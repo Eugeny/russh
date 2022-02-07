@@ -18,18 +18,21 @@ use byteorder::{BigEndian, ByteOrder};
 use std::num::Wrapping;
 use tokio::io::{AsyncRead, AsyncReadExt};
 pub mod chacha20poly1305;
+pub mod aes256gcm;
 pub mod clear;
 
 pub struct Cipher {
     pub name: Name,
     pub key_len: usize,
-    pub make_opening_cipher: fn(key: &[u8]) -> OpeningCipher,
-    pub make_sealing_cipher: fn(key: &[u8]) -> SealingCipher,
+    pub nonce_len: usize,
+    pub make_opening_cipher: fn(key: &[u8], nonce: &[u8]) -> OpeningCipher,
+    pub make_sealing_cipher: fn(key: &[u8], nonce: &[u8]) -> SealingCipher,
 }
 
 pub enum OpeningCipher {
     Clear(clear::Key),
     Chacha20Poly1305(chacha20poly1305::OpeningKey),
+    AES256GCM(aes256gcm::OpeningKey),
 }
 
 impl<'a> OpeningCipher {
@@ -37,6 +40,7 @@ impl<'a> OpeningCipher {
         match *self {
             OpeningCipher::Clear(ref key) => key,
             OpeningCipher::Chacha20Poly1305(ref key) => key,
+            OpeningCipher::AES256GCM(ref key) => key,
         }
     }
 }
@@ -44,6 +48,7 @@ impl<'a> OpeningCipher {
 pub enum SealingCipher {
     Clear(clear::Key),
     Chacha20Poly1305(chacha20poly1305::SealingKey),
+    AES256GCM(aes256gcm::SealingKey),
 }
 
 impl<'a> SealingCipher {
@@ -51,6 +56,7 @@ impl<'a> SealingCipher {
         match *self {
             SealingCipher::Clear(ref key) => key,
             SealingCipher::Chacha20Poly1305(ref key) => key,
+            SealingCipher::AES256GCM(ref key) => key,
         }
     }
 }

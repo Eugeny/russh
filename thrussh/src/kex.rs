@@ -48,6 +48,7 @@ pub const CURVE25519: Name = Name("curve25519-sha256@libssh.org");
 
 thread_local! {
     static KEY_BUF: RefCell<CryptoVec> = RefCell::new(CryptoVec::new());
+    static NONCE_BUF: RefCell<CryptoVec> = RefCell::new(CryptoVec::new());
     static BUFFER: RefCell<CryptoVec> = RefCell::new(CryptoVec::new());
 }
 
@@ -159,67 +160,83 @@ impl Algorithm {
     ) -> Result<super::cipher::CipherPair, crate::Error> {
         let cipher = match cipher {
             super::cipher::chacha20poly1305::NAME => &super::cipher::chacha20poly1305::CIPHER,
+            super::cipher::aes256gcm::NAME => &super::cipher::aes256gcm::CIPHER,
+            super::cipher::aes256gcm::NAME_ALT => &super::cipher::aes256gcm::CIPHER,
             _ => unreachable!(),
         };
 
         // https://tools.ietf.org/html/rfc4253#section-7.2
         BUFFER.with(|buffer| {
             KEY_BUF.with(|key| {
-                let compute_key = |c, key: &mut CryptoVec, len| -> Result<(), crate::Error> {
-                    let mut buffer = buffer.borrow_mut();
-                    buffer.clear();
-                    key.clear();
-
-                    if let Some(ref shared) = self.shared_secret {
-                        buffer.extend_ssh_mpint(&shared.0);
-                    }
-
-                    buffer.extend(exchange_hash.as_ref());
-                    buffer.push(c);
-                    buffer.extend(session_id.as_ref());
-                    let hash =                    {
-                        use sha2::Digest;
-                        let mut hasher = sha2::Sha256::new();
-                        hasher.update(&buffer[..]);
-                        hasher.finalize()
-                    };
-                    key.extend(hash.as_ref());
-
-                    while key.len() < len {
-                        // extend.
+                NONCE_BUF.with(|nonce| {
+                    let compute_key = |c, key: &mut CryptoVec, len| -> Result<(), crate::Error> {
+                        let mut buffer = buffer.borrow_mut();
                         buffer.clear();
+                        key.clear();
+
                         if let Some(ref shared) = self.shared_secret {
                             buffer.extend_ssh_mpint(&shared.0);
                         }
+
                         buffer.extend(exchange_hash.as_ref());
-                        buffer.extend(key);
+                        buffer.push(c);
+                        buffer.extend(session_id.as_ref());
                         let hash = {
                             use sha2::Digest;
                             let mut hasher = sha2::Sha256::new();
                             hasher.update(&buffer[..]);
                             hasher.finalize()
                         };
-                        key.extend(&hash.as_ref());
-                    }
-                    Ok(())
-                };
+                        key.extend(hash.as_ref());
 
-                let (local_to_remote, remote_to_local) = if is_server {
-                    (b'D', b'C')
-                } else {
-                    (b'C', b'D')
-                };
+                        while key.len() < len {
+                            // extend.
+                            buffer.clear();
+                            if let Some(ref shared) = self.shared_secret {
+                                buffer.extend_ssh_mpint(&shared.0);
+                            }
+                            buffer.extend(exchange_hash.as_ref());
+                            buffer.extend(key);
+                            let hash = {
+                                use sha2::Digest;
+                                let mut hasher = sha2::Sha256::new();
+                                hasher.update(&buffer[..]);
+                                hasher.finalize()
+                            };
+                            key.extend(&hash.as_ref());
+                        }
 
-                let mut key = key.borrow_mut();
-                compute_key(local_to_remote, &mut key, cipher.key_len)?;
-                let local_to_remote = (cipher.make_sealing_cipher)(&key);
+                        key.resize(len);
+                        Ok(())
+                    };
 
-                compute_key(remote_to_local, &mut key, cipher.key_len)?;
-                let remote_to_local = (cipher.make_opening_cipher)(&key);
+                    let (local_to_remote, remote_to_local) = if is_server {
+                        (b'D', b'C')
+                    } else {
+                        (b'C', b'D')
+                    };
 
-                Ok(super::cipher::CipherPair {
-                    local_to_remote: local_to_remote,
-                    remote_to_local: remote_to_local,
+                    let (local_to_remote_nonce, remote_to_local_nonce) = if is_server {
+                        (b'B', b'A')
+                    } else {
+                        (b'A', b'B')
+                    };
+
+                    let mut key = key.borrow_mut();
+                    let mut nonce = nonce.borrow_mut();
+
+                    compute_key(local_to_remote, &mut key, cipher.key_len)?;
+                    compute_key(local_to_remote_nonce, &mut nonce, cipher.nonce_len)?;
+                    let local_to_remote = (cipher.make_sealing_cipher)(&key, &nonce);
+
+                    compute_key(remote_to_local, &mut key, cipher.key_len)?;
+                    compute_key(remote_to_local_nonce, &mut nonce, cipher.nonce_len)?;
+                    let remote_to_local = (cipher.make_opening_cipher)(&key, &nonce);
+
+                    Ok(super::cipher::CipherPair {
+                        local_to_remote: local_to_remote,
+                        remote_to_local: remote_to_local,
+                    })
                 })
             })
         })

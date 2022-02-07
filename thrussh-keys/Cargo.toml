@@ -45,7 +45,7 @@ serde = "1.0"
 dirs = "3.0"
 log = "0.4"
 thiserror = "1.0"
-thrussh-libsodium = "0.2"
+thrussh-libsodium = { version = "0.2", path = "../thrussh-libsodium" }
 sha2 = "0.9"
 pbkdf2 = "0.8"
 hmac = "0.11"

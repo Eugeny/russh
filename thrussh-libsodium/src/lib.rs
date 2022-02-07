@@ -166,6 +166,60 @@ pub mod ed25519 {
     }
 }
 
+pub mod aes256gcm {
+    use super::*;
+    pub const NONCE_BYTES: usize = crypto_aead_aes256gcm_NPUBBYTES as usize;
+    pub const KEY_BYTES: usize = crypto_aead_aes256gcm_KEYBYTES as usize;
+    pub const TAG_BYTES: usize = crypto_aead_aes256gcm_ABYTES as usize;
+    pub struct Key(pub [u8; KEY_BYTES]);
+    pub struct Nonce(pub [u8; NONCE_BYTES]);
+    pub struct Tag(pub [u8; TAG_BYTES]);
+
+    pub fn aes256gcm_encrypt(ciphertext: &mut [u8], tag: &mut [u8], message: &[u8], ad: &[u8], nonce: &Nonce, key: &Key) -> bool {
+        lazy_static::initialize(&super::SODIUM);
+        if tag.len() != TAG_BYTES {
+            false
+        } else {
+            unsafe {
+                let ret = crypto_aead_aes256gcm_encrypt_detached(
+                    ciphertext.as_mut_ptr(),
+                    tag.as_mut_ptr(),
+                    std::ptr::null_mut(),
+                    message.as_ptr(),
+                    message.len() as c_ulonglong,
+                    ad.as_ptr(),
+                    ad.len() as c_ulonglong,
+                    std::ptr::null_mut(),
+                    nonce.0.as_ptr(),
+                    key.0.as_ptr(),
+                );
+                ret == 0
+            }
+        }
+    }
+
+    pub fn aes256gcm_decrypt(message: &mut [u8], tag: &[u8], ciphertext: &[u8], ad: &[u8], nonce: &Nonce, key: &Key) -> bool {
+        lazy_static::initialize(&super::SODIUM);
+        if tag.len() != TAG_BYTES {
+            false
+        } else {
+            unsafe {
+                crypto_aead_aes256gcm_decrypt_detached(
+                    message.as_mut_ptr(),
+                    std::ptr::null_mut(),
+                    ciphertext.as_ptr(),
+                    ciphertext.len() as c_ulonglong,
+                    tag.as_ptr(),
+                    ad.as_ptr(),
+                    ad.len() as c_ulonglong,
+                    nonce.0.as_ptr(),
+                    key.0.as_ptr(),
+                ) == 0
+            }
+        }
+    }
+}
+
 pub mod scalarmult {
     use super::*;
     pub const BYTES: usize = 32;
@@ -191,5 +245,16 @@ pub mod scalarmult {
             crypto_scalarmult_curve25519(q.0.as_mut_ptr(), n.0.as_ptr(), p.0.as_ptr());
         }
         q
+    }
+}
+
+pub mod random {
+    use libc::c_void;
+    use libsodium_sys::randombytes_buf;
+
+    pub fn randombytes(buf: &mut [u8]) {
+        unsafe {
+            randombytes_buf(buf.as_mut_ptr() as *mut c_void, buf.len());
+        }
     }
 }
