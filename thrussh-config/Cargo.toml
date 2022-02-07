@@ -1,0 +1,18 @@
+[package]
+name = "thrussh-config"
+description = "Utilities to parse .ssh/config files, including helpers to implement ProxyCommand in Thrussh."
+version = "0.6.0"
+authors = ["Pierre-Étienne Meunier <pe@pijul.org>"]
+include = [ "Cargo.toml", "src/lib.rs", "src/proxy.rs" ]
+license = "Apache-2.0"
+documentation = "https://docs.rs/thrussh-config"
+repository = "https://nest.pijul.com/pijul/thrussh"
+edition = "2018"
+
+[dependencies]
+log = "0.4"
+dirs-next = "2.0"
+tokio = { version = "1.0", features = [ "io-util", "net", "macros", "process" ] }
+futures = "0.3"
+thiserror = "1.0"
+whoami = "1.0"

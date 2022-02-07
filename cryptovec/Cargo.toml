@@ -1,0 +1,13 @@
+[package]
+name = "cryptovec"
+description = "A vector which zeroes its memory on clears and reallocations."
+version = "0.6.1"
+authors = ["Pierre-Étienne Meunier <pe@pijul.org>"]
+repository = "https://pijul.org/cryptovec"
+documentation = "https://pijul.org/cryptovec/doc/cryptovec"
+license = "Apache-2.0"
+include = ["Cargo.toml", "src/lib.rs"]
+
+[dependencies]
+libc = "0.2"
+winapi = { version = "0.3", features = ["basetsd", "minwindef", "memoryapi"] }
