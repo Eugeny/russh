@@ -548,6 +548,9 @@ where
                     Some((id, ChannelMsg::Close)) => {
                         session.close(id);
                     }
+                    Some((id, ChannelMsg::Success)) => {
+                        session.channel_success(id);
+                    }
                     Some((id, ChannelMsg::XonXoff { client_can_do })) => {
                         session.xon_xoff_request(id, client_can_do);
                     }
@@ -559,9 +562,6 @@ where
                     }
                     Some((id, ChannelMsg::WindowAdjusted { new_size })) => {
                         debug!("window adjusted to {:?} for channel {:?}", new_size, id);
-                    }
-                    Some((id, ChannelMsg::Success)) => {
-                        debug!("channel success {:?}", id);
                     }
                     None => {
                         debug!("session.receiver: received None");
