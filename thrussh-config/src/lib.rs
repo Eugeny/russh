@@ -1,3 +1,4 @@
+#![deny(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
 use log::debug;
 use std::io::Read;
 use std::net::ToSocketAddrs;

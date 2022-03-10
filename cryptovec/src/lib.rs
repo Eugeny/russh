@@ -287,7 +287,7 @@ impl CryptoVec {
     pub fn push(&mut self, s: u8) {
         let size = self.size;
         self.resize(size + 1);
-        unsafe { *(self.p.offset(size as isize)) = s }
+        unsafe { *self.p.add(size) = s }
     }
 
     /// Append a new u32, big endian-encoded, at the end of this CryptoVec.
@@ -319,7 +319,7 @@ impl CryptoVec {
         unsafe {
             libc::memcpy(
                 (&mut x) as *mut u32 as *mut c_void,
-                self.p.offset(i as isize) as *const c_void,
+                self.p.add(i) as *const c_void,
                 4,
             );
         }
@@ -336,7 +336,7 @@ impl CryptoVec {
         let cur_size = self.size;
         self.resize(cur_size + n_bytes);
         let s =
-            unsafe { std::slice::from_raw_parts_mut(self.p.offset(cur_size as isize), n_bytes) };
+            unsafe { std::slice::from_raw_parts_mut(self.p.add(cur_size), n_bytes) };
         // Resize the buffer to its appropriate size.
         match r.read(s) {
             Ok(n) => {
@@ -367,7 +367,7 @@ impl CryptoVec {
         assert!(offset < self.size);
         // if we're past this point, self.p cannot be null.
         unsafe {
-            let s = std::slice::from_raw_parts(self.p.offset(offset as isize), self.size - offset);
+            let s = std::slice::from_raw_parts(self.p.add(offset), self.size - offset);
             w.write(s)
         }
     }
@@ -381,7 +381,7 @@ impl CryptoVec {
     pub fn resize_mut(&mut self, n: usize) -> &mut [u8] {
         let size = self.size;
         self.resize(size + n);
-        unsafe { std::slice::from_raw_parts_mut(self.p.offset(size as isize), n) }
+        unsafe { std::slice::from_raw_parts_mut(self.p.add(size), n) }
     }
 
     /// Append a slice at the end of this CryptoVec.
@@ -394,7 +394,7 @@ impl CryptoVec {
         let size = self.size;
         self.resize(size + s.len());
         unsafe {
-            std::ptr::copy_nonoverlapping(s.as_ptr(), self.p.offset(size as isize), s.len());
+            std::ptr::copy_nonoverlapping(s.as_ptr(), self.p.add(size), s.len());
         }
     }
 
@@ -418,7 +418,7 @@ impl Drop for CryptoVec {
         if self.capacity > 0 {
             unsafe {
                 for i in 0..self.size {
-                    std::ptr::write_volatile(self.p.offset(i as isize), 0)
+                    std::ptr::write_volatile(self.p.add(i), 0)
                 }
                 munlock(self.p, self.capacity);
                 let layout = std::alloc::Layout::from_size_align_unchecked(self.capacity, 1);

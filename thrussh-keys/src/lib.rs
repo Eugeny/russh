@@ -1,5 +1,5 @@
 #![deny(trivial_casts, unstable_features, unused_import_braces)]
-#![deny(clippy::unwrap_used, clippy::expect_used)]
+#![deny(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
 //! This crate contains methods to deal with SSH keys, as defined in
 //! crate Thrussh. This includes in particular various functions for
 //! opening key files, deciphering encrypted keys, and dealing with
