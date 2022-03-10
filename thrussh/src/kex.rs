@@ -16,7 +16,7 @@ use crate::{cipher, key, msg};
 use byteorder::{BigEndian, ByteOrder};
 
 use crate::session::Exchange;
-use cryptovec::CryptoVec;
+use russh_cryptovec::CryptoVec;
 use sodium;
 use std::cell::RefCell;
 use thrussh_keys::encoding::Encoding;

@@ -13,7 +13,7 @@
 // limitations under the License.
 //
 
-use cryptovec::CryptoVec;
+use russh_cryptovec::CryptoVec;
 use std::sync::Arc;
 use thrussh_keys::encoding;
 use thrussh_keys::key;

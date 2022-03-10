@@ -5,7 +5,7 @@ use crate::key;
 use crate::key::{PublicKey, SignatureHash};
 use crate::Error;
 use byteorder::{BigEndian, ByteOrder};
-use cryptovec::CryptoVec;
+use russh_cryptovec::CryptoVec;
 use tokio;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 

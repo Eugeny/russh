@@ -1,4 +1,5 @@
 #![deny(trivial_casts, unstable_features, unused_import_braces)]
+#![deny(clippy::unwrap_used, clippy::expect_used)]
 //! This crate contains methods to deal with SSH keys, as defined in
 //! crate Thrussh. This includes in particular various functions for
 //! opening key files, deciphering encrypted keys, and dealing with
@@ -45,7 +46,7 @@
 //!        client.add_identity(&key, &[agent::Constraint::KeyLifetime { seconds: 60 }]).await?;
 //!        client.request_identities().await?;
 //!        let buf = b"signed message";
-//!        let sig = client.sign_request(&public, cryptovec::CryptoVec::from_slice(&buf[..])).await.1.unwrap();
+//!        let sig = client.sign_request(&public, russh_cryptovec::CryptoVec::from_slice(&buf[..])).await.1.unwrap();
 //!        // Here, `sig` is encoded in a format usable internally by the SSH protocol.
 //!        Ok::<(), Error>(())
 //!    }).unwrap()
@@ -340,7 +341,7 @@ pub fn check_known_hosts_path<P: AsRef<Path>>(
                     if &parse_public_key_base64(k)? == pubkey {
                         return Ok(true);
                     } else {
-                        return Err((Error::KeyChanged { line }));
+                        return Err(Error::KeyChanged { line });
                     }
                 }
             }
@@ -768,7 +769,7 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
             let mut client = agent::client::AgentClient::connect(stream);
             client.add_identity(&key, &[]).await?;
             client.request_identities().await?;
-            let buf = cryptovec::CryptoVec::from_slice(b"blabla");
+            let buf = russh_cryptovec::CryptoVec::from_slice(b"blabla");
             let len = buf.len();
             let (_, buf) = client.sign_request(&public, buf).await;
             let buf = buf?;
@@ -848,7 +849,7 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
                 .add_identity(&key, &[agent::Constraint::KeyLifetime { seconds: 60 }])
                 .await?;
             client.request_identities().await?;
-            let buf = cryptovec::CryptoVec::from_slice(b"blabla");
+            let buf = russh_cryptovec::CryptoVec::from_slice(b"blabla");
             let len = buf.len();
             let (_, buf) = client.sign_request(&public, buf).await;
             let buf = buf?;

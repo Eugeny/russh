@@ -17,7 +17,7 @@ use crate::sshbuffer::SSHBuffer;
 use crate::{auth, cipher, kex, msg, negotiation};
 use crate::{Channel, ChannelId, Disconnect, Limits};
 use byteorder::{BigEndian, ByteOrder};
-use cryptovec::CryptoVec;
+use russh_cryptovec::CryptoVec;
 use std::collections::HashMap;
 use std::num::Wrapping;
 use std::sync::Arc;

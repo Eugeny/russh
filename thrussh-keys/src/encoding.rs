@@ -15,7 +15,7 @@
 
 use crate::Error;
 use byteorder::{BigEndian, ByteOrder, WriteBytesExt};
-use cryptovec::CryptoVec;
+use russh_cryptovec::CryptoVec;
 
 #[doc(hidden)]
 pub trait Bytes {

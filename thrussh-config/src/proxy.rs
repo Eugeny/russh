@@ -1,10 +1,8 @@
 use futures::ready;
 use futures::task::*;
-use std;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::process::Stdio;
-use tokio;
 use tokio::io::ReadBuf;
 use tokio::net::TcpStream;
 use tokio::process::Command;

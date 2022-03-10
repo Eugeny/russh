@@ -21,7 +21,7 @@ use crate::negotiation::Named;
 use crate::negotiation::Select;
 use crate::session::*;
 use crate::{ChannelId, ChannelOpenFailure, Error, Sig};
-use cryptovec::CryptoVec;
+use russh_cryptovec::CryptoVec;
 use std::cell::RefCell;
 use thrussh_keys::encoding::{Encoding, Reader};
 

@@ -20,7 +20,7 @@ use crate::session::*;
 use crate::ssh_read::SshRead;
 use crate::sshbuffer::*;
 use crate::{ChannelId, ChannelMsg, ChannelOpenFailure, Disconnect, Limits, Sig};
-use cryptovec::CryptoVec;
+use russh_cryptovec::CryptoVec;
 use futures::task::{Context, Poll};
 use futures::Future;
 use std::cell::RefCell;

@@ -3,7 +3,7 @@ use crate::key;
 #[cfg(feature = "openssl")]
 use crate::key::SignatureHash;
 use byteorder::{BigEndian, ByteOrder};
-use cryptovec::CryptoVec;
+use russh_cryptovec::CryptoVec;
 use futures::future::Future;
 use futures::stream::{Stream, StreamExt};
 use std;

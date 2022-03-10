@@ -279,7 +279,7 @@ extern crate thiserror;
 
 use std::fmt::{Display, Formatter};
 
-pub use cryptovec::CryptoVec;
+pub use russh_cryptovec::CryptoVec;
 mod auth;
 mod cipher;
 mod compression;
