@@ -92,6 +92,9 @@ pub enum Error {
     /// The key is encrypted (should supply a password?)
     #[error("The key is encrypted")]
     KeyIsEncrypted,
+    /// The key contents are inconsistent
+    #[error("The key is corrupt")]
+    KeyIsCorrupt,
     /// Home directory could not be found
     #[error("No home directory found")]
     NoHomeDir,
@@ -189,8 +192,10 @@ impl PublicKeyBase64 for key::PublicKey {
         match *self {
             key::PublicKey::Ed25519(ref publickey) => {
                 let name = b"ssh-ed25519";
+                #[allow(clippy::unwrap_used)] // Vec<>.write can't fail
                 s.write_u32::<BigEndian>(name.len() as u32).unwrap();
                 s.extend_from_slice(name);
+                #[allow(clippy::unwrap_used)] // Vec<>.write can't fail
                 s.write_u32::<BigEndian>(publickey.key.len() as u32)
                     .unwrap();
                 s.extend_from_slice(&publickey.key);
@@ -199,6 +204,7 @@ impl PublicKeyBase64 for key::PublicKey {
             key::PublicKey::RSA { ref key, .. } => {
                 use encoding::Encoding;
                 let name = b"ssh-rsa";
+                #[allow(clippy::unwrap_used)] // Vec<>.write_all can't fail
                 s.write_u32::<BigEndian>(name.len() as u32).unwrap();
                 s.extend_from_slice(name);
                 s.extend_ssh_mpint(&key.0.rsa().unwrap().e().to_vec());
@@ -213,11 +219,13 @@ impl PublicKeyBase64 for key::KeyPair {
     fn public_key_bytes(&self) -> Vec<u8> {
         let name = self.name().as_bytes();
         let mut s = Vec::new();
+        #[allow(clippy::unwrap_used)] // Vec<>.write_all can't fail
         s.write_u32::<BigEndian>(name.len() as u32).unwrap();
         s.extend_from_slice(name);
         match *self {
             key::KeyPair::Ed25519(ref key) => {
                 let public = &key.key[32..];
+                #[allow(clippy::unwrap_used)] // Vec<>.write can't fail
                 s.write_u32::<BigEndian>(32).unwrap();
                 s.extend_from_slice(public);
             }
@@ -323,9 +331,9 @@ pub fn check_known_hosts_path<P: AsRef<Path>>(
     };
     debug!("host_port = {:?}", host_port);
     let mut line = 1;
-    while f.read_line(&mut buffer).unwrap() > 0 {
+    while f.read_line(&mut buffer)? > 0 {
         {
-            if buffer.as_bytes()[0] == b'#' {
+            if buffer.as_bytes().get(0) == Some(&b'#') {
                 buffer.clear();
                 continue;
             }

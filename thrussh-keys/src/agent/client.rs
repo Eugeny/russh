@@ -190,7 +190,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AgentClient<S> {
             }
         }
         let len = self.buf.len() - 4;
-        BigEndian::write_u32(&mut self.buf[0..], len as u32);
+        BigEndian::write_u32(&mut self.buf[..], len as u32);
         self.read_response().await?;
         Ok(())
     }
@@ -202,7 +202,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AgentClient<S> {
         self.buf.push(msg::LOCK);
         self.buf.extend_ssh_string(passphrase);
         let len = self.buf.len() - 4;
-        BigEndian::write_u32(&mut self.buf[0..], len as u32);
+        BigEndian::write_u32(&mut self.buf[..], len as u32);
         self.read_response().await?;
         Ok(())
     }
@@ -214,7 +214,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AgentClient<S> {
         self.buf.push(msg::UNLOCK);
         self.buf.extend_ssh_string(passphrase);
         let len = self.buf.len() - 4;
-        BigEndian::write_u32(&mut self.buf[0..], len as u32);
+        #[allow(clippy::indexing_slicing)] // static length
+        BigEndian::write_u32(&mut self.buf[..], len as u32);
         self.read_response().await?;
         Ok(())
     }
@@ -226,11 +227,13 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AgentClient<S> {
         self.buf.resize(4);
         self.buf.push(msg::REQUEST_IDENTITIES);
         let len = self.buf.len() - 4;
-        BigEndian::write_u32(&mut self.buf[0..], len as u32);
+        BigEndian::write_u32(&mut self.buf[..], len as u32);
 
         self.read_response().await?;
         debug!("identities: {:?}", &self.buf[..]);
         let mut keys = Vec::new();
+
+        #[allow(clippy::indexing_slicing)] // static length
         if self.buf[0] == msg::IDENTITIES_ANSWER {
             let mut r = self.buf.reader(1);
             let n = r.read_u32()?;
@@ -286,13 +289,14 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AgentClient<S> {
                 return (self, Err(e));
             }
 
+            #[allow(clippy::indexing_slicing)] // length is checked
             if !self.buf.is_empty() && self.buf[0] == msg::SIGN_RESPONSE {
                 let resp = self.write_signature(hash, &mut data);
                 if let Err(e) = resp {
                     return (self, Err(e));
                 }
                 (self, Ok(data))
-            } else if self.buf[0] == msg::FAILURE {
+            } else if self.buf.get(0) == Some(&msg::FAILURE) {
                 (self, Err(Error::AgentFailure))
             } else {
                 debug!("self.buf = {:?}", &self.buf[..]);
@@ -319,7 +323,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AgentClient<S> {
         };
         self.buf.push_u32_be(hash);
         let len = self.buf.len() - 4;
-        BigEndian::write_u32(&mut self.buf[0..], len as u32);
+        BigEndian::write_u32(&mut self.buf[..], len as u32);
         hash
     }
 
@@ -350,6 +354,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AgentClient<S> {
                 return (self, Err(e));
             }
 
+            #[allow(clippy::indexing_slicing)] // length is checked
             if !self.buf.is_empty() && self.buf[0] == msg::SIGN_RESPONSE {
                 let base64 = data_encoding::BASE64_NOPAD.encode(&self.buf[1..]);
                 (self, Ok(base64))
@@ -372,6 +377,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AgentClient<S> {
             if let Err(e) = self.read_response().await {
                 return (self, Err(e));
             }
+            #[allow(clippy::indexing_slicing)] // length is checked
             if !self.buf.is_empty() && self.buf[0] == msg::SIGN_RESPONSE {
                 let as_sig = |buf: &CryptoVec| -> Result<crate::signature::Signature, Error> {
                     let mut r = buf.reader(1);
@@ -415,7 +421,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AgentClient<S> {
         self.buf.push(msg::REMOVE_IDENTITY);
         key_blob(public, &mut self.buf);
         let len = self.buf.len() - 4;
-        BigEndian::write_u32(&mut self.buf[0..], len as u32);
+        BigEndian::write_u32(&mut self.buf[..], len as u32);
         self.read_response().await?;
         Ok(())
     }
@@ -428,7 +434,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AgentClient<S> {
         self.buf.extend_ssh_string(id.as_bytes());
         self.buf.extend_ssh_string(pin);
         let len = self.buf.len() - 4;
-        BigEndian::write_u32(&mut self.buf[0..], len as u32);
+        BigEndian::write_u32(&mut self.buf[..], len as u32);
         self.read_response().await?;
         Ok(())
     }
@@ -438,7 +444,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AgentClient<S> {
         self.buf.clear();
         self.buf.resize(4);
         self.buf.push(msg::REMOVE_ALL_IDENTITIES);
-        BigEndian::write_u32(&mut self.buf[0..], 5);
+        BigEndian::write_u32(&mut self.buf[..], 5);
         self.read_response().await?;
         Ok(())
     }
@@ -451,7 +457,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AgentClient<S> {
         self.buf.extend_ssh_string(typ);
         self.buf.extend_ssh_string(ext);
         let len = self.buf.len() - 4;
-        BigEndian::write_u32(&mut self.buf[0..], len as u32);
+        BigEndian::write_u32(&mut self.buf[..], len as u32);
         self.read_response().await?;
         Ok(())
     }
@@ -463,12 +469,13 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AgentClient<S> {
         self.buf.push(msg::EXTENSION);
         self.buf.extend_ssh_string(typ);
         let len = self.buf.len() - 4;
-        BigEndian::write_u32(&mut self.buf[0..], len as u32);
+        BigEndian::write_u32(&mut self.buf[..], len as u32);
         self.read_response().await?;
 
         let mut r = self.buf.reader(1);
         ext.extend(r.read_string()?);
 
+        #[allow(clippy::indexing_slicing)] // length is checked
         Ok(!self.buf.is_empty() && self.buf[0] == msg::SUCCESS)
     }
 }
@@ -492,6 +499,7 @@ fn key_blob(public: &key::PublicKey, buf: &mut CryptoVec) {
             buf.extend_ssh_string(b"ssh-ed25519");
             buf.extend_ssh_string(&p.key[0..]);
             let len1 = buf.len();
+            #[allow(clippy::indexing_slicing)] // length is known
             BigEndian::write_u32(&mut buf[5..], (len1 - len0) as u32);
         }
     }

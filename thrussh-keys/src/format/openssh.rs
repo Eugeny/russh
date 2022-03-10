@@ -8,7 +8,7 @@ use openssl::bn::BigNum;
 /// Decode a secret key given in the OpenSSH format, deciphering it if
 /// needed using the supplied password.
 pub fn decode_openssh(secret: &[u8], password: Option<&str>) -> Result<key::KeyPair, Error> {
-    if &secret[0..15] == b"openssh-key-v1\0" {
+    if matches!(secret.get(0..15), Some(b"openssh-key-v1\0")) {
         let mut position = secret.reader(15);
 
         let ciphername = position.read_string()?;
@@ -35,7 +35,9 @@ pub fn decode_openssh(secret: &[u8], password: Option<&str>) -> Result<key::KeyP
                 let pubkey = position.read_string()?;
                 let seckey = position.read_string()?;
                 let _comment = position.read_string()?;
-                assert_eq!(pubkey, &seckey[32..]);
+                if Some(pubkey) != seckey.get(32..) {
+                    return Err(Error::KeyIsCorrupt)
+                }
                 use key::ed25519::*;
                 let mut secret = SecretKey::new_zeroed();
                 secret.key.clone_from_slice(seckey);
@@ -111,6 +113,8 @@ fn decrypt_secret_key(
                 let mut kdfopts = kdfoptions.reader(0);
                 let salt = kdfopts.read_string()?;
                 let rounds = kdfopts.read_u32()?;
+                #[allow(clippy::unwrap_used)] // parameters are static
+                #[allow(clippy::indexing_slicing)] // output length is static
                 bcrypt_pbkdf::bcrypt_pbkdf(password, salt, rounds, &mut key[..n]).unwrap();
             }
             _kdfname => {
@@ -125,21 +129,25 @@ fn decrypt_secret_key(
         use block_modes::BlockMode;
         match ciphername {
             b"aes128-cbc" => {
+                #[allow(clippy::unwrap_used)] // parameters are static
                 let cipher = Aes128Cbc::new_from_slices(key, iv).unwrap();
                 let n = cipher.decrypt(&mut dec)?.len();
                 dec.truncate(n)
             }
             b"aes256-cbc" => {
+                #[allow(clippy::unwrap_used)] // parameters are static
                 let cipher = Aes256Cbc::new_from_slices(key, iv).unwrap();
                 let n = cipher.decrypt(&mut dec)?.len();
                 dec.truncate(n)
             }
             b"aes128-ctr" => {
+                #[allow(clippy::unwrap_used)] // parameters are static
                 let mut cipher = Aes128Ctr::new_from_slices(key, iv).unwrap();
                 cipher.apply_keystream(&mut dec);
                 dec.truncate(secret_key.len())
             }
             b"aes256-ctr" => {
+                #[allow(clippy::unwrap_used)] // parameters are static
                 let mut cipher = Aes256Ctr::new_from_slices(key, iv).unwrap();
                 cipher.apply_keystream(&mut dec);
                 dec.truncate(secret_key.len())

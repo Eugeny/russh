@@ -243,7 +243,7 @@ fn read_key_v0(reader: &mut BERReaderSeq) -> Result<key::KeyPair, Error> {
 
 #[cfg(not(feature = "openssl"))]
 fn read_key_v0(_: &mut BERReaderSeq) -> Result<key::KeyPair, Error> {
-    Err(Error::CouldNotReadKey.into())
+    Err(Error::CouldNotReadKey)
 }
 
 #[test]
@@ -287,9 +287,10 @@ pub fn encode_pkcs8_encrypted(
     let padding_len = 32 - (plaintext.len() % 32);
     plaintext.extend(std::iter::repeat(padding_len as u8).take(padding_len));
 
+    #[allow(clippy::unwrap_used)] // parameters are static
     let c = Aes256Cbc::new_from_slices(&dkey, &iv).unwrap();
     let n = plaintext.len();
-    c.encrypt(&mut plaintext, n).unwrap();
+    c.encrypt(&mut plaintext, n)?;
 
     Ok(yasna::construct_der(|writer| {
         writer.write_sequence(|writer| {
@@ -317,6 +318,7 @@ pub fn encode_pkcs8(key: &key::KeyPair) -> Vec<u8> {
     })
 }
 
+#[allow(clippy::indexing_slicing)]
 fn clone(src: &[u8], dest: &mut [u8]) {
     let i = src.iter().take_while(|b| **b == 0).count();
     let src = &src[i..];
@@ -424,6 +426,7 @@ impl Encryption {
     fn decrypt(&self, key: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>, Error> {
         match *self {
             Encryption::Aes128Cbc(ref iv) => {
+                #[allow(clippy::unwrap_used)] // parameters are static
                 let c = Aes128Cbc::new_from_slices(key, iv).unwrap();
                 let mut dec = ciphertext.to_vec();
                 c.decrypt(&mut dec)?;
@@ -431,6 +434,7 @@ impl Encryption {
                 Ok(dec)
             },
             Encryption::Aes256Cbc(ref iv) => {
+                #[allow(clippy::unwrap_used)] // parameters are static
                 let c = Aes256Cbc::new_from_slices(key, iv).unwrap();
                 let mut dec = ciphertext.to_vec();
                 c.decrypt(&mut dec)?;

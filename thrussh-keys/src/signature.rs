@@ -25,6 +25,7 @@ impl Signature {
         match self {
             Signature::Ed25519(ref bytes) => {
                 let t = b"ssh-ed25519";
+                #[allow(clippy::unwrap_used)] // Vec<>.write_all can't fail
                 bytes_
                     .write_u32::<BigEndian>((t.len() + bytes.0.len() + 8) as u32)
                     .unwrap();
@@ -40,6 +41,7 @@ impl Signature {
                     SignatureHash::SHA2_512 => &b"rsa-sha2-512"[..],
                     SignatureHash::SHA1 => &b"ssh-rsa"[..],
                 };
+                #[allow(clippy::unwrap_used)] // Vec<>.write_all can't fail
                 bytes_
                     .write_u32::<BigEndian>((t.len() + bytes.len() + 8) as u32)
                     .unwrap();

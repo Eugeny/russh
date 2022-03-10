@@ -1,4 +1,9 @@
-#![deny(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
+#![deny(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic
+)]
 use log::debug;
 use std::io::Read;
 use std::net::ToSocketAddrs;
@@ -12,11 +17,10 @@ pub enum Error {
     HostNotFound,
     #[error("No home directory")]
     NoHome,
-    #[error("{}", source)]
-    Io {
-        #[from]
-        source: std::io::Error,
-    },
+    #[error("Cannot resolve the address")]
+    NotResolvable,
+    #[error("{}", 0)]
+    Io(#[from] std::io::Error),
 }
 
 mod proxy;
@@ -53,19 +57,19 @@ impl Config {
         }
     }
 
-    pub async fn stream(&mut self) -> Result<Stream, std::io::Error> {
+    pub async fn stream(&mut self) -> Result<Stream, Error> {
         self.update_proxy_command();
         if let Some(ref proxy_command) = self.proxy_command {
             let cmd: Vec<&str> = proxy_command.split(' ').collect();
-            Stream::proxy_command(cmd[0], &cmd[1..]).await
+            Stream::proxy_command(cmd.get(0).unwrap_or(&""), cmd.get(1..).unwrap_or(&[]))
+                .await
+                .map_err(Into::into)
         } else {
-            Stream::tcp_connect(
-                &(self.host_name.as_str(), self.port)
-                    .to_socket_addrs()?
-                    .next()
-                    .unwrap(),
-            )
-            .await
+            let address = (self.host_name.as_str(), self.port)
+                .to_socket_addrs()?
+                .next()
+                .ok_or(Error::NotResolvable)?;
+            Stream::tcp_connect(&address).await.map_err(Into::into)
         }
     }
 }
@@ -130,7 +134,14 @@ pub fn parse(file: &str, host: &str) -> Result<Config, Error> {
                         if id.starts_with("~/") {
                             if let Some(mut home) = dirs_next::home_dir() {
                                 home.push(id.split_at(2).1);
-                                config.identity_file = Some(home.to_str().unwrap().to_string());
+                                config.identity_file = Some(
+                                    home.to_str()
+                                        .ok_or_else(|| std::io::Error::new(
+                                            std::io::ErrorKind::Other,
+                                            "Failed to convert home directory to string",
+                                        ))?
+                                        .to_string(),
+                                );
                             } else {
                                 return Err(Error::NoHome);
                             }
@@ -149,17 +160,10 @@ pub fn parse(file: &str, host: &str) -> Result<Config, Error> {
                         debug!("{:?}", key);
                     }
                 }
-            } else {
-                match lower.as_str() {
-                    "host" => {
-                        if value.trim_start() == host {
-                            let mut c = Config::default(host);
-                            c.port = 22;
-                            config = Some(c)
-                        }
-                    }
-                    _ => {}
-                }
+            } else if lower.as_str() == "host" && value.trim_start() == host {
+                let mut c = Config::default(host);
+                c.port = 22;
+                config = Some(c)
             }
         }
     }

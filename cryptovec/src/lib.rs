@@ -262,7 +262,9 @@ impl CryptoVec {
                 }
 
                 if self.p.is_null() {
-                    panic!("Realloc failed, pointer = {:?} {:?}", self, size)
+                    #[allow(clippy::panic)] {
+                        panic!("Realloc failed, pointer = {:?} {:?}", self, size)
+                    }
                 } else {
                     self.capacity = next_capacity;
                     self.size = size;
@@ -300,7 +302,7 @@ impl CryptoVec {
     /// ```
     pub fn push_u32_be(&mut self, s: u32) {
         let s = s.to_be();
-        let x: [u8; 4] = unsafe { std::mem::transmute(s) };
+        let x: [u8; 4] = s.to_ne_bytes();
         self.extend(&x)
     }
 

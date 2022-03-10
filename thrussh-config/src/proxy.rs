@@ -27,8 +27,7 @@ impl Stream {
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .args(args)
-                .spawn()
-                .unwrap(),
+                .spawn()?
         ))
     }
 }
@@ -40,7 +39,12 @@ impl tokio::io::AsyncRead for Stream {
         buf: &mut ReadBuf,
     ) -> Poll<Result<(), std::io::Error>> {
         match *self {
-            Stream::Child(ref mut c) => Pin::new(c.stdout.as_mut().unwrap()).poll_read(cx, buf),
+            Stream::Child(ref mut c) => {
+                match c.stdout.as_mut() {
+                    Some(ref mut stdout) => Pin::new(stdout).poll_read(cx, buf),
+                    None => Poll::Ready(Ok(()))
+                }
+            },
             Stream::Tcp(ref mut t) => Pin::new(t).poll_read(cx, buf),
         }
     }
@@ -53,14 +57,24 @@ impl tokio::io::AsyncWrite for Stream {
         buf: &[u8],
     ) -> Poll<Result<usize, std::io::Error>> {
         match *self {
-            Stream::Child(ref mut c) => Pin::new(c.stdin.as_mut().unwrap()).poll_write(cx, buf),
+            Stream::Child(ref mut c) => {
+                match c.stdin.as_mut() {
+                    Some(ref mut stdin) => Pin::new(stdin).poll_write(cx, buf),
+                    None => Poll::Ready(Ok(0))
+                }
+            },
             Stream::Tcp(ref mut t) => Pin::new(t).poll_write(cx, buf),
         }
     }
 
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), std::io::Error>> {
         match *self {
-            Stream::Child(ref mut c) => Pin::new(c.stdin.as_mut().unwrap()).poll_flush(cx),
+            Stream::Child(ref mut c) => {
+                match c.stdin.as_mut() {
+                    Some(ref mut stdin) => Pin::new(stdin).poll_flush(cx),
+                    None => Poll::Ready(Ok(()))
+                }
+            },
             Stream::Tcp(ref mut t) => Pin::new(t).poll_flush(cx),
         }
     }
@@ -71,7 +85,9 @@ impl tokio::io::AsyncWrite for Stream {
     ) -> Poll<Result<(), std::io::Error>> {
         match *self {
             Stream::Child(ref mut c) => {
-                ready!(Pin::new(c.stdin.as_mut().unwrap()).poll_shutdown(cx))?;
+                if let Some(ref mut stdin) = c.stdin {
+                    ready!(Pin::new(stdin).poll_shutdown(cx))?;
+                }
                 drop(c.stdin.take());
                 Poll::Ready(Ok(()))
             }

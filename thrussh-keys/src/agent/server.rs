@@ -20,6 +20,7 @@ use super::Constraint;
 use crate::Error;
 
 #[derive(Clone)]
+#[allow(clippy::type_complexity)]
 struct KeyStore(Arc<RwLock<HashMap<Vec<u8>, (Arc<key::KeyPair>, SystemTime, Vec<Constraint>)>>>);
 
 #[derive(Clone)]
@@ -132,7 +133,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + 'stat
             }
             Ok(13) if !is_locked => {
                 // sign request
-                let agent = self.agent.take().unwrap();
+                let agent = self.agent.take().ok_or(Error::AgentFailure)?;
                 let (agent, signed) = self.try_sign(agent, r, writebuf).await?;
                 self.agent = Some(agent);
                 if signed {
@@ -195,21 +196,21 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + 'stat
             }
         }
         let len = writebuf.len() - 4;
-        BigEndian::write_u32(&mut writebuf[0..], len as u32);
+        BigEndian::write_u32(&mut writebuf[..], len as u32);
         Ok(())
     }
 
     fn lock(&self, mut r: Position) -> Result<(), Error> {
         let password = r.read_string()?;
-        let mut lock = self.lock.0.write().unwrap();
+        let mut lock = self.lock.0.write().or(Err(Error::AgentFailure))?;
         lock.extend(password);
         Ok(())
     }
 
     fn unlock(&self, mut r: Position) -> Result<bool, Error> {
         let password = r.read_string()?;
-        let mut lock = self.lock.0.write().unwrap();
-        if &lock[0..] == password {
+        let mut lock = self.lock.0.write().or(Err(Error::AgentFailure))?;
+        if &lock[..] == password {
             lock.clear();
             Ok(true)
         } else {
@@ -243,15 +244,19 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + 'stat
                 let pos1 = r.position;
                 let concat = r.read_string()?;
                 let _comment = r.read_string()?;
-                if &concat[32..64] != public_ {
+                if concat.get(32..64) != Some(public_) {
                     return Ok(false);
                 }
                 use key::ed25519::*;
                 let mut public = PublicKey::new_zeroed();
                 let mut secret = SecretKey::new_zeroed();
+
+                #[allow(clippy::indexing_slicing)] // length checked before
                 public.key.clone_from_slice(&public_[..32]);
                 secret.key.clone_from_slice(concat);
                 writebuf.push(msg::SUCCESS);
+
+                #[allow(clippy::indexing_slicing)] // positions checked before
                 (self.buf[pos0..pos1].to_vec(), key::KeyPair::Ed25519(secret))
             }
             #[cfg(feature = "openssl")]
@@ -304,7 +309,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + 'stat
             }
             _ => return Ok(false),
         };
-        let mut w = self.keys.0.write().unwrap();
+        let mut w = self.keys.0.write().or(Err(Error::AgentFailure))?;
         let now = SystemTime::now();
         if constrained {
             let n = r.read_u32()?;
@@ -318,14 +323,15 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + 'stat
                     let keys = self.keys.clone();
                     tokio::spawn(async move {
                         sleep(Duration::from_secs(seconds as u64)).await;
-                        let mut keys = keys.0.write().unwrap();
-                        let delete = if let Some(&(_, time, _)) = keys.get(&blob) {
-                            time == now
-                        } else {
-                            false
-                        };
-                        if delete {
-                            keys.remove(&blob);
+                        if let Ok(mut keys) = keys.0.write() {
+                            let delete = if let Some(&(_, time, _)) = keys.get(&blob) {
+                                time == now
+                            } else {
+                                false
+                            };
+                            if delete {
+                                keys.remove(&blob);
+                            }
                         }
                     });
                 } else if t == msg::CONSTRAIN_CONFIRM {
@@ -350,7 +356,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + 'stat
         let mut needs_confirm = false;
         let key = {
             let blob = r.read_string()?;
-            let k = self.keys.0.read().unwrap();
+            let k = self.keys.0.read().or(Err(Error::AgentFailure))?;
             if let Some(&(ref key, _, ref constraints)) = k.get(blob) {
                 if constraints.iter().any(|c| *c == Constraint::Confirm) {
                     needs_confirm = true;
