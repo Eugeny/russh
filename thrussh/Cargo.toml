@@ -22,6 +22,7 @@ include = [
 "src/session.rs",
 "src/sshbuffer.rs",
 "src/ssh_read.rs",
+"src/cipher/aes256gcm.rs",
 "src/cipher/chacha20poly1305.rs",
 "src/cipher/clear.rs",
 "src/cipher/mod.rs",
@@ -47,7 +48,7 @@ bitflags = "1.2"
 log = "0.4"
 thrussh-keys = { version = "0.21.0", path = "../thrussh-keys" }
 openssl = { version = "0.10", optional = true }
-thrussh-libsodium = "0.2"
+thrussh-libsodium = { version = "0.2", path = "../thrussh-libsodium" }
 cryptovec = "0.6.0"
 tokio = { version = "1.0", features = [ "io-util", "rt-multi-thread", "time", "net", "sync", "macros", "process" ] }
 futures = "0.3"

@@ -33,13 +33,14 @@ const TAG_LEN: usize = 16;
 pub static CIPHER: super::Cipher = super::Cipher {
     name: NAME,
     key_len: 64,
+    nonce_len: 0,
     make_sealing_cipher,
     make_opening_cipher,
 };
 
 pub const NAME: super::Name = super::Name("chacha20-poly1305@openssh.com");
 
-fn make_sealing_cipher(k: &[u8]) -> super::SealingCipher {
+fn make_sealing_cipher(k: &[u8], _: &[u8]) -> super::SealingCipher {
     let mut k1 = Key([0; KEY_BYTES]);
     let mut k2 = Key([0; KEY_BYTES]);
     k1.0.clone_from_slice(&k[KEY_BYTES..]);
@@ -47,7 +48,7 @@ fn make_sealing_cipher(k: &[u8]) -> super::SealingCipher {
     super::SealingCipher::Chacha20Poly1305(SealingKey { k1, k2 })
 }
 
-fn make_opening_cipher(k: &[u8]) -> super::OpeningCipher {
+fn make_opening_cipher(k: &[u8], _: &[u8]) -> super::OpeningCipher {
     let mut k1 = Key([0; KEY_BYTES]);
     let mut k2 = Key([0; KEY_BYTES]);
     k1.0.clone_from_slice(&k[KEY_BYTES..]);
