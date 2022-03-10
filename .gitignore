@@ -2,3 +2,5 @@
 .DS_Store
 .pijul
 target
+Cargo.lock
+.cargo-ok
