@@ -13,8 +13,8 @@
 // limitations under the License.
 //
 use russh_cryptovec::CryptoVec;
-use thrussh_keys::encoding::*;
-use thrussh_keys::key::*;
+use russh_keys::encoding::*;
+use russh_keys::key::*;
 
 #[doc(hidden)]
 pub trait PubKey {

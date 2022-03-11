@@ -1,8 +1,8 @@
 use anyhow::Result;
 use std::io::Write;
 use std::sync::Arc;
-use thrussh::*;
-use thrussh_keys::*;
+use russh::*;
+use russh_keys::*;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -18,7 +18,7 @@ async fn main() -> Result<()> {
 struct Client {}
 
 impl client::Handler for Client {
-    type Error = thrussh::Error;
+    type Error = russh::Error;
     type FutureUnit = futures::future::Ready<Result<(Self, client::Session), Self::Error>>;
     type FutureBool = futures::future::Ready<Result<(Self, bool), Self::Error>>;
 
@@ -67,10 +67,10 @@ impl Session {
         let mut code = None;
         while let Some(msg) = channel.wait().await {
             match msg {
-                thrussh::ChannelMsg::Data { ref data } => {
+                russh::ChannelMsg::Data { ref data } => {
                     output.write_all(&data).unwrap();
                 }
-                thrussh::ChannelMsg::ExitStatus { exit_status } => {
+                russh::ChannelMsg::ExitStatus { exit_status } => {
                     code = Some(exit_status);
                 }
                 _ => {}

@@ -5,6 +5,7 @@ documentation = "https://pijul.org/cryptovec/doc/cryptovec"
 include = ["Cargo.toml", "src/lib.rs"]
 license = "Apache-2.0"
 name = "russh-cryptovec"
+publish = false
 repository = "https://pijul.org/cryptovec"
 version = "0.6.1"
 

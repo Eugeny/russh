@@ -20,9 +20,9 @@ use msg;
 use negotiation;
 use negotiation::Select;
 use std::cell::RefCell;
-use thrussh_keys::encoding::{Encoding, Position, Reader};
-use thrussh_keys::key;
-use thrussh_keys::key::Verify;
+use russh_keys::encoding::{Encoding, Position, Reader};
+use russh_keys::key;
+use russh_keys::key::Verify;
 use tokio::time::Instant;
 
 impl Session {
@@ -408,7 +408,7 @@ impl Encrypted {
                 }
             }
             Err(e) => {
-                if let thrussh_keys::Error::CouldNotReadKey = e {
+                if let russh_keys::Error::CouldNotReadKey = e {
                     reject_auth_request(until, &mut self.write, auth_request).await;
                     Ok(())
                 } else {

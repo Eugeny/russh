@@ -1,17 +1,17 @@
 extern crate env_logger;
 extern crate futures;
-extern crate thrussh;
-extern crate thrussh_keys;
+extern crate russh;
+extern crate russh_keys;
 extern crate tokio;
 use anyhow::Context;
 use std::sync::Arc;
-use thrussh::*;
-use thrussh_keys::*;
+use russh::*;
+use russh_keys::*;
 
 struct Client {}
 
 impl client::Handler for Client {
-    type Error = thrussh::Error;
+    type Error = russh::Error;
     type FutureUnit = futures::future::Ready<Result<(Self, client::Session), Self::Error>>;
     type FutureBool = futures::future::Ready<Result<(Self, bool), Self::Error>>;
 
@@ -30,15 +30,15 @@ impl client::Handler for Client {
 #[tokio::main]
 async fn main() {
     env_logger::init();
-    let config = thrussh::client::Config::default();
+    let config = russh::client::Config::default();
     let config = Arc::new(config);
     let sh = Client {};
 
-    let mut agent = thrussh_keys::agent::client::AgentClient::connect_env()
+    let mut agent = russh_keys::agent::client::AgentClient::connect_env()
         .await
         .unwrap();
     let mut identities = agent.request_identities().await.unwrap();
-    let mut session = thrussh::client::connect(config, "127.0.0.1:2200", sh)
+    let mut session = russh::client::connect(config, "127.0.0.1:2200", sh)
         .await
         .unwrap();
     let (_, auth_res) = session
@@ -58,10 +58,10 @@ async fn main() {
     while let Some(msg) = channel.wait().await {
         use std::io::Write;
         match msg {
-            thrussh::ChannelMsg::Data { ref data } => {
+            russh::ChannelMsg::Data { ref data } => {
                 f.write_all(&data).unwrap();
             }
-            thrussh::ChannelMsg::Eof => {
+            russh::ChannelMsg::Eof => {
                 f.flush().unwrap();
                 break;
             }

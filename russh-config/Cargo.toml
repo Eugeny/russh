@@ -1,12 +1,12 @@
 [package]
 authors = ["Pierre-Étienne Meunier <pe@pijul.org>"]
-description = "Utilities to parse .ssh/config files, including helpers to implement ProxyCommand in Thrussh."
-documentation = "https://docs.rs/thrussh-config"
+description = "Utilities to parse .ssh/config files, including helpers to implement ProxyCommand in Russh."
+documentation = "https://docs.rs/russh-config"
 edition = "2018"
 include = ["Cargo.toml", "src/lib.rs", "src/proxy.rs"]
 license = "Apache-2.0"
-name = "thrussh-config"
-repository = "https://nest.pijul.com/pijul/thrussh"
+name = "russh-config"
+repository = "https://nest.pijul.com/pijul/russh"
 version = "0.6.0"
 
 [dependencies]

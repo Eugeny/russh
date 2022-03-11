@@ -27,9 +27,9 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
-use thrussh_keys::encoding::{Encoding, Reader};
-use thrussh_keys::key;
-use thrussh_keys::key::parse_public_key;
+use russh_keys::encoding::{Encoding, Reader};
+use russh_keys::key;
+use russh_keys::key::parse_public_key;
 use tokio;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -65,7 +65,7 @@ enum Reply {
     AuthFailure,
     ChannelOpenFailure,
     SignRequest {
-        key: thrussh_keys::key::PublicKey,
+        key: russh_keys::key::PublicKey,
         data: CryptoVec,
     },
 }
@@ -1089,7 +1089,7 @@ impl KexDhDone {
                     debug!("sig_type: {:?}", sig_type);
                     sig_reader.read_string().map_err(crate::Error::from)?
                 };
-                use thrussh_keys::key::Verify;
+                use russh_keys::key::Verify;
                 debug!("signature: {:?}", signature);
                 if !pubkey.verify_server_auth(hash.as_ref(), signature) {
                     debug!("wrong server sig");

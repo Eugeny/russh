@@ -4,7 +4,7 @@ use crate::key::PubKey;
 use crate::negotiation::Select;
 use crate::{kex, msg, negotiation};
 use std::cell::RefCell;
-use thrussh_keys::encoding::{Encoding, Reader};
+use russh_keys::encoding::{Encoding, Reader};
 
 thread_local! {
     static HASH_BUF: RefCell<CryptoVec> = RefCell::new(CryptoVec::new());

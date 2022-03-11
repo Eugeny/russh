@@ -32,25 +32,25 @@
 //! to all other clients:
 //!
 //! ```
-//! extern crate thrussh;
-//! extern crate thrussh_keys;
+//! extern crate russh;
+//! extern crate russh_keys;
 //! extern crate futures;
 //! extern crate tokio;
 //! use std::sync::{Mutex, Arc};
-//! use thrussh::*;
-//! use thrussh::server::{Auth, Session};
-//! use thrussh_keys::*;
+//! use russh::*;
+//! use russh::server::{Auth, Session};
+//! use russh_keys::*;
 //! use std::collections::HashMap;
 //! use futures::Future;
 //!
 //! #[tokio::main]
 //! async fn main() {
-//!     let client_key = thrussh_keys::key::KeyPair::generate_ed25519().unwrap();
+//!     let client_key = russh_keys::key::KeyPair::generate_ed25519().unwrap();
 //!     let client_pubkey = Arc::new(client_key.clone_public_key());
-//!     let mut config = thrussh::server::Config::default();
+//!     let mut config = russh::server::Config::default();
 //!     config.connection_timeout = Some(std::time::Duration::from_secs(3));
 //!     config.auth_rejection_time = std::time::Duration::from_secs(3);
-//!     config.keys.push(thrussh_keys::key::KeyPair::generate_ed25519().unwrap());
+//!     config.keys.push(russh_keys::key::KeyPair::generate_ed25519().unwrap());
 //!     let config = Arc::new(config);
 //!     let sh = Server{
 //!         client_pubkey,
@@ -59,14 +59,14 @@
 //!     };
 //!     tokio::time::timeout(
 //!        std::time::Duration::from_secs(1),
-//!        thrussh::server::run(config, "0.0.0.0:2222", sh)
+//!        russh::server::run(config, "0.0.0.0:2222", sh)
 //!     ).await.unwrap_or(Ok(()));
 //! }
 //!
 //! #[derive(Clone)]
 //! struct Server {
-//!     client_pubkey: Arc<thrussh_keys::key::PublicKey>,
-//!     clients: Arc<Mutex<HashMap<(usize, ChannelId), thrussh::server::Handle>>>,
+//!     client_pubkey: Arc<russh_keys::key::PublicKey>,
+//!     clients: Arc<Mutex<HashMap<(usize, ChannelId), russh::server::Handle>>>,
 //!     id: usize,
 //! }
 //!
@@ -136,7 +136,7 @@
 //!
 //! # Implementing clients
 //!
-//! Maybe surprisingly, the data types used by Thrussh to implement
+//! Maybe surprisingly, the data types used by Russh to implement
 //! clients are relatively more complicated than for servers. This is
 //! mostly related to the fact that clients are generally used both in
 //! a synchronous way (in the case of SSH, we can think of sending a
@@ -151,15 +151,15 @@
 //! data.
 //!
 //! ```
-//!extern crate thrussh;
-//!extern crate thrussh_keys;
+//!extern crate russh;
+//!extern crate russh_keys;
 //!extern crate futures;
 //!extern crate tokio;
 //!extern crate env_logger;
 //!use std::sync::Arc;
-//!use thrussh::*;
-//!use thrussh::server::{Auth, Session};
-//!use thrussh_keys::*;
+//!use russh::*;
+//!use russh::server::{Auth, Session};
+//!use russh_keys::*;
 //!use futures::Future;
 //!use std::io::Read;
 //!
@@ -194,14 +194,14 @@
 //!
 //! #[tokio::main]
 //! async fn main() {
-//!   let config = thrussh::client::Config::default();
+//!   let config = russh::client::Config::default();
 //!   let config = Arc::new(config);
 //!   let sh = Client{};
 //!
-//!   let key = thrussh_keys::key::KeyPair::generate_ed25519().unwrap();
-//!   let mut agent = thrussh_keys::agent::client::AgentClient::connect_env().await.unwrap();
+//!   let key = russh_keys::key::KeyPair::generate_ed25519().unwrap();
+//!   let mut agent = russh_keys::agent::client::AgentClient::connect_env().await.unwrap();
 //!   agent.add_identity(&key, &[]).await.unwrap();
-//!   let mut session = thrussh::client::connect(config, "localhost:22", sh).await.unwrap();
+//!   let mut session = russh::client::connect(config, "localhost:22", sh).await.unwrap();
 //!   if session.authenticate_future(std::env::var("USER").unwrap(), key.clone_public_key(), agent).await.1.unwrap() {
 //!     let mut channel = session.channel_open_session().await.unwrap();
 //!     channel.data(&b"Hello, world!"[..]).await.unwrap();
@@ -214,15 +214,15 @@
 //! # Using non-socket IO / writing tunnels
 //!
 //! The easy way to implement SSH tunnels, like `ProxyCommand` for
-//! OpenSSH, is to use the `thrussh-config` crate, and use the
+//! OpenSSH, is to use the `russh-config` crate, and use the
 //! `Stream::tcp_connect` or `Stream::proxy_command` methods of that
-//! crate. That crate is a very lightweight layer above Thrussh, only
+//! crate. That crate is a very lightweight layer above Russh, only
 //! implementing for external commands the traits used for sockets.
 //!
 //! # The SSH protocol
 //!
 //! If we exclude the key exchange and authentication phases, handled
-//! by Thrussh behind the scenes, the rest of the SSH protocol is
+//! by Russh behind the scenes, the rest of the SSH protocol is
 //! relatively simple: clients and servers open *channels*, which are
 //! just integers used to handle multiple requests in parallel in a
 //! single connection. Once a client has obtained a `ChannelId` by
@@ -242,8 +242,8 @@
 //!
 //! The main goal of this library is conciseness, and reduced size and
 //! readability of the library's code. Moreover, this library is split
-//! between Thrussh, which implements the main logic of SSH clients
-//! and servers, and Thrussh-keys, which implements calls to
+//! between Russh, which implements the main logic of SSH clients
+//! and servers, and Russh-keys, which implements calls to
 //! cryptographic primitives.
 //!
 //! One non-goal is to implement all possible cryptographic algorithms
@@ -274,7 +274,7 @@
 extern crate bitflags;
 #[macro_use]
 extern crate log;
-extern crate thrussh_libsodium as sodium;
+extern crate russh_libsodium as sodium;
 #[macro_use]
 extern crate thiserror;
 
@@ -416,7 +416,7 @@ pub enum Error {
     DecryptionError,
 
     #[error(transparent)]
-    Keys(#[from] thrussh_keys::Error),
+    Keys(#[from] russh_keys::Error),
 
     #[error(transparent)]
     IO(#[from] std::io::Error),
@@ -670,14 +670,14 @@ mod test_compress {
     async fn compress_local_test() {
         let _ = env_logger::try_init();
 
-        let client_key = thrussh_keys::key::KeyPair::generate_ed25519().unwrap();
+        let client_key = russh_keys::key::KeyPair::generate_ed25519().unwrap();
         let mut config = server::Config::default();
         config.preferred = Preferred::COMPRESSED;
         config.connection_timeout = None; // Some(std::time::Duration::from_secs(3));
         config.auth_rejection_time = std::time::Duration::from_secs(3);
         config
             .keys
-            .push(thrussh_keys::key::KeyPair::generate_ed25519().unwrap());
+            .push(russh_keys::key::KeyPair::generate_ed25519().unwrap());
         let config = Arc::new(config);
         let mut sh = Server {
             clients: Arc::new(Mutex::new(HashMap::new())),
@@ -754,7 +754,7 @@ mod test_compress {
             }
             self.finished(session)
         }
-        fn auth_publickey(self, _: &str, _: &thrussh_keys::key::PublicKey) -> Self::FutureAuth {
+        fn auth_publickey(self, _: &str, _: &russh_keys::key::PublicKey) -> Self::FutureAuth {
             debug!("auth_publickey");
             self.finished_auth(server::Auth::Accept)
         }
@@ -780,7 +780,7 @@ mod test_compress {
         }
         fn check_server_key(
             self,
-            server_public_key: &thrussh_keys::key::PublicKey,
+            server_public_key: &russh_keys::key::PublicKey,
         ) -> Self::FutureBool {
             println!("check_server_key: {:?}", server_public_key);
             self.finished_bool(true)

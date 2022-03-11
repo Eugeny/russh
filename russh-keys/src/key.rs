@@ -18,11 +18,11 @@ use crate::Error;
 use russh_cryptovec::CryptoVec;
 #[cfg(feature = "openssl")]
 use openssl::pkey::{Private, Public};
-use thrussh_libsodium as sodium;
+use russh_libsodium as sodium;
 
 /// Keys for elliptic curve Ed25519 cryptography.
 pub mod ed25519 {
-    pub use thrussh_libsodium::ed25519::{
+    pub use russh_libsodium::ed25519::{
         keypair, sign_detached, verify_detached, PublicKey, SecretKey,
     };
 }
@@ -100,7 +100,7 @@ impl SignatureHash {
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub enum PublicKey {
     #[doc(hidden)]
-    Ed25519(thrussh_libsodium::ed25519::PublicKey),
+    Ed25519(russh_libsodium::ed25519::PublicKey),
     #[doc(hidden)]
     #[cfg(feature = "openssl")]
     RSA {
@@ -433,7 +433,7 @@ pub fn parse_public_key(p: &[u8]) -> Result<PublicKey, Error> {
     let t = pos.read_string()?;
     if t == b"ssh-ed25519" {
         if let Ok(pubkey) = pos.read_string() {
-            use thrussh_libsodium::ed25519;
+            use russh_libsodium::ed25519;
             let mut p = ed25519::PublicKey {
                 key: [0; ed25519::PUBLICKEY_BYTES],
             };

@@ -21,7 +21,7 @@ use russh_cryptovec::CryptoVec;
 use std::collections::HashMap;
 use std::num::Wrapping;
 use std::sync::Arc;
-use thrussh_keys::encoding::Encoding;
+use russh_keys::encoding::Encoding;
 
 #[derive(Debug)]
 pub(crate) struct Encrypted {

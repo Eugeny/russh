@@ -18,7 +18,7 @@ use std::net::ToSocketAddrs;
 use std::sync::Arc;
 
 use futures::future::Future;
-use thrussh_keys::key;
+use russh_keys::key;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::pin;
@@ -44,7 +44,7 @@ pub struct Config {
     /// The authentication banner, usually a warning message shown to the client.
     pub auth_banner: Option<&'static str>,
     /// Authentication rejections must happen in constant time for
-    /// security reasons. Thrussh does not handle this by default.
+    /// security reasons. Russh does not handle this by default.
     pub auth_rejection_time: std::time::Duration,
     /// The server's keys. The first key pair in the client's preference order will be chosen.
     pub keys: Vec<key::KeyPair>,
@@ -87,7 +87,7 @@ impl Default for Config {
 /// A client's response in a challenge-response authentication.
 #[derive(Debug)]
 pub struct Response<'a> {
-    pos: thrussh_keys::encoding::Position<'a>,
+    pos: russh_keys::encoding::Position<'a>,
     n: u32,
 }
 
@@ -154,7 +154,7 @@ pub trait Handler: Sized {
     /// default handlers.
     fn finished(self, session: Session) -> Self::FutureUnit;
 
-    /// Check authentication using the "none" method. Thrussh makes
+    /// Check authentication using the "none" method. Russh makes
     /// sure rejection happens in time `config.auth_rejection_time`,
     /// except if this method takes more than that.
     #[allow(unused_variables)]
@@ -162,7 +162,7 @@ pub trait Handler: Sized {
         self.finished_auth(Auth::Reject)
     }
 
-    /// Check authentication using the "password" method. Thrussh
+    /// Check authentication using the "password" method. Russh
     /// makes sure rejection happens in time
     /// `config.auth_rejection_time`, except if this method takes more
     /// than that.
@@ -173,8 +173,8 @@ pub trait Handler: Sized {
 
     /// Check authentication using the "publickey" method. This method
     /// should just check whether the public key matches the
-    /// authorized ones. Thrussh then checks the signature. If the key
-    /// is unknown, or the signature is invalid, Thrussh guarantees
+    /// authorized ones. Russh then checks the signature. If the key
+    /// is unknown, or the signature is invalid, Russh guarantees
     /// that rejection happens in constant time
     /// `config.auth_rejection_time`, except if this method takes more
     /// time than that.
@@ -184,7 +184,7 @@ pub trait Handler: Sized {
     }
 
     /// Check authentication using the "keyboard-interactive"
-    /// method. Thrussh makes sure rejection happens in time
+    /// method. Russh makes sure rejection happens in time
     /// `config.auth_rejection_time`, except if this method takes more
     /// than that.
     #[allow(unused_variables)]

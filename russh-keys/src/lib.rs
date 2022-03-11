@@ -1,7 +1,7 @@
 #![deny(trivial_casts, unstable_features, unused_import_braces)]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
 //! This crate contains methods to deal with SSH keys, as defined in
-//! crate Thrussh. This includes in particular various functions for
+//! crate Russh. This includes in particular various functions for
 //! opening key files, deciphering encrypted keys, and dealing with
 //! agents.
 //!
@@ -12,7 +12,7 @@
 //! agent to sign a piece of data (`b"Please sign this", below).
 //!
 //!```
-//! use thrussh_keys::*;
+//! use russh_keys::*;
 //! use futures::Future;
 //!
 //! #[derive(Clone)]
@@ -27,7 +27,7 @@
 //!
 //! fn main() {
 //!    env_logger::try_init().unwrap_or(());
-//!    let dir = tempdir::TempDir::new("thrussh").unwrap();
+//!    let dir = tempdir::TempDir::new("russh").unwrap();
 //!    let agent_path = dir.path().join("agent");
 //!
 //!    let mut core = tokio::runtime::Runtime::new().unwrap();
@@ -36,7 +36,7 @@
 //!    core.spawn(async move {
 //!        let mut listener = tokio::net::UnixListener::bind(&agent_path_)
 //!            .unwrap();
-//!        thrussh_keys::agent::server::serve(tokio_stream::wrappers::UnixListenerStream::new(listener), X {}).await
+//!        russh_keys::agent::server::serve(tokio_stream::wrappers::UnixListenerStream::new(listener), X {}).await
 //!    });
 //!    let key = decode_secret_key(PKCS8_ENCRYPTED, Some("blabla")).unwrap();
 //!    let public = key.clone_public_key();
@@ -148,7 +148,7 @@ const KEYTYPE_RSA: &[u8] = b"ssh-rsa";
 /// Load a public key from a file. Ed25519 and RSA keys are supported.
 ///
 /// ```
-/// thrussh_keys::load_public_key("../files/id_ed25519.pub").unwrap();
+/// russh_keys::load_public_key("../files/id_ed25519.pub").unwrap();
 /// ```
 pub fn load_public_key<P: AsRef<Path>>(path: P) -> Result<key::PublicKey, Error> {
     let mut pubkey = String::new();
@@ -168,7 +168,7 @@ pub fn load_public_key<P: AsRef<Path>>(path: P) -> Result<key::PublicKey, Error>
 /// as `ssh-ed25519 AAAAC3N...`).
 ///
 /// ```
-/// thrussh_keys::parse_public_key_base64("AAAAC3NzaC1lZDI1NTE5AAAAIJdD7y3aLq454yWBdwLWbieU1ebz9/cu7/QEXn9OIeZJ").is_ok();
+/// russh_keys::parse_public_key_base64("AAAAC3NzaC1lZDI1NTE5AAAAIJdD7y3aLq454yWBdwLWbieU1ebz9/cu7/QEXn9OIeZJ").is_ok();
 /// ```
 pub fn parse_public_key_base64(key: &str) -> Result<key::PublicKey, Error> {
     let base = BASE64_MIME.decode(key.as_bytes())?;
@@ -486,7 +486,7 @@ QR+u0AypRPmzHnOPAAAAEXJvb3RAMTQwOTExNTQ5NDBkAQ==
     #[test]
     fn test_check_known_hosts() {
         env_logger::try_init().unwrap_or(());
-        let dir = tempdir::TempDir::new("thrussh").unwrap();
+        let dir = tempdir::TempDir::new("russh").unwrap();
         let path = dir.path().join("known_hosts");
         {
             let mut f = File::create(&path).unwrap();
@@ -759,7 +759,7 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
     fn test_client_agent(key: key::KeyPair) {
         env_logger::try_init().unwrap_or(());
         use std::process::{Command, Stdio};
-        let dir = tempdir::TempDir::new("thrussh").unwrap();
+        let dir = tempdir::TempDir::new("russh").unwrap();
         let agent_path = dir.path().join("agent");
         let mut agent = Command::new("ssh-agent")
             .arg("-a")
@@ -820,7 +820,7 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
     #[cfg(feature = "openssl")]
     fn test_agent() {
         env_logger::try_init().unwrap_or(());
-        let dir = tempdir::TempDir::new("thrussh").unwrap();
+        let dir = tempdir::TempDir::new("russh").unwrap();
         let agent_path = dir.path().join("agent");
 
         let core = tokio::runtime::Runtime::new().unwrap();

@@ -824,11 +824,90 @@ dependencies = [
 ]
 
 [[package]]
+name = "russh"
+version = "0.33.5"
+dependencies = [
+ "anyhow",
+ "bitflags",
+ "byteorder",
+ "digest",
+ "env_logger 0.7.1",
+ "flate2",
+ "futures",
+ "generic-array",
+ "log",
+ "openssl",
+ "rand 0.8.4",
+ "russh-cryptovec",
+ "russh-keys",
+ "russh-libsodium",
+ "sha2",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "russh-config"
+version = "0.6.0"
+dependencies = [
+ "dirs-next",
+ "futures",
+ "log",
+ "thiserror",
+ "tokio",
+ "whoami",
+]
+
+[[package]]
 name = "russh-cryptovec"
 version = "0.6.1"
 dependencies = [
  "libc",
  "winapi",
+]
+
+[[package]]
+name = "russh-keys"
+version = "0.21.0"
+dependencies = [
+ "aes",
+ "bcrypt-pbkdf",
+ "bit-vec",
+ "block-modes",
+ "byteorder",
+ "data-encoding",
+ "dirs",
+ "env_logger 0.8.4",
+ "futures",
+ "hmac",
+ "log",
+ "md5",
+ "num-bigint",
+ "num-integer",
+ "openssl",
+ "pbkdf2",
+ "rand 0.8.4",
+ "russh-cryptovec",
+ "russh-libsodium",
+ "serde",
+ "serde_derive",
+ "sha2",
+ "tempdir",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
+ "yasna",
+]
+
+[[package]]
+name = "russh-libsodium"
+version = "0.2.1"
+dependencies = [
+ "lazy_static",
+ "libc",
+ "libsodium-sys",
+ "pkg-config",
+ "vcpkg",
 ]
 
 [[package]]
@@ -949,85 +1028,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
-]
-
-[[package]]
-name = "thrussh"
-version = "0.33.5"
-dependencies = [
- "anyhow",
- "bitflags",
- "byteorder",
- "digest",
- "env_logger 0.7.1",
- "flate2",
- "futures",
- "generic-array",
- "log",
- "openssl",
- "rand 0.8.4",
- "russh-cryptovec",
- "sha2",
- "thiserror",
- "thrussh-keys",
- "thrussh-libsodium",
- "tokio",
-]
-
-[[package]]
-name = "thrussh-config"
-version = "0.6.0"
-dependencies = [
- "dirs-next",
- "futures",
- "log",
- "thiserror",
- "tokio",
- "whoami",
-]
-
-[[package]]
-name = "thrussh-keys"
-version = "0.21.0"
-dependencies = [
- "aes",
- "bcrypt-pbkdf",
- "bit-vec",
- "block-modes",
- "byteorder",
- "data-encoding",
- "dirs",
- "env_logger 0.8.4",
- "futures",
- "hmac",
- "log",
- "md5",
- "num-bigint",
- "num-integer",
- "openssl",
- "pbkdf2",
- "rand 0.8.4",
- "russh-cryptovec",
- "serde",
- "serde_derive",
- "sha2",
- "tempdir",
- "thiserror",
- "thrussh-libsodium",
- "tokio",
- "tokio-stream",
- "yasna",
-]
-
-[[package]]
-name = "thrussh-libsodium"
-version = "0.2.1"
-dependencies = [
- "lazy_static",
- "libc",
- "libsodium-sys",
- "pkg-config",
- "vcpkg",
 ]
 
 [[package]]

@@ -15,8 +15,8 @@
 
 use russh_cryptovec::CryptoVec;
 use std::sync::Arc;
-use thrussh_keys::encoding;
-use thrussh_keys::key;
+use russh_keys::encoding;
+use russh_keys::key;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 bitflags! {
@@ -72,11 +72,11 @@ pub enum AgentAuthError {
     #[error(transparent)]
     Send(#[from] crate::SendError),
     #[error(transparent)]
-    Key(#[from] thrussh_keys::Error),
+    Key(#[from] russh_keys::Error),
 }
 
 impl<R: AsyncRead + AsyncWrite + Unpin + Send + 'static> Signer
-    for thrussh_keys::agent::client::AgentClient<R>
+    for russh_keys::agent::client::AgentClient<R>
 {
     type Error = AgentAuthError;
     type Future = std::pin::Pin<

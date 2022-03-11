@@ -14,12 +14,12 @@
 //
 use crate::{cipher, kex, msg, Error};
 use std::str::from_utf8;
-use thrussh_keys::key;
+use russh_keys::key;
 // use super::mac; // unimplemented
 use crate::compression::*;
 use russh_cryptovec::CryptoVec;
-use thrussh_keys::encoding::{Encoding, Reader};
-use thrussh_keys::key::{KeyPair, PublicKey};
+use russh_keys::encoding::{Encoding, Reader};
+use russh_keys::key::{KeyPair, PublicKey};
 use rand::RngCore;
 
 #[derive(Debug)]
@@ -95,9 +95,9 @@ impl Named for () {
 }
 
 #[cfg(feature = "openssl")]
-use thrussh_keys::key::{ED25519, SSH_RSA};
+use russh_keys::key::{ED25519, SSH_RSA};
 #[cfg(not(feature = "openssl"))]
-use thrussh_keys::key::{ED25519};
+use russh_keys::key::{ED25519};
 
 impl Named for PublicKey {
     fn name(&self) -> &'static str {

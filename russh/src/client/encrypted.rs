@@ -23,7 +23,7 @@ use crate::session::*;
 use crate::{ChannelId, ChannelOpenFailure, Error, Sig};
 use russh_cryptovec::CryptoVec;
 use std::cell::RefCell;
-use thrussh_keys::encoding::{Encoding, Reader};
+use russh_keys::encoding::{Encoding, Reader};
 
 thread_local! {
     static SIGNATURE_BUFFER: RefCell<CryptoVec> = RefCell::new(CryptoVec::new());

@@ -1,9 +1,9 @@
 [package]
 authors = ["Pierre-Étienne Meunier <pe@pijul.org>"]
 description = "A client and server SSH library."
-documentation = "https://docs.rs/thrussh"
+documentation = "https://docs.rs/russh"
 edition = "2018"
-homepage = "https://pijul.org/thrussh"
+homepage = "https://pijul.org/russh"
 include = [
   "Cargo.toml",
   "src/auth.rs",
@@ -34,9 +34,9 @@ include = [
 ]
 keywords = ["ssh"]
 license = "Apache-2.0"
-name = "thrussh"
+name = "russh"
 readme = "../README.md"
-repository = "https://nest.pijul.com/pijul/thrussh"
+repository = "https://nest.pijul.com/pijul/russh"
 version = "0.33.5"
 
 [features]
@@ -55,8 +55,8 @@ rand = "0.8"
 russh-cryptovec = {version = "0.6.0", path = "../cryptovec"}
 sha2 = "0.9"
 thiserror = "1.0"
-thrussh-keys = {version = "0.21.0", path = "../thrussh-keys"}
-thrussh-libsodium = {version = "0.2", path = "../thrussh-libsodium"}
+russh-keys = {version = "0.21.0", path = "../russh-keys"}
+russh-libsodium = {version = "0.2", path = "../russh-libsodium"}
 tokio = {version = "1.17.0", features = ["io-util", "rt-multi-thread", "time", "net", "sync", "macros", "process"]}
 
 [dev-dependencies]

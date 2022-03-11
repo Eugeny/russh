@@ -19,7 +19,7 @@ use crate::session::Exchange;
 use russh_cryptovec::CryptoVec;
 use sodium;
 use std::cell::RefCell;
-use thrussh_keys::encoding::Encoding;
+use russh_keys::encoding::Encoding;
 use rand::RngCore;
 
 #[doc(hidden)]

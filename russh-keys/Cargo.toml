@@ -1,9 +1,9 @@
 [package]
 authors = ["Pierre-Étienne Meunier <pe@pijul.org>"]
 description = "Deal with SSH keys: load them, decrypt them, call an SSH agent."
-documentation = "https://docs.rs/thrussh-keys"
+documentation = "https://docs.rs/russh-keys"
 edition = "2018"
-homepage = "https://pijul.org/thrussh"
+homepage = "https://pijul.org/russh"
 include = [
   "Cargo.toml",
   "src/lib.rs",
@@ -24,8 +24,8 @@ include = [
 ]
 keywords = ["ssh"]
 license = "Apache-2.0"
-name = "thrussh-keys"
-repository = "https://nest.pijul.com/pijul/thrussh"
+name = "russh-keys"
+repository = "https://nest.pijul.com/pijul/russh"
 version = "0.21.0"
 
 [dependencies]
@@ -50,7 +50,7 @@ serde = "1.0"
 serde_derive = "1.0"
 sha2 = "0.9"
 thiserror = "1.0"
-thrussh-libsodium = {version = "0.2", path = "../thrussh-libsodium"}
+russh-libsodium = {version = "0.2", path = "../russh-libsodium"}
 tokio = {version = "1.17.0", features = ["io-util", "rt-multi-thread", "time", "net"]}
 tokio-stream = {version = "0.1", features = ["net"]}
 yasna = {version = "0.4.0", features = ["bit-vec", "num-bigint"]}

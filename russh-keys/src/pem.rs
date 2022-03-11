@@ -1,7 +1,7 @@
 use {Error, ErrorKind, KEYTYPE_ED25519, KEYTYPE_RSA, rsa_key_from_components};
 use std;
-use thrussh::encoding::Reader;
-use thrussh::key;
+use russh::encoding::Reader;
+use russh::key;
 use super::is_base64_char;
 use hex::FromHex;
 use base64::{decode_config, MIME};
