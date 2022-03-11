@@ -47,7 +47,7 @@ impl KexInit {
         Ok(KexDhDone {
             exchange: self.exchange,
             names: algo,
-            kex: kex,
+            kex,
             key: 0,
             session_id: self.session_id,
         })

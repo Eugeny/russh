@@ -143,7 +143,7 @@ impl Encrypted {
     }
 
     pub fn sender_window_size(&self, channel: ChannelId) -> usize {
-        if let Some(ref channel) = self.channels.get(&channel) {
+        if let Some(channel) = self.channels.get(&channel) {
             channel.sender_window_size as usize
         } else {
             0
@@ -227,7 +227,7 @@ impl Encrypted {
         };
         let buf_len = buf.len();
 
-        while buf.len() > 0 {
+        while !buf.is_empty() {
             // Compute the length we're allowed to send.
             let off = std::cmp::min(buf.len(), channel.recipient_maximum_packet_size as usize);
             push_packet!(write, {
@@ -276,7 +276,7 @@ impl Encrypted {
             };
             let buf_len = buf.len();
 
-            while buf.len() > 0 {
+            while !buf.is_empty() {
                 // Compute the length we're allowed to send.
                 let off = std::cmp::min(buf.len(), channel.recipient_maximum_packet_size as usize);
                 push_packet!(self.write, {
@@ -426,7 +426,7 @@ impl KexInit {
             exchange: ex,
             algo: Some(algo),
             sent: false,
-            session_id: Some(session_id.clone()),
+            session_id: Some(*session_id),
         };
         kexinit.exchange.client_kex_init.clear();
         kexinit.exchange.server_kex_init.clear();
@@ -440,7 +440,7 @@ impl KexInit {
             exchange: ex,
             algo: None,
             sent: true,
-            session_id: Some(session_id.clone()),
+            session_id: Some(*session_id),
         };
         kexinit.exchange.client_kex_init.clear();
         kexinit.exchange.server_kex_init.clear();
@@ -476,7 +476,7 @@ impl KexDhDone {
         let session_id = if let Some(session_id) = self.session_id {
             session_id
         } else {
-            hash.clone()
+            hash
         };
         // Now computing keys.
         let c = self
@@ -488,7 +488,7 @@ impl KexDhDone {
             kex: self.kex,
             key: self.key,
             cipher: c,
-            session_id: session_id,
+            session_id,
             received: false,
             sent: false,
         })

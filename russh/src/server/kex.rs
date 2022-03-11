@@ -34,12 +34,12 @@ impl KexInit {
             let next_kex = if key < config.keys.len() {
                 Kex::KexDh(KexDh {
                     exchange: self.exchange,
-                    key: key,
+                    key,
                     names: algo,
                     session_id: self.session_id,
                 })
             } else {
-                return Err(Error::UnknownKey.into());
+                return Err(Error::UnknownKey);
             };
 
             Ok(next_kex)
@@ -85,7 +85,7 @@ impl KexDh {
             // can output it immediately when the time comes.
             let kexdhdone = KexDhDone {
                 exchange: self.exchange,
-                kex: kex,
+                kex,
                 key: self.key,
                 names: self.names,
                 session_id: self.session_id,

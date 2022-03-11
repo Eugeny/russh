@@ -86,7 +86,7 @@ impl Session {
 
                 // Ok, NEWKEYS received, now encrypted.
                 enc.flush_all_pending();
-                let mut pending = std::mem::replace(&mut self.pending_reads, Vec::new());
+                let mut pending = std::mem::take(&mut self.pending_reads);
                 for p in pending.drain(..) {
                     self = self.process_packet(handler, &p).await?
                 }
@@ -187,7 +187,7 @@ fn server_accept_service(
         buffer.extend_ssh_string(b"ssh-userauth");
     });
 
-    if let Some(ref banner) = banner {
+    if let Some(banner) = banner {
         push_packet!(buffer, {
             buffer.push(msg::USERAUTH_BANNER);
             buffer.extend_ssh_string(banner.as_bytes());
@@ -196,7 +196,7 @@ fn server_accept_service(
     }
 
     AuthRequest {
-        methods: methods,
+        methods,
         partial_success: false, // not used immediately anway.
         current: None,
         rejection_count: 0,
@@ -246,7 +246,7 @@ impl Encrypted {
                     self.state = EncryptedState::InitCompression;
                 } else {
                     auth_user.clear();
-                    auth_request.methods = auth_request.methods - MethodSet::PASSWORD;
+                    auth_request.methods -= MethodSet::PASSWORD;
                     auth_request.partial_success = false;
                     reject_auth_request(until, &mut self.write, auth_request).await;
                 }
@@ -343,7 +343,7 @@ impl Encrypted {
 
                     let is_valid = if sent_pk_ok && user == auth_user {
                         true
-                    } else if auth_user.len() == 0 {
+                    } else if auth_user.is_empty() {
                         auth_user.clear();
                         auth_user.push_str(user);
                         let h = handler.take().unwrap();
@@ -389,13 +389,13 @@ impl Encrypted {
                         debug!("pubkey_key: {:?}", pubkey_key);
                         push_packet!(self.write, {
                             self.write.push(msg::USERAUTH_PK_OK);
-                            self.write.extend_ssh_string(&pubkey_algo);
-                            self.write.extend_ssh_string(&pubkey_key);
+                            self.write.extend_ssh_string(pubkey_algo);
+                            self.write.extend_ssh_string(pubkey_key);
                         });
 
                         auth_request.current = Some(CurrentRequest::PublicKey {
                             key: public_key,
-                            algo: algo,
+                            algo,
                             sent_pk_ok: true,
                         });
                     } else {
@@ -453,7 +453,7 @@ async fn read_userauth_info_response<H: Handler>(
     if let Some(CurrentRequest::KeyboardInteractive { ref submethods }) = auth_request.current {
         let mut r = b.reader(1);
         let n = r.read_u32().map_err(crate::Error::from)?;
-        let response = Response { pos: r, n: n };
+        let response = Response { pos: r, n };
         let h = handler.take().unwrap();
         let (h, auth) = h
             .auth_keyboard_interactive(user, submethods, Some(response))
@@ -461,7 +461,7 @@ async fn read_userauth_info_response<H: Handler>(
         *handler = Some(h);
         reply_userauth_info_response(until, auth_request, write, auth)
             .await
-            .map_err(|e| H::Error::from(crate::Error::from(e)))
+            .map_err(H::Error::from)
     } else {
         reject_auth_request(until, write, auth_request).await;
         Ok(false)
@@ -563,9 +563,9 @@ impl Session {
                 }
                 self.flush()?;
                 let (h, s) = if let Some(ext) = ext {
-                    h.extended_data(channel_num, ext, &data, self).await?
+                    h.extended_data(channel_num, ext, data, self).await?
                 } else {
-                    h.data(channel_num, &data, self).await?
+                    h.data(channel_num, data, self).await?
                 };
                 *handler = Some(h);
                 Ok(s)
@@ -829,7 +829,7 @@ impl Session {
             recipient_channel: sender,
 
             // "sender" is the local end, i.e. we're the sender, the remote is the recipient.
-            sender_channel: sender_channel,
+            sender_channel,
 
             recipient_window_size: window,
             sender_window_size: self.common.config.window_size,

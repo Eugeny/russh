@@ -132,7 +132,7 @@ impl Session {
 
     pub fn writable_packet_size(&self, channel: &ChannelId) -> u32 {
         if let Some(ref enc) = self.common.encrypted {
-            if let Some(channel) = enc.channels.get(&channel) {
+            if let Some(channel) = enc.channels.get(channel) {
                 return channel
                     .sender_window_size
                     .min(channel.sender_maximum_packet_size);
@@ -143,7 +143,7 @@ impl Session {
 
     pub fn window_size(&self, channel: &ChannelId) -> u32 {
         if let Some(ref enc) = self.common.encrypted {
-            if let Some(channel) = enc.channels.get(&channel) {
+            if let Some(channel) = enc.channels.get(channel) {
                 return channel.sender_window_size;
             }
         }
@@ -152,7 +152,7 @@ impl Session {
 
     pub fn max_packet_size(&self, channel: &ChannelId) -> u32 {
         if let Some(ref enc) = self.common.encrypted {
-            if let Some(channel) = enc.channels.get(&channel) {
+            if let Some(channel) = enc.channels.get(channel) {
                 return channel.sender_maximum_packet_size;
             }
         }
@@ -166,18 +166,16 @@ impl Session {
                 &self.common.config.as_ref().limits,
                 &self.common.cipher,
                 &mut self.common.write_buffer,
-            ) {
-                if enc.rekey.is_none() {
-                    debug!("starting rekeying");
-                    if let Some(exchange) = enc.exchange.take() {
-                        let mut kexinit = KexInit::initiate_rekey(exchange, &enc.session_id);
-                        kexinit.server_write(
-                            &self.common.config.as_ref(),
-                            &mut self.common.cipher,
-                            &mut self.common.write_buffer,
-                        )?;
-                        enc.rekey = Some(Kex::KexInit(kexinit))
-                    }
+            ) && enc.rekey.is_none() {
+                debug!("starting rekeying");
+                if let Some(exchange) = enc.exchange.take() {
+                    let mut kexinit = KexInit::initiate_rekey(exchange, &enc.session_id);
+                    kexinit.server_write(
+                        self.common.config.as_ref(),
+                        &mut self.common.cipher,
+                        &mut self.common.write_buffer,
+                    )?;
+                    enc.rekey = Some(Kex::KexInit(kexinit))
                 }
             }
         }

@@ -44,16 +44,16 @@ pub const NAME: super::Name = super::Name("aes256-gcm@openssh.com");
 fn make_sealing_cipher(k: &[u8], n: &[u8]) -> super::SealingCipher {
     let mut key = Key([0; KEY_BYTES]);
     let mut nonce = Nonce([0; NONCE_BYTES]);
-    key.0.clone_from_slice(&k);
-    nonce.0.clone_from_slice(&n);
+    key.0.clone_from_slice(k);
+    nonce.0.clone_from_slice(n);
     super::SealingCipher::AES256GCM(SealingKey { key, nonce })
 }
 
 fn make_opening_cipher(k: &[u8], n: &[u8]) -> super::OpeningCipher {
     let mut key = Key([0; KEY_BYTES]);
     let mut nonce = Nonce([0; NONCE_BYTES]);
-    key.0.clone_from_slice(&k);
-    nonce.0.clone_from_slice(&n);
+    key.0.clone_from_slice(k);
+    nonce.0.clone_from_slice(n);
     super::OpeningCipher::AES256GCM(OpeningKey { key, nonce })
 }
 
@@ -141,7 +141,7 @@ impl super::SealingKey for SealingKey {
 
         // Prepare an output buffer
         let mut buffer = vec![0; plaintext_in_ciphertext_out.len()];
-        buffer.splice(..super::PACKET_LENGTH_LEN, packet_length.clone());
+        buffer.splice(..super::PACKET_LENGTH_LEN, packet_length);
 
         let nonce = make_nonce(&self.nonce, sequence_number);
         if !aes256gcm_encrypt(&mut buffer[super::PACKET_LENGTH_LEN..], tag_out, &plaintext_in_ciphertext_out[super::PACKET_LENGTH_LEN..], &packet_length, &nonce, &self.key) {

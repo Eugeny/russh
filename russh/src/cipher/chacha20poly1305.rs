@@ -91,7 +91,7 @@ impl super::OpeningKey for OpeningKey {
             chacha20_xor(&mut poly_key.0, &nonce, &self.k2);
             // let mut tag_ = Tag([0; 16]);
             // tag_.0.clone_from_slice(tag);
-            if !poly1305_verify(&tag, ciphertext_in_plaintext_out, &poly_key) {
+            if !poly1305_verify(tag, ciphertext_in_plaintext_out, &poly_key) {
                 return Err(Error::PacketAuth);
             }
         }

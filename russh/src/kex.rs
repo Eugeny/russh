@@ -17,7 +17,7 @@ use byteorder::{BigEndian, ByteOrder};
 
 use crate::session::Exchange;
 use russh_cryptovec::CryptoVec;
-use sodium;
+
 use std::cell::RefCell;
 use russh_keys::encoding::Encoding;
 use rand::RngCore;
@@ -202,7 +202,7 @@ impl Algorithm {
                                 hasher.update(&buffer[..]);
                                 hasher.finalize()
                             };
-                            key.extend(&hash.as_ref());
+                            key.extend(hash.as_ref());
                         }
 
                         key.resize(len);
@@ -233,8 +233,8 @@ impl Algorithm {
                     let remote_to_local = (cipher.make_opening_cipher)(&key, &nonce);
 
                     Ok(super::cipher::CipherPair {
-                        local_to_remote: local_to_remote,
-                        remote_to_local: remote_to_local,
+                        local_to_remote,
+                        remote_to_local,
                     })
                 })
             })

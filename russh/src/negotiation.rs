@@ -133,7 +133,7 @@ pub trait Select {
                 from_utf8(kex_string),
                 pref.kex
             );
-            return Err(Error::NoCommonKexAlgo.into());
+            return Err(Error::NoCommonKexAlgo);
         };
 
         let key_string = r.read_string()?;
@@ -145,7 +145,7 @@ pub trait Select {
                 from_utf8(key_string),
                 pref.key
             );
-            return Err(Error::NoCommonKeyAlgo.into());
+            return Err(Error::NoCommonKeyAlgo);
         };
 
         let cipher_string = r.read_string()?;
@@ -156,12 +156,12 @@ pub trait Select {
                 from_utf8(cipher_string),
                 pref.cipher
             );
-            return Err(Error::NoCommonCipher.into());
+            return Err(Error::NoCommonCipher);
         }
         r.read_string()?; // cipher server-to-client.
         debug!("kex {}", line!());
         let mac = Self::select(pref.mac, r.read_string()?);
-        let mac = mac.and_then(|(_, x)| Some(x));
+        let mac = mac.map(|(_, x)| x);
         r.read_string()?; // mac server-to-client.
 
         debug!("kex {}", line!());
@@ -170,7 +170,7 @@ pub trait Select {
             if let Some((_, c)) = Self::select(pref.compression, r.read_string()?) {
                 Compression::from_string(c)
             } else {
-                return Err(Error::NoCommonCompression.into());
+                return Err(Error::NoCommonCompression);
             };
         debug!("kex {}", line!());
         // server-to-client compression.
@@ -178,7 +178,7 @@ pub trait Select {
             if let Some((_, c)) = Self::select(pref.compression, r.read_string()?) {
                 Compression::from_string(c)
             } else {
-                return Err(Error::NoCommonCompression.into());
+                return Err(Error::NoCommonCompression);
             };
         debug!("client_compression = {:?}", client_compression);
         r.read_string()?; // languages client-to-server
@@ -198,7 +198,7 @@ pub trait Select {
                     ignore_guessed: fol && !(kex_both_first && key_both_first),
                 })
             }
-            _ => Err(Error::KexInit.into()),
+            _ => Err(Error::KexInit),
         }
     }
 }

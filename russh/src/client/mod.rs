@@ -290,7 +290,7 @@ impl<H: Handler> Handle<H> {
                     future = f;
                     let data = match data {
                         Ok(data) => data,
-                        Err(e) => return (future, Err(e.into())),
+                        Err(e) => return (future, Err(e)),
                     };
                     if let Err(_) = self.sender.send(Msg::Signed { data }).await {
                         return (future, Err((crate::SendError {}).into()));
@@ -324,7 +324,7 @@ impl<H: Handler> Handle<H> {
                     });
                 }
                 None => {
-                    return Err(Error::Disconnect.into());
+                    return Err(Error::Disconnect);
                 }
                 msg => {
                     debug!("msg = {:?}", msg);
@@ -884,7 +884,7 @@ impl Session {
                         if buf[0] == crate::msg::DISCONNECT {
                             break;
                         } else if buf[0] > 4 {
-                            self = reply(self, &mut handler, &mut encrypted_signal, &buf[..]).await?;
+                            self = reply(self, &mut handler, &mut encrypted_signal, buf).await?;
                         }
                     }
                     reading.set(start_reading(stream_read, buffer, self.common.cipher.clone()));
@@ -994,7 +994,7 @@ impl Session {
             .client_id
             .extend(self.common.config.as_ref().client_id.as_bytes());
         let mut kexinit = KexInit {
-            exchange: exchange,
+            exchange,
             algo: None,
             sent: false,
             session_id: None,
@@ -1023,7 +1023,7 @@ impl Session {
                     if let Some(exchange) = std::mem::replace(&mut enc.exchange, None) {
                         let mut kexinit = KexInit::initiate_rekey(exchange, &enc.session_id);
                         kexinit.client_write(
-                            &self.common.config.as_ref(),
+                            self.common.config.as_ref(),
                             &mut self.common.cipher,
                             &mut self.common.write_buffer,
                         )?;

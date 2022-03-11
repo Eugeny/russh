@@ -100,7 +100,7 @@ impl super::Session {
 
                     // Ok, NEWKEYS received, now encrypted.
                     enc.flush_all_pending();
-                    let mut pending = std::mem::replace(&mut self.pending_reads, Vec::new());
+                    let mut pending = std::mem::take(&mut self.pending_reads);
                     for p in pending.drain(..) {
                         self = self.process_packet(client, &p).await?
                     }
@@ -369,7 +369,7 @@ impl super::Session {
                         }
                     }
                 }
-                let (c, s) = c.data(channel_num, &data, self).await?;
+                let (c, s) = c.data(channel_num, data, self).await?;
                 *client = Some(c);
                 Ok(s)
             }
@@ -390,7 +390,7 @@ impl super::Session {
                     }
                 }
                 let (c, s) = c
-                    .extended_data(channel_num, extended_code, &data, self)
+                    .extended_data(channel_num, extended_code, data, self)
                     .await?;
                 *client = Some(c);
                 Ok(s)

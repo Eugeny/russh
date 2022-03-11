@@ -26,10 +26,10 @@ impl Session {
                     });
                     sender_channel
                 }
-                _ => return Err(Error::NotAuthenticated.into()),
+                _ => return Err(Error::NotAuthenticated),
             }
         } else {
-            return Err(Error::Inconsistent.into());
+            return Err(Error::Inconsistent);
         };
         Ok(result)
     }
@@ -66,10 +66,10 @@ impl Session {
                     });
                     sender_channel
                 }
-                _ => return Err(Error::NotAuthenticated.into()),
+                _ => return Err(Error::NotAuthenticated),
             }
         } else {
-            return Err(Error::Inconsistent.into());
+            return Err(Error::Inconsistent);
         };
         Ok(result)
     }
@@ -110,10 +110,10 @@ impl Session {
                     });
                     sender_channel
                 }
-                _ => return Err(Error::NotAuthenticated.into()),
+                _ => return Err(Error::NotAuthenticated),
             }
         } else {
-            return Err(Error::Inconsistent.into());
+            return Err(Error::Inconsistent);
         };
         Ok(result)
     }

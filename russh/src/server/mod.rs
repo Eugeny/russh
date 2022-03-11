@@ -522,7 +522,7 @@ where
                         is_reading = Some((stream_read, buffer));
                         break;
                     } else if buf[0] > 4 {
-                        match reply(session, &mut handler, &buf[..]).await {
+                        match reply(session, &mut handler, buf).await {
                             Ok(s) => session = s,
                             Err(e) => return Err(e),
                         }
@@ -612,7 +612,7 @@ async fn read_ssh_id<R: AsyncRead + Unpin>(
         .server_id
         .extend(config.as_ref().server_id.as_bytes());
     let mut kexinit = KexInit {
-        exchange: exchange,
+        exchange,
         algo: None,
         sent: false,
         session_id: None,
@@ -627,7 +627,7 @@ async fn read_ssh_id<R: AsyncRead + Unpin>(
         auth_method: None, // Client only.
         cipher,
         encrypted: None,
-        config: config,
+        config,
         wants_reply: false,
         disconnected: false,
         buffer: CryptoVec::new(),
@@ -647,7 +647,7 @@ async fn reply<H: Handler>(
                     session.common.kex = Some(kexinit.server_parse(
                         session.common.config.as_ref(),
                         &session.common.cipher,
-                        &buf,
+                        buf,
                         &mut session.common.write_buffer,
                     )?);
                     return Ok(session);

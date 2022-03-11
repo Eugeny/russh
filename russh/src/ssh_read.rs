@@ -1,7 +1,7 @@
 use crate::Error;
 use russh_cryptovec::CryptoVec;
 use futures::task::*;
-use std;
+
 use std::pin::Pin;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, ReadBuf};
 
@@ -23,7 +23,7 @@ impl ReadSshIdBuffer {
         let mut buf = CryptoVec::new();
         buf.resize(256);
         ReadSshIdBuffer {
-            buf: buf,
+            buf,
             sshid_len: 0,
             bytes_read: 0,
             total: 0,
@@ -122,7 +122,7 @@ impl<R: AsyncRead + Unpin> SshRead<R> {
             ssh_id.total += n;
             debug!("{:?}", std::str::from_utf8(&ssh_id.buf[..ssh_id.total]));
             if n == 0 {
-                return Err(Error::Disconnect.into());
+                return Err(Error::Disconnect);
             }
             loop {
                 if i >= ssh_id.total - 1 {
@@ -144,12 +144,10 @@ impl<R: AsyncRead + Unpin> SshRead<R> {
 
             if ssh_id.bytes_read > 0 {
                 // If we have a full line, handle it.
-                if i >= 8 {
-                    if &ssh_id.buf[0..8] == b"SSH-2.0-" {
-                        // Either the line starts with "SSH-2.0-"
-                        ssh_id.sshid_len = i;
-                        return Ok(&ssh_id.buf[..ssh_id.sshid_len]);
-                    }
+                if i >= 8 && &ssh_id.buf[0..8] == b"SSH-2.0-" {
+                    // Either the line starts with "SSH-2.0-"
+                    ssh_id.sshid_len = i;
+                    return Ok(&ssh_id.buf[..ssh_id.sshid_len]);
                 }
                 // Else, it is a "preliminary" (see
                 // https://tools.ietf.org/html/rfc4253#section-4.2),
