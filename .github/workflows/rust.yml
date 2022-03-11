@@ -32,6 +32,8 @@ jobs:
     steps:
     - uses: actions/checkout@v2
     - name: Run tests
-      run:  cargo test --verbose --all-features
+      run: |
+        ssh-agent
+        cargo test --verbose --all-features
       env:
         RUST_BACKTRACE: 1
