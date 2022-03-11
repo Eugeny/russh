@@ -169,6 +169,7 @@ fn write_key_v0(writer: &mut yasna::DERWriterSeq, key: &Rsa<Private>) {
         writer.next().write_null()
     });
     let bytes = yasna::construct_der(|writer| {
+        #[allow(clippy::unwrap_used)] // key is known to be private
         writer.write_sequence(|writer| {
             writer.next().write_u32(0);
             use num_bigint::BigUint;

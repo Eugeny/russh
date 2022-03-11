@@ -46,7 +46,7 @@
 //! #[tokio::main]
 //! async fn main() {
 //!     let client_key = russh_keys::key::KeyPair::generate_ed25519().unwrap();
-//!     let client_pubkey = Arc::new(client_key.clone_public_key());
+//!     let client_pubkey = Arc::new(client_key.clone_public_key().unwrap());
 //!     let mut config = russh::server::Config::default();
 //!     config.connection_timeout = Some(std::time::Duration::from_secs(3));
 //!     config.auth_rejection_time = std::time::Duration::from_secs(3);
@@ -202,7 +202,7 @@
 //!   let mut agent = russh_keys::agent::client::AgentClient::connect_env().await.unwrap();
 //!   agent.add_identity(&key, &[]).await.unwrap();
 //!   let mut session = russh::client::connect(config, "localhost:22", sh).await.unwrap();
-//!   if session.authenticate_future(std::env::var("USER").unwrap(), key.clone_public_key(), agent).await.1.unwrap() {
+//!   if session.authenticate_future(std::env::var("USER").unwrap(), key.clone_public_key().unwrap(), agent).await.1.unwrap() {
 //!     let mut channel = session.channel_open_session().await.unwrap();
 //!     channel.data(&b"Hello, world!"[..]).await.unwrap();
 //!     if let Some(msg) = channel.wait().await {

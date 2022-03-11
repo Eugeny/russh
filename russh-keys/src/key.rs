@@ -86,7 +86,7 @@ impl SignatureHash {
     }
 
     #[cfg(feature = "openssl")]
-    fn to_message_digest(&self) -> openssl::hash::MessageDigest {
+    fn message_digest(&self) -> openssl::hash::MessageDigest {
         use openssl::hash::MessageDigest;
         match *self {
             SignatureHash::SHA2_256 => MessageDigest::sha256(),
@@ -200,14 +200,14 @@ impl PublicKey {
     /// Verify a signature.
     pub fn verify_detached(&self, buffer: &[u8], sig: &[u8]) -> bool {
         match self {
-            &PublicKey::Ed25519(ref public) => {
+            PublicKey::Ed25519(ref public) => {
                 sodium::ed25519::verify_detached(sig, buffer, public)
             }
             #[cfg(feature = "openssl")]
-            &PublicKey::RSA { ref key, ref hash } => {
+            PublicKey::RSA { ref key, ref hash } => {
                 use openssl::sign::*;
                 let verify = || {
-                    let mut verifier = Verifier::new(hash.to_message_digest(), &key.0)?;
+                    let mut verifier = Verifier::new(hash.message_digest(), &key.0)?;
                     verifier.update(buffer)?;
                     verifier.verify(sig)
                 };
@@ -286,28 +286,27 @@ impl<'b> crate::encoding::Bytes for &'b KeyPair {
 
 impl KeyPair {
     /// Copy the public key of this algorithm.
-    pub fn clone_public_key(&self) -> PublicKey {
-        match self {
-            &KeyPair::Ed25519(ref key) => {
+    pub fn clone_public_key(&self) -> Result<PublicKey, Error> {
+        Ok(match self {
+            KeyPair::Ed25519(ref key) => {
                 let mut public = sodium::ed25519::PublicKey { key: [0; 32] };
                 public.key.clone_from_slice(&key.key[32..]);
                 PublicKey::Ed25519(public)
             }
             #[cfg(feature = "openssl")]
-            &KeyPair::RSA { ref key, ref hash } => {
+            KeyPair::RSA { ref key, ref hash } => {
                 use openssl::pkey::PKey;
                 use openssl::rsa::Rsa;
                 let key = Rsa::from_public_components(
-                    key.n().to_owned().unwrap(),
-                    key.e().to_owned().unwrap(),
-                )
-                    .unwrap();
+                    key.n().to_owned()?,
+                    key.e().to_owned()?,
+                )?;
                 PublicKey::RSA {
-                    key: OpenSSLPKey(PKey::from_rsa(key).unwrap()),
+                    key: OpenSSLPKey(PKey::from_rsa(key)?),
                     hash: *hash,
                 }
             }
-        }
+        })
     }
 
     /// Name of this key algorithm.
@@ -335,12 +334,12 @@ impl KeyPair {
     /// Sign a slice using this algorithm.
     pub fn sign_detached(&self, to_sign: &[u8]) -> Result<Signature, Error> {
         match self {
-            &KeyPair::Ed25519(ref secret) => Ok(Signature::Ed25519(SignatureBytes(
+            KeyPair::Ed25519(ref secret) => Ok(Signature::Ed25519(SignatureBytes(
                 sodium::ed25519::sign_detached(to_sign, secret).0,
             ))),
 
             #[cfg(feature = "openssl")]
-            &KeyPair::RSA { ref key, ref hash } => Ok(Signature::RSA {
+            KeyPair::RSA { ref key, ref hash } => Ok(Signature::RSA {
                 bytes: rsa_signature(hash, key, to_sign)?,
                 hash: *hash,
             }),
@@ -357,7 +356,7 @@ impl KeyPair {
         to_sign: H,
     ) -> Result<(), Error> {
         match self {
-            &KeyPair::Ed25519(ref secret) => {
+            KeyPair::Ed25519(ref secret) => {
                 let signature = sodium::ed25519::sign_detached(to_sign.as_ref(), secret);
 
                 buffer.push_u32_be((ED25519.0.len() + signature.0.len() + 8) as u32);
@@ -365,7 +364,7 @@ impl KeyPair {
                 buffer.extend_ssh_string(&signature.0);
             }
             #[cfg(feature = "openssl")]
-            &KeyPair::RSA { ref key, ref hash } => {
+            KeyPair::RSA { ref key, ref hash } => {
                 // https://tools.ietf.org/html/draft-rsa-dsa-sha2-256-02#section-2.2
                 let signature = rsa_signature(hash, key, to_sign.as_ref())?;
                 let name = hash.name();
@@ -383,14 +382,14 @@ impl KeyPair {
     /// `add_signature`.
     pub fn add_self_signature(&self, buffer: &mut CryptoVec) -> Result<(), Error> {
         match self {
-            &KeyPair::Ed25519(ref secret) => {
+            KeyPair::Ed25519(ref secret) => {
                 let signature = sodium::ed25519::sign_detached(buffer, secret);
                 buffer.push_u32_be((ED25519.0.len() + signature.0.len() + 8) as u32);
                 buffer.extend_ssh_string(ED25519.0.as_bytes());
                 buffer.extend_ssh_string(&signature.0);
             }
             #[cfg(feature = "openssl")]
-            &KeyPair::RSA { ref key, ref hash } => {
+            KeyPair::RSA { ref key, ref hash } => {
                 // https://tools.ietf.org/html/draft-rsa-dsa-sha2-256-02#section-2.2
                 let signature = rsa_signature(hash, key, buffer)?;
                 let name = hash.name();
@@ -416,13 +415,13 @@ fn rsa_signature(
         key.n().to_owned()?,
         key.e().to_owned()?,
         key.d().to_owned()?,
-        key.p().unwrap().to_owned()?,
-        key.q().unwrap().to_owned()?,
-        key.dmp1().unwrap().to_owned()?,
-        key.dmq1().unwrap().to_owned()?,
-        key.iqmp().unwrap().to_owned()?,
+        key.p().ok_or(Error::KeyIsCorrupt)?.to_owned()?,
+        key.q().ok_or(Error::KeyIsCorrupt)?.to_owned()?,
+        key.dmp1().ok_or(Error::KeyIsCorrupt)?.to_owned()?,
+        key.dmq1().ok_or(Error::KeyIsCorrupt)?.to_owned()?,
+        key.iqmp().ok_or(Error::KeyIsCorrupt)?.to_owned()?,
     )?)?;
-    let mut signer = Signer::new(hash.to_message_digest(), &pkey)?;
+    let mut signer = Signer::new(hash.message_digest(), &pkey)?;
     signer.update(b)?;
     Ok(signer.sign_to_vec()?)
 }

@@ -39,7 +39,7 @@
 //!        russh_keys::agent::server::serve(tokio_stream::wrappers::UnixListenerStream::new(listener), X {}).await
 //!    });
 //!    let key = decode_secret_key(PKCS8_ENCRYPTED, Some("blabla")).unwrap();
-//!    let public = key.clone_public_key();
+//!    let public = key.clone_public_key().unwrap();
 //!    core.block_on(async move {
 //!        let stream = tokio::net::UnixStream::connect(&agent_path).await?;
 //!        let mut client = agent::client::AgentClient::connect(stream);
@@ -207,7 +207,9 @@ impl PublicKeyBase64 for key::PublicKey {
                 #[allow(clippy::unwrap_used)] // Vec<>.write_all can't fail
                 s.write_u32::<BigEndian>(name.len() as u32).unwrap();
                 s.extend_from_slice(name);
+                #[allow(clippy::unwrap_used)] // TODO check
                 s.extend_ssh_mpint(&key.0.rsa().unwrap().e().to_vec());
+                #[allow(clippy::unwrap_used)] // TODO check
                 s.extend_ssh_mpint(&key.0.rsa().unwrap().n().to_vec());
             }
         }
@@ -597,7 +599,7 @@ xV/JrzLAwPoKk3bkqys3bUmgo6DxVC/6RmMwPQ0rmpw78kOgEej90g==
 
     #[test]
     #[cfg(feature = "openssl")]
-    fn test_loewenheim() {
+    fn test_loewenheim() -> Result<(), Error> {
         env_logger::try_init().unwrap_or(());
         let key = "-----BEGIN RSA PRIVATE KEY-----
 Proc-Type: 4,ENCRYPTED
@@ -631,10 +633,11 @@ KJaj7gc0n6gmKY6r0/Ddufy1JZ6eihBCSJ64RARBXeg2rZpyT+xxhMEZLK5meOeR
 -----END RSA PRIVATE KEY-----
 ";
         let key = decode_secret_key(key, Some("passphrase")).unwrap();
-        let public = key.clone_public_key();
+        let public = key.clone_public_key()?;
         let buf = b"blabla";
         let sig = key.sign_detached(buf).unwrap();
         assert!(public.verify_detached(buf, sig.as_ref()));
+        Ok(())
     }
 
     #[test]
@@ -772,7 +775,7 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
         std::thread::sleep(std::time::Duration::from_millis(10));
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async move {
-            let public = key.clone_public_key();
+            let public = key.clone_public_key()?;
             let stream = tokio::net::UnixStream::connect(&agent_path).await?;
             let mut client = agent::client::AgentClient::connect(stream);
             client.add_identity(&key, &[]).await?;
@@ -849,8 +852,8 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
             .await
         });
         let key = decode_secret_key(PKCS8_ENCRYPTED, Some("blabla")).unwrap();
-        let public = key.clone_public_key();
         core.block_on(async move {
+            let public = key.clone_public_key()?;
             let stream = tokio::net::UnixStream::connect(&agent_path).await?;
             let mut client = agent::client::AgentClient::connect(stream);
             client

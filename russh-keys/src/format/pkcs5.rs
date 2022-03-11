@@ -23,9 +23,10 @@ pub fn decode_pkcs5(
                 c.consume(&iv[..8]);
                 let md5 = c.compute();
 
+                #[allow(clippy::unwrap_used)] // AES parameters are static
                 let c = Aes128Cbc::new_from_slices(&md5.0, &iv[..]).unwrap();
                 let mut dec = secret.to_vec();
-                c.decrypt(&mut dec).unwrap();
+                c.decrypt(&mut dec)?;
                 pkcs_unpad(&mut dec);
                 dec
             }

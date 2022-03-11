@@ -28,6 +28,7 @@ pub fn decode_openssh(secret: &[u8], password: Option<&str>) -> Result<key::KeyP
         let mut position = secret.reader(0);
         let _check0 = position.read_u32()?;
         let _check1 = position.read_u32()?;
+        #[allow(clippy::never_loop)]
         for _ in 0..nkeys {
             // TODO check: never really loops beyong the first key
             let key_type = position.read_string()?;
@@ -67,7 +68,7 @@ pub fn decode_openssh(secret: &[u8], password: Option<&str>) -> Result<key::KeyP
                         .set_factors(p, q)?
                         .set_crt_params(dmp1, dmq1, iqmp)?
                         .build();
-                    key.check_key().unwrap();
+                    key.check_key()?;
                     return Ok(key::KeyPair::RSA {
                         key,
                         hash: key::SignatureHash::SHA2_512,

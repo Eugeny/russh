@@ -296,6 +296,8 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + 'stat
                 writebuf.extend_ssh_string(b"ssh-rsa");
                 writebuf.extend_ssh_mpint(e);
                 writebuf.extend_ssh_mpint(n);
+
+                #[allow(clippy::indexing_slicing)] // length is known
                 let blob = writebuf[len0..].to_vec();
                 writebuf.resize(len0);
                 writebuf.push(msg::SUCCESS);

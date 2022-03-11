@@ -107,6 +107,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AgentClient<S> {
                 self.buf.extend_ssh_string(b"");
             }
             #[cfg(feature = "openssl")]
+            #[allow(clippy::unwrap_used)] // key is known to be private
             key::KeyPair::RSA { ref key, .. } => {
                 self.buf.extend_ssh_string(b"ssh-rsa");
                 self.buf.extend_ssh_mpint(&key.n().to_vec());
@@ -282,16 +283,21 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AgentClient<S> {
     ) -> impl futures::Future<Output = (Self, Result<CryptoVec, Error>)> {
         debug!("sign_request: {:?}", data);
         let hash = self.prepare_sign_request(public, &data);
+
         async move {
+            if let Err(e) = hash {
+                return (self, Err(e));
+            }
+
             let resp = self.read_response().await;
             debug!("resp = {:?}", &self.buf[..]);
             if let Err(e) = resp {
                 return (self, Err(e));
             }
 
-            #[allow(clippy::indexing_slicing)] // length is checked
+            #[allow(clippy::indexing_slicing, clippy::unwrap_used)] // length is checked, hash already checked
             if !self.buf.is_empty() && self.buf[0] == msg::SIGN_RESPONSE {
-                let resp = self.write_signature(hash, &mut data);
+                let resp = self.write_signature(hash.unwrap(), &mut data);
                 if let Err(e) = resp {
                     return (self, Err(e));
                 }
@@ -305,11 +311,11 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AgentClient<S> {
         }
     }
 
-    fn prepare_sign_request(&mut self, public: &key::PublicKey, data: &[u8]) -> u32 {
+    fn prepare_sign_request(&mut self, public: &key::PublicKey, data: &[u8]) -> Result<u32, Error> {
         self.buf.clear();
         self.buf.resize(4);
         self.buf.push(msg::SIGN_REQUEST);
-        key_blob(public, &mut self.buf);
+        key_blob(public, &mut self.buf)?;
         self.buf.extend_ssh_string(data);
         debug!("public = {:?}", public);
         let hash = match public {
@@ -324,7 +330,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AgentClient<S> {
         self.buf.push_u32_be(hash);
         let len = self.buf.len() - 4;
         BigEndian::write_u32(&mut self.buf[..], len as u32);
-        hash
+        Ok(hash)
     }
 
     fn write_signature(&self, hash: u32, data: &mut CryptoVec) -> Result<(), Error> {
@@ -347,8 +353,12 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AgentClient<S> {
         data: &[u8],
     ) -> impl futures::Future<Output = (Self, Result<String, Error>)> {
         debug!("sign_request: {:?}", data);
-        self.prepare_sign_request(public, data);
+        let r = self.prepare_sign_request(public, data);
         async move {
+            if let Err(e) = r {
+                return (self, Err(e));
+            }
+
             let resp = self.read_response().await;
             if let Err(e) = resp {
                 return (self, Err(e));
@@ -371,12 +381,18 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AgentClient<S> {
         data: &[u8],
     ) -> impl futures::Future<Output = (Self, Result<crate::signature::Signature, Error>)> {
         debug!("sign_request: {:?}", data);
-        self.prepare_sign_request(public, data);
+
+        let r = self.prepare_sign_request(public, data);
 
         async move {
+            if let Err(e) = r{
+                return (self, Err(e));
+            }
+
             if let Err(e) = self.read_response().await {
                 return (self, Err(e));
             }
+
             #[allow(clippy::indexing_slicing)] // length is checked
             if !self.buf.is_empty() && self.buf[0] == msg::SIGN_RESPONSE {
                 let as_sig = |buf: &CryptoVec| -> Result<crate::signature::Signature, Error> {
@@ -419,7 +435,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AgentClient<S> {
         self.buf.clear();
         self.buf.resize(4);
         self.buf.push(msg::REMOVE_IDENTITY);
-        key_blob(public, &mut self.buf);
+        key_blob(public, &mut self.buf)?;
         let len = self.buf.len() - 4;
         BigEndian::write_u32(&mut self.buf[..], len as u32);
         self.read_response().await?;
@@ -480,17 +496,18 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AgentClient<S> {
     }
 }
 
-fn key_blob(public: &key::PublicKey, buf: &mut CryptoVec) {
+fn key_blob(public: &key::PublicKey, buf: &mut CryptoVec) -> Result<(), Error> {
     match *public {
         #[cfg(feature = "openssl")]
         PublicKey::RSA { ref key, .. } => {
             buf.extend(&[0, 0, 0, 0]);
             let len0 = buf.len();
             buf.extend_ssh_string(b"ssh-rsa");
-            let rsa = key.0.rsa().unwrap();
+            let rsa = key.0.rsa()?;
             buf.extend_ssh_mpint(&rsa.e().to_vec());
             buf.extend_ssh_mpint(&rsa.n().to_vec());
             let len1 = buf.len();
+            #[allow(clippy::indexing_slicing)] // length is known
             BigEndian::write_u32(&mut buf[5..], (len1 - len0) as u32);
         }
         PublicKey::Ed25519(ref p) => {
@@ -503,4 +520,5 @@ fn key_blob(public: &key::PublicKey, buf: &mut CryptoVec) {
             BigEndian::write_u32(&mut buf[5..], (len1 - len0) as u32);
         }
     }
+    Ok(())
 }
