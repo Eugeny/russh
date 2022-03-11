@@ -4,6 +4,8 @@ extern crate russh;
 extern crate russh_keys;
 extern crate tokio;
 use anyhow::Context;
+use std::net::SocketAddr;
+use std::str::FromStr;
 use std::sync::Arc;
 use russh::*;
 use russh_keys::*;
@@ -38,7 +40,7 @@ async fn main() {
         .await
         .unwrap();
     let mut identities = agent.request_identities().await.unwrap();
-    let mut session = russh::client::connect(config, "127.0.0.1:2200", sh)
+    let mut session = russh::client::connect(config, SocketAddr::from_str("127.0.0.1:2200").unwrap(), sh)
         .await
         .unwrap();
     let (_, auth_res) = session

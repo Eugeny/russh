@@ -42,7 +42,7 @@ mod encrypted;
 mod session;
 
 use tokio::sync::mpsc::*;
-pub mod proxy;
+
 pub struct Session {
     common: CommonSession<Arc<Config>>,
     receiver: Receiver<Msg>,
@@ -270,13 +270,13 @@ impl<H: Handler> Handle<H> {
         mut future: S,
     ) -> (S, Result<bool, S::Error>) {
         let user = user.into();
-        if let Err(_) = self
+        if self
             .sender
             .send(Msg::Authenticate {
                 user,
                 method: auth::Method::FuturePublicKey { key },
             })
-            .await
+            .await.is_err()
         {
             return (future, Err((crate::SendError {}).into()));
         }
@@ -292,7 +292,7 @@ impl<H: Handler> Handle<H> {
                         Ok(data) => data,
                         Err(e) => return (future, Err(e)),
                     };
-                    if let Err(_) = self.sender.send(Msg::Signed { data }).await {
+                    if self.sender.send(Msg::Signed { data }).await.is_err() {
                         return (future, Err((crate::SendError {}).into()));
                     }
                 }
@@ -749,17 +749,12 @@ impl<H: Handler> Future for Handle<H> {
     }
 }
 
-use std::net::ToSocketAddrs;
-pub async fn connect<H: Handler + Send + 'static, T: ToSocketAddrs>(
+use std::net::SocketAddr;
+pub async fn connect<H: Handler + Send + 'static>(
     config: Arc<Config>,
-    addr: T,
+    addr: SocketAddr,
     handler: H,
 ) -> Result<Handle<H>, H::Error> {
-    let addr = addr
-        .to_socket_addrs()
-        .map_err(crate::Error::from)?
-        .next()
-        .unwrap();
     let socket = TcpStream::connect(addr).await.map_err(crate::Error::from)?;
     connect_stream(config, socket, handler).await
 }
@@ -858,6 +853,7 @@ impl Session {
         let reading = start_reading(stream_read, buffer, self.common.cipher.clone());
         pin!(reading);
 
+        #[allow(clippy::panic)] // false positive in select! macro
         while !self.common.disconnected {
             tokio::select! {
                 r = &mut reading => {
@@ -1002,7 +998,7 @@ impl Session {
         self.common.write_buffer.buffer.clear();
         kexinit.client_write(
             self.common.config.as_ref(),
-            &mut self.common.cipher,
+            &self.common.cipher,
             &mut self.common.write_buffer,
         )?;
         self.common.kex = Some(Kex::KexInit(kexinit));
@@ -1015,7 +1011,7 @@ impl Session {
         if let Some(ref mut enc) = self.common.encrypted {
             if enc.flush(
                 &self.common.config.as_ref().limits,
-                &mut self.common.cipher,
+                &self.common.cipher,
                 &mut self.common.write_buffer,
             ) {
                 info!("Re-exchanging keys");
@@ -1024,7 +1020,7 @@ impl Session {
                         let mut kexinit = KexInit::initiate_rekey(exchange, &enc.session_id);
                         kexinit.client_write(
                             self.common.config.as_ref(),
-                            &mut self.common.cipher,
+                            &self.common.cipher,
                             &mut self.common.write_buffer,
                         )?;
                         enc.rekey = Some(Kex::KexInit(kexinit))
@@ -1113,7 +1109,7 @@ async fn reply<H: Handler>(
     match session.common.kex.take() {
         Some(Kex::KexInit(kexinit)) => {
             if kexinit.algo.is_some()
-                || buf[0] == msg::KEXINIT
+                || buf.get(0) == Some(&msg::KEXINIT)
                 || session.common.encrypted.is_none()
             {
                 session.common.kex = Some(Kex::KexDhDone(kexinit.client_parse(
@@ -1131,7 +1127,7 @@ async fn reply<H: Handler>(
                 kexdhdone.names.ignore_guessed = false;
                 session.common.kex = Some(Kex::KexDhDone(kexdhdone));
                 Ok(session)
-            } else if buf[0] == msg::KEX_ECDH_REPLY {
+            } else if buf.get(0) == Some(&msg::KEX_ECDH_REPLY) {
                 // We've sent ECDH_INIT, waiting for ECDH_REPLY
                 session.common.kex = Some(kexdhdone.server_key_check(false, handler, buf).await?);
                 session
@@ -1147,7 +1143,7 @@ async fn reply<H: Handler>(
         }
         Some(Kex::NewKeys(newkeys)) => {
             debug!("newkeys received");
-            if buf[0] != msg::NEWKEYS {
+            if buf.get(0) != Some(&msg::NEWKEYS) {
                 return Err(Error::Kex.into());
             }
             if let Some(sender) = sender.take() {

@@ -1,8 +1,8 @@
 # Russh
 
-Async (tokio) SSH2 client and serve rimplementation.
+Async (tokio) SSH2 client and server rimplementation.
 
-This is a fork of [Thrussh]((//nest.pijul.com/pijul/thrussh) by Pierre-Étienne Meunier which adds:
+This is a fork of [Thrussh](//nest.pijul.com/pijul/thrussh) by Pierre-Étienne Meunier which adds:
 
 * More safety guarantees
 * AES256-GCM support

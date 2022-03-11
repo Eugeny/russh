@@ -162,7 +162,8 @@
 //!use russh_keys::*;
 //!use futures::Future;
 //!use std::io::Read;
-//!
+//!use std::net::SocketAddr;
+//!use std::str::FromStr;
 //!
 //!struct Client {
 //!}
@@ -201,7 +202,7 @@
 //!   let key = russh_keys::key::KeyPair::generate_ed25519().unwrap();
 //!   let mut agent = russh_keys::agent::client::AgentClient::connect_env().await.unwrap();
 //!   agent.add_identity(&key, &[]).await.unwrap();
-//!   let mut session = russh::client::connect(config, "localhost:22", sh).await.unwrap();
+//!   let mut session = russh::client::connect(config, SocketAddr::from_str("127.0.0.1:22").unwrap(), sh).await.unwrap();
 //!   if session.authenticate_future(std::env::var("USER").unwrap(), key.clone_public_key().unwrap(), agent).await.1.unwrap() {
 //!     let mut channel = session.channel_open_session().await.unwrap();
 //!     channel.data(&b"Hello, world!"[..]).await.unwrap();
