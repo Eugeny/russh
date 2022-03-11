@@ -220,9 +220,14 @@ impl Encrypted {
         buf0: &[u8],
         from: usize,
     ) -> usize {
+        if from >= buf0.len() {
+            return 0;
+        }
         let mut buf = if buf0.len() as u32 > from as u32 + channel.recipient_window_size {
+            #[allow(clippy::indexing_slicing)] // length checked
             &buf0[from..from + channel.recipient_window_size as usize]
         } else {
+            #[allow(clippy::indexing_slicing)] // length checked
             &buf0[from..]
         };
         let buf_len = buf.len();
@@ -233,6 +238,7 @@ impl Encrypted {
             push_packet!(write, {
                 write.push(msg::CHANNEL_DATA);
                 write.push_u32_be(channel.recipient_channel);
+                #[allow(clippy::indexing_slicing)] // length checked
                 write.extend_ssh_string(&buf[..off]);
             });
             debug!(
@@ -241,7 +247,10 @@ impl Encrypted {
                 channel.recipient_window_size
             );
             channel.recipient_window_size -= off as u32;
-            buf = &buf[off..]
+            #[allow(clippy::indexing_slicing)] // length checked
+            {
+                buf = &buf[off..]
+            }
         }
         debug!("buf.len() = {:?}, buf_len = {:?}", buf.len(), buf_len);
         buf_len
@@ -270,6 +279,7 @@ impl Encrypted {
                 return;
             }
             let mut buf = if buf0.len() as u32 > channel.recipient_window_size {
+                #[allow(clippy::indexing_slicing)] // length checked
                 &buf0[0..channel.recipient_window_size as usize]
             } else {
                 &buf0
@@ -283,11 +293,15 @@ impl Encrypted {
                     self.write.push(msg::CHANNEL_EXTENDED_DATA);
                     self.write.push_u32_be(channel.recipient_channel);
                     self.write.push_u32_be(ext);
+                    #[allow(clippy::indexing_slicing)] // length checked
                     self.write.extend_ssh_string(&buf[..off]);
                 });
                 debug!("buffer: {:?}", self.write.deref().len());
                 channel.recipient_window_size -= off as u32;
-                buf = &buf[off..]
+                #[allow(clippy::indexing_slicing)] // length checked
+                {
+                    buf = &buf[off..]
+                }
             }
             debug!("buf.len() = {:?}, buf_len = {:?}", buf.len(), buf_len);
             if buf_len < buf0.len() {
@@ -301,19 +315,20 @@ impl Encrypted {
         limits: &Limits,
         cipher: &cipher::CipherPair,
         write_buffer: &mut SSHBuffer,
-    ) -> bool {
+    ) -> Result<bool, crate::Error> {
         // If there are pending packets (and we've not started to rekey), flush them.
         {
             while self.write_cursor < self.write.len() {
                 // Read a single packet, encrypt and send it.
+                #[allow(clippy::indexing_slicing)] // length checked
                 let len = BigEndian::read_u32(&self.write[self.write_cursor..]) as usize;
+                #[allow(clippy::indexing_slicing)]
                 let packet = self
                     .compress
                     .compress(
                         &self.write[(self.write_cursor + 4)..(self.write_cursor + 4 + len)],
                         &mut self.compress_buffer,
-                    )
-                    .unwrap();
+                    )?;
                 cipher.write(packet, write_buffer);
                 self.write_cursor += 4 + len
             }
@@ -325,7 +340,7 @@ impl Encrypted {
         }
         let now = std::time::Instant::now();
         let dur = now.duration_since(self.last_rekey);
-        write_buffer.bytes >= limits.rekey_write_limit || dur >= limits.rekey_time_limit
+        Ok(write_buffer.bytes >= limits.rekey_write_limit || dur >= limits.rekey_time_limit)
     }
     pub fn new_channel_id(&mut self) -> ChannelId {
         self.last_channel_id += Wrapping(1);
@@ -395,17 +410,17 @@ impl Exchange {
 pub enum Kex {
     /// Version number sent. `algo` and `sent` tell wether kexinit has
     /// been received, and sent, respectively.
-    KexInit(KexInit),
+    Init(KexInit),
 
     /// Algorithms have been determined, the DH algorithm should run.
-    KexDh(KexDh),
+    Dh(KexDh),
 
     /// The kex has run.
-    KexDhDone(KexDhDone),
+    DhDone(KexDhDone),
 
     /// The DH is over, we've sent the NEWKEYS packet, and are waiting
     /// the NEWKEYS from the other side.
-    NewKeys(NewKeys),
+    Keys(NewKeys),
 }
 
 #[derive(Debug)]

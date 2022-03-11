@@ -1,4 +1,5 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
+#![allow(clippy::single_match)] // length checked
 // Copyright 2016 Pierre-Étienne Meunier
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -37,6 +38,7 @@
 //! extern crate futures;
 //! extern crate tokio;
 //! use std::sync::{Mutex, Arc};
+//! use std::str::FromStr;
 //! use russh::*;
 //! use russh::server::{Auth, Session};
 //! use russh_keys::*;
@@ -59,7 +61,7 @@
 //!     };
 //!     tokio::time::timeout(
 //!        std::time::Duration::from_secs(1),
-//!        russh::server::run(config, "0.0.0.0:2222", sh)
+//!        russh::server::run(config, &std::net::SocketAddr::from_str("0.0.0.0:2222").unwrap(), sh)
 //!     ).await.unwrap_or(Ok(()));
 //! }
 //!
@@ -305,6 +307,7 @@ macro_rules! push_packet {
         let i1 = $buffer.len();
         use std::ops::DerefMut;
         let buf = $buffer.deref_mut();
+        #[allow(clippy::indexing_slicing)] // length checked
         BigEndian::write_u32(&mut buf[i0..], (i1 - i0 - 4) as u32);
         x
     }};
@@ -592,6 +595,7 @@ pub enum ChannelOpenFailure {
     ConnectFailed = 2,
     UnknownChannelType = 3,
     ResourceShortage = 4,
+    Unknown = 0,
 }
 
 impl ChannelOpenFailure {

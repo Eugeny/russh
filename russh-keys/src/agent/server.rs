@@ -230,9 +230,9 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + 'stat
         }
     }
 
-    async fn add_key<'a>(
+    async fn add_key(
         &self,
-        mut r: Position<'a>,
+        mut r: Position<'_>,
         constrained: bool,
         writebuf: &mut CryptoVec,
     ) -> Result<bool, Error> {
@@ -349,10 +349,10 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + 'stat
         Ok(true)
     }
 
-    async fn try_sign<'a>(
+    async fn try_sign(
         &self,
         agent: A,
-        mut r: Position<'a>,
+        mut r: Position<'_>,
         writebuf: &mut CryptoVec,
     ) -> Result<(A, bool), Error> {
         let mut needs_confirm = false;

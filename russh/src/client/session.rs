@@ -118,6 +118,7 @@ impl Session {
         Ok(result)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn request_pty(
         &mut self,
         channel: ChannelId,

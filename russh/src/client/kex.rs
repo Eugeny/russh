@@ -40,6 +40,7 @@ impl KexInit {
             &mut self.exchange.client_kex_init,
         )?;
 
+        #[allow(clippy::indexing_slicing)] // length checked
         cipher.write(&self.exchange.client_kex_init[i0..], write_buffer);
         self.exchange.client_kex_init.resize(i0);
 

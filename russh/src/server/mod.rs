@@ -14,7 +14,7 @@
 //
 
 use std;
-use std::net::ToSocketAddrs;
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 use futures::future::Future;
@@ -287,7 +287,7 @@ pub trait Handler: Sized {
 
     /// The client requests a pseudo-terminal with the given
     /// specifications.
-    #[allow(unused_variables)]
+    #[allow(unused_variables, clippy::too_many_arguments)]
     fn pty_request(
         self,
         channel: ChannelId,
@@ -403,11 +403,10 @@ pub trait Server {
 /// stream and a [`Handler`](trait.Handler.html).
 pub async fn run<H: Server + Send + 'static>(
     config: Arc<Config>,
-    addr: &str,
+    addr: &SocketAddr,
     mut server: H,
 ) -> Result<(), std::io::Error> {
-    let addr = addr.to_socket_addrs().unwrap().next().unwrap();
-    let socket = TcpListener::bind(&addr).await?;
+    let socket = TcpListener::bind(addr).await?;
     if config.maximum_packet_size > 65535 {
         error!(
             "Maximum packet size ({:?}) should not larger than a TCP packet (65535)",
@@ -449,12 +448,11 @@ async fn start_reading<R: AsyncRead + Unpin>(
 pub async fn run_stream<H: Handler, R>(
     config: Arc<Config>,
     mut stream: R,
-    handler: H,
+    mut handler: H,
 ) -> Result<H, H::Error>
 where
     R: AsyncRead + AsyncWrite + Unpin,
 {
-    let mut handler = Some(handler);
     let delay = config.connection_timeout;
     // Writing SSH id.
     let mut decomp = CryptoVec::new();
@@ -490,6 +488,7 @@ where
     pin!(reading);
     let mut is_reading = None;
 
+    #[allow(clippy::panic)] // false positive in macro
     while !session.common.disconnected {
         tokio::select! {
             r = &mut reading => {
@@ -501,6 +500,7 @@ where
                     is_reading = Some((stream_read, buffer));
                     break
                 }
+                #[allow(clippy::indexing_slicing)] // length checked
                 let buf = if let Some(ref mut enc) = session.common.encrypted {
                     let d = enc.decompress.decompress(
                         &buffer.buffer[5..],
@@ -517,13 +517,17 @@ where
                     &buffer.buffer[5..]
                 };
                 if !buf.is_empty() {
+                    #[allow(clippy::indexing_slicing)] // length checked
                     if buf[0] == crate::msg::DISCONNECT {
                         debug!("break");
                         is_reading = Some((stream_read, buffer));
                         break;
                     } else if buf[0] > 4 {
-                        match reply(session, &mut handler, buf).await {
-                            Ok(s) => session = s,
+                        match reply(session, handler, buf).await {
+                            Ok((h, s)) => {
+                                handler = h;
+                                session = s;
+                            },
                             Err(e) => return Err(e),
                         }
                     }
@@ -593,7 +597,7 @@ where
             break;
         }
     }
-    Ok(handler.unwrap())
+    Ok(handler)
 }
 
 async fn read_ssh_id<R: AsyncRead + Unpin>(
@@ -622,7 +626,7 @@ async fn read_ssh_id<R: AsyncRead + Unpin>(
     kexinit.server_write(config.as_ref(), cipher.as_ref(), &mut write_buffer)?;
     Ok(CommonSession {
         write_buffer,
-        kex: Some(Kex::KexInit(kexinit)),
+        kex: Some(Kex::Init(kexinit)),
         auth_user: String::new(),
         auth_method: None, // Client only.
         cipher,
@@ -636,39 +640,39 @@ async fn read_ssh_id<R: AsyncRead + Unpin>(
 
 async fn reply<H: Handler>(
     mut session: Session,
-    handler: &mut Option<H>,
+    handler: H,
     buf: &[u8],
-) -> Result<Session, H::Error> {
+) -> Result<(H, Session), H::Error> {
     // Handle key exchange/re-exchange.
     if session.common.encrypted.is_none() {
         match session.common.kex.take() {
-            Some(Kex::KexInit(kexinit)) => {
-                if kexinit.algo.is_some() || buf[0] == msg::KEXINIT {
+            Some(Kex::Init(kexinit)) => {
+                if kexinit.algo.is_some() || buf.get(0) == Some(&msg::KEXINIT) {
                     session.common.kex = Some(kexinit.server_parse(
                         session.common.config.as_ref(),
                         &session.common.cipher,
                         buf,
                         &mut session.common.write_buffer,
                     )?);
-                    return Ok(session);
+                    return Ok((handler, session));
                 } else {
                     // Else, i.e. if the other side has not started
                     // the key exchange, process its packets by simple
                     // not returning.
-                    session.common.kex = Some(Kex::KexInit(kexinit))
+                    session.common.kex = Some(Kex::Init(kexinit))
                 }
             }
-            Some(Kex::KexDh(kexdh)) => {
+            Some(Kex::Dh(kexdh)) => {
                 session.common.kex = Some(kexdh.parse(
                     session.common.config.as_ref(),
                     &session.common.cipher,
                     buf,
                     &mut session.common.write_buffer,
                 )?);
-                return Ok(session);
+                return Ok((handler, session));
             }
-            Some(Kex::NewKeys(newkeys)) => {
-                if buf[0] != msg::NEWKEYS {
+            Some(Kex::Keys(newkeys)) => {
+                if buf.get(0) != Some(&msg::NEWKEYS) {
                     return Err(Error::Kex.into());
                 }
                 // Ok, NEWKEYS received, now encrypted.
@@ -679,15 +683,15 @@ async fn reply<H: Handler>(
                     },
                     newkeys,
                 );
-                return Ok(session);
+                return Ok((handler, session));
             }
             Some(kex) => {
                 session.common.kex = Some(kex);
-                return Ok(session);
+                return Ok((handler, session));
             }
             None => {}
         }
-        Ok(session)
+        Ok((handler, session))
     } else {
         Ok(session.server_read_encrypted(handler, buf).await?)
     }

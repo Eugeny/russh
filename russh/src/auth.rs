@@ -79,6 +79,7 @@ impl<R: AsyncRead + AsyncWrite + Unpin + Send + 'static> Signer
     for russh_keys::agent::client::AgentClient<R>
 {
     type Error = AgentAuthError;
+    #[allow(clippy::type_complexity)]
     type Future = std::pin::Pin<
         Box<dyn futures::Future<Output = (Self, Result<CryptoVec, Self::Error>)> + Send>,
     >;

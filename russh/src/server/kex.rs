@@ -18,7 +18,7 @@ impl KexInit {
         buf: &[u8],
         write_buffer: &mut SSHBuffer,
     ) -> Result<Kex, Error> {
-        if buf[0] == msg::KEXINIT {
+        if buf.get(0) == Some(&msg::KEXINIT) {
             let algo = {
                 // read algorithms from packet.
                 self.exchange.client_kex_init.extend(buf);
@@ -28,11 +28,12 @@ impl KexInit {
                 self.server_write(config, cipher, write_buffer)?
             }
             let mut key = 0;
+            #[allow(clippy::indexing_slicing)] // length checked
             while key < config.keys.len() && config.keys[key].name() != algo.key.as_ref() {
                 key += 1
             }
             let next_kex = if key < config.keys.len() {
-                Kex::KexDh(KexDh {
+                Kex::Dh(KexDh {
                     exchange: self.exchange,
                     key,
                     names: algo,
@@ -44,7 +45,7 @@ impl KexInit {
 
             Ok(next_kex)
         } else {
-            Ok(Kex::KexInit(self))
+            Ok(Kex::Init(self))
         }
     }
 
@@ -74,10 +75,10 @@ impl KexDh {
         if self.names.ignore_guessed {
             // If we need to ignore this packet.
             self.names.ignore_guessed = false;
-            Ok(Kex::KexDh(self))
+            Ok(Kex::Dh(self))
         } else {
             // Else, process it.
-            assert!(buf[0] == msg::KEX_ECDH_INIT);
+            assert!(buf.get(0) == Some(&msg::KEX_ECDH_INIT));
             let mut r = buf.reader(1);
             self.exchange.client_ephemeral.extend(r.read_string()?);
             let kex = kex::Algorithm::server_dh(self.names.kex, &mut self.exchange, buf)?;
@@ -90,6 +91,7 @@ impl KexDh {
                 names: self.names,
                 session_id: self.session_id,
             };
+            #[allow(clippy::indexing_slicing)] // key index checked
             let hash: Result<_, Error> = HASH_BUF.with(|buffer| {
                 let mut buffer = buffer.borrow_mut();
                 buffer.clear();
@@ -115,7 +117,7 @@ impl KexDh {
                 Ok(hash)
             });
 
-            Ok(Kex::NewKeys(kexdhdone.compute_keys(hash?, true)?))
+            Ok(Kex::Keys(kexdhdone.compute_keys(hash?, true)?))
         }
     }
 }

@@ -65,10 +65,20 @@ impl Algorithm {
     ) -> Result<Algorithm, crate::Error> {
         debug!("server_dh");
 
-        assert_eq!(payload[0], msg::KEX_ECDH_INIT);
         let mut client_pubkey = GroupElement([0; 32]);
         {
+            if payload.get(0) != Some(&msg::KEX_ECDH_INIT) {
+                return Err(crate::Error::Inconsistent);
+            }
+
+            #[allow(clippy::indexing_slicing)] // length checked
             let pubkey_len = BigEndian::read_u32(&payload[1..]) as usize;
+
+            if payload.len() < 5 + pubkey_len {
+                return Err(crate::Error::Inconsistent);
+            }
+
+            #[allow(clippy::indexing_slicing)] // length checked
             client_pubkey
                 .0
                 .clone_from_slice(&payload[5..(5 + pubkey_len)])
@@ -114,7 +124,7 @@ impl Algorithm {
     }
 
     pub fn compute_shared_secret(&mut self, remote_pubkey_: &[u8]) -> Result<(), crate::Error> {
-        let local_secret = std::mem::replace(&mut self.local_secret, None).unwrap();
+        let local_secret = std::mem::replace(&mut self.local_secret, None).ok_or(crate::Error::KexInit)?;
 
         use sodium::scalarmult::*;
         let mut remote_pubkey = GroupElement([0; 32]);

@@ -130,6 +130,7 @@ pub async fn read<'a, R: AsyncRead + Unpin>(
     }
     buffer.buffer.resize(buffer.len + 4);
     debug!("read_exact {:?}", buffer.len + 4);
+    #[allow(clippy::indexing_slicing)] // length checked
     stream.read_exact(&mut buffer.buffer[4..]).await?;
     debug!("read_exact done");
     let key = pair.remote_to_local.as_opening_key();
@@ -138,7 +139,7 @@ pub async fn read<'a, R: AsyncRead + Unpin>(
     let (ciphertext, tag) = buffer.buffer.split_at_mut(ciphertext_len);
     let plaintext = key.open(seqn, ciphertext, tag)?;
 
-    let padding_length = plaintext[0] as usize;
+    let padding_length = *plaintext.get(0).to_owned().unwrap_or(&0) as usize;
     debug!("reading, padding_length {:?}", padding_length);
     let plaintext_end = plaintext
         .len()
@@ -182,6 +183,7 @@ impl CipherPair {
         key.fill_padding(buffer.buffer.resize_mut(padding_length));
         buffer.buffer.resize_mut(key.tag_len());
 
+        #[allow(clippy::indexing_slicing)] // length checked
         let (plaintext, tag) =
             buffer.buffer[offset..].split_at_mut(PACKET_LENGTH_LEN + packet_length);
 

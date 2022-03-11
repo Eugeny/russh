@@ -422,6 +422,7 @@ impl Channel {
     }
 
     /// Request a pseudo-terminal with the given characteristics.
+    #[allow(clippy::too_many_arguments)] // length checked
     pub async fn request_pty(
         &mut self,
         want_reply: bool,
@@ -832,7 +833,7 @@ impl Session {
     async fn run<H: Handler + Send, R: AsyncRead + AsyncWrite + Unpin + Send>(
         mut self,
         mut stream: SshRead<R>,
-        handler: H,
+        mut handler: H,
         mut encrypted_signal: Option<tokio::sync::oneshot::Sender<()>>,
     ) -> Result<(), H::Error> {
         self.flush()?;
@@ -846,7 +847,6 @@ impl Session {
         }
         self.common.write_buffer.buffer.clear();
         let mut decomp = CryptoVec::new();
-        let mut handler = Some(handler);
 
         let (stream_read, mut stream_write) = stream.split();
         let buffer = SSHBuffer::new();
@@ -865,6 +865,7 @@ impl Session {
                         break
                     }
                     let buf = if let Some(ref mut enc) = self.common.encrypted {
+                        #[allow(clippy::indexing_slicing)] // length checked
                         if let Ok(buf) = enc.decompress.decompress(
                             &buffer.buffer[5..],
                             &mut decomp,
@@ -874,13 +875,17 @@ impl Session {
                             break
                         }
                     } else {
+                        #[allow(clippy::indexing_slicing)] // length checked
                         &buffer.buffer[5..]
                     };
                     if !buf.is_empty() {
+                        #[allow(clippy::indexing_slicing)] // length checked
                         if buf[0] == crate::msg::DISCONNECT {
                             break;
                         } else if buf[0] > 4 {
-                            self = reply(self, &mut handler, &mut encrypted_signal, buf).await?;
+                            let (h, s) = reply(self, handler, &mut encrypted_signal, buf).await?;
+                            handler = h;
+                            self = s;
                         }
                     }
                     reading.set(start_reading(stream_read, buffer, self.common.cipher.clone()));
@@ -1001,7 +1006,7 @@ impl Session {
             &self.common.cipher,
             &mut self.common.write_buffer,
         )?;
-        self.common.kex = Some(Kex::KexInit(kexinit));
+        self.common.kex = Some(Kex::Init(kexinit));
         Ok(())
     }
 
@@ -1013,7 +1018,7 @@ impl Session {
                 &self.common.config.as_ref().limits,
                 &self.common.cipher,
                 &mut self.common.write_buffer,
-            ) {
+            )? {
                 info!("Re-exchanging keys");
                 if enc.rekey.is_none() {
                     if let Some(exchange) = std::mem::replace(&mut enc.exchange, None) {
@@ -1023,7 +1028,7 @@ impl Session {
                             &self.common.cipher,
                             &mut self.common.write_buffer,
                         )?;
-                        enc.rekey = Some(Kex::KexInit(kexinit))
+                        enc.rekey = Some(Kex::Init(kexinit))
                     }
                 }
             }
@@ -1049,17 +1054,17 @@ impl KexDhDone {
     async fn server_key_check<H: Handler>(
         mut self,
         rekey: bool,
-        handler: &mut Option<H>,
+        mut handler: H,
         buf: &[u8],
-    ) -> Result<Kex, H::Error> {
+    ) -> Result<(Kex, H), H::Error> {
         let mut reader = buf.reader(1);
         let pubkey = reader.read_string().map_err(crate::Error::from)?; // server public key.
         let pubkey = parse_public_key(pubkey).map_err(crate::Error::from)?;
         debug!("server_public_Key: {:?}", pubkey);
         if !rekey {
-            let h = handler.take().unwrap();
-            let (h, check) = h.check_server_key(&pubkey).await?;
-            *handler = Some(h);
+            let ret = handler.check_server_key(&pubkey).await?;
+            handler = ret.0;
+            let check = ret.1;
             if !check {
                 return Err(Error::UnknownKey.into());
             }
@@ -1095,24 +1100,24 @@ impl KexDhDone {
             };
             let mut newkeys = self.compute_keys(hash, false)?;
             newkeys.sent = true;
-            Ok(Kex::NewKeys(newkeys))
+            Ok((Kex::Keys(newkeys), handler))
         })
     }
 }
 
 async fn reply<H: Handler>(
     mut session: Session,
-    handler: &mut Option<H>,
+    mut handler: H,
     sender: &mut Option<tokio::sync::oneshot::Sender<()>>,
     buf: &[u8],
-) -> Result<Session, H::Error> {
+) -> Result<(H, Session), H::Error> {
     match session.common.kex.take() {
-        Some(Kex::KexInit(kexinit)) => {
+        Some(Kex::Init(kexinit)) => {
             if kexinit.algo.is_some()
                 || buf.get(0) == Some(&msg::KEXINIT)
                 || session.common.encrypted.is_none()
             {
-                session.common.kex = Some(Kex::KexDhDone(kexinit.client_parse(
+                session.common.kex = Some(Kex::DhDone(kexinit.client_parse(
                     session.common.config.as_ref(),
                     &session.common.cipher,
                     buf,
@@ -1120,28 +1125,30 @@ async fn reply<H: Handler>(
                 )?));
                 session.flush()?;
             }
-            Ok(session)
+            Ok((handler, session))
         }
-        Some(Kex::KexDhDone(mut kexdhdone)) => {
+        Some(Kex::DhDone(mut kexdhdone)) => {
             if kexdhdone.names.ignore_guessed {
                 kexdhdone.names.ignore_guessed = false;
-                session.common.kex = Some(Kex::KexDhDone(kexdhdone));
-                Ok(session)
+                session.common.kex = Some(Kex::DhDone(kexdhdone));
+                Ok((handler, session))
             } else if buf.get(0) == Some(&msg::KEX_ECDH_REPLY) {
                 // We've sent ECDH_INIT, waiting for ECDH_REPLY
-                session.common.kex = Some(kexdhdone.server_key_check(false, handler, buf).await?);
+                let (kex, h) = kexdhdone.server_key_check(false, handler, buf).await?;
+                handler = h;
+                session.common.kex = Some(kex);
                 session
                     .common
                     .cipher
                     .write(&[msg::NEWKEYS], &mut session.common.write_buffer);
                 session.flush()?;
-                Ok(session)
+                Ok((handler, session))
             } else {
                 error!("Wrong packet received");
                 Err(Error::Inconsistent.into())
             }
         }
-        Some(Kex::NewKeys(newkeys)) => {
+        Some(Kex::Keys(newkeys)) => {
             debug!("newkeys received");
             if buf.get(0) != Some(&msg::NEWKEYS) {
                 return Err(Error::Kex.into());
@@ -1157,11 +1164,11 @@ async fn reply<H: Handler>(
                 newkeys,
             );
             // Ok, NEWKEYS received, now encrypted.
-            Ok(session)
+            Ok((handler, session))
         }
         Some(kex) => {
             session.common.kex = Some(kex);
-            Ok(session)
+            Ok((handler, session))
         }
         None => session.client_read_encrypted(handler, buf).await,
     }

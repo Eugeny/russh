@@ -34,6 +34,7 @@ impl super::OpeningKey for Key {
         tag: &[u8],
     ) -> Result<&'a [u8], Error> {
         debug_assert_eq!(tag.len(), 0); // self.tag_len());
+        #[allow(clippy::indexing_slicing)] // length known
         Ok(&ciphertext_in_plaintext_out[4..])
     }
 }

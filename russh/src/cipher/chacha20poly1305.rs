@@ -40,6 +40,7 @@ pub static CIPHER: super::Cipher = super::Cipher {
 
 pub const NAME: super::Name = super::Name("chacha20-poly1305@openssh.com");
 
+#[allow(clippy::indexing_slicing)] // length checked
 fn make_sealing_cipher(k: &[u8], _: &[u8]) -> super::SealingCipher {
     let mut k1 = Key([0; KEY_BYTES]);
     let mut k2 = Key([0; KEY_BYTES]);
@@ -48,6 +49,7 @@ fn make_sealing_cipher(k: &[u8], _: &[u8]) -> super::SealingCipher {
     super::SealingCipher::Chacha20Poly1305(SealingKey { k1, k2 })
 }
 
+#[allow(clippy::indexing_slicing)] // length checked
 fn make_opening_cipher(k: &[u8], _: &[u8]) -> super::OpeningCipher {
     let mut k1 = Key([0; KEY_BYTES]);
     let mut k2 = Key([0; KEY_BYTES]);
@@ -56,6 +58,7 @@ fn make_opening_cipher(k: &[u8], _: &[u8]) -> super::OpeningCipher {
     super::OpeningCipher::Chacha20Poly1305(OpeningKey { k1, k2 })
 }
 
+#[allow(clippy::indexing_slicing)] // length checked
 fn make_counter(sequence_number: u32) -> Nonce {
     let mut nonce = Nonce([0; NONCE_BYTES]);
     let i0 = NONCE_BYTES - 4;
@@ -78,6 +81,7 @@ impl super::OpeningKey for OpeningKey {
         TAG_LEN
     }
 
+    #[allow(clippy::indexing_slicing)] // lengths checked
     fn open<'a>(
         &self,
         sequence_number: u32,

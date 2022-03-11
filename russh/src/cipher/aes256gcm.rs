@@ -64,8 +64,12 @@ fn make_nonce(nonce: &Nonce, sequence_number: u32) -> Nonce {
     new_nonce.0.clone_from_slice(&nonce.0);
     // Increment the nonce
     let i0 = NONCE_BYTES - 8;
-    let ctr = BigEndian::read_u64(&mut new_nonce.0[i0..]);
+
+    #[allow(clippy::indexing_slicing)] // length checked
+    let ctr = BigEndian::read_u64(&new_nonce.0[i0..]);
+
     // GCM requires the counter to start from 1
+    #[allow(clippy::indexing_slicing)] // length checked
     BigEndian::write_u64(&mut new_nonce.0[i0..], ctr + sequence_number as u64 - GCM_COUNTER_OFFSET);
     new_nonce
 }
@@ -91,13 +95,19 @@ impl super::OpeningKey for OpeningKey {
     ) -> Result<&'a [u8], Error> {
         // Packet length is sent unencrypted
         let mut packet_length = [0; super::PACKET_LENGTH_LEN];
+
+        #[allow(clippy::indexing_slicing)] // length checked
         packet_length.clone_from_slice(&ciphertext_in_plaintext_out[..super::PACKET_LENGTH_LEN]);
 
         // Prepare a buffer for libsodium to read from
         let mut buffer = vec![0; ciphertext_in_plaintext_out.len() - super::PACKET_LENGTH_LEN];
+
+        #[allow(clippy::indexing_slicing)] // length checked
         buffer.copy_from_slice(&ciphertext_in_plaintext_out[super::PACKET_LENGTH_LEN..]);
 
         let nonce = make_nonce(&self.nonce, sequence_number);
+
+        #[allow(clippy::indexing_slicing)] // length checked
         if !aes256gcm_decrypt(&mut ciphertext_in_plaintext_out[super::PACKET_LENGTH_LEN..], tag, &buffer, &packet_length, &nonce, &self.key) {
             return Err(Error::DecryptionError);
         }
@@ -137,6 +147,7 @@ impl super::SealingKey for SealingKey {
     ) {
         // Packet length is received unencrypted
         let mut packet_length = [0; super::PACKET_LENGTH_LEN];
+        #[allow(clippy::indexing_slicing)] // length checked
         packet_length.clone_from_slice(&plaintext_in_ciphertext_out[..super::PACKET_LENGTH_LEN]);
 
         // Prepare an output buffer
@@ -144,9 +155,8 @@ impl super::SealingKey for SealingKey {
         buffer.splice(..super::PACKET_LENGTH_LEN, packet_length);
 
         let nonce = make_nonce(&self.nonce, sequence_number);
-        if !aes256gcm_encrypt(&mut buffer[super::PACKET_LENGTH_LEN..], tag_out, &plaintext_in_ciphertext_out[super::PACKET_LENGTH_LEN..], &packet_length, &nonce, &self.key) {
-            panic!("aes256gcm_encrypt() failed");
-        }
+        #[allow(clippy::indexing_slicing)] // length checked
+        aes256gcm_encrypt(&mut buffer[super::PACKET_LENGTH_LEN..], tag_out, &plaintext_in_ciphertext_out[super::PACKET_LENGTH_LEN..], &packet_length, &nonce, &self.key);
         plaintext_in_ciphertext_out.clone_from_slice(&buffer);
     }
 }

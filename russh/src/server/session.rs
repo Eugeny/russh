@@ -166,16 +166,16 @@ impl Session {
                 &self.common.config.as_ref().limits,
                 &self.common.cipher,
                 &mut self.common.write_buffer,
-            ) && enc.rekey.is_none() {
+            )? && enc.rekey.is_none() {
                 debug!("starting rekeying");
                 if let Some(exchange) = enc.exchange.take() {
                     let mut kexinit = KexInit::initiate_rekey(exchange, &enc.session_id);
                     kexinit.server_write(
                         self.common.config.as_ref(),
-                        &mut self.common.cipher,
+                        &self.common.cipher,
                         &mut self.common.write_buffer,
                     )?;
-                    enc.rekey = Some(Kex::KexInit(kexinit))
+                    enc.rekey = Some(Kex::Init(kexinit))
                 }
             }
         }

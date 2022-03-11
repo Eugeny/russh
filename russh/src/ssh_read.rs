@@ -16,6 +16,7 @@ struct ReadSshIdBuffer {
 
 impl ReadSshIdBuffer {
     pub fn id(&self) -> &[u8] {
+        #[allow(clippy::indexing_slicing)] // length checked
         &self.buf[..self.sshid_len]
     }
 
@@ -62,6 +63,7 @@ impl<R: AsyncRead + Unpin> AsyncRead for SshRead<R> {
             debug!("id {:?} {:?}", id.total, id.bytes_read);
             if id.total > id.bytes_read {
                 let total = id.total.min(id.bytes_read + buf.remaining());
+                #[allow(clippy::indexing_slicing)] // length checked
                 let result = { buf.put_slice(&id.buf[id.bytes_read..total]) };
                 debug!("read {:?} bytes from id.buf", result);
                 id.bytes_read += total - id.bytes_read;
@@ -111,19 +113,26 @@ impl<R: AsyncRead + Unpin> SshRead<R> {
         }
     }
 
+    #[allow(clippy::unwrap_used)]
     pub async fn read_ssh_id(&mut self) -> Result<&[u8], Error> {
         let ssh_id = self.id.as_mut().unwrap();
         loop {
             let mut i = 0;
             debug!("read_ssh_id: reading");
+
+            #[allow(clippy::indexing_slicing)] // length checked
             let n = AsyncReadExt::read(&mut self.r, &mut ssh_id.buf[ssh_id.total..]).await?;
             debug!("read {:?}", n);
 
             ssh_id.total += n;
-            debug!("{:?}", std::str::from_utf8(&ssh_id.buf[..ssh_id.total]));
+            #[allow(clippy::indexing_slicing)] // length checked
+            {
+                debug!("{:?}", std::str::from_utf8(&ssh_id.buf[..ssh_id.total]));
+            }
             if n == 0 {
                 return Err(Error::Disconnect);
             }
+            #[allow(clippy::indexing_slicing)] // length checked
             loop {
                 if i >= ssh_id.total - 1 {
                     break;
@@ -144,9 +153,10 @@ impl<R: AsyncRead + Unpin> SshRead<R> {
 
             if ssh_id.bytes_read > 0 {
                 // If we have a full line, handle it.
-                if i >= 8 && &ssh_id.buf[0..8] == b"SSH-2.0-" {
+                if i >= 8 && ssh_id.buf.get(0..8) == Some(b"SSH-2.0-") {
                     // Either the line starts with "SSH-2.0-"
                     ssh_id.sshid_len = i;
+                    #[allow(clippy::indexing_slicing)] // length checked
                     return Ok(&ssh_id.buf[..ssh_id.sshid_len]);
                 }
                 // Else, it is a "preliminary" (see
