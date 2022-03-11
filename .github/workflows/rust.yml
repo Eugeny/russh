@@ -33,7 +33,7 @@ jobs:
     - uses: actions/checkout@v2
     - name: Run tests
       run: |
-        ssh-agent
+        eval `ssh-agent`
         cargo test --verbose --all-features
       env:
         RUST_BACKTRACE: 1
