@@ -148,7 +148,7 @@ const KEYTYPE_RSA: &[u8] = b"ssh-rsa";
 /// Load a public key from a file. Ed25519 and RSA keys are supported.
 ///
 /// ```
-/// thrussh_keys::load_public_key("/home/pe/.ssh/id_ed25519.pub").unwrap();
+/// thrussh_keys::load_public_key("../files/id_ed25519.pub").unwrap();
 /// ```
 pub fn load_public_key<P: AsRef<Path>>(path: P) -> Result<key::PublicKey, Error> {
     let mut pubkey = String::new();

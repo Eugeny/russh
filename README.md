@@ -4,13 +4,19 @@ A full implementation of the SSH 2 protocol, both server-side and client-side.
 
 Thrussh is completely asynchronous, and can be combined with other protocols using [Tokio](//tokio.rs).
 
-## Panics
+## Safety
 
-`deny(clippy::panic)` except for:
+* `deny(clippy::unwrap_used)`
+* `deny(clippy::expect_used)`
+* `deny(clippy::indexing_slicing)`
+* `deny(clippy::panic)`
+* Exceptions are checked manually
+
+### Panics
 
 * When the Rust allocator fails to allocate memory during a CryptoVec being resized.
 
-## Unsafe code
+### Unsafe code
 
 * `cryptovec` uses `unsafe` for faster copying, initialization and binding to native API.
 * `russh-libsodium` uses `unsafe` for `libsodium` bindings.

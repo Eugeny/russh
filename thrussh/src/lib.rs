@@ -671,7 +671,6 @@ mod test_compress {
         let _ = env_logger::try_init();
 
         let client_key = thrussh_keys::key::KeyPair::generate_ed25519().unwrap();
-        let client_pubkey = Arc::new(client_key.clone_public_key());
         let mut config = server::Config::default();
         config.preferred = Preferred::COMPRESSED;
         config.connection_timeout = None; // Some(std::time::Duration::from_secs(3));
@@ -681,7 +680,6 @@ mod test_compress {
             .push(thrussh_keys::key::KeyPair::generate_ed25519().unwrap());
         let config = Arc::new(config);
         let mut sh = Server {
-            client_pubkey,
             clients: Arc::new(Mutex::new(HashMap::new())),
             id: 0,
         };
@@ -721,7 +719,6 @@ mod test_compress {
 
     #[derive(Clone)]
     struct Server {
-        client_pubkey: Arc<thrussh_keys::key::PublicKey>,
         clients: Arc<Mutex<HashMap<(usize, ChannelId), super::server::Handle>>>,
         id: usize,
     }
