@@ -1,6 +1,6 @@
 [package]
 name = "russh-libsodium"
-version = "0.2.1"
+version = "0.3.0-beta.1"
 license = "Apache-2.0/MIT"
 description = "Straightforward bindings to libsodium"
 homepage = "https://nest.pijul.com/pijul/russh"

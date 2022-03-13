@@ -1,5 +1,5 @@
 [package]
-authors = ["Pierre-Étienne Meunier <pe@pijul.org>"]
+authors = ["Pierre-Étienne Meunier <pe@pijul.org>", "Eugeny <e@ajenti.org"]
 description = "A vector which zeroes its memory on clears and reallocations."
 documentation = "https://pijul.org/cryptovec/doc/cryptovec"
 include = ["Cargo.toml", "src/lib.rs"]
@@ -7,7 +7,7 @@ license = "Apache-2.0"
 name = "russh-cryptovec"
 publish = false
 repository = "https://pijul.org/cryptovec"
-version = "0.6.1"
+version = "0.7.0-beta.1"
 
 [dependencies]
 libc = "0.2"

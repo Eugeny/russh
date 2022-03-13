@@ -7,7 +7,7 @@ include = ["Cargo.toml", "src/lib.rs", "src/proxy.rs"]
 license = "Apache-2.0"
 name = "russh-config"
 repository = "https://nest.pijul.com/pijul/russh"
-version = "0.6.0"
+version = "0.7.0-beta.1"
 
 [dependencies]
 dirs-next = "2.0"

@@ -37,7 +37,7 @@ license = "Apache-2.0"
 name = "russh"
 readme = "../README.md"
 repository = "https://nest.pijul.com/pijul/russh"
-version = "0.33.5"
+version = "0.34.0-beta.1"
 
 [features]
 default = ["flate2"]
