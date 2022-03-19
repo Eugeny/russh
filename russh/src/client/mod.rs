@@ -23,7 +23,6 @@ use crate::{ChannelId, ChannelMsg, ChannelOpenFailure, Disconnect, Limits, Sig};
 use russh_cryptovec::CryptoVec;
 use futures::task::{Context, Poll};
 use futures::Future;
-use tokio::task::JoinError;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::pin::Pin;
