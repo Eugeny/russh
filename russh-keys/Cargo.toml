@@ -45,12 +45,12 @@ num-integer = "0.1"
 openssl = {version = "0.10", optional = true}
 pbkdf2 = "0.8"
 rand = "0.8"
-russh-cryptovec = {version = "0.6.0", path = "../cryptovec"}
+russh-cryptovec = {version = "0.7.0-beta.1", path = "../cryptovec"}
 serde = "1.0"
 serde_derive = "1.0"
 sha2 = "0.9"
 thiserror = "1.0"
-russh-libsodium = {version = "0.2", path = "../russh-libsodium"}
+russh-libsodium = {version = "0.3.0-beta.1", path = "../russh-libsodium"}
 tokio = {version = "1.17.0", features = ["io-util", "rt-multi-thread", "time", "net"]}
 tokio-stream = {version = "0.1", features = ["net"]}
 yasna = {version = "0.4.0", features = ["bit-vec", "num-bigint"]}

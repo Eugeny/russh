@@ -825,7 +825,7 @@ dependencies = [
 
 [[package]]
 name = "russh"
-version = "0.33.5"
+version = "0.34.0-beta.1"
 dependencies = [
  "anyhow",
  "bitflags",
@@ -848,7 +848,7 @@ dependencies = [
 
 [[package]]
 name = "russh-config"
-version = "0.6.0"
+version = "0.7.0-beta.1"
 dependencies = [
  "dirs-next",
  "futures",
@@ -860,7 +860,7 @@ dependencies = [
 
 [[package]]
 name = "russh-cryptovec"
-version = "0.6.1"
+version = "0.7.0-beta.1"
 dependencies = [
  "libc",
  "winapi",
@@ -868,7 +868,7 @@ dependencies = [
 
 [[package]]
 name = "russh-keys"
-version = "0.21.0"
+version = "0.22.0-beta.1"
 dependencies = [
  "aes",
  "bcrypt-pbkdf",
@@ -901,7 +901,7 @@ dependencies = [
 
 [[package]]
 name = "russh-libsodium"
-version = "0.2.1"
+version = "0.3.0-beta.1"
 dependencies = [
  "lazy_static",
  "libc",
