@@ -23,6 +23,7 @@ use crate::{ChannelId, ChannelMsg, ChannelOpenFailure, Disconnect, Limits, Sig};
 use russh_cryptovec::CryptoVec;
 use futures::task::{Context, Poll};
 use futures::Future;
+use tokio::task::JoinError;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::pin::Pin;
@@ -811,7 +812,12 @@ where
     session.read_ssh_id(sshid)?;
     let (encrypted_signal, encrypted_recv) = tokio::sync::oneshot::channel();
     let join = tokio::spawn(session.run(stream, handler, Some(encrypted_signal)));
-    encrypted_recv.await.unwrap_or(());
+
+    if let Err(_) = encrypted_recv.await {
+        join.await.map_err(|e| crate::Error::Join(e))??;
+        return Err(H::Error::from(crate::Error::Disconnect));
+    }
+
     Ok(Handle {
         sender,
         receiver: receiver2,
