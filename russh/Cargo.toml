@@ -36,8 +36,8 @@ keywords = ["ssh"]
 license = "Apache-2.0"
 name = "russh"
 readme = "../README.md"
-repository = "https://nest.pijul.com/pijul/russh"
-version = "0.34.0-beta.2"
+repository = "https://github.com/warp-tech/russh"
+version = "0.34.0-beta.3"
 
 [features]
 default = ["flate2"]
