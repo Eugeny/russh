@@ -24,7 +24,7 @@ use futures::task::{Context, Poll};
 use futures::Future;
 use russh_cryptovec::CryptoVec;
 use russh_keys::encoding::{Encoding, Reader};
-use russh_keys::key;
+use russh_keys::key::{self, SignatureHash};
 use russh_keys::key::parse_public_key;
 use std::cell::RefCell;
 use std::collections::HashMap;
