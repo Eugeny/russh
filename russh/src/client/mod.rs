@@ -1064,7 +1064,11 @@ impl KexDhDone {
     ) -> Result<(Kex, H), H::Error> {
         let mut reader = buf.reader(1);
         let pubkey = reader.read_string().map_err(crate::Error::from)?; // server public key.
-        let pubkey = parse_public_key(pubkey).map_err(crate::Error::from)?;
+        let pubkey = parse_public_key(
+            pubkey,
+            SignatureHash::from_rsa_hostkey_algo(self.names.key.0.as_bytes()),
+        )
+        .map_err(crate::Error::from)?;
         debug!("server_public_Key: {:?}", pubkey);
         if !rekey {
             let ret = handler.check_server_key(&pubkey).await?;

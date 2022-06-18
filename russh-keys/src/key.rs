@@ -94,6 +94,16 @@ impl SignatureHash {
             SignatureHash::SHA1 => MessageDigest::sha1(),
         }
     }
+
+    pub fn from_rsa_hostkey_algo(algo: &[u8]) -> Option<Self> {
+        if algo == b"rsa-sha2-256" {
+            Some(Self::SHA2_256)
+        } else if algo == b"rsa-sha2-512" {
+            Some(Self::SHA2_512)
+        } else {
+            Some(Self::SHA1)
+        }
+    }
 }
 
 /// Public key
@@ -168,15 +178,8 @@ impl PublicKey {
                             BigNum::from_slice(key_n)?,
                             BigNum::from_slice(key_e)?,
                         )?)?),
-                        hash: {
-                            if algo == b"rsa-sha2-256" {
-                                SignatureHash::SHA2_256
-                            } else if algo == b"rsa-sha2-512" {
-                                SignatureHash::SHA2_512
-                            } else {
-                                SignatureHash::SHA1
-                            }
-                        },
+                        hash: SignatureHash::from_rsa_hostkey_algo(algo)
+                            .unwrap_or(SignatureHash::SHA1),
                     })
                 }
                 #[cfg(not(feature = "openssl"))]
@@ -427,7 +430,7 @@ fn rsa_signature(
 }
 
 /// Parse a public key from a byte slice.
-pub fn parse_public_key(p: &[u8]) -> Result<PublicKey, Error> {
+pub fn parse_public_key(p: &[u8], prefer_hash: Option<SignatureHash>) -> Result<PublicKey, Error> {
     let mut pos = p.reader(0);
     let t = pos.read_string()?;
     if t == b"ssh-ed25519" {
@@ -453,7 +456,7 @@ pub fn parse_public_key(p: &[u8]) -> Result<PublicKey, Error> {
                     BigNum::from_slice(n)?,
                     BigNum::from_slice(e)?,
                 )?)?),
-                hash: SignatureHash::SHA2_256,
+                hash: prefer_hash.unwrap_or(SignatureHash::SHA2_256),
             });
         }
     }

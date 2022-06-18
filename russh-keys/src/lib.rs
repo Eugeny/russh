@@ -172,7 +172,7 @@ pub fn load_public_key<P: AsRef<Path>>(path: P) -> Result<key::PublicKey, Error>
 /// ```
 pub fn parse_public_key_base64(key: &str) -> Result<key::PublicKey, Error> {
     let base = BASE64_MIME.decode(key.as_bytes())?;
-    key::parse_public_key(&base)
+    key::parse_public_key(&base, None)
 }
 
 pub trait PublicKeyBase64 {
