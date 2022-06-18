@@ -1,4 +1,9 @@
-#![deny(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
+#![deny(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic
+)]
 // Copyright 2016 Pierre-Étienne Meunier
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -235,11 +240,7 @@ impl CryptoVec {
         } else if size <= self.size {
             // If this is a truncation, resize and erase the extra memory.
             unsafe {
-                libc::memset(
-                    self.p.add(size) as *mut c_void,
-                    0,
-                    self.size - size,
-                );
+                libc::memset(self.p.add(size) as *mut c_void, 0, self.size - size);
             }
             self.size = size;
         } else {
@@ -262,7 +263,8 @@ impl CryptoVec {
                 }
 
                 if self.p.is_null() {
-                    #[allow(clippy::panic)] {
+                    #[allow(clippy::panic)]
+                    {
                         panic!("Realloc failed, pointer = {:?} {:?}", self, size)
                     }
                 } else {
@@ -337,8 +339,7 @@ impl CryptoVec {
     ) -> Result<usize, std::io::Error> {
         let cur_size = self.size;
         self.resize(cur_size + n_bytes);
-        let s =
-            unsafe { std::slice::from_raw_parts_mut(self.p.add(cur_size), n_bytes) };
+        let s = unsafe { std::slice::from_raw_parts_mut(self.p.add(cur_size), n_bytes) };
         // Resize the buffer to its appropriate size.
         match r.read(s) {
             Ok(n) => {

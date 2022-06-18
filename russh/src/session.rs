@@ -18,10 +18,10 @@ use crate::{auth, cipher, kex, msg, negotiation};
 use crate::{Channel, ChannelId, Disconnect, Limits};
 use byteorder::{BigEndian, ByteOrder};
 use russh_cryptovec::CryptoVec;
+use russh_keys::encoding::Encoding;
 use std::collections::HashMap;
 use std::num::Wrapping;
 use std::sync::Arc;
-use russh_keys::encoding::Encoding;
 
 #[derive(Debug)]
 pub(crate) struct Encrypted {
@@ -323,12 +323,10 @@ impl Encrypted {
                 #[allow(clippy::indexing_slicing)] // length checked
                 let len = BigEndian::read_u32(&self.write[self.write_cursor..]) as usize;
                 #[allow(clippy::indexing_slicing)]
-                let packet = self
-                    .compress
-                    .compress(
-                        &self.write[(self.write_cursor + 4)..(self.write_cursor + 4 + len)],
-                        &mut self.compress_buffer,
-                    )?;
+                let packet = self.compress.compress(
+                    &self.write[(self.write_cursor + 4)..(self.write_cursor + 4 + len)],
+                    &mut self.compress_buffer,
+                )?;
                 cipher.write(packet, write_buffer);
                 self.write_cursor += 4 + len
             }

@@ -1,5 +1,10 @@
 #![deny(trivial_casts, unstable_features, unused_import_braces)]
-#![deny(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
+#![deny(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic
+)]
 //! This crate contains methods to deal with SSH keys, as defined in
 //! crate Russh. This includes in particular various functions for
 //! opening key files, deciphering encrypted keys, and dealing with
@@ -131,8 +136,10 @@ pub enum Error {
     ASN1(yasna::ASN1Error),
     #[error("Environment variable `{0}` not found")]
     EnvVar(&'static str),
-    #[error("Unable to connect to ssh-agent. The environment variable `SSH_AUTH_SOCK` \
-    was set, but it points to a nonexistent file or directory.")]
+    #[error(
+        "Unable to connect to ssh-agent. The environment variable `SSH_AUTH_SOCK` \
+    was set, but it points to a nonexistent file or directory."
+    )]
     BadAuthSock,
 }
 

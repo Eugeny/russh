@@ -17,8 +17,8 @@ use crate::Error;
 use byteorder::{BigEndian, ByteOrder};
 use std::num::Wrapping;
 use tokio::io::{AsyncRead, AsyncReadExt};
-pub mod chacha20poly1305;
 pub mod aes256gcm;
+pub mod chacha20poly1305;
 pub mod clear;
 
 pub struct Cipher {

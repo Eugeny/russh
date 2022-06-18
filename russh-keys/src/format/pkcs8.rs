@@ -99,10 +99,7 @@ fn asn1_read_pbkdf2(
                 Ok(Err(Error::UnknownAlgorithm(oid)))
             }
         })?;
-        Ok(digest.map(|()| KeyDerivation::Pbkdf2 {
-            salt,
-            rounds,
-        }))
+        Ok(digest.map(|()| KeyDerivation::Pbkdf2 { salt, rounds }))
     })
 }
 
@@ -262,10 +259,10 @@ fn test_read_write_pkcs8() {
     }
 }
 
-use yasna::models::ObjectIdentifier;
 use aes::*;
 use block_modes::block_padding::NoPadding;
 use block_modes::BlockMode;
+use yasna::models::ObjectIdentifier;
 type Aes128Cbc = block_modes::Cbc<Aes128, NoPadding>;
 type Aes256Cbc = block_modes::Cbc<Aes256, NoPadding>;
 
@@ -379,13 +376,10 @@ impl Algorithms {
 impl KeyDerivation {
     fn derive(&self, password: &[u8], key: &mut [u8]) -> Result<(), Error> {
         match *self {
-            KeyDerivation::Pbkdf2 {
-                ref salt,
-                rounds,
-            } => {
+            KeyDerivation::Pbkdf2 { ref salt, rounds } => {
                 pbkdf2::pbkdf2::<hmac::Hmac<sha2::Sha256>>(password, salt, rounds as u32, key)
                 // pbkdf2_hmac(password, salt, rounds as usize, digest, key)?
-            },
+            }
         }
         Ok(())
     }
@@ -433,7 +427,7 @@ impl Encryption {
                 c.decrypt(&mut dec)?;
                 pkcs_unpad(&mut dec);
                 Ok(dec)
-            },
+            }
             Encryption::Aes256Cbc(ref iv) => {
                 #[allow(clippy::unwrap_used)] // parameters are static
                 let c = Aes256Cbc::new_from_slices(key, iv).unwrap();
@@ -441,14 +435,11 @@ impl Encryption {
                 c.decrypt(&mut dec)?;
                 pkcs_unpad(&mut dec);
                 Ok(dec)
-            },
+            }
         }
     }
 }
 
 enum KeyDerivation {
-    Pbkdf2 {
-        salt: Vec<u8>,
-        rounds: u64,
-    },
+    Pbkdf2 { salt: Vec<u8>, rounds: u64 },
 }

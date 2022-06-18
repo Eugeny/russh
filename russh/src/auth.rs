@@ -14,9 +14,9 @@
 //
 
 use russh_cryptovec::CryptoVec;
-use std::sync::Arc;
 use russh_keys::encoding;
 use russh_keys::key;
+use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 bitflags! {

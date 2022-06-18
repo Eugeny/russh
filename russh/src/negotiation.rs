@@ -13,14 +13,14 @@
 // limitations under the License.
 //
 use crate::{cipher, kex, msg, Error};
-use std::str::from_utf8;
 use russh_keys::key;
+use std::str::from_utf8;
 // use super::mac; // unimplemented
 use crate::compression::*;
+use rand::RngCore;
 use russh_cryptovec::CryptoVec;
 use russh_keys::encoding::{Encoding, Reader};
 use russh_keys::key::{KeyPair, PublicKey};
-use rand::RngCore;
 
 #[derive(Debug)]
 pub struct Names {
@@ -94,10 +94,10 @@ impl Named for () {
     }
 }
 
+#[cfg(not(feature = "openssl"))]
+use russh_keys::key::ED25519;
 #[cfg(feature = "openssl")]
 use russh_keys::key::{ED25519, SSH_RSA};
-#[cfg(not(feature = "openssl"))]
-use russh_keys::key::{ED25519};
 
 impl Named for PublicKey {
     fn name(&self) -> &'static str {

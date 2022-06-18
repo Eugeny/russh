@@ -19,10 +19,10 @@ use byteorder::{BigEndian, ByteOrder};
 use msg;
 use negotiation;
 use negotiation::Select;
-use std::cell::RefCell;
 use russh_keys::encoding::{Encoding, Position, Reader};
 use russh_keys::key;
 use russh_keys::key::Verify;
+use std::cell::RefCell;
 use tokio::time::Instant;
 
 impl Session {
@@ -106,7 +106,7 @@ impl Session {
                 enc.rekey = Some(Kex::Init(k));
                 self.pending_len += buf.len() as u32;
                 if self.pending_len > 2 * self.target_window_size {
-                    return Err(Error::Pending.into())
+                    return Err(Error::Pending.into());
                 }
                 self.pending_reads.push(CryptoVec::from_slice(buf));
                 return Ok((handler, self));
@@ -114,7 +114,7 @@ impl Session {
             rek => {
                 debug!("rek = {:?}", rek);
                 enc.rekey = rek
-            },
+            }
         }
         self.process_packet(handler, buf).await
     }
@@ -147,7 +147,8 @@ impl Session {
                 Ok((handler, self))
             }
             EncryptedState::WaitingAuthRequest(_) if buf.get(0) == Some(&msg::USERAUTH_REQUEST) => {
-                let h = enc.server_read_auth_request(instant, handler, buf, &mut self.common.auth_user)
+                let h = enc
+                    .server_read_auth_request(instant, handler, buf, &mut self.common.auth_user)
                     .await?;
                 if let EncryptedState::InitCompression = enc.state {
                     enc.client_compression.init_decompress(&mut enc.decompress);
@@ -275,7 +276,9 @@ impl Encrypted {
                 auth_request.current = Some(CurrentRequest::KeyboardInteractive {
                     submethods: submethods.to_string(),
                 });
-                let (h, auth) = handler.auth_keyboard_interactive(user, submethods, None).await?;
+                let (h, auth) = handler
+                    .auth_keyboard_interactive(user, submethods, None)
+                    .await?;
                 handler = h;
                 if reply_userauth_info_response(until, auth_request, &mut self.write, auth).await? {
                     self.state = EncryptedState::InitCompression

@@ -20,16 +20,16 @@ use crate::session::*;
 use crate::ssh_read::SshRead;
 use crate::sshbuffer::*;
 use crate::{ChannelId, ChannelMsg, ChannelOpenFailure, Disconnect, Limits, Sig};
-use russh_cryptovec::CryptoVec;
 use futures::task::{Context, Poll};
 use futures::Future;
+use russh_cryptovec::CryptoVec;
+use russh_keys::encoding::{Encoding, Reader};
+use russh_keys::key;
+use russh_keys::key::parse_public_key;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
-use russh_keys::encoding::{Encoding, Reader};
-use russh_keys::key;
-use russh_keys::key::parse_public_key;
 use tokio;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -210,7 +210,6 @@ pub struct Channel {
 }
 
 impl<H: Handler> Handle<H> {
-
     pub fn is_closed(&self) -> bool {
         self.sender.is_closed()
     }
@@ -276,7 +275,8 @@ impl<H: Handler> Handle<H> {
                 user,
                 method: auth::Method::FuturePublicKey { key },
             })
-            .await.is_err()
+            .await
+            .is_err()
         {
             return (future, Err((crate::SendError {}).into()));
         }

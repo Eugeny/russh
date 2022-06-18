@@ -15,9 +15,9 @@
 use crate::encoding::{Encoding, Reader};
 pub use crate::signature::*;
 use crate::Error;
-use russh_cryptovec::CryptoVec;
 #[cfg(feature = "openssl")]
 use openssl::pkey::{Private, Public};
+use russh_cryptovec::CryptoVec;
 use russh_libsodium as sodium;
 
 /// Keys for elliptic curve Ed25519 cryptography.
@@ -165,7 +165,10 @@ impl PublicKey {
                     let mut p = pubkey.reader(0);
                     let key_algo = p.read_string()?;
                     debug!("{:?}", std::str::from_utf8(key_algo));
-                    if key_algo != b"ssh-rsa" && key_algo != b"rsa-sha2-256" && key_algo != b"rsa-sha2-512" {
+                    if key_algo != b"ssh-rsa"
+                        && key_algo != b"rsa-sha2-256"
+                        && key_algo != b"rsa-sha2-512"
+                    {
                         return Err(Error::CouldNotReadKey);
                     }
                     let key_e = p.read_string()?;
@@ -203,9 +206,7 @@ impl PublicKey {
     /// Verify a signature.
     pub fn verify_detached(&self, buffer: &[u8], sig: &[u8]) -> bool {
         match self {
-            PublicKey::Ed25519(ref public) => {
-                sodium::ed25519::verify_detached(sig, buffer, public)
-            }
+            PublicKey::Ed25519(ref public) => sodium::ed25519::verify_detached(sig, buffer, public),
             #[cfg(feature = "openssl")]
             PublicKey::RSA { ref key, ref hash } => {
                 use openssl::sign::*;
@@ -223,12 +224,11 @@ impl PublicKey {
     pub fn fingerprint(&self) -> String {
         use super::PublicKeyBase64;
         let key = self.public_key_bytes();
-        use sha2::{Sha256, Digest};
+        use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
         hasher.update(&key[..]);
         data_encoding::BASE64_NOPAD.encode(&hasher.finalize())
     }
-
 
     #[cfg(feature = "openssl")]
     pub fn set_algorithm(&mut self, algorithm: &[u8]) {
@@ -244,8 +244,7 @@ impl PublicKey {
     }
 
     #[cfg(not(feature = "openssl"))]
-    pub fn set_algorithm(&mut self, _: &[u8]) {
-    }
+    pub fn set_algorithm(&mut self, _: &[u8]) {}
 }
 
 impl Verify for PublicKey {
@@ -300,10 +299,7 @@ impl KeyPair {
             KeyPair::RSA { ref key, ref hash } => {
                 use openssl::pkey::PKey;
                 use openssl::rsa::Rsa;
-                let key = Rsa::from_public_components(
-                    key.n().to_owned()?,
-                    key.e().to_owned()?,
-                )?;
+                let key = Rsa::from_public_components(key.n().to_owned()?, key.e().to_owned()?)?;
                 PublicKey::RSA {
                     key: OpenSSLPKey(PKey::from_rsa(key)?),
                     hash: *hash,

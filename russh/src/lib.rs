@@ -1,5 +1,11 @@
-#![deny(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
-#![allow(clippy::single_match)] // length checked
+#![deny(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic
+)]
+#![allow(clippy::single_match)]
+// length checked
 // Copyright 2016 Pierre-Étienne Meunier
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -313,7 +319,8 @@ macro_rules! push_packet {
     }};
 }
 
-type Sha256Hash = generic_array::GenericArray<u8, <sha2::Sha256 as digest::FixedOutputDirty>::OutputSize>;
+type Sha256Hash =
+    generic_array::GenericArray<u8, <sha2::Sha256 as digest::FixedOutputDirty>::OutputSize>;
 
 mod session;
 

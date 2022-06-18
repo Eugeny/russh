@@ -70,7 +70,10 @@ fn make_nonce(nonce: &Nonce, sequence_number: u32) -> Nonce {
 
     // GCM requires the counter to start from 1
     #[allow(clippy::indexing_slicing)] // length checked
-    BigEndian::write_u64(&mut new_nonce.0[i0..], ctr + sequence_number as u64 - GCM_COUNTER_OFFSET);
+    BigEndian::write_u64(
+        &mut new_nonce.0[i0..],
+        ctr + sequence_number as u64 - GCM_COUNTER_OFFSET,
+    );
     new_nonce
 }
 
@@ -108,7 +111,14 @@ impl super::OpeningKey for OpeningKey {
         let nonce = make_nonce(&self.nonce, sequence_number);
 
         #[allow(clippy::indexing_slicing)] // length checked
-        if !aes256gcm_decrypt(&mut ciphertext_in_plaintext_out[super::PACKET_LENGTH_LEN..], tag, &buffer, &packet_length, &nonce, &self.key) {
+        if !aes256gcm_decrypt(
+            &mut ciphertext_in_plaintext_out[super::PACKET_LENGTH_LEN..],
+            tag,
+            &buffer,
+            &packet_length,
+            &nonce,
+            &self.key,
+        ) {
             return Err(Error::DecryptionError);
         }
         Ok(ciphertext_in_plaintext_out)
@@ -156,7 +166,14 @@ impl super::SealingKey for SealingKey {
 
         let nonce = make_nonce(&self.nonce, sequence_number);
         #[allow(clippy::indexing_slicing)] // length checked
-        aes256gcm_encrypt(&mut buffer[super::PACKET_LENGTH_LEN..], tag_out, &plaintext_in_ciphertext_out[super::PACKET_LENGTH_LEN..], &packet_length, &nonce, &self.key);
+        aes256gcm_encrypt(
+            &mut buffer[super::PACKET_LENGTH_LEN..],
+            tag_out,
+            &plaintext_in_ciphertext_out[super::PACKET_LENGTH_LEN..],
+            &packet_length,
+            &nonce,
+            &self.key,
+        );
         plaintext_in_ciphertext_out.clone_from_slice(&buffer);
     }
 }

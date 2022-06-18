@@ -1,7 +1,7 @@
 use super::*;
 use crate::msg;
-use std::sync::Arc;
 use russh_keys::encoding::Encoding;
+use std::sync::Arc;
 use tokio::sync::mpsc::{Receiver, Sender};
 
 /// A connected server session. This type is unique to a client.
@@ -56,7 +56,6 @@ impl Handle {
             .await
             .map_err(|_| ())
     }
-
 
     /// Send success to the session referenced by this handler.
     pub async fn channel_success(&mut self, id: ChannelId) -> Result<(), ()> {
@@ -166,7 +165,8 @@ impl Session {
                 &self.common.config.as_ref().limits,
                 &self.common.cipher,
                 &mut self.common.write_buffer,
-            )? && enc.rekey.is_none() {
+            )? && enc.rekey.is_none()
+            {
                 debug!("starting rekeying");
                 if let Some(exchange) = enc.exchange.take() {
                     let mut kexinit = KexInit::initiate_rekey(exchange, &enc.session_id);

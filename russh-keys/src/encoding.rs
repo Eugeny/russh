@@ -53,23 +53,23 @@ pub fn mpint_len(s: &[u8]) -> usize {
 }
 
 impl Encoding for Vec<u8> {
-    #[allow(clippy::unwrap_used)]  // writing into Vec<> can't panic
+    #[allow(clippy::unwrap_used)] // writing into Vec<> can't panic
     fn extend_ssh_string(&mut self, s: &[u8]) {
         self.write_u32::<BigEndian>(s.len() as u32).unwrap();
         self.extend(s);
     }
 
-    #[allow(clippy::unwrap_used)]  // writing into Vec<> can't panic
+    #[allow(clippy::unwrap_used)] // writing into Vec<> can't panic
     fn extend_ssh_string_blank(&mut self, len: usize) -> &mut [u8] {
         self.write_u32::<BigEndian>(len as u32).unwrap();
         let current = self.len();
         self.resize(current + len, 0u8);
-        #[allow(clippy::indexing_slicing)]  // length is known
+        #[allow(clippy::indexing_slicing)] // length is known
         &mut self[current..]
     }
 
-    #[allow(clippy::unwrap_used)]  // writing into Vec<> can't panic
-    #[allow(clippy::indexing_slicing)]  // length is known
+    #[allow(clippy::unwrap_used)] // writing into Vec<> can't panic
+    #[allow(clippy::indexing_slicing)] // length is known
     fn extend_ssh_mpint(&mut self, s: &[u8]) {
         // Skip initial 0s.
         let mut i = 0;
@@ -87,7 +87,7 @@ impl Encoding for Vec<u8> {
         self.extend(&s[i..]);
     }
 
-    #[allow(clippy::indexing_slicing)]  // length is known
+    #[allow(clippy::indexing_slicing)] // length is known
     fn extend_list<A: Bytes, I: Iterator<Item = A>>(&mut self, list: I) {
         let len0 = self.len();
         self.extend(&[0, 0, 0, 0]);
@@ -116,7 +116,7 @@ impl Encoding for CryptoVec {
         self.extend(s);
     }
 
-    #[allow(clippy::indexing_slicing)]  // length is known
+    #[allow(clippy::indexing_slicing)] // length is known
     fn extend_ssh_string_blank(&mut self, len: usize) -> &mut [u8] {
         self.push_u32_be(len as u32);
         let current = self.len();
@@ -124,7 +124,7 @@ impl Encoding for CryptoVec {
         &mut self[current..]
     }
 
-    #[allow(clippy::indexing_slicing)]  // length is known
+    #[allow(clippy::indexing_slicing)] // length is known
     fn extend_ssh_mpint(&mut self, s: &[u8]) {
         // Skip initial 0s.
         let mut i = 0;
@@ -155,7 +155,7 @@ impl Encoding for CryptoVec {
         }
         let len = (self.len() - len0 - 4) as u32;
 
-        #[allow(clippy::indexing_slicing)]  // length is known
+        #[allow(clippy::indexing_slicing)] // length is known
         BigEndian::write_u32(&mut self[len0..], len);
     }
 
@@ -200,7 +200,7 @@ impl<'a> Position<'a> {
     pub fn read_string(&mut self) -> Result<&'a [u8], Error> {
         let len = self.read_u32()? as usize;
         if self.position + len <= self.s.len() {
-            #[allow(clippy::indexing_slicing)]  // length is known
+            #[allow(clippy::indexing_slicing)] // length is known
             let result = &self.s[self.position..(self.position + len)];
             self.position += len;
             Ok(result)
@@ -211,7 +211,7 @@ impl<'a> Position<'a> {
     /// Read a `u32` from this reader.
     pub fn read_u32(&mut self) -> Result<u32, Error> {
         if self.position + 4 <= self.s.len() {
-            #[allow(clippy::indexing_slicing)]  // length is known
+            #[allow(clippy::indexing_slicing)] // length is known
             let u = BigEndian::read_u32(&self.s[self.position..]);
             self.position += 4;
             Ok(u)
@@ -222,7 +222,7 @@ impl<'a> Position<'a> {
     /// Read one byte from this reader.
     pub fn read_byte(&mut self) -> Result<u8, Error> {
         if self.position < self.s.len() {
-            #[allow(clippy::indexing_slicing)]  // length is known
+            #[allow(clippy::indexing_slicing)] // length is known
             let u = self.s[self.position];
             self.position += 1;
             Ok(u)

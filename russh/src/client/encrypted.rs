@@ -22,8 +22,8 @@ use crate::negotiation::Select;
 use crate::session::*;
 use crate::{ChannelId, ChannelOpenFailure, Error, Sig};
 use russh_cryptovec::CryptoVec;
-use std::cell::RefCell;
 use russh_keys::encoding::{Encoding, Reader};
+use std::cell::RefCell;
 
 thread_local! {
     static SIGNATURE_BUFFER: RefCell<CryptoVec> = RefCell::new(CryptoVec::new());
@@ -121,7 +121,7 @@ impl super::Session {
                     enc.rekey = Some(Kex::Init(k));
                     self.pending_len += buf.len() as u32;
                     if self.pending_len > 2 * self.target_window_size {
-                        return Err(Error::Pending.into())
+                        return Err(Error::Pending.into());
                     }
                     self.pending_reads.push(CryptoVec::from_slice(buf));
                     return Ok((client, self));
@@ -279,7 +279,7 @@ impl super::Session {
             }
         }
         if is_authenticated {
-            return self.client_read_authenticated(client, buf).await
+            return self.client_read_authenticated(client, buf).await;
         } else {
             Ok((client, self))
         }
@@ -357,7 +357,8 @@ impl super::Session {
                 let target = self.common.config.window_size;
                 if let Some(ref mut enc) = self.common.encrypted {
                     if enc.adjust_window_size(channel_num, data, target) {
-                        let next_window = client.adjust_window(channel_num, self.target_window_size);
+                        let next_window =
+                            client.adjust_window(channel_num, self.target_window_size);
                         if next_window > 0 {
                             self.target_window_size = next_window
                         }
@@ -374,7 +375,8 @@ impl super::Session {
                 let target = self.common.config.window_size;
                 if let Some(ref mut enc) = self.common.encrypted {
                     if enc.adjust_window_size(channel_num, data, target) {
-                        let next_window = client.adjust_window(channel_num, self.target_window_size);
+                        let next_window =
+                            client.adjust_window(channel_num, self.target_window_size);
                         if next_window > 0 {
                             self.target_window_size = next_window
                         }
@@ -401,7 +403,8 @@ impl super::Session {
                         let c = std::str::from_utf8(r.read_string().map_err(crate::Error::from)?)
                             .map_err(crate::Error::from)?;
                         let d = r.read_u32().map_err(crate::Error::from)?;
-                        client.channel_open_forwarded_tcpip(channel_num, a, b, c, d, self)
+                        client
+                            .channel_open_forwarded_tcpip(channel_num, a, b, c, d, self)
                             .await
                     }
                     b"xon-xoff" => {
@@ -425,15 +428,16 @@ impl super::Session {
                         let lang_tag =
                             std::str::from_utf8(r.read_string().map_err(crate::Error::from)?)
                                 .map_err(crate::Error::from)?;
-                        client.exit_signal(
-                            channel_num,
-                            signal_name,
-                            core_dumped != 0,
-                            error_message,
-                            lang_tag,
-                            self,
-                        )
-                        .await
+                        client
+                            .exit_signal(
+                                channel_num,
+                                signal_name,
+                                core_dumped != 0,
+                                error_message,
+                                lang_tag,
+                                self,
+                            )
+                            .await
                     }
                     _ => {
                         let wants_reply = r.read_byte().map_err(crate::Error::from)?;

@@ -18,9 +18,9 @@ use byteorder::{BigEndian, ByteOrder};
 use crate::session::Exchange;
 use russh_cryptovec::CryptoVec;
 
-use std::cell::RefCell;
-use russh_keys::encoding::Encoding;
 use rand::RngCore;
+use russh_keys::encoding::Encoding;
+use std::cell::RefCell;
 
 #[doc(hidden)]
 pub struct Algorithm {
@@ -124,7 +124,8 @@ impl Algorithm {
     }
 
     pub fn compute_shared_secret(&mut self, remote_pubkey_: &[u8]) -> Result<(), crate::Error> {
-        let local_secret = std::mem::replace(&mut self.local_secret, None).ok_or(crate::Error::KexInit)?;
+        let local_secret =
+            std::mem::replace(&mut self.local_secret, None).ok_or(crate::Error::KexInit)?;
 
         use sodium::scalarmult::*;
         let mut remote_pubkey = GroupElement([0; 32]);

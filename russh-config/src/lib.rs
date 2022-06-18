@@ -136,10 +136,12 @@ pub fn parse(file: &str, host: &str) -> Result<Config, Error> {
                                 home.push(id.split_at(2).1);
                                 config.identity_file = Some(
                                     home.to_str()
-                                        .ok_or_else(|| std::io::Error::new(
-                                            std::io::ErrorKind::Other,
-                                            "Failed to convert home directory to string",
-                                        ))?
+                                        .ok_or_else(|| {
+                                            std::io::Error::new(
+                                                std::io::ErrorKind::Other,
+                                                "Failed to convert home directory to string",
+                                            )
+                                        })?
                                         .to_string(),
                                 );
                             } else {

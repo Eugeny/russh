@@ -37,7 +37,7 @@ pub fn decode_openssh(secret: &[u8], password: Option<&str>) -> Result<key::KeyP
                 let seckey = position.read_string()?;
                 let _comment = position.read_string()?;
                 if Some(pubkey) != seckey.get(32..) {
-                    return Err(Error::KeyIsCorrupt)
+                    return Err(Error::KeyIsCorrupt);
                 }
                 use key::ed25519::*;
                 let mut secret = SecretKey::new_zeroed();

@@ -1,4 +1,9 @@
-#![deny(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
+#![deny(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic
+)]
 extern crate libc;
 #[macro_use]
 extern crate lazy_static;
@@ -176,7 +181,14 @@ pub mod aes256gcm {
     pub struct Nonce(pub [u8; NONCE_BYTES]);
     pub struct Tag(pub [u8; TAG_BYTES]);
 
-    pub fn aes256gcm_encrypt(ciphertext: &mut [u8], tag: &mut [u8], message: &[u8], ad: &[u8], nonce: &Nonce, key: &Key) -> bool {
+    pub fn aes256gcm_encrypt(
+        ciphertext: &mut [u8],
+        tag: &mut [u8],
+        message: &[u8],
+        ad: &[u8],
+        nonce: &Nonce,
+        key: &Key,
+    ) -> bool {
         lazy_static::initialize(&super::SODIUM);
         if tag.len() != TAG_BYTES {
             false
@@ -199,7 +211,14 @@ pub mod aes256gcm {
         }
     }
 
-    pub fn aes256gcm_decrypt(message: &mut [u8], tag: &[u8], ciphertext: &[u8], ad: &[u8], nonce: &Nonce, key: &Key) -> bool {
+    pub fn aes256gcm_decrypt(
+        message: &mut [u8],
+        tag: &[u8],
+        ciphertext: &[u8],
+        ad: &[u8],
+        nonce: &Nonce,
+        key: &Key,
+    ) -> bool {
         lazy_static::initialize(&super::SODIUM);
         if tag.len() != TAG_BYTES {
             false

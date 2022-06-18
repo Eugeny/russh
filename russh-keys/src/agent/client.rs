@@ -48,8 +48,10 @@ impl AgentClient<tokio::net::UnixStream> {
             return Err(Error::EnvVar("SSH_AUTH_SOCK"));
         };
         match Self::connect_uds(var).await {
-            Err(Error::IO(io_err)) if io_err.kind() == std::io::ErrorKind::NotFound => Err(Error::BadAuthSock),
-            owise => owise
+            Err(Error::IO(io_err)) if io_err.kind() == std::io::ErrorKind::NotFound => {
+                Err(Error::BadAuthSock)
+            }
+            owise => owise,
         }
     }
 }
@@ -295,7 +297,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AgentClient<S> {
                 return (self, Err(e));
             }
 
-            #[allow(clippy::indexing_slicing, clippy::unwrap_used)] // length is checked, hash already checked
+            #[allow(clippy::indexing_slicing, clippy::unwrap_used)]
+            // length is checked, hash already checked
             if !self.buf.is_empty() && self.buf[0] == msg::SIGN_RESPONSE {
                 let resp = self.write_signature(hash.unwrap(), &mut data);
                 if let Err(e) = resp {
@@ -385,7 +388,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AgentClient<S> {
         let r = self.prepare_sign_request(public, data);
 
         async move {
-            if let Err(e) = r{
+            if let Err(e) = r {
                 return (self, Err(e));
             }
 
