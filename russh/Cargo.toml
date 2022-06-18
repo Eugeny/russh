@@ -37,7 +37,7 @@ license = "Apache-2.0"
 name = "russh"
 readme = "../README.md"
 repository = "https://github.com/warp-tech/russh"
-version = "0.34.0-beta.4"
+version = "0.34.0-beta.5"
 
 [features]
 default = ["flate2"]
