@@ -26,7 +26,7 @@ keywords = ["ssh"]
 license = "Apache-2.0"
 name = "russh-keys"
 repository = "https://nest.pijul.com/pijul/russh"
-version = "0.22.0-beta.2"
+version = "0.22.0-beta.3"
 
 [dependencies]
 aes = {version = "0.7", features = ["ctr"]}
