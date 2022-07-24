@@ -189,7 +189,7 @@ pub trait PublicKeyBase64 {
         let mut s = BASE64_MIME.encode(&self.public_key_bytes());
         assert_eq!(s.pop(), Some('\n'));
         assert_eq!(s.pop(), Some('\r'));
-        s
+        s.replace("\r\n", "")
     }
 }
 
