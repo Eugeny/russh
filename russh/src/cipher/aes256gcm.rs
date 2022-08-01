@@ -35,13 +35,14 @@ pub static CIPHER: super::Cipher = super::Cipher {
     name: NAME,
     key_len: KEY_BYTES,
     nonce_len: NONCE_BYTES,
+    mac_key_len: 0,
     make_sealing_cipher,
     make_opening_cipher,
 };
 
 pub const NAME: super::Name = super::Name("aes256-gcm@openssh.com");
 
-fn make_sealing_cipher(k: &[u8], n: &[u8]) -> super::SealingCipher {
+fn make_sealing_cipher(k: &[u8], n: &[u8], _: &[u8]) -> super::SealingCipher {
     let mut key = Key([0; KEY_BYTES]);
     let mut nonce = Nonce([0; NONCE_BYTES]);
     key.0.clone_from_slice(k);
@@ -49,7 +50,7 @@ fn make_sealing_cipher(k: &[u8], n: &[u8]) -> super::SealingCipher {
     super::SealingCipher::AES256GCM(SealingKey { key, nonce })
 }
 
-fn make_opening_cipher(k: &[u8], n: &[u8]) -> super::OpeningCipher {
+fn make_opening_cipher(k: &[u8], n: &[u8], _: &[u8]) -> super::OpeningCipher {
     let mut key = Key([0; KEY_BYTES]);
     let mut nonce = Nonce([0; NONCE_BYTES]);
     key.0.clone_from_slice(k);

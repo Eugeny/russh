@@ -6,6 +6,7 @@ This is a fork of [Thrussh](//nest.pijul.com/pijul/thrussh) by Pierre-Étienne M
 
 * More safety guarantees
 * AES256-GCM support
+* Legacy `ssh-rsa` host keys support
 * Dependency updates
 
 ## Safety

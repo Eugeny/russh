@@ -69,6 +69,8 @@ extern crate log;
 #[cfg(test)]
 extern crate env_logger;
 
+use aes::cipher::block_padding::UnpadError;
+use aes::cipher::inout::PadError;
 use byteorder::{BigEndian, WriteBytesExt};
 use data_encoding::BASE64_MIME;
 use std::borrow::Cow;
@@ -128,7 +130,10 @@ pub enum Error {
     Openssl(#[from] openssl::error::ErrorStack),
 
     #[error(transparent)]
-    BlockMode(#[from] block_modes::BlockModeError),
+    Pad(#[from] PadError),
+
+    #[error(transparent)]
+    Unpad(#[from] UnpadError),
 
     #[error("Base64 decoding error: {0}")]
     Decode(#[from] data_encoding::DecodeError),

@@ -31,7 +31,8 @@ pub(crate) struct Encrypted {
     pub exchange: Option<Exchange>,
     pub kex: kex::Algorithm,
     pub key: usize,
-    pub mac: Option<&'static str>,
+    pub client_mac: &'static str,
+    pub server_mac: &'static str,
     pub session_id: crate::Sha256Hash,
     pub rekey: Option<Kex>,
     pub channels: HashMap<ChannelId, Channel>,
@@ -65,7 +66,8 @@ impl<C> CommonSession<C> {
             enc.exchange = Some(newkeys.exchange);
             enc.kex = newkeys.kex;
             enc.key = newkeys.key;
-            enc.mac = newkeys.names.mac;
+            enc.client_mac = newkeys.names.client_mac;
+            enc.server_mac = newkeys.names.server_mac;
             self.cipher = Arc::new(newkeys.cipher);
         }
     }
@@ -75,7 +77,8 @@ impl<C> CommonSession<C> {
             exchange: Some(newkeys.exchange),
             kex: newkeys.kex,
             key: newkeys.key,
-            mac: newkeys.names.mac,
+            client_mac: newkeys.names.client_mac,
+            server_mac: newkeys.names.server_mac,
             session_id: newkeys.session_id,
             state,
             rekey: None,

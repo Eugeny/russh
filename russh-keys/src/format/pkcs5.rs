@@ -1,11 +1,8 @@
-use super::{pkcs_unpad, Encryption};
+use super::Encryption;
 use crate::key;
 use crate::Error;
 
 use aes::*;
-use block_modes::block_padding::NoPadding;
-use block_modes::BlockMode;
-type Aes128Cbc = block_modes::Cbc<Aes128, NoPadding>;
 
 /// Decode a secret key in the PKCS#5 format, possible deciphering it
 /// using the supplied password.
@@ -15,6 +12,9 @@ pub fn decode_pkcs5(
     password: Option<&str>,
     enc: Encryption,
 ) -> Result<key::KeyPair, Error> {
+    use aes::cipher::{BlockDecryptMut, KeyIvInit};
+    use block_padding::Pkcs7;
+
     if let Some(pass) = password {
         let sec = match enc {
             Encryption::Aes128Cbc(ref iv) => {
@@ -24,10 +24,9 @@ pub fn decode_pkcs5(
                 let md5 = c.compute();
 
                 #[allow(clippy::unwrap_used)] // AES parameters are static
-                let c = Aes128Cbc::new_from_slices(&md5.0, &iv[..]).unwrap();
+                let c = cbc::Decryptor::<Aes128>::new_from_slices(&md5.0, &iv[..]).unwrap();
                 let mut dec = secret.to_vec();
-                c.decrypt(&mut dec)?;
-                pkcs_unpad(&mut dec);
+                c.decrypt_padded_mut::<Pkcs7>(&mut dec)?;
                 dec
             }
             Encryption::Aes256Cbc(_) => unimplemented!(),

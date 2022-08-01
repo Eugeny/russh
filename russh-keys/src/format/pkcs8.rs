@@ -1,8 +1,10 @@
-use super::{pkcs_unpad, Encryption};
+use super::Encryption;
 use crate::key;
 #[cfg(feature = "openssl")]
 use crate::key::SignatureHash;
 use crate::Error;
+use aes::cipher::block_padding::Pkcs7;
+use aes::cipher::{BlockDecryptMut, BlockEncryptMut, KeyIvInit};
 use bit_vec::BitVec;
 #[cfg(feature = "openssl")]
 use openssl::pkey::Private;
@@ -260,11 +262,7 @@ fn test_read_write_pkcs8() {
 }
 
 use aes::*;
-use block_modes::block_padding::NoPadding;
-use block_modes::BlockMode;
 use yasna::models::ObjectIdentifier;
-type Aes128Cbc = block_modes::Cbc<Aes128, NoPadding>;
-type Aes256Cbc = block_modes::Cbc<Aes256, NoPadding>;
 
 /// Encode a password-protected PKCS#8-encoded private key.
 pub fn encode_pkcs8_encrypted(
@@ -286,9 +284,9 @@ pub fn encode_pkcs8_encrypted(
     plaintext.extend(std::iter::repeat(padding_len as u8).take(padding_len));
 
     #[allow(clippy::unwrap_used)] // parameters are static
-    let c = Aes256Cbc::new_from_slices(&dkey, &iv).unwrap();
+    let c = cbc::Encryptor::<Aes256>::new_from_slices(&dkey, &iv).unwrap();
     let n = plaintext.len();
-    c.encrypt(&mut plaintext, n)?;
+    c.encrypt_padded_mut::<Pkcs7>(&mut plaintext, n)?;
 
     Ok(yasna::construct_der(|writer| {
         writer.write_sequence(|writer| {
@@ -422,18 +420,16 @@ impl Encryption {
         match *self {
             Encryption::Aes128Cbc(ref iv) => {
                 #[allow(clippy::unwrap_used)] // parameters are static
-                let c = Aes128Cbc::new_from_slices(key, iv).unwrap();
+                let c = cbc::Decryptor::<Aes128>::new_from_slices(key, iv).unwrap();
                 let mut dec = ciphertext.to_vec();
-                c.decrypt(&mut dec)?;
-                pkcs_unpad(&mut dec);
+                c.decrypt_padded_mut::<Pkcs7>(&mut dec)?;
                 Ok(dec)
             }
             Encryption::Aes256Cbc(ref iv) => {
                 #[allow(clippy::unwrap_used)] // parameters are static
-                let c = Aes256Cbc::new_from_slices(key, iv).unwrap();
+                let c = cbc::Decryptor::<Aes256>::new_from_slices(key, iv).unwrap();
                 let mut dec = ciphertext.to_vec();
-                c.decrypt(&mut dec)?;
-                pkcs_unpad(&mut dec);
+                c.decrypt_padded_mut::<Pkcs7>(&mut dec)?;
                 Ok(dec)
             }
         }

@@ -1,7 +1,10 @@
 use crate::encoding::Reader;
 use crate::key;
 use crate::{Error, KEYTYPE_ED25519, KEYTYPE_RSA};
+use aes::cipher::block_padding::Pkcs7;
+use aes::cipher::{BlockDecryptMut, KeyIvInit, StreamCipher};
 use bcrypt_pbkdf;
+use ctr::Ctr64LE;
 #[cfg(feature = "openssl")]
 use openssl::bn::BigNum;
 
@@ -85,9 +88,6 @@ pub fn decode_openssh(secret: &[u8], password: Option<&str>) -> Result<key::KeyP
 }
 
 use aes::*;
-use block_modes::block_padding::NoPadding;
-type Aes128Cbc = block_modes::Cbc<Aes128, NoPadding>;
-type Aes256Cbc = block_modes::Cbc<Aes256, NoPadding>;
 
 fn decrypt_secret_key(
     ciphername: &[u8],
@@ -126,30 +126,28 @@ fn decrypt_secret_key(
 
         let mut dec = secret_key.to_vec();
         dec.resize(dec.len() + 32, 0u8);
-        use aes::cipher::{NewCipher, StreamCipher};
-        use block_modes::BlockMode;
         match ciphername {
             b"aes128-cbc" => {
                 #[allow(clippy::unwrap_used)] // parameters are static
-                let cipher = Aes128Cbc::new_from_slices(key, iv).unwrap();
-                let n = cipher.decrypt(&mut dec)?.len();
+                let cipher = cbc::Decryptor::<Aes128>::new_from_slices(key, iv).unwrap();
+                let n = cipher.decrypt_padded_mut::<Pkcs7>(&mut dec)?.len();
                 dec.truncate(n)
             }
             b"aes256-cbc" => {
                 #[allow(clippy::unwrap_used)] // parameters are static
-                let cipher = Aes256Cbc::new_from_slices(key, iv).unwrap();
-                let n = cipher.decrypt(&mut dec)?.len();
+                let cipher = cbc::Decryptor::<Aes256>::new_from_slices(key, iv).unwrap();
+                let n = cipher.decrypt_padded_mut::<Pkcs7>(&mut dec)?.len();
                 dec.truncate(n)
             }
             b"aes128-ctr" => {
                 #[allow(clippy::unwrap_used)] // parameters are static
-                let mut cipher = Aes128Ctr::new_from_slices(key, iv).unwrap();
+                let mut cipher = Ctr64LE::<Aes128>::new_from_slices(key, iv).unwrap();
                 cipher.apply_keystream(&mut dec);
                 dec.truncate(secret_key.len())
             }
             b"aes256-ctr" => {
                 #[allow(clippy::unwrap_used)] // parameters are static
-                let mut cipher = Aes256Ctr::new_from_slices(key, iv).unwrap();
+                let mut cipher = Ctr64LE::<Aes256>::new_from_slices(key, iv).unwrap();
                 cipher.apply_keystream(&mut dec);
                 dec.truncate(secret_key.len())
             }

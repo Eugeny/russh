@@ -34,6 +34,7 @@ pub static CIPHER: super::Cipher = super::Cipher {
     name: NAME,
     key_len: 64,
     nonce_len: 0,
+    mac_key_len: 0,
     make_sealing_cipher,
     make_opening_cipher,
 };
@@ -41,7 +42,7 @@ pub static CIPHER: super::Cipher = super::Cipher {
 pub const NAME: super::Name = super::Name("chacha20-poly1305@openssh.com");
 
 #[allow(clippy::indexing_slicing)] // length checked
-fn make_sealing_cipher(k: &[u8], _: &[u8]) -> super::SealingCipher {
+fn make_sealing_cipher(k: &[u8], _: &[u8], _: &[u8]) -> super::SealingCipher {
     let mut k1 = Key([0; KEY_BYTES]);
     let mut k2 = Key([0; KEY_BYTES]);
     k1.0.clone_from_slice(&k[KEY_BYTES..]);
@@ -50,7 +51,7 @@ fn make_sealing_cipher(k: &[u8], _: &[u8]) -> super::SealingCipher {
 }
 
 #[allow(clippy::indexing_slicing)] // length checked
-fn make_opening_cipher(k: &[u8], _: &[u8]) -> super::OpeningCipher {
+fn make_opening_cipher(k: &[u8], _: &[u8], _: &[u8]) -> super::OpeningCipher {
     let mut k1 = Key([0; KEY_BYTES]);
     let mut k2 = Key([0; KEY_BYTES]);
     k1.0.clone_from_slice(&k[KEY_BYTES..]);

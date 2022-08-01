@@ -289,6 +289,7 @@ extern crate thiserror;
 
 use std::fmt::{Display, Formatter};
 
+use digest::typenum::U32;
 pub use russh_cryptovec::CryptoVec;
 mod auth;
 mod cipher;
@@ -320,7 +321,7 @@ macro_rules! push_packet {
 }
 
 type Sha256Hash =
-    generic_array::GenericArray<u8, <sha2::Sha256 as digest::FixedOutputDirty>::OutputSize>;
+    generic_array::GenericArray<u8, U32>;
 
 mod session;
 
@@ -355,6 +356,10 @@ pub enum Error {
     /// No common compression algorithm.
     #[error("No common compression algorithm")]
     NoCommonCompression,
+
+    /// No common MAC algorithm.
+    #[error("No common MAC algorithm")]
+    NoCommonMac,
 
     /// Invalid SSH version string.
     #[error("invalid SSH version string")]

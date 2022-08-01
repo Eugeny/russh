@@ -49,6 +49,7 @@ pub const CURVE25519: Name = Name("curve25519-sha256@libssh.org");
 thread_local! {
     static KEY_BUF: RefCell<CryptoVec> = RefCell::new(CryptoVec::new());
     static NONCE_BUF: RefCell<CryptoVec> = RefCell::new(CryptoVec::new());
+    static MAC_BUF: RefCell<CryptoVec> = RefCell::new(CryptoVec::new());
     static BUFFER: RefCell<CryptoVec> = RefCell::new(CryptoVec::new());
 }
 
@@ -172,6 +173,7 @@ impl Algorithm {
         let cipher = match cipher {
             super::cipher::chacha20poly1305::NAME => &super::cipher::chacha20poly1305::CIPHER,
             super::cipher::aes256gcm::NAME => &super::cipher::aes256gcm::CIPHER,
+            super::cipher::aes256ctr::NAME => &super::cipher::aes256ctr::CIPHER,
             _ => unreachable!(),
         };
 
@@ -179,73 +181,85 @@ impl Algorithm {
         BUFFER.with(|buffer| {
             KEY_BUF.with(|key| {
                 NONCE_BUF.with(|nonce| {
-                    let compute_key = |c, key: &mut CryptoVec, len| -> Result<(), crate::Error> {
-                        let mut buffer = buffer.borrow_mut();
-                        buffer.clear();
-                        key.clear();
+                    MAC_BUF.with(|mac| {
+                        let compute_key =
+                            |c, key: &mut CryptoVec, len| -> Result<(), crate::Error> {
+                                let mut buffer = buffer.borrow_mut();
+                                buffer.clear();
+                                key.clear();
 
-                        if let Some(ref shared) = self.shared_secret {
-                            buffer.extend_ssh_mpint(&shared.0);
-                        }
+                                if let Some(ref shared) = self.shared_secret {
+                                    buffer.extend_ssh_mpint(&shared.0);
+                                }
 
-                        buffer.extend(exchange_hash.as_ref());
-                        buffer.push(c);
-                        buffer.extend(session_id.as_ref());
-                        let hash = {
-                            use sha2::Digest;
-                            let mut hasher = sha2::Sha256::new();
-                            hasher.update(&buffer[..]);
-                            hasher.finalize()
-                        };
-                        key.extend(hash.as_ref());
+                                buffer.extend(exchange_hash.as_ref());
+                                buffer.push(c);
+                                buffer.extend(session_id.as_ref());
+                                let hash = {
+                                    use sha2::Digest;
+                                    let mut hasher = sha2::Sha256::new();
+                                    hasher.update(&buffer[..]);
+                                    hasher.finalize()
+                                };
+                                key.extend(hash.as_ref());
 
-                        while key.len() < len {
-                            // extend.
-                            buffer.clear();
-                            if let Some(ref shared) = self.shared_secret {
-                                buffer.extend_ssh_mpint(&shared.0);
-                            }
-                            buffer.extend(exchange_hash.as_ref());
-                            buffer.extend(key);
-                            let hash = {
-                                use sha2::Digest;
-                                let mut hasher = sha2::Sha256::new();
-                                hasher.update(&buffer[..]);
-                                hasher.finalize()
+                                while key.len() < len {
+                                    // extend.
+                                    buffer.clear();
+                                    if let Some(ref shared) = self.shared_secret {
+                                        buffer.extend_ssh_mpint(&shared.0);
+                                    }
+                                    buffer.extend(exchange_hash.as_ref());
+                                    buffer.extend(key);
+                                    let hash = {
+                                        use sha2::Digest;
+                                        let mut hasher = sha2::Sha256::new();
+                                        hasher.update(&buffer[..]);
+                                        hasher.finalize()
+                                    };
+                                    key.extend(hash.as_ref());
+                                }
+
+                                key.resize(len);
+                                Ok(())
                             };
-                            key.extend(hash.as_ref());
-                        }
 
-                        key.resize(len);
-                        Ok(())
-                    };
+                        let (local_to_remote, remote_to_local) = if is_server {
+                            (b'D', b'C')
+                        } else {
+                            (b'C', b'D')
+                        };
 
-                    let (local_to_remote, remote_to_local) = if is_server {
-                        (b'D', b'C')
-                    } else {
-                        (b'C', b'D')
-                    };
+                        let (local_to_remote_nonce, remote_to_local_nonce) = if is_server {
+                            (b'B', b'A')
+                        } else {
+                            (b'A', b'B')
+                        };
 
-                    let (local_to_remote_nonce, remote_to_local_nonce) = if is_server {
-                        (b'B', b'A')
-                    } else {
-                        (b'A', b'B')
-                    };
+                        let (local_to_remote_mac, remote_to_local_mac) = if is_server {
+                            (b'F', b'E')
+                        } else {
+                            (b'E', b'F')
+                        };
 
-                    let mut key = key.borrow_mut();
-                    let mut nonce = nonce.borrow_mut();
+                        let mut key = key.borrow_mut();
+                        let mut nonce = nonce.borrow_mut();
+                        let mut mac = mac.borrow_mut();
 
-                    compute_key(local_to_remote, &mut key, cipher.key_len)?;
-                    compute_key(local_to_remote_nonce, &mut nonce, cipher.nonce_len)?;
-                    let local_to_remote = (cipher.make_sealing_cipher)(&key, &nonce);
+                        compute_key(local_to_remote, &mut key, cipher.key_len)?;
+                        compute_key(local_to_remote_nonce, &mut nonce, cipher.nonce_len)?;
+                        compute_key(local_to_remote_mac, &mut mac, cipher.mac_key_len)?;
+                        let local_to_remote = (cipher.make_sealing_cipher)(&key, &nonce, &mac);
 
-                    compute_key(remote_to_local, &mut key, cipher.key_len)?;
-                    compute_key(remote_to_local_nonce, &mut nonce, cipher.nonce_len)?;
-                    let remote_to_local = (cipher.make_opening_cipher)(&key, &nonce);
+                        compute_key(remote_to_local, &mut key, cipher.key_len)?;
+                        compute_key(remote_to_local_nonce, &mut nonce, cipher.nonce_len)?;
+                        compute_key(remote_to_local_mac, &mut mac, cipher.mac_key_len)?;
+                        let remote_to_local = (cipher.make_opening_cipher)(&key, &nonce, &mac);
 
-                    Ok(super::cipher::CipherPair {
-                        local_to_remote,
-                        remote_to_local,
+                        Ok(super::cipher::CipherPair {
+                            local_to_remote,
+                            remote_to_local,
+                        })
                     })
                 })
             })

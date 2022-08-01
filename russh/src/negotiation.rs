@@ -27,7 +27,8 @@ pub struct Names {
     pub kex: kex::Name,
     pub key: key::Name,
     pub cipher: cipher::Name,
-    pub mac: Option<&'static str>,
+    pub client_mac: &'static str,
+    pub server_mac: &'static str,
     pub server_compression: Compression,
     pub client_compression: Compression,
     pub ignore_guessed: bool,
@@ -53,7 +54,11 @@ impl Preferred {
     pub const DEFAULT: Preferred = Preferred {
         kex: &[kex::CURVE25519],
         key: &[key::ED25519, key::RSA_SHA2_256, key::RSA_SHA2_512],
-        cipher: &[cipher::chacha20poly1305::NAME, cipher::aes256gcm::NAME],
+        cipher: &[
+            cipher::chacha20poly1305::NAME,
+            cipher::aes256gcm::NAME,
+            cipher::aes256ctr::NAME,
+        ],
         mac: &["none"],
         compression: &["none", "zlib", "zlib@openssh.com"],
     };
@@ -62,7 +67,11 @@ impl Preferred {
     pub const DEFAULT: Preferred = Preferred {
         kex: &[kex::CURVE25519],
         key: &[key::ED25519],
-        cipher: &[cipher::chacha20poly1305::NAME, cipher::aes256gcm::NAME],
+        cipher: &[
+            cipher::chacha20poly1305::NAME,
+            cipher::aes256gcm::NAME,
+            cipher::aes256ctr::NAME,
+        ],
         mac: &["none"],
         compression: &["none", "zlib", "zlib@openssh.com"],
     };
@@ -70,7 +79,11 @@ impl Preferred {
     pub const COMPRESSED: Preferred = Preferred {
         kex: &[kex::CURVE25519],
         key: &[key::ED25519, key::RSA_SHA2_256, key::RSA_SHA2_512],
-        cipher: &[cipher::chacha20poly1305::NAME, cipher::aes256gcm::NAME],
+        cipher: &[
+            cipher::chacha20poly1305::NAME,
+            cipher::aes256gcm::NAME,
+            cipher::aes256ctr::NAME,
+        ],
         mac: &["none"],
         compression: &["zlib", "zlib@openssh.com", "none"],
     };
@@ -160,9 +173,16 @@ pub trait Select {
         }
         r.read_string()?; // cipher server-to-client.
         debug!("kex {}", line!());
-        let mac = Self::select(pref.mac, r.read_string()?);
-        let mac = mac.map(|(_, x)| x);
-        r.read_string()?; // mac server-to-client.
+        let client_mac = if let Some((_, m)) = Self::select(pref.mac, r.read_string()?) {
+            m
+        } else {
+            return Err(Error::NoCommonMac);
+        };
+        let server_mac = if let Some((_, m)) = Self::select(pref.mac, r.read_string()?) {
+            m
+        } else {
+            return Err(Error::NoCommonMac);
+        };
 
         debug!("kex {}", line!());
         // client-to-server compression.
@@ -185,13 +205,14 @@ pub trait Select {
         r.read_string()?; // languages server-to-client
 
         let follows = r.read_byte()? != 0;
-        match (cipher, mac, follows) {
-            (Some((_, cipher)), mac, fol) => {
+        match (cipher,  follows) {
+            (Some((_, cipher)), fol) => {
                 Ok(Names {
                     kex: kex_algorithm,
                     key: key_algorithm,
                     cipher,
-                    mac,
+                    client_mac,
+                    server_mac,
                     client_compression,
                     server_compression,
                     // Ignore the next packet if (1) it follows and (2) it's not the correct guess.
