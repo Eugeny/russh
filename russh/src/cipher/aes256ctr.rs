@@ -17,7 +17,7 @@ use super::super::Error;
 use aes::cipher::{KeyIvInit, StreamCipher};
 use aes::Aes256;
 use byteorder::{BigEndian, ByteOrder};
-use ctr::{Ctr128BE, Ctr64LE};
+use ctr::{Ctr128BE, Ctr64LE, Ctr64BE};
 use digest::typenum::U20;
 use generic_array::typenum::{U16, U32};
 use generic_array::GenericArray;
@@ -104,9 +104,12 @@ fn make_opening_cipher(k: &[u8], n: &[u8], m: &[u8]) -> super::OpeningCipher {
 impl super::OpeningKey for OpeningKey {
     fn decrypt_packet_length(
         &self,
-        _sequence_number: u32,
-        encrypted_packet_length: [u8; 4],
+        sequence_number: u32,
+        mut encrypted_packet_length: [u8; 4],
     ) -> [u8; 4] {
+        let nonce = make_nonce(&self.nonce, sequence_number);
+        let mut cipher = Ctr128BE::<Aes256>::new(&self.key, &nonce);
+        cipher.apply_keystream(&mut encrypted_packet_length);
         encrypted_packet_length
     }
 
@@ -123,6 +126,8 @@ impl super::OpeningKey for OpeningKey {
         let nonce = make_nonce(&self.nonce, sequence_number);
         let mut cipher = Ctr128BE::<Aes256>::new(&self.key, &nonce);
         cipher.apply_keystream(ciphertext_in_plaintext_out);
+
+        // TODO check mac
 
         Ok(ciphertext_in_plaintext_out)
     }
@@ -150,7 +155,8 @@ impl super::SealingKey for SealingKey {
     }
 
     fn fill_padding(&self, padding_out: &mut [u8]) {
-        randombytes(padding_out);
+        padding_out.fill(0)
+        // randombytes(padding_out);
     }
 
     fn tag_len(&self) -> usize {
@@ -172,11 +178,15 @@ impl super::SealingKey for SealingKey {
         hmac.update(plaintext_in_ciphertext_out);
 
         tag_out.copy_from_slice(&hmac.finalize().into_bytes());
+        println!("hmac key {:?}", self.mac_key.as_slice());
         println!("raw {:?}{:?}", buf, plaintext_in_ciphertext_out);
         println!("hmac {:?}", tag_out);
 
         let nonce = make_nonce(&self.nonce, sequence_number);
-        let mut cipher = Ctr64LE::<Aes256>::new(&self.key, &nonce);
+        let mut cipher = Ctr128BE::<Aes256>::new(&self.key, &nonce);
+        println!("data pre enc {:?}", plaintext_in_ciphertext_out);
+
+        // TODO check mac
         cipher.apply_keystream(plaintext_in_ciphertext_out);
     }
 }
