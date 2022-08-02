@@ -14,7 +14,7 @@
 //
 use crate::sshbuffer::SSHBuffer;
 use crate::Error;
-use aes::{Aes128, Aes256};
+use aes::{Aes128, Aes192, Aes256};
 use byteorder::{BigEndian, ByteOrder};
 use ctr::Ctr128BE;
 use once_cell::sync::Lazy;
@@ -43,6 +43,7 @@ pub trait Cipher {
 
 pub const CLEAR: Name = Name("clear");
 pub const AES_128_CTR: Name = Name("aes128-ctr");
+pub const AES_192_CTR: Name = Name("aes192-ctr");
 pub const AES_256_CTR: Name = Name("aes256-ctr");
 pub const AES_256_GCM: Name = Name("aes256-gcm@openssh.com");
 pub const CHACHA20_POLY1305: Name = Name("chacha20-poly1305@openssh.com");
@@ -50,6 +51,8 @@ pub const CHACHA20_POLY1305: Name = Name("chacha20-poly1305@openssh.com");
 static _CLEAR: Clear = Clear {};
 static _AES_128_CTR: SshBlockCipher<Ctr128BE<Aes128>> =
     SshBlockCipher::<Ctr128BE<Aes128>> { c: PhantomData };
+static _AES_192_CTR: SshBlockCipher<Ctr128BE<Aes192>> =
+    SshBlockCipher::<Ctr128BE<Aes192>> { c: PhantomData };
 static _AES_256_CTR: SshBlockCipher<Ctr128BE<Aes256>> =
     SshBlockCipher::<Ctr128BE<Aes256>> { c: PhantomData };
 static _AES_256_GCM: Aes256Gcm = Aes256Gcm {};
@@ -59,6 +62,7 @@ pub static CIPHERS: Lazy<HashMap<&'static Name, &(dyn Cipher + Send + Sync)>> = 
     let mut h: HashMap<&'static Name, &(dyn Cipher + Send + Sync)> = HashMap::new();
     h.insert(&CLEAR, &_CLEAR);
     h.insert(&AES_128_CTR, &_AES_128_CTR);
+    h.insert(&AES_192_CTR, &_AES_192_CTR);
     h.insert(&AES_256_CTR, &_AES_256_CTR);
     h.insert(&AES_256_GCM, &_AES_256_GCM);
     h.insert(&CHACHA20_POLY1305, &_CHACHA20_POLY1305);
