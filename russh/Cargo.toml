@@ -53,6 +53,7 @@ futures = "0.3"
 generic-array = "0.14"
 hmac = "0.12"
 log = "0.4"
+once_cell = "1.13"
 openssl = {version = "0.10", optional = true}
 rand = "0.8"
 russh-cryptovec = {version = "0.7.0-beta.1", path = "../cryptovec"}

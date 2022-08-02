@@ -13,7 +13,7 @@
 // limitations under the License.
 //
 
-use crate::cipher::SealingCipher;
+use crate::cipher::SealingKey;
 use crate::sshbuffer::SSHBuffer;
 use crate::{auth, cipher, kex, msg, negotiation};
 use crate::{Channel, ChannelId, Disconnect, Limits};
@@ -316,7 +316,7 @@ impl Encrypted {
     pub fn flush(
         &mut self,
         limits: &Limits,
-        cipher: &mut SealingCipher,
+        cipher: &mut dyn SealingKey,
         write_buffer: &mut SSHBuffer,
     ) -> Result<bool, crate::Error> {
         // If there are pending packets (and we've not started to rekey), flush them.

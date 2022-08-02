@@ -16,9 +16,42 @@
 // http://cvsweb.openbsd.org/cgi-bin/cvsweb/src/usr.bin/ssh/PROTOCOL.chacha20poly1305?annotate=HEAD
 
 use super::super::Error;
+use super::Name;
 use byteorder::{BigEndian, ByteOrder};
 use sodium::aes256gcm::*;
 use sodium::random::randombytes;
+
+pub struct Aes256Gcm {}
+
+impl super::Cipher for Aes256Gcm {
+    fn key_len(&self) -> usize {
+        KEY_BYTES
+    }
+
+    fn mac_key_len(&self) -> usize {
+        0
+    }
+
+    fn nonce_len(&self) -> usize {
+        NONCE_BYTES
+    }
+
+    fn make_opening_key(&self, k: &[u8], n: &[u8], _: &[u8]) -> Box<dyn super::OpeningKey + Send> {
+        let mut key = Key([0u8; KEY_BYTES]);
+        let mut nonce = Nonce([0u8; NONCE_BYTES]);
+        key.0.clone_from_slice(k);
+        nonce.0.clone_from_slice(n);
+        Box::new(OpeningKey { key, nonce })
+    }
+
+    fn make_sealing_key(&self, k: &[u8], n: &[u8], _: &[u8]) -> Box<dyn super::SealingKey + Send> {
+        let mut key = Key([0u8; KEY_BYTES]);
+        let mut nonce = Nonce([0u8; NONCE_BYTES]);
+        key.0.clone_from_slice(k);
+        nonce.0.clone_from_slice(n);
+        Box::new(SealingKey { key, nonce })
+    }
+}
 
 pub struct OpeningKey {
     key: Key,
@@ -31,34 +64,6 @@ pub struct SealingKey {
 }
 
 const TAG_LEN: usize = 16;
-
-pub static CIPHER: super::Cipher = super::Cipher {
-    name: NAME,
-    key_len: KEY_BYTES,
-    nonce_len: NONCE_BYTES,
-    mac_key_len: 0,
-    make_sealing_cipher,
-    make_opening_cipher,
-};
-
-pub const NAME: super::Name = super::Name("aes256-gcm@openssh.com");
-
-fn make_sealing_cipher(k: &[u8], n: &[u8], _: &[u8]) -> super::SealingCipher {
-    let mut key = Key([0; KEY_BYTES]);
-    let mut nonce = Nonce([0; NONCE_BYTES]);
-    key.0.clone_from_slice(k);
-    nonce.0.clone_from_slice(n);
-    super::SealingCipher::AES256GCM(SealingKey { key, nonce })
-}
-
-fn make_opening_cipher(k: &[u8], n: &[u8], _: &[u8]) -> super::OpeningCipher {
-    let mut key = Key([0; KEY_BYTES]);
-    let mut nonce = Nonce([0; NONCE_BYTES]);
-    key.0.clone_from_slice(k);
-    nonce.0.clone_from_slice(n);
-    super::OpeningCipher::AES256GCM(OpeningKey { key, nonce })
-}
-
 const GCM_COUNTER_OFFSET: u64 = 3;
 
 fn make_nonce(nonce: &Nonce, sequence_number: u32) -> Nonce {

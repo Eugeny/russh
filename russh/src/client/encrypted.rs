@@ -50,7 +50,7 @@ impl super::Session {
                 if let Some(Kex::Init(kexinit)) = enc.rekey.take() {
                     enc.rekey = Some(Kex::DhDone(kexinit.client_parse(
                         self.common.config.as_ref(),
-                        &mut self.common.cipher.local_to_remote,
+                        &mut *self.common.cipher.local_to_remote,
                         buf,
                         &mut self.common.write_buffer,
                     )?));
@@ -62,7 +62,7 @@ impl super::Session {
                     );
                     enc.rekey = Some(Kex::DhDone(kexinit.client_parse(
                         self.common.config.as_ref(),
-                        &mut self.common.cipher.local_to_remote,
+                        &mut *self.common.cipher.local_to_remote,
                         buf,
                         &mut self.common.write_buffer,
                     )?));
@@ -516,7 +516,10 @@ impl super::Session {
                     debug!("sending ssh-userauth service requset");
                     if !*sent {
                         let p = b"\x05\0\0\0\x0Cssh-userauth";
-                        self.common.cipher.local_to_remote.write(p, &mut self.common.write_buffer);
+                        self.common
+                            .cipher
+                            .local_to_remote
+                            .write(p, &mut self.common.write_buffer);
                         *sent = true
                     }
                     accepted

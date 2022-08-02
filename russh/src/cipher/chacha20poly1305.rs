@@ -19,6 +19,40 @@ use super::super::Error;
 use byteorder::{BigEndian, ByteOrder};
 use sodium::chacha20::*;
 
+pub struct Chacha20Poly1305 {}
+
+impl super::Cipher for Chacha20Poly1305 {
+    fn key_len(&self) -> usize {
+        KEY_BYTES * 2
+    }
+
+    fn mac_key_len(&self) -> usize {
+        0
+    }
+
+    fn nonce_len(&self) -> usize {
+        0
+    }
+
+    #[allow(clippy::indexing_slicing)] // length checked
+    fn make_opening_key(&self, k: &[u8], _: &[u8], _: &[u8]) -> Box<dyn super::OpeningKey + Send> {
+        let mut k1 = Key([0; KEY_BYTES]);
+        let mut k2 = Key([0; KEY_BYTES]);
+        k1.0.clone_from_slice(&k[KEY_BYTES..]);
+        k2.0.clone_from_slice(&k[..KEY_BYTES]);
+        Box::new(OpeningKey { k1, k2 })
+    }
+
+    #[allow(clippy::indexing_slicing)] // length checked
+    fn make_sealing_key(&self, k: &[u8], _: &[u8], _: &[u8]) -> Box<dyn super::SealingKey + Send> {
+        let mut k1 = Key([0; KEY_BYTES]);
+        let mut k2 = Key([0; KEY_BYTES]);
+        k1.0.clone_from_slice(&k[KEY_BYTES..]);
+        k2.0.clone_from_slice(&k[..KEY_BYTES]);
+        Box::new(SealingKey { k1, k2 })
+    }
+}
+
 pub struct OpeningKey {
     k1: Key,
     k2: Key,
@@ -30,35 +64,6 @@ pub struct SealingKey {
 }
 
 const TAG_LEN: usize = 16;
-
-pub static CIPHER: super::Cipher = super::Cipher {
-    name: NAME,
-    key_len: 64,
-    nonce_len: 0,
-    mac_key_len: 0,
-    make_sealing_cipher,
-    make_opening_cipher,
-};
-
-pub const NAME: super::Name = super::Name("chacha20-poly1305@openssh.com");
-
-#[allow(clippy::indexing_slicing)] // length checked
-fn make_sealing_cipher(k: &[u8], _: &[u8], _: &[u8]) -> super::SealingCipher {
-    let mut k1 = Key([0; KEY_BYTES]);
-    let mut k2 = Key([0; KEY_BYTES]);
-    k1.0.clone_from_slice(&k[KEY_BYTES..]);
-    k2.0.clone_from_slice(&k[..KEY_BYTES]);
-    super::SealingCipher::Chacha20Poly1305(SealingKey { k1, k2 })
-}
-
-#[allow(clippy::indexing_slicing)] // length checked
-fn make_opening_cipher(k: &[u8], _: &[u8], _: &[u8]) -> super::OpeningCipher {
-    let mut k1 = Key([0; KEY_BYTES]);
-    let mut k2 = Key([0; KEY_BYTES]);
-    k1.0.clone_from_slice(&k[KEY_BYTES..]);
-    k2.0.clone_from_slice(&k[..KEY_BYTES]);
-    super::OpeningCipher::Chacha20Poly1305(OpeningKey { k1, k2 })
-}
 
 #[allow(clippy::indexing_slicing)] // length checked
 fn make_counter(sequence_number: u32) -> Nonce {

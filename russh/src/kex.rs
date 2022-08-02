@@ -1,3 +1,4 @@
+use crate::cipher::CIPHERS;
 // Copyright 2016 Pierre-Étienne Meunier
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -170,12 +171,7 @@ impl Algorithm {
         cipher: cipher::Name,
         is_server: bool,
     ) -> Result<super::cipher::CipherPair, crate::Error> {
-        let cipher = match cipher {
-            super::cipher::chacha20poly1305::NAME => &super::cipher::chacha20poly1305::CIPHER,
-            super::cipher::aes256gcm::NAME => &super::cipher::aes256gcm::CIPHER,
-            super::cipher::aes256ctr::NAME => &super::cipher::aes256ctr::CIPHER,
-            _ => unreachable!(),
-        };
+        let cipher = CIPHERS.get(&cipher).unwrap();
 
         // https://tools.ietf.org/html/rfc4253#section-7.2
         BUFFER.with(|buffer| {
@@ -246,15 +242,15 @@ impl Algorithm {
                         let mut nonce = nonce.borrow_mut();
                         let mut mac = mac.borrow_mut();
 
-                        compute_key(local_to_remote, &mut key, cipher.key_len)?;
-                        compute_key(local_to_remote_nonce, &mut nonce, cipher.nonce_len)?;
-                        compute_key(local_to_remote_mac, &mut mac, cipher.mac_key_len)?;
-                        let local_to_remote = (cipher.make_sealing_cipher)(&key, &nonce, &mac);
+                        compute_key(local_to_remote, &mut key, cipher.key_len())?;
+                        compute_key(local_to_remote_nonce, &mut nonce, cipher.nonce_len())?;
+                        compute_key(local_to_remote_mac, &mut mac, cipher.mac_key_len())?;
 
-                        compute_key(remote_to_local, &mut key, cipher.key_len)?;
-                        compute_key(remote_to_local_nonce, &mut nonce, cipher.nonce_len)?;
-                        compute_key(remote_to_local_mac, &mut mac, cipher.mac_key_len)?;
-                        let remote_to_local = (cipher.make_opening_cipher)(&key, &nonce, &mac);
+                        let local_to_remote = cipher.make_sealing_key(&key, &nonce, &mac);
+                        compute_key(remote_to_local, &mut key, cipher.key_len())?;
+                        compute_key(remote_to_local_nonce, &mut nonce, cipher.nonce_len())?;
+                        compute_key(remote_to_local_mac, &mut mac, cipher.mac_key_len())?;
+                        let remote_to_local = cipher.make_opening_key(&key, &nonce, &mac);
 
                         Ok(super::cipher::CipherPair {
                             local_to_remote,

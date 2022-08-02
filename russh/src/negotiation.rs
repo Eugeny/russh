@@ -55,9 +55,9 @@ impl Preferred {
         kex: &[kex::CURVE25519],
         key: &[key::ED25519, key::RSA_SHA2_256, key::RSA_SHA2_512],
         cipher: &[
-            cipher::chacha20poly1305::NAME,
-            cipher::aes256gcm::NAME,
-            cipher::aes256ctr::NAME,
+            cipher::CHACHA20_POLY1305,
+            cipher::AES_256_GCM,
+            cipher::AES_256_CTR,
         ],
         mac: &["none"],
         compression: &["none", "zlib", "zlib@openssh.com"],
@@ -68,9 +68,9 @@ impl Preferred {
         kex: &[kex::CURVE25519],
         key: &[key::ED25519],
         cipher: &[
-            cipher::chacha20poly1305::NAME,
-            cipher::aes256gcm::NAME,
-            cipher::aes256ctr::NAME,
+            cipher::CHACHA20_POLY1305,
+            cipher::AES_256_GCM,
+            cipher::AES_256_CTR,
         ],
         mac: &["none"],
         compression: &["none", "zlib", "zlib@openssh.com"],
@@ -80,9 +80,9 @@ impl Preferred {
         kex: &[kex::CURVE25519],
         key: &[key::ED25519, key::RSA_SHA2_256, key::RSA_SHA2_512],
         cipher: &[
-            // cipher::chacha20poly1305::NAME,
-            cipher::aes256gcm::NAME,
-            // cipher::aes256ctr::NAME,
+            cipher::CHACHA20_POLY1305,
+            cipher::AES_256_GCM,
+            cipher::AES_256_CTR,
         ],
         mac: &["none"],
         compression: &["zlib", "zlib@openssh.com", "none"],
@@ -174,7 +174,7 @@ pub trait Select {
         r.read_string()?; // cipher server-to-client.
         debug!("kex {}", line!());
 
-        let need_mac = matches!(cipher, Some((_, cipher::aes256ctr::NAME)));
+        let need_mac = cipher.map(|x| x.1 == cipher::AES_256_CTR).unwrap_or(false);
 
         let client_mac = if let Some((_, m)) = Self::select(pref.mac, r.read_string()?) {
             m

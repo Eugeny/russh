@@ -18,6 +18,30 @@ use crate::Error;
 #[derive(Debug)]
 pub struct Key;
 
+pub struct Clear {}
+
+impl super::Cipher for Clear {
+    fn key_len(&self) -> usize {
+        0
+    }
+
+    fn mac_key_len(&self) -> usize {
+        0
+    }
+
+    fn nonce_len(&self) -> usize {
+        0
+    }
+
+    fn make_opening_key(&self, _: &[u8], _: &[u8], _: &[u8]) -> Box<dyn super::OpeningKey + Send> {
+        Box::new(Key {})
+    }
+
+    fn make_sealing_key(&self, _: &[u8], _: &[u8], _: &[u8]) -> Box<dyn super::SealingKey + Send> {
+        Box::new(Key {})
+    }
+}
+
 impl super::OpeningKey for Key {
     fn decrypt_packet_length(&self, _seqn: u32, packet_length: [u8; 4]) -> [u8; 4] {
         packet_length

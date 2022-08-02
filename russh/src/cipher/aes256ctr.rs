@@ -1,5 +1,3 @@
-// Copyright 2016 Pierre-Étienne Meunier
-//
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -13,100 +11,88 @@
 // limitations under the License.
 //
 
+use std::marker::PhantomData;
+
 use super::super::Error;
-use aes::cipher::{KeyIvInit, StreamCipher};
-use aes::Aes256;
+use aes::cipher::{IvSizeUser, KeyIvInit, KeySizeUser, StreamCipher};
 use byteorder::{BigEndian, ByteOrder};
-use ctr::Ctr128BE;
 use digest::typenum::U20;
 use digest::CtOutput;
-use generic_array::typenum::{U16, U32};
 use generic_array::GenericArray;
 use hmac::{Hmac, Mac};
 use russh_libsodium::random::randombytes;
 use sha1::Sha1;
 
-const KEY_BYTES: usize = 32;
-const NONCE_BYTES: usize = 16;
 const MAC_KEY_BYTES: usize = 20;
-type Key = GenericArray<u8, U32>;
-type Nonce = GenericArray<u8, U16>;
 type MacKey = GenericArray<u8, U20>;
 
-pub struct OpeningKey {
-    mac_key: MacKey,
-    cipher: Ctr128BE<Aes256>,
+pub struct SshBlockCipher<C: StreamCipher + KeySizeUser + IvSizeUser> {
+    pub c: PhantomData<C>,
 }
 
-pub struct SealingKey {
+impl<C: StreamCipher + KeySizeUser + IvSizeUser + KeyIvInit + Send + 'static> super::Cipher
+    for SshBlockCipher<C>
+{
+    fn key_len(&self) -> usize {
+        C::key_size()
+    }
+
+    fn mac_key_len(&self) -> usize {
+        MAC_KEY_BYTES
+    }
+
+    fn nonce_len(&self) -> usize {
+        C::iv_size()
+    }
+
+    fn make_opening_key(&self, k: &[u8], n: &[u8], m: &[u8]) -> Box<dyn super::OpeningKey + Send> {
+        let mut key = GenericArray::<u8, C::KeySize>::default();
+        let mut nonce = GenericArray::<u8, C::IvSize>::default();
+        let mut mac_key = GenericArray::from([0u8; MAC_KEY_BYTES]);
+        key.clone_from_slice(k);
+        nonce.clone_from_slice(n);
+        mac_key.clone_from_slice(m);
+        Box::new(OpeningKey {
+            cipher: C::new(&key, &nonce),
+            mac_key,
+        })
+    }
+
+    fn make_sealing_key(&self, k: &[u8], n: &[u8], m: &[u8]) -> Box<dyn super::SealingKey + Send> {
+        let mut key = GenericArray::<u8, C::KeySize>::default();
+        let mut nonce = GenericArray::<u8, C::IvSize>::default();
+        let mut mac_key = GenericArray::from([0u8; MAC_KEY_BYTES]);
+        key.clone_from_slice(k);
+        nonce.clone_from_slice(n);
+        mac_key.clone_from_slice(m);
+        Box::new(SealingKey {
+            cipher: C::new(&key, &nonce),
+            mac_key,
+        })
+    }
+}
+
+pub struct OpeningKey<C: StreamCipher + KeySizeUser + IvSizeUser> {
     mac_key: MacKey,
-    cipher: Ctr128BE<Aes256>,
+    cipher: C,
+}
+
+pub struct SealingKey<C: StreamCipher + KeySizeUser + IvSizeUser> {
+    mac_key: MacKey,
+    cipher: C,
 }
 
 const TAG_LEN: usize = 20;
 const SEQ_OFFSET: u32 = 3;
 
-pub static CIPHER: super::Cipher = super::Cipher {
-    name: NAME,
-    key_len: KEY_BYTES,
-    nonce_len: NONCE_BYTES,
-    mac_key_len: MAC_KEY_BYTES,
-    make_sealing_cipher,
-    make_opening_cipher,
-};
-pub const NAME: super::Name = super::Name("aes256-ctr");
-
-fn make_nonce(nonce: &Nonce, sequence_number: u32) -> Nonce {
-    let mut new_nonce = Nonce::from([0; NONCE_BYTES]);
-    new_nonce.clone_from_slice(&nonce);
-
-    #[allow(clippy::indexing_slicing)] // length checked
-    let ctr = BigEndian::read_u128(&new_nonce[..]);
-
-    #[allow(clippy::indexing_slicing)] // length checked
-    BigEndian::write_u128(
-        &mut new_nonce[..],
-        ctr + sequence_number as u128 - SEQ_OFFSET as u128,
-    );
-
-    new_nonce
-}
-
-fn make_sealing_cipher(k: &[u8], n: &[u8], m: &[u8]) -> super::SealingCipher {
-    let mut key = GenericArray::from([0u8; KEY_BYTES]);
-    let mut nonce = GenericArray::from([0u8; NONCE_BYTES]);
-    let mut mac_key = GenericArray::from([0u8; MAC_KEY_BYTES]);
-    key.clone_from_slice(k);
-    nonce.clone_from_slice(n);
-    mac_key.clone_from_slice(m);
-    super::SealingCipher::AES256CTR(SealingKey {
-        cipher: Ctr128BE::<Aes256>::new(&key, &nonce),
-        mac_key,
-    })
-}
-
-fn make_opening_cipher(k: &[u8], n: &[u8], m: &[u8]) -> super::OpeningCipher {
-    let mut key = GenericArray::from([0u8; KEY_BYTES]);
-    let mut nonce = GenericArray::from([0u8; NONCE_BYTES]);
-    let mut mac_key = GenericArray::from([0u8; MAC_KEY_BYTES]);
-    key.clone_from_slice(k);
-    nonce.clone_from_slice(n);
-    mac_key.clone_from_slice(m);
-    super::OpeningCipher::AES256CTR(OpeningKey {
-        cipher: Ctr128BE::<Aes256>::new(&key, &nonce),
-        mac_key,
-    })
-}
-
-impl super::OpeningKey for OpeningKey {
+impl<C: StreamCipher + KeySizeUser + IvSizeUser> super::OpeningKey for OpeningKey<C> {
     fn decrypt_packet_length(
         &self,
         _sequence_number: u32,
         mut encrypted_packet_length: [u8; 4],
     ) -> [u8; 4] {
         // Work around uncloneable Aes<>
-        let mut cipher: Ctr128BE<Aes256> =
-            unsafe { std::ptr::read(&self.cipher as *const Ctr128BE<Aes256>) };
+        let mut cipher: C = unsafe { std::ptr::read(&self.cipher as *const C) };
         cipher.apply_keystream(&mut encrypted_packet_length);
         encrypted_packet_length
     }
@@ -137,7 +123,7 @@ impl super::OpeningKey for OpeningKey {
     }
 }
 
-impl super::SealingKey for SealingKey {
+impl<C: StreamCipher + KeySizeUser + IvSizeUser> super::SealingKey for SealingKey<C> {
     fn padding_length(&self, payload: &[u8]) -> usize {
         let block_size = 16;
         let extra_len = super::PACKET_LENGTH_LEN + super::PADDING_LENGTH_LEN + TAG_LEN;

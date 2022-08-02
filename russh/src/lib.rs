@@ -320,8 +320,7 @@ macro_rules! push_packet {
     }};
 }
 
-type Sha256Hash =
-    generic_array::GenericArray<u8, U32>;
+type Sha256Hash = generic_array::GenericArray<u8, U32>;
 
 mod session;
 

@@ -36,7 +36,7 @@ use tokio::net::TcpStream;
 use tokio::pin;
 
 mod kex;
-use crate::cipher::{self, OpeningCipher, CLEAR_PAIR, CipherPair, SealingCipher, clear};
+use crate::cipher::{self, clear, CipherPair, OpeningKey};
 use crate::{msg, Error};
 mod encrypted;
 mod session;
@@ -795,7 +795,10 @@ where
             kex: None,
             auth_user: String::new(),
             auth_method: None, // Client only.
-            cipher: cipher::CLEAR_PAIR,
+            cipher: CipherPair {
+                local_to_remote: Box::new(clear::Key),
+                remote_to_local: Box::new(clear::Key),
+            },
             encrypted: None,
             config,
             wants_reply: false,
@@ -827,10 +830,10 @@ where
 async fn start_reading<R: AsyncRead + Unpin>(
     mut stream_read: R,
     mut buffer: SSHBuffer,
-    mut cipher: OpeningCipher,
-) -> Result<(usize, R, SSHBuffer, OpeningCipher), Error> {
+    mut cipher: Box<dyn OpeningKey + Send>,
+) -> Result<(usize, R, SSHBuffer, Box<dyn OpeningKey + Send>), Error> {
     buffer.buffer.clear();
-    let n = cipher::read(&mut stream_read, &mut buffer, &mut cipher).await?;
+    let n = cipher::read(&mut stream_read, &mut buffer, &mut *cipher).await?;
     Ok((n, stream_read, buffer, cipher))
 }
 
@@ -857,7 +860,7 @@ impl Session {
         let buffer = SSHBuffer::new();
 
         // Allow handing out references to the cipher
-        let mut opening_cipher = OpeningCipher::Clear(clear::Key);
+        let mut opening_cipher = Box::new(clear::Key) as Box<dyn OpeningKey + Send>;
         std::mem::swap(&mut opening_cipher, &mut self.common.cipher.remote_to_local);
 
         let reading = start_reading(stream_read, buffer, opening_cipher);
@@ -1018,7 +1021,7 @@ impl Session {
         self.common.write_buffer.buffer.clear();
         kexinit.client_write(
             self.common.config.as_ref(),
-            &mut self.common.cipher.local_to_remote,
+            &mut *self.common.cipher.local_to_remote,
             &mut self.common.write_buffer,
         )?;
         self.common.kex = Some(Kex::Init(kexinit));
@@ -1031,7 +1034,7 @@ impl Session {
         if let Some(ref mut enc) = self.common.encrypted {
             if enc.flush(
                 &self.common.config.as_ref().limits,
-                &mut self.common.cipher.local_to_remote,
+                &mut *self.common.cipher.local_to_remote,
                 &mut self.common.write_buffer,
             )? {
                 info!("Re-exchanging keys");
@@ -1040,7 +1043,7 @@ impl Session {
                         let mut kexinit = KexInit::initiate_rekey(exchange, &enc.session_id);
                         kexinit.client_write(
                             self.common.config.as_ref(),
-                            &mut self.common.cipher.local_to_remote,
+                            &mut *self.common.cipher.local_to_remote,
                             &mut self.common.write_buffer,
                         )?;
                         enc.rekey = Some(Kex::Init(kexinit))
@@ -1138,7 +1141,7 @@ async fn reply<H: Handler>(
             {
                 session.common.kex = Some(Kex::DhDone(kexinit.client_parse(
                     session.common.config.as_ref(),
-                    &mut session.common.cipher.local_to_remote,
+                    &mut *session.common.cipher.local_to_remote,
                     buf,
                     &mut session.common.write_buffer,
                 )?));

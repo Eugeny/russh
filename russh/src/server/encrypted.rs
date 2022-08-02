@@ -49,7 +49,7 @@ impl Session {
             if let Some(Kex::Init(kexinit)) = enc.rekey.take() {
                 enc.rekey = Some(kexinit.server_parse(
                     self.common.config.as_ref(),
-                    &mut self.common.cipher.local_to_remote,
+                    &mut *self.common.cipher.local_to_remote,
                     buf,
                     &mut self.common.write_buffer,
                 )?);
@@ -61,7 +61,7 @@ impl Session {
                 );
                 enc.rekey = Some(kexinit.server_parse(
                     self.common.config.as_ref(),
-                    &mut self.common.cipher.local_to_remote,
+                    &mut *self.common.cipher.local_to_remote,
                     buf,
                     &mut self.common.write_buffer,
                 )?);
@@ -74,7 +74,7 @@ impl Session {
             Some(Kex::Dh(kexdh)) => {
                 enc.rekey = Some(kexdh.parse(
                     self.common.config.as_ref(),
-                    &mut self.common.cipher.local_to_remote,
+                    &mut *self.common.cipher.local_to_remote,
                     buf,
                     &mut self.common.write_buffer,
                 )?);
