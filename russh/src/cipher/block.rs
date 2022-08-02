@@ -83,7 +83,6 @@ pub struct SealingKey<C: StreamCipher + KeySizeUser + IvSizeUser> {
 }
 
 const TAG_LEN: usize = 20;
-const SEQ_OFFSET: u32 = 3;
 
 impl<C: StreamCipher + KeySizeUser + IvSizeUser> super::OpeningKey for OpeningKey<C> {
     fn decrypt_packet_length(

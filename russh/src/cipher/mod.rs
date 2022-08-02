@@ -24,14 +24,14 @@ use std::marker::PhantomData;
 use std::num::Wrapping;
 use tokio::io::{AsyncRead, AsyncReadExt};
 
-pub mod aes256ctr;
-pub mod aes256gcm;
+pub mod block;
 pub mod chacha20poly1305;
 pub mod clear;
-use aes256ctr::SshBlockCipher;
-use aes256gcm::Aes256Gcm;
+pub mod gcm;
+use block::SshBlockCipher;
 use chacha20poly1305::Chacha20Poly1305;
 use clear::Clear;
+use gcm::GcmCipher;
 
 pub trait Cipher {
     fn key_len(&self) -> usize;
@@ -55,7 +55,7 @@ static _AES_192_CTR: SshBlockCipher<Ctr128BE<Aes192>> =
     SshBlockCipher::<Ctr128BE<Aes192>> { c: PhantomData };
 static _AES_256_CTR: SshBlockCipher<Ctr128BE<Aes256>> =
     SshBlockCipher::<Ctr128BE<Aes256>> { c: PhantomData };
-static _AES_256_GCM: Aes256Gcm = Aes256Gcm {};
+static _AES_256_GCM: GcmCipher = GcmCipher {};
 static _CHACHA20_POLY1305: Chacha20Poly1305 = Chacha20Poly1305 {};
 
 pub static CIPHERS: Lazy<HashMap<&'static Name, &(dyn Cipher + Send + Sync)>> = Lazy::new(|| {

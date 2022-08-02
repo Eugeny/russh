@@ -16,16 +16,20 @@
 // http://cvsweb.openbsd.org/cgi-bin/cvsweb/src/usr.bin/ssh/PROTOCOL.chacha20poly1305?annotate=HEAD
 
 use super::super::Error;
-use super::Name;
+use aes_gcm::{AeadCore, AeadInPlace, Aes256Gcm, KeyInit, KeySizeUser};
 use byteorder::{BigEndian, ByteOrder};
-use sodium::aes256gcm::*;
+use generic_array::GenericArray;
 use sodium::random::randombytes;
 
-pub struct Aes256Gcm {}
+pub struct GcmCipher {}
 
-impl super::Cipher for Aes256Gcm {
+type KeySize = <Aes256Gcm as KeySizeUser>::KeySize;
+type NonceSize = <Aes256Gcm as AeadCore>::NonceSize;
+type TagSize = <Aes256Gcm as AeadCore>::TagSize;
+
+impl super::Cipher for GcmCipher {
     fn key_len(&self) -> usize {
-        KEY_BYTES
+        Aes256Gcm::key_size()
     }
 
     fn mac_key_len(&self) -> usize {
@@ -33,52 +37,60 @@ impl super::Cipher for Aes256Gcm {
     }
 
     fn nonce_len(&self) -> usize {
-        NONCE_BYTES
+        GenericArray::<u8, NonceSize>::default().len()
     }
 
     fn make_opening_key(&self, k: &[u8], n: &[u8], _: &[u8]) -> Box<dyn super::OpeningKey + Send> {
-        let mut key = Key([0u8; KEY_BYTES]);
-        let mut nonce = Nonce([0u8; NONCE_BYTES]);
-        key.0.clone_from_slice(k);
-        nonce.0.clone_from_slice(n);
-        Box::new(OpeningKey { key, nonce })
+        let mut key = GenericArray::<u8, KeySize>::default();
+        key.clone_from_slice(k);
+        let mut nonce = GenericArray::<u8, NonceSize>::default();
+        nonce.clone_from_slice(n);
+        Box::new(OpeningKey {
+            nonce,
+            cipher: Aes256Gcm::new(&key),
+        })
     }
 
     fn make_sealing_key(&self, k: &[u8], n: &[u8], _: &[u8]) -> Box<dyn super::SealingKey + Send> {
-        let mut key = Key([0u8; KEY_BYTES]);
-        let mut nonce = Nonce([0u8; NONCE_BYTES]);
-        key.0.clone_from_slice(k);
-        nonce.0.clone_from_slice(n);
-        Box::new(SealingKey { key, nonce })
+        let mut key = GenericArray::<u8, KeySize>::default();
+        key.clone_from_slice(k);
+        let mut nonce = GenericArray::<u8, NonceSize>::default();
+        nonce.clone_from_slice(n);
+        Box::new(SealingKey {
+            nonce,
+            cipher: Aes256Gcm::new(&key),
+        })
     }
 }
 
 pub struct OpeningKey {
-    key: Key,
-    nonce: Nonce,
+    nonce: GenericArray<u8, NonceSize>,
+    cipher: Aes256Gcm,
 }
 
 pub struct SealingKey {
-    key: Key,
-    nonce: Nonce,
+    nonce: GenericArray<u8, NonceSize>,
+    cipher: Aes256Gcm,
 }
 
-const TAG_LEN: usize = 16;
 const GCM_COUNTER_OFFSET: u64 = 3;
 
-fn make_nonce(nonce: &Nonce, sequence_number: u32) -> Nonce {
-    let mut new_nonce = Nonce([0; NONCE_BYTES]);
-    new_nonce.0.clone_from_slice(&nonce.0);
+fn make_nonce(
+    nonce: &GenericArray<u8, NonceSize>,
+    sequence_number: u32,
+) -> GenericArray<u8, NonceSize> {
+    let mut new_nonce = GenericArray::<u8, NonceSize>::default();
+    new_nonce.clone_from_slice(&nonce);
     // Increment the nonce
-    let i0 = NONCE_BYTES - 8;
+    let i0 = new_nonce.len() - 8;
 
     #[allow(clippy::indexing_slicing)] // length checked
-    let ctr = BigEndian::read_u64(&new_nonce.0[i0..]);
+    let ctr = BigEndian::read_u64(&new_nonce[i0..]);
 
     // GCM requires the counter to start from 1
     #[allow(clippy::indexing_slicing)] // length checked
     BigEndian::write_u64(
-        &mut new_nonce.0[i0..],
+        &mut new_nonce[i0..],
         ctr + sequence_number as u64 - GCM_COUNTER_OFFSET,
     );
     new_nonce
@@ -94,7 +106,7 @@ impl super::OpeningKey for OpeningKey {
     }
 
     fn tag_len(&self) -> usize {
-        TAG_LEN
+        GenericArray::<u8, TagSize>::default().len()
     }
 
     fn open<'a>(
@@ -117,17 +129,18 @@ impl super::OpeningKey for OpeningKey {
 
         let nonce = make_nonce(&self.nonce, sequence_number);
 
-        #[allow(clippy::indexing_slicing)] // length checked
-        if !aes256gcm_decrypt(
-            &mut ciphertext_in_plaintext_out[super::PACKET_LENGTH_LEN..],
-            tag,
-            &buffer,
-            &packet_length,
+        let mut tag_buf = GenericArray::<u8, TagSize>::default();
+        tag_buf.clone_from_slice(&tag);
+
+        if let Err(_) = self.cipher.decrypt_in_place_detached(
             &nonce,
-            &self.key,
+            &packet_length,
+            &mut ciphertext_in_plaintext_out[super::PACKET_LENGTH_LEN..],
+            &tag_buf,
         ) {
             return Err(Error::DecryptionError);
         }
+
         Ok(ciphertext_in_plaintext_out)
     }
 }
@@ -153,34 +166,31 @@ impl super::SealingKey for SealingKey {
     }
 
     fn tag_len(&self) -> usize {
-        TAG_LEN
+        GenericArray::<u8, TagSize>::default().len()
     }
 
     fn seal(
         &mut self,
         sequence_number: u32,
         plaintext_in_ciphertext_out: &mut [u8],
-        tag_out: &mut [u8],
+        tag: &mut [u8],
     ) {
         // Packet length is received unencrypted
         let mut packet_length = [0; super::PACKET_LENGTH_LEN];
         #[allow(clippy::indexing_slicing)] // length checked
         packet_length.clone_from_slice(&plaintext_in_ciphertext_out[..super::PACKET_LENGTH_LEN]);
 
-        // Prepare an output buffer
-        let mut buffer = vec![0; plaintext_in_ciphertext_out.len()];
-        buffer.splice(..super::PACKET_LENGTH_LEN, packet_length);
-
         let nonce = make_nonce(&self.nonce, sequence_number);
-        #[allow(clippy::indexing_slicing)] // length checked
-        aes256gcm_encrypt(
-            &mut buffer[super::PACKET_LENGTH_LEN..],
-            tag_out,
-            &plaintext_in_ciphertext_out[super::PACKET_LENGTH_LEN..],
-            &packet_length,
-            &nonce,
-            &self.key,
-        );
-        plaintext_in_ciphertext_out.clone_from_slice(&buffer);
+
+        let tag_out = self
+            .cipher
+            .encrypt_in_place_detached(
+                &nonce,
+                &packet_length,
+                &mut plaintext_in_ciphertext_out[super::PACKET_LENGTH_LEN..],
+            )
+            .unwrap();
+
+        tag.clone_from_slice(&tag_out)
     }
 }
