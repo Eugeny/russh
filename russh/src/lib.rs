@@ -292,7 +292,7 @@ use std::fmt::{Display, Formatter};
 use digest::typenum::U32;
 pub use russh_cryptovec::CryptoVec;
 mod auth;
-mod cipher;
+pub mod cipher;
 mod compression;
 mod kex;
 mod key;

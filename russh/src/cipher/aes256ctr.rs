@@ -17,11 +17,13 @@ use super::super::Error;
 use aes::cipher::{KeyIvInit, StreamCipher};
 use aes::Aes256;
 use byteorder::{BigEndian, ByteOrder};
-use ctr::{Ctr128BE};
+use ctr::Ctr128BE;
 use digest::typenum::U20;
+use digest::CtOutput;
 use generic_array::typenum::{U16, U32};
 use generic_array::GenericArray;
 use hmac::{Hmac, Mac};
+use russh_libsodium::random::randombytes;
 use sha1::Sha1;
 
 const KEY_BYTES: usize = 32;
@@ -115,13 +117,21 @@ impl super::OpeningKey for OpeningKey {
 
     fn open<'a>(
         &mut self,
-        _sequence_number: u32,
+        sequence_number: u32,
         ciphertext_in_plaintext_out: &'a mut [u8],
         tag: &[u8],
     ) -> Result<&'a [u8], Error> {
         self.cipher.apply_keystream(ciphertext_in_plaintext_out);
 
-        // TODO check mac
+        let mac = hmac(sequence_number, ciphertext_in_plaintext_out, &self.mac_key);
+
+        let mut rcvd_mac = GenericArray::from([0u8; TAG_LEN]);
+        rcvd_mac.copy_from_slice(tag);
+        let rcvd_mac = CtOutput::<Hmac<Sha1>>::new(rcvd_mac);
+
+        if mac != rcvd_mac {
+            return Err(Error::PacketAuth);
+        }
 
         Ok(ciphertext_in_plaintext_out)
     }
@@ -149,8 +159,7 @@ impl super::SealingKey for SealingKey {
     }
 
     fn fill_padding(&self, padding_out: &mut [u8]) {
-        padding_out.fill(0)
-        // randombytes(padding_out);
+        randombytes(padding_out);
     }
 
     fn tag_len(&self) -> usize {
@@ -163,22 +172,18 @@ impl super::SealingKey for SealingKey {
         plaintext_in_ciphertext_out: &mut [u8],
         tag_out: &mut [u8],
     ) {
-        let mut hmac = Hmac::<Sha1>::new_from_slice(&self.mac_key).unwrap();
-
-        let mut buf = vec![0; 4];
-        BigEndian::write_u32(&mut buf, sequence_number);
-        // buf.extend_from_slice(plaintext_in_ciphertext_out);
-        hmac.update(&buf);
-        hmac.update(plaintext_in_ciphertext_out);
-
-        tag_out.copy_from_slice(&hmac.finalize().into_bytes());
-        println!("hmac key {:?}", self.mac_key.as_slice());
-        println!("raw {:?}{:?}", buf, plaintext_in_ciphertext_out);
-        println!("hmac {:?}", tag_out);
-
-        println!("data pre enc {:?}", plaintext_in_ciphertext_out);
-
-        // TODO check mac
+        tag_out.copy_from_slice(
+            &hmac(sequence_number, plaintext_in_ciphertext_out, &self.mac_key).into_bytes(),
+        );
         self.cipher.apply_keystream(plaintext_in_ciphertext_out);
     }
+}
+
+fn hmac(seq: u32, packet: &[u8], key: &MacKey) -> CtOutput<Hmac<Sha1>> {
+    let mut hmac = Hmac::<Sha1>::new_from_slice(key).unwrap();
+    let mut buf = vec![0; 4];
+    BigEndian::write_u32(&mut buf, seq);
+    hmac.update(&buf);
+    hmac.update(packet);
+    hmac.finalize()
 }
