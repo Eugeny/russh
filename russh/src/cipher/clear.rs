@@ -28,7 +28,7 @@ impl super::OpeningKey for Key {
     }
 
     fn open<'a>(
-        &self,
+        &mut self,
         _seqn: u32,
         ciphertext_in_plaintext_out: &'a mut [u8],
         tag: &[u8],
@@ -65,7 +65,7 @@ impl super::SealingKey for Key {
         0
     }
 
-    fn seal(&self, _seqn: u32, _plaintext_in_ciphertext_out: &mut [u8], tag_out: &mut [u8]) {
+    fn seal(&mut self, _seqn: u32, _plaintext_in_ciphertext_out: &mut [u8], tag_out: &mut [u8]) {
         debug_assert_eq!(tag_out.len(), self.tag_len());
     }
 }

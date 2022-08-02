@@ -1,5 +1,5 @@
 use super::*;
-use crate::cipher::CipherPair;
+use crate::cipher::{SealingCipher};
 use crate::key::PubKey;
 use crate::negotiation::Select;
 use crate::{kex, msg, negotiation};
@@ -14,7 +14,7 @@ impl KexInit {
     pub fn server_parse(
         mut self,
         config: &Config,
-        cipher: &CipherPair,
+        cipher: &mut SealingCipher,
         buf: &[u8],
         write_buffer: &mut SSHBuffer,
     ) -> Result<Kex, Error> {
@@ -52,7 +52,7 @@ impl KexInit {
     pub fn server_write(
         &mut self,
         config: &Config,
-        cipher: &CipherPair,
+        cipher: &mut SealingCipher,
         write_buffer: &mut SSHBuffer,
     ) -> Result<(), Error> {
         self.exchange.server_kex_init.clear();
@@ -68,7 +68,7 @@ impl KexDh {
     pub fn parse(
         mut self,
         config: &Config,
-        cipher: &CipherPair,
+        cipher: &mut SealingCipher,
         buf: &[u8],
         write_buffer: &mut SSHBuffer,
     ) -> Result<Kex, Error> {

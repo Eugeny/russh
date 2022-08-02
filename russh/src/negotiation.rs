@@ -80,9 +80,9 @@ impl Preferred {
         kex: &[kex::CURVE25519],
         key: &[key::ED25519, key::RSA_SHA2_256, key::RSA_SHA2_512],
         cipher: &[
-            cipher::chacha20poly1305::NAME,
+            // cipher::chacha20poly1305::NAME,
             cipher::aes256gcm::NAME,
-            cipher::aes256ctr::NAME,
+            // cipher::aes256ctr::NAME,
         ],
         mac: &["none"],
         compression: &["zlib", "zlib@openssh.com", "none"],
@@ -173,15 +173,22 @@ pub trait Select {
         }
         r.read_string()?; // cipher server-to-client.
         debug!("kex {}", line!());
+
+        let need_mac = matches!(cipher, Some((_, cipher::aes256ctr::NAME)));
+
         let client_mac = if let Some((_, m)) = Self::select(pref.mac, r.read_string()?) {
             m
-        } else {
+        } else if need_mac {
             return Err(Error::NoCommonMac);
+        } else {
+            "none"
         };
         let server_mac = if let Some((_, m)) = Self::select(pref.mac, r.read_string()?) {
             m
-        } else {
+        } else if need_mac {
             return Err(Error::NoCommonMac);
+        } else {
+            "none"
         };
 
         debug!("kex {}", line!());
@@ -205,7 +212,7 @@ pub trait Select {
         r.read_string()?; // languages server-to-client
 
         let follows = r.read_byte()? != 0;
-        match (cipher,  follows) {
+        match (cipher, follows) {
             (Some((_, cipher)), fol) => {
                 Ok(Names {
                     kex: kex_algorithm,

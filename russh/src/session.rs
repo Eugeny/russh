@@ -13,6 +13,7 @@
 // limitations under the License.
 //
 
+use crate::cipher::SealingCipher;
 use crate::sshbuffer::SSHBuffer;
 use crate::{auth, cipher, kex, msg, negotiation};
 use crate::{Channel, ChannelId, Disconnect, Limits};
@@ -21,7 +22,6 @@ use russh_cryptovec::CryptoVec;
 use russh_keys::encoding::Encoding;
 use std::collections::HashMap;
 use std::num::Wrapping;
-use std::sync::Arc;
 
 #[derive(Debug)]
 pub(crate) struct Encrypted {
@@ -54,7 +54,7 @@ pub(crate) struct CommonSession<Config> {
     pub auth_method: Option<auth::Method>,
     pub write_buffer: SSHBuffer,
     pub kex: Option<Kex>,
-    pub cipher: Arc<cipher::CipherPair>,
+    pub cipher: cipher::CipherPair,
     pub wants_reply: bool,
     pub disconnected: bool,
     pub buffer: CryptoVec,
@@ -68,7 +68,7 @@ impl<C> CommonSession<C> {
             enc.key = newkeys.key;
             enc.client_mac = newkeys.names.client_mac;
             enc.server_mac = newkeys.names.server_mac;
-            self.cipher = Arc::new(newkeys.cipher);
+            self.cipher = newkeys.cipher;
         }
     }
 
@@ -93,7 +93,7 @@ impl<C> CommonSession<C> {
             compress_buffer: CryptoVec::new(),
             decompress: crate::compression::Decompress::None,
         });
-        self.cipher = Arc::new(newkeys.cipher);
+        self.cipher = newkeys.cipher;
     }
 
     /// Send a disconnect message.
@@ -316,7 +316,7 @@ impl Encrypted {
     pub fn flush(
         &mut self,
         limits: &Limits,
-        cipher: &cipher::CipherPair,
+        cipher: &mut SealingCipher,
         write_buffer: &mut SSHBuffer,
     ) -> Result<bool, crate::Error> {
         // If there are pending packets (and we've not started to rekey), flush them.

@@ -24,6 +24,7 @@ pub struct OpeningKey {
     key: Key,
     nonce: Nonce,
 }
+
 pub struct SealingKey {
     key: Key,
     nonce: Nonce,
@@ -92,7 +93,7 @@ impl super::OpeningKey for OpeningKey {
     }
 
     fn open<'a>(
-        &self,
+        &mut self,
         sequence_number: u32,
         ciphertext_in_plaintext_out: &'a mut [u8],
         tag: &[u8],
@@ -151,7 +152,7 @@ impl super::SealingKey for SealingKey {
     }
 
     fn seal(
-        &self,
+        &mut self,
         sequence_number: u32,
         plaintext_in_ciphertext_out: &mut [u8],
         tag_out: &mut [u8],

@@ -17,14 +17,12 @@ use super::super::Error;
 use aes::cipher::{KeyIvInit, StreamCipher};
 use aes::Aes256;
 use byteorder::{BigEndian, ByteOrder};
-use ctr::{Ctr128BE, Ctr64LE, Ctr64BE};
+use ctr::{Ctr128BE};
 use digest::typenum::U20;
 use generic_array::typenum::{U16, U32};
 use generic_array::GenericArray;
-use hmac::{Hmac, Mac, SimpleHmac};
+use hmac::{Hmac, Mac};
 use sha1::Sha1;
-use sha2::Sha256;
-use sodium::random::randombytes;
 
 const KEY_BYTES: usize = 32;
 const NONCE_BYTES: usize = 16;
@@ -34,14 +32,13 @@ type Nonce = GenericArray<u8, U16>;
 type MacKey = GenericArray<u8, U20>;
 
 pub struct OpeningKey {
-    key: Key,
-    nonce: Nonce,
     mac_key: MacKey,
+    cipher: Ctr128BE<Aes256>,
 }
+
 pub struct SealingKey {
-    key: Key,
-    nonce: Nonce,
     mac_key: MacKey,
+    cipher: Ctr128BE<Aes256>,
 }
 
 const TAG_LEN: usize = 20;
@@ -81,8 +78,7 @@ fn make_sealing_cipher(k: &[u8], n: &[u8], m: &[u8]) -> super::SealingCipher {
     nonce.clone_from_slice(n);
     mac_key.clone_from_slice(m);
     super::SealingCipher::AES256CTR(SealingKey {
-        key,
-        nonce,
+        cipher: Ctr128BE::<Aes256>::new(&key, &nonce),
         mac_key,
     })
 }
@@ -95,8 +91,7 @@ fn make_opening_cipher(k: &[u8], n: &[u8], m: &[u8]) -> super::OpeningCipher {
     nonce.clone_from_slice(n);
     mac_key.clone_from_slice(m);
     super::OpeningCipher::AES256CTR(OpeningKey {
-        key,
-        nonce,
+        cipher: Ctr128BE::<Aes256>::new(&key, &nonce),
         mac_key,
     })
 }
@@ -104,11 +99,12 @@ fn make_opening_cipher(k: &[u8], n: &[u8], m: &[u8]) -> super::OpeningCipher {
 impl super::OpeningKey for OpeningKey {
     fn decrypt_packet_length(
         &self,
-        sequence_number: u32,
+        _sequence_number: u32,
         mut encrypted_packet_length: [u8; 4],
     ) -> [u8; 4] {
-        let nonce = make_nonce(&self.nonce, sequence_number);
-        let mut cipher = Ctr128BE::<Aes256>::new(&self.key, &nonce);
+        // Work around uncloneable Aes<>
+        let mut cipher: Ctr128BE<Aes256> =
+            unsafe { std::ptr::read(&self.cipher as *const Ctr128BE<Aes256>) };
         cipher.apply_keystream(&mut encrypted_packet_length);
         encrypted_packet_length
     }
@@ -118,14 +114,12 @@ impl super::OpeningKey for OpeningKey {
     }
 
     fn open<'a>(
-        &self,
-        sequence_number: u32,
+        &mut self,
+        _sequence_number: u32,
         ciphertext_in_plaintext_out: &'a mut [u8],
         tag: &[u8],
     ) -> Result<&'a [u8], Error> {
-        let nonce = make_nonce(&self.nonce, sequence_number);
-        let mut cipher = Ctr128BE::<Aes256>::new(&self.key, &nonce);
-        cipher.apply_keystream(ciphertext_in_plaintext_out);
+        self.cipher.apply_keystream(ciphertext_in_plaintext_out);
 
         // TODO check mac
 
@@ -164,7 +158,7 @@ impl super::SealingKey for SealingKey {
     }
 
     fn seal(
-        &self,
+        &mut self,
         sequence_number: u32,
         plaintext_in_ciphertext_out: &mut [u8],
         tag_out: &mut [u8],
@@ -182,11 +176,9 @@ impl super::SealingKey for SealingKey {
         println!("raw {:?}{:?}", buf, plaintext_in_ciphertext_out);
         println!("hmac {:?}", tag_out);
 
-        let nonce = make_nonce(&self.nonce, sequence_number);
-        let mut cipher = Ctr128BE::<Aes256>::new(&self.key, &nonce);
         println!("data pre enc {:?}", plaintext_in_ciphertext_out);
 
         // TODO check mac
-        cipher.apply_keystream(plaintext_in_ciphertext_out);
+        self.cipher.apply_keystream(plaintext_in_ciphertext_out);
     }
 }

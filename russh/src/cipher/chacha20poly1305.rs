@@ -23,6 +23,7 @@ pub struct OpeningKey {
     k1: Key,
     k2: Key,
 }
+
 pub struct SealingKey {
     k1: Key,
     k2: Key,
@@ -84,7 +85,7 @@ impl super::OpeningKey for OpeningKey {
 
     #[allow(clippy::indexing_slicing)] // lengths checked
     fn open<'a>(
-        &self,
+        &mut self,
         sequence_number: u32,
         ciphertext_in_plaintext_out: &'a mut [u8],
         tag: &[u8],
@@ -137,7 +138,7 @@ impl super::SealingKey for SealingKey {
 
     /// Append an encrypted packet with contents `packet_content` at the end of `buffer`.
     fn seal(
-        &self,
+        &mut self,
         sequence_number: u32,
         plaintext_in_ciphertext_out: &mut [u8],
         tag_out: &mut [u8],
