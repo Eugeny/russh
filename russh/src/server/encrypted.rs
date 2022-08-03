@@ -92,7 +92,7 @@ impl Session {
                 // Ok, NEWKEYS received, now encrypted.
                 enc.flush_all_pending();
                 let mut pending = std::mem::take(&mut self.pending_reads);
-                for p in pending.into_iter() {
+                for p in pending.drain(..) {
                     let (h, s) = self.process_packet(handler, &p).await?;
                     handler = h;
                     self = s;
