@@ -83,10 +83,10 @@ impl Preferred {
 
     #[cfg(not(feature = "openssl"))]
     pub const DEFAULT: Preferred = Preferred {
-        kex: &KEX_ORDER,
+        kex: KEX_ORDER,
         key: &[key::ED25519],
-        cipher: &CIPHER_ORDER,
-        mac: &HMAC_ORDER,
+        cipher: CIPHER_ORDER,
+        mac: HMAC_ORDER,
         compression: &["none", "zlib", "zlib@openssh.com"],
     };
 

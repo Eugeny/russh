@@ -711,7 +711,7 @@ mod test_compress {
 
         tokio::spawn(async move {
             let (socket, _) = socket.accept().await.unwrap();
-            let server = sh.new(socket.peer_addr().ok());
+            let server = sh.new_client(socket.peer_addr().ok());
             server::run_stream(config, socket, server).await.unwrap();
         });
 
@@ -747,7 +747,7 @@ mod test_compress {
 
     impl server::Server for Server {
         type Handler = Self;
-        fn new(&mut self, _: Option<std::net::SocketAddr>) -> Self {
+        fn new_client(&mut self, _: Option<std::net::SocketAddr>) -> Self {
             let s = self.clone();
             self.id += 1;
             s

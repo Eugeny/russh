@@ -455,7 +455,7 @@ async fn read_userauth_info_response<H: Handler>(
     mut handler: H,
     write: &mut CryptoVec,
     auth_request: &mut AuthRequest,
-    user: &mut String,
+    user: &mut str,
     b: &[u8],
 ) -> Result<(H, bool), H::Error> {
     if let Some(CurrentRequest::KeyboardInteractive { ref submethods }) = auth_request.current {

@@ -198,7 +198,7 @@ impl super::SealingKey for SealingKey {
 
         let nonce = make_nonce(&self.nonce, sequence_number);
 
-        #[allow(clippy::indexing_slicing)]
+        #[allow(clippy::indexing_slicing, clippy::unwrap_used)]
         let tag_out = self
             .cipher
             .encrypt_in_place_detached(

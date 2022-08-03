@@ -17,7 +17,7 @@ use std::num::Wrapping;
 
 use super::*;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct SSHBuffer {
     pub buffer: CryptoVec,
     pub len: usize, // next packet length.
