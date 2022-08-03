@@ -1,3 +1,15 @@
+use std::collections::HashMap;
+use std::fmt::Debug;
+use std::marker::PhantomData;
+use std::num::Wrapping;
+
+use aes::{Aes128, Aes192, Aes256};
+use byteorder::{BigEndian, ByteOrder};
+use ctr::Ctr128BE;
+use once_cell::sync::Lazy;
+use tokio::io::{AsyncRead, AsyncReadExt};
+
+use crate::mac::MacAlgorithm;
 // Copyright 2016 Pierre-Étienne Meunier
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,54 +26,66 @@
 //
 use crate::sshbuffer::SSHBuffer;
 use crate::Error;
-use byteorder::{BigEndian, ByteOrder};
-use std::num::Wrapping;
-use tokio::io::{AsyncRead, AsyncReadExt};
-pub mod aes256gcm;
+
+pub mod block;
 pub mod chacha20poly1305;
 pub mod clear;
+pub mod gcm;
+use block::SshBlockCipher;
+use chacha20poly1305::Chacha20Poly1305;
+use clear::Clear;
+use gcm::GcmCipher;
 
-pub struct Cipher {
-    pub name: Name,
-    pub key_len: usize,
-    pub nonce_len: usize,
-    pub make_opening_cipher: fn(key: &[u8], nonce: &[u8]) -> OpeningCipher,
-    pub make_sealing_cipher: fn(key: &[u8], nonce: &[u8]) -> SealingCipher,
-}
-
-pub enum OpeningCipher {
-    Clear(clear::Key),
-    Chacha20Poly1305(chacha20poly1305::OpeningKey),
-    AES256GCM(aes256gcm::OpeningKey),
-}
-
-impl<'a> OpeningCipher {
-    fn as_opening_key(&self) -> &dyn OpeningKey {
-        match *self {
-            OpeningCipher::Clear(ref key) => key,
-            OpeningCipher::Chacha20Poly1305(ref key) => key,
-            OpeningCipher::AES256GCM(ref key) => key,
-        }
+pub trait Cipher {
+    fn needs_mac(&self) -> bool {
+        false
     }
-}
-
-pub enum SealingCipher {
-    Clear(clear::Key),
-    Chacha20Poly1305(chacha20poly1305::SealingKey),
-    AES256GCM(aes256gcm::SealingKey),
-}
-
-impl<'a> SealingCipher {
-    fn as_sealing_key(&'a self) -> &'a dyn SealingKey {
-        match *self {
-            SealingCipher::Clear(ref key) => key,
-            SealingCipher::Chacha20Poly1305(ref key) => key,
-            SealingCipher::AES256GCM(ref key) => key,
-        }
+    fn key_len(&self) -> usize;
+    fn nonce_len(&self) -> usize {
+        0
     }
+    fn make_opening_key(
+        &self,
+        key: &[u8],
+        nonce: &[u8],
+        mac_key: &[u8],
+        mac: &dyn MacAlgorithm,
+    ) -> Box<dyn OpeningKey + Send>;
+    fn make_sealing_key(
+        &self,
+        key: &[u8],
+        nonce: &[u8],
+        mac_key: &[u8],
+        mac: &dyn MacAlgorithm,
+    ) -> Box<dyn SealingKey + Send>;
 }
 
-#[derive(Debug, PartialEq, Eq, Copy, Clone)]
+pub const CLEAR: Name = Name("clear");
+pub const AES_128_CTR: Name = Name("aes128-ctr");
+pub const AES_192_CTR: Name = Name("aes192-ctr");
+pub const AES_256_CTR: Name = Name("aes256-ctr");
+pub const AES_256_GCM: Name = Name("aes256-gcm@openssh.com");
+pub const CHACHA20_POLY1305: Name = Name("chacha20-poly1305@openssh.com");
+
+static _CLEAR: Clear = Clear {};
+static _AES_128_CTR: SshBlockCipher<Ctr128BE<Aes128>> = SshBlockCipher(PhantomData);
+static _AES_192_CTR: SshBlockCipher<Ctr128BE<Aes192>> = SshBlockCipher(PhantomData);
+static _AES_256_CTR: SshBlockCipher<Ctr128BE<Aes256>> = SshBlockCipher(PhantomData);
+static _AES_256_GCM: GcmCipher = GcmCipher {};
+static _CHACHA20_POLY1305: Chacha20Poly1305 = Chacha20Poly1305 {};
+
+pub static CIPHERS: Lazy<HashMap<&'static Name, &(dyn Cipher + Send + Sync)>> = Lazy::new(|| {
+    let mut h: HashMap<&'static Name, &(dyn Cipher + Send + Sync)> = HashMap::new();
+    h.insert(&CLEAR, &_CLEAR);
+    h.insert(&AES_128_CTR, &_AES_128_CTR);
+    h.insert(&AES_192_CTR, &_AES_192_CTR);
+    h.insert(&AES_256_CTR, &_AES_256_CTR);
+    h.insert(&AES_256_GCM, &_AES_256_GCM);
+    h.insert(&CHACHA20_POLY1305, &_CHACHA20_POLY1305);
+    h
+});
+
+#[derive(Debug, PartialEq, Eq, Copy, Clone, Hash)]
 pub struct Name(&'static str);
 impl AsRef<str> for Name {
     fn as_ref(&self) -> &str {
@@ -70,8 +94,8 @@ impl AsRef<str> for Name {
 }
 
 pub struct CipherPair {
-    pub local_to_remote: SealingCipher,
-    pub remote_to_local: OpeningCipher,
+    pub local_to_remote: Box<dyn SealingKey + Send>,
+    pub remote_to_local: Box<dyn OpeningKey + Send>,
 }
 
 impl std::fmt::Debug for CipherPair {
@@ -80,18 +104,13 @@ impl std::fmt::Debug for CipherPair {
     }
 }
 
-pub const CLEAR_PAIR: CipherPair = CipherPair {
-    local_to_remote: SealingCipher::Clear(clear::Key),
-    remote_to_local: OpeningCipher::Clear(clear::Key),
-};
-
 pub trait OpeningKey {
     fn decrypt_packet_length(&self, seqn: u32, encrypted_packet_length: [u8; 4]) -> [u8; 4];
 
     fn tag_len(&self) -> usize;
 
     fn open<'a>(
-        &self,
+        &mut self,
         seqn: u32,
         ciphertext_in_plaintext_out: &'a mut [u8],
         tag: &[u8],
@@ -105,26 +124,61 @@ pub trait SealingKey {
 
     fn tag_len(&self) -> usize;
 
-    fn seal(&self, seqn: u32, plaintext_in_ciphertext_out: &mut [u8], tag_out: &mut [u8]);
+    fn seal(&mut self, seqn: u32, plaintext_in_ciphertext_out: &mut [u8], tag_out: &mut [u8]);
+
+    fn write(&mut self, payload: &[u8], buffer: &mut SSHBuffer) {
+        // https://tools.ietf.org/html/rfc4253#section-6
+        //
+        // The variables `payload`, `packet_length` and `padding_length` refer
+        // to the protocol fields of the same names.
+        debug!("writing, seqn = {:?}", buffer.seqn.0);
+
+        let padding_length = self.padding_length(payload);
+        debug!("padding length {:?}", padding_length);
+        let packet_length = PADDING_LENGTH_LEN + payload.len() + padding_length;
+        debug!("packet_length {:?}", packet_length);
+        let offset = buffer.buffer.len();
+
+        // Maximum packet length:
+        // https://tools.ietf.org/html/rfc4253#section-6.1
+        assert!(packet_length <= std::u32::MAX as usize);
+        buffer.buffer.push_u32_be(packet_length as u32);
+
+        assert!(padding_length <= std::u8::MAX as usize);
+        buffer.buffer.push(padding_length as u8);
+        buffer.buffer.extend(payload);
+        self.fill_padding(buffer.buffer.resize_mut(padding_length));
+        buffer.buffer.resize_mut(self.tag_len());
+
+        #[allow(clippy::indexing_slicing)] // length checked
+        let (plaintext, tag) =
+            buffer.buffer[offset..].split_at_mut(PACKET_LENGTH_LEN + packet_length);
+
+        self.seal(buffer.seqn.0, plaintext, tag);
+
+        buffer.bytes += payload.len();
+        // Sequence numbers are on 32 bits and wrap.
+        // https://tools.ietf.org/html/rfc4253#section-6.4
+        buffer.seqn += Wrapping(1);
+    }
 }
 
 pub async fn read<'a, R: AsyncRead + Unpin>(
     stream: &'a mut R,
     buffer: &'a mut SSHBuffer,
-    pair: &'a CipherPair,
+    cipher: &'a mut (dyn OpeningKey + Send),
 ) -> Result<usize, Error> {
     if buffer.len == 0 {
         let mut len = [0; 4];
         stream.read_exact(&mut len).await?;
         debug!("reading, len = {:?}", len);
         {
-            let key = pair.remote_to_local.as_opening_key();
             let seqn = buffer.seqn.0;
             buffer.buffer.clear();
             buffer.buffer.extend(&len);
             debug!("reading, seqn = {:?}", seqn);
-            let len = key.decrypt_packet_length(seqn, len);
-            buffer.len = BigEndian::read_u32(&len) as usize + key.tag_len();
+            let len = cipher.decrypt_packet_length(seqn, len);
+            buffer.len = BigEndian::read_u32(&len) as usize + cipher.tag_len();
             debug!("reading, clear len = {:?}", buffer.len);
         }
     }
@@ -133,11 +187,10 @@ pub async fn read<'a, R: AsyncRead + Unpin>(
     #[allow(clippy::indexing_slicing)] // length checked
     stream.read_exact(&mut buffer.buffer[4..]).await?;
     debug!("read_exact done");
-    let key = pair.remote_to_local.as_opening_key();
     let seqn = buffer.seqn.0;
-    let ciphertext_len = buffer.buffer.len() - key.tag_len();
+    let ciphertext_len = buffer.buffer.len() - cipher.tag_len();
     let (ciphertext, tag) = buffer.buffer.split_at_mut(ciphertext_len);
-    let plaintext = key.open(seqn, ciphertext, tag)?;
+    let plaintext = cipher.open(seqn, ciphertext, tag)?;
 
     let padding_length = *plaintext.get(0).to_owned().unwrap_or(&0) as usize;
     debug!("reading, padding_length {:?}", padding_length);
@@ -155,45 +208,6 @@ pub async fn read<'a, R: AsyncRead + Unpin>(
     buffer.buffer.resize(plaintext_end + 4);
 
     Ok(plaintext_end + 4)
-}
-
-impl CipherPair {
-    pub fn write(&self, payload: &[u8], buffer: &mut SSHBuffer) {
-        // https://tools.ietf.org/html/rfc4253#section-6
-        //
-        // The variables `payload`, `packet_length` and `padding_length` refer
-        // to the protocol fields of the same names.
-        debug!("writing, seqn = {:?}", buffer.seqn.0);
-        let key = self.local_to_remote.as_sealing_key();
-
-        let padding_length = key.padding_length(payload);
-        debug!("padding length {:?}", padding_length);
-        let packet_length = PADDING_LENGTH_LEN + payload.len() + padding_length;
-        debug!("packet_length {:?}", packet_length);
-        let offset = buffer.buffer.len();
-
-        // Maximum packet length:
-        // https://tools.ietf.org/html/rfc4253#section-6.1
-        assert!(packet_length <= std::u32::MAX as usize);
-        buffer.buffer.push_u32_be(packet_length as u32);
-
-        assert!(padding_length <= std::u8::MAX as usize);
-        buffer.buffer.push(padding_length as u8);
-        buffer.buffer.extend(payload);
-        key.fill_padding(buffer.buffer.resize_mut(padding_length));
-        buffer.buffer.resize_mut(key.tag_len());
-
-        #[allow(clippy::indexing_slicing)] // length checked
-        let (plaintext, tag) =
-            buffer.buffer[offset..].split_at_mut(PACKET_LENGTH_LEN + packet_length);
-
-        key.seal(buffer.seqn.0, plaintext, tag);
-
-        buffer.bytes += payload.len();
-        // Sequence numbers are on 32 bits and wrap.
-        // https://tools.ietf.org/html/rfc4253#section-6.4
-        buffer.seqn += Wrapping(1);
-    }
 }
 
 pub const PACKET_LENGTH_LEN: usize = 4;

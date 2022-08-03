@@ -1,10 +1,12 @@
+use std::cell::RefCell;
+
+use russh_keys::encoding::{Encoding, Reader};
+
 use super::*;
-use crate::cipher::CipherPair;
+use crate::cipher::SealingKey;
 use crate::key::PubKey;
 use crate::negotiation::Select;
 use crate::{kex, msg, negotiation};
-use russh_keys::encoding::{Encoding, Reader};
-use std::cell::RefCell;
 
 thread_local! {
     static HASH_BUF: RefCell<CryptoVec> = RefCell::new(CryptoVec::new());
@@ -14,7 +16,7 @@ impl KexInit {
     pub fn server_parse(
         mut self,
         config: &Config,
-        cipher: &CipherPair,
+        cipher: &mut dyn SealingKey,
         buf: &[u8],
         write_buffer: &mut SSHBuffer,
     ) -> Result<Kex, Error> {
@@ -52,7 +54,7 @@ impl KexInit {
     pub fn server_write(
         &mut self,
         config: &Config,
-        cipher: &CipherPair,
+        cipher: &mut dyn SealingKey,
         write_buffer: &mut SSHBuffer,
     ) -> Result<(), Error> {
         self.exchange.server_kex_init.clear();
@@ -68,7 +70,7 @@ impl KexDh {
     pub fn parse(
         mut self,
         config: &Config,
-        cipher: &CipherPair,
+        cipher: &mut dyn SealingKey,
         buf: &[u8],
         write_buffer: &mut SSHBuffer,
     ) -> Result<Kex, Error> {

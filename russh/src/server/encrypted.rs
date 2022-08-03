@@ -12,18 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-use super::super::*;
-use super::*;
+use std::cell::RefCell;
+
 use auth::*;
 use byteorder::{BigEndian, ByteOrder};
-use msg;
-use negotiation;
 use negotiation::Select;
 use russh_keys::encoding::{Encoding, Position, Reader};
 use russh_keys::key;
 use russh_keys::key::Verify;
-use std::cell::RefCell;
 use tokio::time::Instant;
+use {msg, negotiation};
+
+use super::super::*;
+use super::*;
 
 impl Session {
     /// Returns false iff a request was rejected.
@@ -49,7 +50,7 @@ impl Session {
             if let Some(Kex::Init(kexinit)) = enc.rekey.take() {
                 enc.rekey = Some(kexinit.server_parse(
                     self.common.config.as_ref(),
-                    &self.common.cipher,
+                    &mut *self.common.cipher.local_to_remote,
                     buf,
                     &mut self.common.write_buffer,
                 )?);
@@ -61,7 +62,7 @@ impl Session {
                 );
                 enc.rekey = Some(kexinit.server_parse(
                     self.common.config.as_ref(),
-                    &self.common.cipher,
+                    &mut *self.common.cipher.local_to_remote,
                     buf,
                     &mut self.common.write_buffer,
                 )?);
@@ -74,7 +75,7 @@ impl Session {
             Some(Kex::Dh(kexdh)) => {
                 enc.rekey = Some(kexdh.parse(
                     self.common.config.as_ref(),
-                    &self.common.cipher,
+                    &mut *self.common.cipher.local_to_remote,
                     buf,
                     &mut self.common.write_buffer,
                 )?);
@@ -454,7 +455,7 @@ async fn read_userauth_info_response<H: Handler>(
     mut handler: H,
     write: &mut CryptoVec,
     auth_request: &mut AuthRequest,
-    user: &mut String,
+    user: &mut str,
     b: &[u8],
 ) -> Result<(H, bool), H::Error> {
     if let Some(CurrentRequest::KeyboardInteractive { ref submethods }) = auth_request.current {

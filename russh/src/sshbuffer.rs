@@ -13,10 +13,11 @@
 // limitations under the License.
 //
 
-use super::*;
 use std::num::Wrapping;
 
-#[derive(Debug)]
+use super::*;
+
+#[derive(Debug, Default)]
 pub struct SSHBuffer {
     pub buffer: CryptoVec,
     pub len: usize, // next packet length.

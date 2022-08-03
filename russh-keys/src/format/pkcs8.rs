@@ -1,17 +1,19 @@
-use super::{pkcs_unpad, Encryption};
-use crate::key;
-#[cfg(feature = "openssl")]
-use crate::key::SignatureHash;
-use crate::Error;
+use std::borrow::Cow;
+
+use aes::cipher::{BlockDecryptMut, BlockEncryptMut, KeyIvInit};
 use bit_vec::BitVec;
+use block_padding::{NoPadding, Pkcs7};
 #[cfg(feature = "openssl")]
 use openssl::pkey::Private;
 #[cfg(feature = "openssl")]
 use openssl::rsa::Rsa;
-use std;
-use std::borrow::Cow;
-use yasna;
 use yasna::BERReaderSeq;
+use {std, yasna};
+
+use super::Encryption;
+#[cfg(feature = "openssl")]
+use crate::key::SignatureHash;
+use crate::{key, Error};
 
 const PBES2: &[u64] = &[1, 2, 840, 113549, 1, 5, 13];
 const PBKDF2: &[u64] = &[1, 2, 840, 113549, 1, 5, 12];
@@ -260,11 +262,7 @@ fn test_read_write_pkcs8() {
 }
 
 use aes::*;
-use block_modes::block_padding::NoPadding;
-use block_modes::BlockMode;
 use yasna::models::ObjectIdentifier;
-type Aes128Cbc = block_modes::Cbc<Aes128, NoPadding>;
-type Aes256Cbc = block_modes::Cbc<Aes256, NoPadding>;
 
 /// Encode a password-protected PKCS#8-encoded private key.
 pub fn encode_pkcs8_encrypted(
@@ -286,9 +284,9 @@ pub fn encode_pkcs8_encrypted(
     plaintext.extend(std::iter::repeat(padding_len as u8).take(padding_len));
 
     #[allow(clippy::unwrap_used)] // parameters are static
-    let c = Aes256Cbc::new_from_slices(&dkey, &iv).unwrap();
+    let c = cbc::Encryptor::<Aes256>::new_from_slices(&dkey, &iv).unwrap();
     let n = plaintext.len();
-    c.encrypt(&mut plaintext, n)?;
+    let encrypted = c.encrypt_padded_mut::<NoPadding>(&mut plaintext, n)?;
 
     Ok(yasna::construct_der(|writer| {
         writer.write_sequence(|writer| {
@@ -300,7 +298,7 @@ pub fn encode_pkcs8_encrypted(
                 asn1_write_pbes2(writer.next(), rounds as u64, &salt, &iv)
             });
             // Ciphertext
-            writer.next().write_bytes(&plaintext[..])
+            writer.next().write_bytes(encrypted)
         })
     }))
 }
@@ -422,19 +420,15 @@ impl Encryption {
         match *self {
             Encryption::Aes128Cbc(ref iv) => {
                 #[allow(clippy::unwrap_used)] // parameters are static
-                let c = Aes128Cbc::new_from_slices(key, iv).unwrap();
+                let c = cbc::Decryptor::<Aes128>::new_from_slices(key, iv).unwrap();
                 let mut dec = ciphertext.to_vec();
-                c.decrypt(&mut dec)?;
-                pkcs_unpad(&mut dec);
-                Ok(dec)
+                Ok(c.decrypt_padded_mut::<Pkcs7>(&mut dec)?.into())
             }
             Encryption::Aes256Cbc(ref iv) => {
                 #[allow(clippy::unwrap_used)] // parameters are static
-                let c = Aes256Cbc::new_from_slices(key, iv).unwrap();
+                let c = cbc::Decryptor::<Aes256>::new_from_slices(key, iv).unwrap();
                 let mut dec = ciphertext.to_vec();
-                c.decrypt(&mut dec)?;
-                pkcs_unpad(&mut dec);
-                Ok(dec)
+                Ok(c.decrypt_padded_mut::<Pkcs7>(&mut dec)?.into())
             }
         }
     }

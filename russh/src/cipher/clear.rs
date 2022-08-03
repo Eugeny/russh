@@ -13,10 +13,39 @@
 // limitations under the License.
 //
 
+use crate::mac::MacAlgorithm;
 use crate::Error;
 
 #[derive(Debug)]
 pub struct Key;
+
+pub struct Clear {}
+
+impl super::Cipher for Clear {
+    fn key_len(&self) -> usize {
+        0
+    }
+
+    fn make_opening_key(
+        &self,
+        _: &[u8],
+        _: &[u8],
+        _: &[u8],
+        _: &dyn MacAlgorithm,
+    ) -> Box<dyn super::OpeningKey + Send> {
+        Box::new(Key {})
+    }
+
+    fn make_sealing_key(
+        &self,
+        _: &[u8],
+        _: &[u8],
+        _: &[u8],
+        _: &dyn MacAlgorithm,
+    ) -> Box<dyn super::SealingKey + Send> {
+        Box::new(Key {})
+    }
+}
 
 impl super::OpeningKey for Key {
     fn decrypt_packet_length(&self, _seqn: u32, packet_length: [u8; 4]) -> [u8; 4] {
@@ -28,7 +57,7 @@ impl super::OpeningKey for Key {
     }
 
     fn open<'a>(
-        &self,
+        &mut self,
         _seqn: u32,
         ciphertext_in_plaintext_out: &'a mut [u8],
         tag: &[u8],
@@ -65,7 +94,7 @@ impl super::SealingKey for Key {
         0
     }
 
-    fn seal(&self, _seqn: u32, _plaintext_in_ciphertext_out: &mut [u8], tag_out: &mut [u8]) {
+    fn seal(&mut self, _seqn: u32, _plaintext_in_ciphertext_out: &mut [u8], tag_out: &mut [u8]) {
         debug_assert_eq!(tag_out.len(), self.tag_len());
     }
 }

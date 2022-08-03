@@ -5,7 +5,19 @@ Async (tokio) SSH2 client and server rimplementation.
 This is a fork of [Thrussh](//nest.pijul.com/pijul/thrussh) by Pierre-Étienne Meunier which adds:
 
 * More safety guarantees
-* AES256-GCM support
+* New ciphers:
+  * aes256-gcm@openssh.com
+  * aes256-ctr
+  * aes192-ctr
+  * aes128-ctr
+* HMACs:
+  * hmac-sha1
+  * hmac-sha2-256
+  * hmac-sha2-512
+  * hmac-sha1-etm@openssh.com
+  * hmac-sha2-256-etm@openssh.com
+  * hmac-sha2-512-etm@openssh.com
+* Legacy `ssh-rsa` host keys support
 * Dependency updates
 
 ## Safety

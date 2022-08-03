@@ -1,13 +1,12 @@
-use super::msg;
-use super::Constraint;
-use crate::encoding::{Encoding, Reader};
-use crate::key;
-use crate::key::{PublicKey, SignatureHash};
-use crate::Error;
 use byteorder::{BigEndian, ByteOrder};
 use russh_cryptovec::CryptoVec;
 use tokio;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+
+use super::{msg, Constraint};
+use crate::encoding::{Encoding, Reader};
+use crate::key::{PublicKey, SignatureHash};
+use crate::{key, Error};
 
 /// SSH agent client.
 pub struct AgentClient<S: AsyncRead + AsyncWrite> {

@@ -1,23 +1,20 @@
-use crate::encoding::{Encoding, Position, Reader};
-use crate::key;
-#[cfg(feature = "openssl")]
-use crate::key::SignatureHash;
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
+use std::time::{Duration, SystemTime};
+
 use byteorder::{BigEndian, ByteOrder};
 use futures::future::Future;
 use futures::stream::{Stream, StreamExt};
 use russh_cryptovec::CryptoVec;
-use std;
-use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
-use std::time::Duration;
-use std::time::SystemTime;
-use tokio;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::time::sleep;
+use {std, tokio};
 
-use super::msg;
-use super::Constraint;
-use crate::Error;
+use super::{msg, Constraint};
+use crate::encoding::{Encoding, Position, Reader};
+#[cfg(feature = "openssl")]
+use crate::key::SignatureHash;
+use crate::{key, Error};
 
 #[derive(Clone)]
 #[allow(clippy::type_complexity)]

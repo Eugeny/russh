@@ -13,10 +13,10 @@
 // limitations under the License.
 //
 
-use russh_cryptovec::CryptoVec;
-use russh_keys::encoding;
-use russh_keys::key;
 use std::sync::Arc;
+
+use russh_cryptovec::CryptoVec;
+use russh_keys::{encoding, key};
 use tokio::io::{AsyncRead, AsyncWrite};
 
 bitflags! {
