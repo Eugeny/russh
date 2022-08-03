@@ -26,34 +26,42 @@ keywords = ["ssh"]
 license = "Apache-2.0"
 name = "russh-keys"
 repository = "https://nest.pijul.com/pijul/russh"
-version = "0.22.0-beta.2"
+version = "0.22.0-beta.3"
 
 [dependencies]
-aes = {version = "0.7", features = ["ctr"]}
+aes = "0.8"
 bcrypt-pbkdf = "0.6"
 bit-vec = "0.6"
-block-modes = "0.8"
+cbc = "0.1"
+ctr = "0.9"
+block-padding = { version = "0.3", features = ["std"] }
 byteorder = "1.4"
 data-encoding = "2.3"
 dirs = "3.0"
 futures = "0.3"
-hmac = "0.11"
+hmac = "0.12"
+inout = { version = "0.1", features = ["std"] }
 log = "0.4"
 md5 = "0.7"
 num-bigint = "0.4"
 num-integer = "0.1"
-openssl = {version = "0.10", optional = true}
-pbkdf2 = "0.8"
+openssl = { version = "0.10", optional = true }
+pbkdf2 = "0.11"
 rand = "0.8"
-russh-cryptovec = {version = "0.7.0-beta.1", path = "../cryptovec"}
+russh-cryptovec = { version = "0.7.0-beta.1", path = "../cryptovec" }
 serde = "1.0"
 serde_derive = "1.0"
-sha2 = "0.9"
+sha2 = "0.10"
 thiserror = "1.0"
-russh-libsodium = {version = "0.3.0-beta.1", path = "../russh-libsodium"}
-tokio = {version = "1.17.0", features = ["io-util", "rt-multi-thread", "time", "net"]}
-tokio-stream = {version = "0.1", features = ["net"]}
-yasna = {version = "0.4.0", features = ["bit-vec", "num-bigint"]}
+russh-libsodium = { version = "0.3.0-beta.1", path = "../russh-libsodium" }
+tokio = { version = "1.17.0", features = [
+  "io-util",
+  "rt-multi-thread",
+  "time",
+  "net",
+] }
+tokio-stream = { version = "0.1", features = ["net"] }
+yasna = { version = "0.4.0", features = ["bit-vec", "num-bigint"] }
 
 [dev-dependencies]
 env_logger = "0.8"

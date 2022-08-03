@@ -12,18 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-use super::{Msg, Reply};
-use crate::auth;
-use crate::key::PubKey;
-use crate::msg;
-use crate::negotiation;
-use crate::negotiation::Named;
-use crate::negotiation::Select;
-use crate::session::*;
-use crate::{ChannelId, ChannelOpenFailure, Error, Sig};
+use std::cell::RefCell;
+
 use russh_cryptovec::CryptoVec;
 use russh_keys::encoding::{Encoding, Reader};
-use std::cell::RefCell;
+
+use super::{Msg, Reply};
+use crate::key::PubKey;
+use crate::negotiation::{Named, Select};
+use crate::session::*;
+use crate::{auth, msg, negotiation, ChannelId, ChannelOpenFailure, Error, Sig};
 
 thread_local! {
     static SIGNATURE_BUFFER: RefCell<CryptoVec> = RefCell::new(CryptoVec::new());
@@ -50,7 +48,7 @@ impl super::Session {
                 if let Some(Kex::Init(kexinit)) = enc.rekey.take() {
                     enc.rekey = Some(Kex::DhDone(kexinit.client_parse(
                         self.common.config.as_ref(),
-                        &self.common.cipher,
+                        &mut *self.common.cipher.local_to_remote,
                         buf,
                         &mut self.common.write_buffer,
                     )?));
@@ -62,7 +60,7 @@ impl super::Session {
                     );
                     enc.rekey = Some(Kex::DhDone(kexinit.client_parse(
                         self.common.config.as_ref(),
-                        &self.common.cipher,
+                        &mut *self.common.cipher.local_to_remote,
                         buf,
                         &mut self.common.write_buffer,
                     )?));
@@ -88,6 +86,7 @@ impl super::Session {
                         enc.rekey = Some(kex);
                         self.common
                             .cipher
+                            .local_to_remote
                             .write(&[msg::NEWKEYS], &mut self.common.write_buffer);
                         self.flush()?;
                         return Ok((client, self));
@@ -515,7 +514,10 @@ impl super::Session {
                     debug!("sending ssh-userauth service requset");
                     if !*sent {
                         let p = b"\x05\0\0\0\x0Cssh-userauth";
-                        self.common.cipher.write(p, &mut self.common.write_buffer);
+                        self.common
+                            .cipher
+                            .local_to_remote
+                            .write(p, &mut self.common.write_buffer);
                         *sent = true
                     }
                     accepted

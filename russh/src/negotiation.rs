@@ -12,22 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-use crate::{cipher, kex, msg, Error};
-use russh_keys::key;
 use std::str::from_utf8;
-// use super::mac; // unimplemented
-use crate::compression::*;
+
 use rand::RngCore;
 use russh_cryptovec::CryptoVec;
 use russh_keys::encoding::{Encoding, Reader};
+use russh_keys::key;
 use russh_keys::key::{KeyPair, PublicKey};
+
+use crate::cipher::CIPHERS;
+use crate::compression::*;
+use crate::{cipher, kex, mac, msg, Error};
 
 #[derive(Debug)]
 pub struct Names {
     pub kex: kex::Name,
     pub key: key::Name,
     pub cipher: cipher::Name,
-    pub mac: Option<&'static str>,
+    pub client_mac: mac::Name,
+    pub server_mac: mac::Name,
     pub server_compression: Compression,
     pub client_compression: Compression,
     pub ignore_guessed: bool,
@@ -43,35 +46,55 @@ pub struct Preferred {
     /// Preferred symmetric ciphers.
     pub cipher: &'static [cipher::Name],
     /// Preferred MAC algorithms.
-    pub mac: &'static [&'static str],
+    pub mac: &'static [mac::Name],
     /// Preferred compression algorithms.
     pub compression: &'static [&'static str],
 }
 
+const KEX_ORDER: &[kex::Name] = &[kex::CURVE25519];
+
+const CIPHER_ORDER: &[cipher::Name] = &[
+    cipher::CHACHA20_POLY1305,
+    cipher::AES_256_GCM,
+    cipher::AES_256_CTR,
+    cipher::AES_192_CTR,
+    cipher::AES_128_CTR,
+];
+
+const HMAC_ORDER: &[mac::Name] = &[
+    mac::HMAC_SHA512_ETM,
+    mac::HMAC_SHA256_ETM,
+    mac::HMAC_SHA512,
+    mac::HMAC_SHA256,
+    mac::HMAC_SHA1_ETM,
+    mac::HMAC_SHA1,
+    mac::NONE,
+];
+
 impl Preferred {
     #[cfg(feature = "openssl")]
     pub const DEFAULT: Preferred = Preferred {
-        kex: &[kex::CURVE25519],
+        kex: KEX_ORDER,
         key: &[key::ED25519, key::RSA_SHA2_256, key::RSA_SHA2_512],
-        cipher: &[cipher::chacha20poly1305::NAME, cipher::aes256gcm::NAME],
-        mac: &["none"],
+        cipher: CIPHER_ORDER,
+        mac: HMAC_ORDER,
         compression: &["none", "zlib", "zlib@openssh.com"],
     };
 
     #[cfg(not(feature = "openssl"))]
     pub const DEFAULT: Preferred = Preferred {
-        kex: &[kex::CURVE25519],
+        kex: KEX_ORDER,
         key: &[key::ED25519],
-        cipher: &[cipher::chacha20poly1305::NAME, cipher::aes256gcm::NAME],
-        mac: &["none"],
+        cipher: CIPHER_ORDER,
+        mac: HMAC_ORDER,
         compression: &["none", "zlib", "zlib@openssh.com"],
     };
 
     pub const COMPRESSED: Preferred = Preferred {
-        kex: &[kex::CURVE25519],
+        kex: KEX_ORDER,
         key: &[key::ED25519, key::RSA_SHA2_256, key::RSA_SHA2_512],
-        cipher: &[cipher::chacha20poly1305::NAME, cipher::aes256gcm::NAME],
-        mac: &["none"],
+        cipher: CIPHER_ORDER,
+        mac: HMAC_ORDER,
         compression: &["zlib", "zlib@openssh.com", "none"],
     };
 }
@@ -160,9 +183,26 @@ pub trait Select {
         }
         r.read_string()?; // cipher server-to-client.
         debug!("kex {}", line!());
-        let mac = Self::select(pref.mac, r.read_string()?);
-        let mac = mac.map(|(_, x)| x);
-        r.read_string()?; // mac server-to-client.
+
+        let need_mac = cipher
+            .and_then(|x| CIPHERS.get(&x.1))
+            .map(|x| x.needs_mac())
+            .unwrap_or(false);
+
+        let client_mac = if let Some((_, m)) = Self::select(pref.mac, r.read_string()?) {
+            m
+        } else if need_mac {
+            return Err(Error::NoCommonMac);
+        } else {
+            mac::NONE
+        };
+        let server_mac = if let Some((_, m)) = Self::select(pref.mac, r.read_string()?) {
+            m
+        } else if need_mac {
+            return Err(Error::NoCommonMac);
+        } else {
+            mac::NONE
+        };
 
         debug!("kex {}", line!());
         // client-to-server compression.
@@ -185,13 +225,14 @@ pub trait Select {
         r.read_string()?; // languages server-to-client
 
         let follows = r.read_byte()? != 0;
-        match (cipher, mac, follows) {
-            (Some((_, cipher)), mac, fol) => {
+        match (cipher, follows) {
+            (Some((_, cipher)), fol) => {
                 Ok(Names {
                     kex: kex_algorithm,
                     key: key_algorithm,
                     cipher,
-                    mac,
+                    client_mac,
+                    server_mac,
                     client_compression,
                     server_compression,
                     // Ignore the next packet if (1) it follows and (2) it's not the correct guess.

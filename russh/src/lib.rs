@@ -80,7 +80,7 @@
 //!
 //! impl server::Server for Server {
 //!     type Handler = Self;
-//!     fn new(&mut self, _: Option<std::net::SocketAddr>) -> Self {
+//!     fn new_client(&mut self, _: Option<std::net::SocketAddr>) -> Self {
 //!         let s = self.clone();
 //!         self.id += 1;
 //!         s
@@ -289,12 +289,14 @@ extern crate thiserror;
 
 use std::fmt::{Display, Formatter};
 
+use digest::typenum::U32;
 pub use russh_cryptovec::CryptoVec;
 mod auth;
-mod cipher;
+pub mod cipher;
 mod compression;
 mod kex;
 mod key;
+pub mod mac;
 mod msg;
 mod negotiation;
 mod ssh_read;
@@ -319,8 +321,7 @@ macro_rules! push_packet {
     }};
 }
 
-type Sha256Hash =
-    generic_array::GenericArray<u8, <sha2::Sha256 as digest::FixedOutputDirty>::OutputSize>;
+type Sha256Hash = generic_array::GenericArray<u8, U32>;
 
 mod session;
 
@@ -340,6 +341,10 @@ pub enum Error {
     #[error("Key exchange init failed")]
     KexInit,
 
+    /// Unknown algorithm name.
+    #[error("Unknown algorithm")]
+    UnknownAlgo,
+
     /// No common key exchange algorithm.
     #[error("No common key exchange algorithm")]
     NoCommonKexAlgo,
@@ -355,6 +360,10 @@ pub enum Error {
     /// No common compression algorithm.
     #[error("No common compression algorithm")]
     NoCommonCompression,
+
+    /// No common MAC algorithm.
+    #[error("No common MAC algorithm")]
+    NoCommonMac,
 
     /// Invalid SSH version string.
     #[error("invalid SSH version string")]
@@ -673,10 +682,11 @@ pub enum ChannelMsg {
 
 #[cfg(test)]
 mod test_compress {
-    use super::server::{Auth, Server as _, Session};
-    use super::*;
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
+
+    use super::server::{Auth, Server as _, Session};
+    use super::*;
 
     #[tokio::test]
     async fn compress_local_test() {
@@ -701,7 +711,7 @@ mod test_compress {
 
         tokio::spawn(async move {
             let (socket, _) = socket.accept().await.unwrap();
-            let server = sh.new(socket.peer_addr().ok());
+            let server = sh.new_client(socket.peer_addr().ok());
             server::run_stream(config, socket, server).await.unwrap();
         });
 
@@ -737,7 +747,7 @@ mod test_compress {
 
     impl server::Server for Server {
         type Handler = Self;
-        fn new(&mut self, _: Option<std::net::SocketAddr>) -> Self {
+        fn new_client(&mut self, _: Option<std::net::SocketAddr>) -> Self {
             let s = self.clone();
             self.id += 1;
             s
@@ -792,9 +802,9 @@ mod test_compress {
         }
         fn check_server_key(
             self,
-            server_public_key: &russh_keys::key::PublicKey,
+            _server_public_key: &russh_keys::key::PublicKey,
         ) -> Self::FutureBool {
-            println!("check_server_key: {:?}", server_public_key);
+            // println!("check_server_key: {:?}", server_public_key);
             self.finished_bool(true)
         }
     }

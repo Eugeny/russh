@@ -4,10 +4,11 @@
     clippy::indexing_slicing,
     clippy::panic
 )]
-use log::debug;
 use std::io::Read;
 use std::net::ToSocketAddrs;
 use std::path::Path;
+
+use log::debug;
 use thiserror::*;
 
 #[derive(Debug, Error)]

@@ -13,15 +13,16 @@
 // limitations under the License.
 //
 
-use crate::sshbuffer::SSHBuffer;
-use crate::{auth, cipher, kex, msg, negotiation};
-use crate::{Channel, ChannelId, Disconnect, Limits};
+use std::collections::HashMap;
+use std::num::Wrapping;
+
 use byteorder::{BigEndian, ByteOrder};
 use russh_cryptovec::CryptoVec;
 use russh_keys::encoding::Encoding;
-use std::collections::HashMap;
-use std::num::Wrapping;
-use std::sync::Arc;
+
+use crate::cipher::SealingKey;
+use crate::sshbuffer::SSHBuffer;
+use crate::{auth, cipher, kex, mac, msg, negotiation, Channel, ChannelId, Disconnect, Limits};
 
 #[derive(Debug)]
 pub(crate) struct Encrypted {
@@ -31,7 +32,8 @@ pub(crate) struct Encrypted {
     pub exchange: Option<Exchange>,
     pub kex: kex::Algorithm,
     pub key: usize,
-    pub mac: Option<&'static str>,
+    pub client_mac: mac::Name,
+    pub server_mac: mac::Name,
     pub session_id: crate::Sha256Hash,
     pub rekey: Option<Kex>,
     pub channels: HashMap<ChannelId, Channel>,
@@ -53,7 +55,7 @@ pub(crate) struct CommonSession<Config> {
     pub auth_method: Option<auth::Method>,
     pub write_buffer: SSHBuffer,
     pub kex: Option<Kex>,
-    pub cipher: Arc<cipher::CipherPair>,
+    pub cipher: cipher::CipherPair,
     pub wants_reply: bool,
     pub disconnected: bool,
     pub buffer: CryptoVec,
@@ -65,8 +67,9 @@ impl<C> CommonSession<C> {
             enc.exchange = Some(newkeys.exchange);
             enc.kex = newkeys.kex;
             enc.key = newkeys.key;
-            enc.mac = newkeys.names.mac;
-            self.cipher = Arc::new(newkeys.cipher);
+            enc.client_mac = newkeys.names.client_mac;
+            enc.server_mac = newkeys.names.server_mac;
+            self.cipher = newkeys.cipher;
         }
     }
 
@@ -75,7 +78,8 @@ impl<C> CommonSession<C> {
             exchange: Some(newkeys.exchange),
             kex: newkeys.kex,
             key: newkeys.key,
-            mac: newkeys.names.mac,
+            client_mac: newkeys.names.client_mac,
+            server_mac: newkeys.names.server_mac,
             session_id: newkeys.session_id,
             state,
             rekey: None,
@@ -90,7 +94,7 @@ impl<C> CommonSession<C> {
             compress_buffer: CryptoVec::new(),
             decompress: crate::compression::Decompress::None,
         });
-        self.cipher = Arc::new(newkeys.cipher);
+        self.cipher = newkeys.cipher;
     }
 
     /// Send a disconnect message.
@@ -313,7 +317,7 @@ impl Encrypted {
     pub fn flush(
         &mut self,
         limits: &Limits,
-        cipher: &cipher::CipherPair,
+        cipher: &mut dyn SealingKey,
         write_buffer: &mut SSHBuffer,
     ) -> Result<bool, crate::Error> {
         // If there are pending packets (and we've not started to rekey), flush them.
@@ -492,9 +496,22 @@ impl KexDhDone {
             hash
         };
         // Now computing keys.
-        let c = self
-            .kex
-            .compute_keys(&session_id, &hash, self.names.cipher, is_server)?;
+        let c = self.kex.compute_keys(
+            &session_id,
+            &hash,
+            self.names.cipher,
+            if is_server {
+                self.names.client_mac
+            } else {
+                self.names.server_mac
+            },
+            if is_server {
+                self.names.server_mac
+            } else {
+                self.names.client_mac
+            },
+            is_server,
+        )?;
         Ok(NewKeys {
             exchange: self.exchange,
             names: self.names,

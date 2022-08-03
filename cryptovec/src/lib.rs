@@ -20,10 +20,11 @@
 //
 extern crate libc;
 extern crate winapi;
+use std::ops::{Deref, DerefMut, Index, IndexMut, Range, RangeFrom, RangeFull, RangeTo};
+
 use libc::c_void;
 #[cfg(not(windows))]
 use libc::size_t;
-use std::ops::{Deref, DerefMut, Index, IndexMut, Range, RangeFrom, RangeFull, RangeTo};
 
 /// A buffer which zeroes its memory on `.clear()`, `.resize()` and
 /// reallocations, to avoid copying secrets around.

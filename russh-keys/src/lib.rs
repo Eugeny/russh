@@ -69,12 +69,15 @@ extern crate log;
 #[cfg(test)]
 extern crate env_logger;
 
-use byteorder::{BigEndian, WriteBytesExt};
-use data_encoding::BASE64_MIME;
 use std::borrow::Cow;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::Path;
+
+use aes::cipher::block_padding::UnpadError;
+use aes::cipher::inout::PadError;
+use byteorder::{BigEndian, WriteBytesExt};
+use data_encoding::BASE64_MIME;
 
 pub mod encoding;
 pub mod key;
@@ -128,7 +131,10 @@ pub enum Error {
     Openssl(#[from] openssl::error::ErrorStack),
 
     #[error(transparent)]
-    BlockMode(#[from] block_modes::BlockModeError),
+    Pad(#[from] PadError),
+
+    #[error(transparent)]
+    Unpad(#[from] UnpadError),
 
     #[error("Base64 decoding error: {0}")]
     Decode(#[from] data_encoding::DecodeError),
@@ -189,7 +195,7 @@ pub trait PublicKeyBase64 {
         let mut s = BASE64_MIME.encode(&self.public_key_bytes());
         assert_eq!(s.pop(), Some('\n'));
         assert_eq!(s.pop(), Some('\r'));
-        s
+        s.replace("\r\n", "")
     }
 }
 
@@ -420,11 +426,13 @@ pub fn check_known_hosts(host: &str, port: u16, pubkey: &key::PublicKey) -> Resu
 #[cfg(test)]
 mod test {
     extern crate tempdir;
-    use super::*;
-    #[cfg(feature = "openssl")]
-    use futures::Future;
     use std::fs::File;
     use std::io::Write;
+
+    #[cfg(feature = "openssl")]
+    use futures::Future;
+
+    use super::*;
 
     const ED25519_KEY: &str = "-----BEGIN OPENSSH PRIVATE KEY-----
 b3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jYmMAAAAGYmNyeXB0AAAAGAAAABDLGyfA39

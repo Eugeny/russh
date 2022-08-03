@@ -15,48 +15,61 @@
 
 // http://cvsweb.openbsd.org/cgi-bin/cvsweb/src/usr.bin/ssh/PROTOCOL.chacha20poly1305?annotate=HEAD
 
-use super::super::Error;
 use byteorder::{BigEndian, ByteOrder};
 use sodium::chacha20::*;
+
+use super::super::Error;
+use crate::mac::MacAlgorithm;
+
+pub struct Chacha20Poly1305 {}
+
+impl super::Cipher for Chacha20Poly1305 {
+    fn key_len(&self) -> usize {
+        KEY_BYTES * 2
+    }
+
+    #[allow(clippy::indexing_slicing)] // length checked
+    fn make_opening_key(
+        &self,
+        k: &[u8],
+        _: &[u8],
+        _: &[u8],
+        _: &dyn MacAlgorithm,
+    ) -> Box<dyn super::OpeningKey + Send> {
+        let mut k1 = Key([0; KEY_BYTES]);
+        let mut k2 = Key([0; KEY_BYTES]);
+        k1.0.clone_from_slice(&k[KEY_BYTES..]);
+        k2.0.clone_from_slice(&k[..KEY_BYTES]);
+        Box::new(OpeningKey { k1, k2 })
+    }
+
+    #[allow(clippy::indexing_slicing)] // length checked
+    fn make_sealing_key(
+        &self,
+        k: &[u8],
+        _: &[u8],
+        _: &[u8],
+        _: &dyn MacAlgorithm,
+    ) -> Box<dyn super::SealingKey + Send> {
+        let mut k1 = Key([0; KEY_BYTES]);
+        let mut k2 = Key([0; KEY_BYTES]);
+        k1.0.clone_from_slice(&k[KEY_BYTES..]);
+        k2.0.clone_from_slice(&k[..KEY_BYTES]);
+        Box::new(SealingKey { k1, k2 })
+    }
+}
 
 pub struct OpeningKey {
     k1: Key,
     k2: Key,
 }
+
 pub struct SealingKey {
     k1: Key,
     k2: Key,
 }
 
 const TAG_LEN: usize = 16;
-
-pub static CIPHER: super::Cipher = super::Cipher {
-    name: NAME,
-    key_len: 64,
-    nonce_len: 0,
-    make_sealing_cipher,
-    make_opening_cipher,
-};
-
-pub const NAME: super::Name = super::Name("chacha20-poly1305@openssh.com");
-
-#[allow(clippy::indexing_slicing)] // length checked
-fn make_sealing_cipher(k: &[u8], _: &[u8]) -> super::SealingCipher {
-    let mut k1 = Key([0; KEY_BYTES]);
-    let mut k2 = Key([0; KEY_BYTES]);
-    k1.0.clone_from_slice(&k[KEY_BYTES..]);
-    k2.0.clone_from_slice(&k[..KEY_BYTES]);
-    super::SealingCipher::Chacha20Poly1305(SealingKey { k1, k2 })
-}
-
-#[allow(clippy::indexing_slicing)] // length checked
-fn make_opening_cipher(k: &[u8], _: &[u8]) -> super::OpeningCipher {
-    let mut k1 = Key([0; KEY_BYTES]);
-    let mut k2 = Key([0; KEY_BYTES]);
-    k1.0.clone_from_slice(&k[KEY_BYTES..]);
-    k2.0.clone_from_slice(&k[..KEY_BYTES]);
-    super::OpeningCipher::Chacha20Poly1305(OpeningKey { k1, k2 })
-}
 
 #[allow(clippy::indexing_slicing)] // length checked
 fn make_counter(sequence_number: u32) -> Nonce {
@@ -83,7 +96,7 @@ impl super::OpeningKey for OpeningKey {
 
     #[allow(clippy::indexing_slicing)] // lengths checked
     fn open<'a>(
-        &self,
+        &mut self,
         sequence_number: u32,
         ciphertext_in_plaintext_out: &'a mut [u8],
         tag: &[u8],
@@ -136,7 +149,7 @@ impl super::SealingKey for SealingKey {
 
     /// Append an encrypted packet with contents `packet_content` at the end of `buffer`.
     fn seal(
-        &self,
+        &mut self,
         sequence_number: u32,
         plaintext_in_ciphertext_out: &mut [u8],
         tag_out: &mut [u8],

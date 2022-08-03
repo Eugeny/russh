@@ -1,11 +1,13 @@
-use crate::key::SignatureHash;
-use crate::Error;
+use std::fmt;
+
 use byteorder::{BigEndian, WriteBytesExt};
 use serde;
 use serde::de::{SeqAccess, Visitor};
 use serde::ser::SerializeTuple;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use std::fmt;
+
+use crate::key::SignatureHash;
+use crate::Error;
 
 pub struct SignatureBytes(pub [u8; 64]);
 

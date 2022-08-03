@@ -1,8 +1,10 @@
+use std::sync::Arc;
+
+use russh_keys::encoding::Encoding;
+use tokio::sync::mpsc::{Receiver, Sender};
+
 use super::*;
 use crate::msg;
-use russh_keys::encoding::Encoding;
-use std::sync::Arc;
-use tokio::sync::mpsc::{Receiver, Sender};
 
 /// A connected server session. This type is unique to a client.
 pub struct Session {
@@ -163,7 +165,7 @@ impl Session {
         if let Some(ref mut enc) = self.common.encrypted {
             if enc.flush(
                 &self.common.config.as_ref().limits,
-                &self.common.cipher,
+                &mut *self.common.cipher.local_to_remote,
                 &mut self.common.write_buffer,
             )? && enc.rekey.is_none()
             {
@@ -172,7 +174,7 @@ impl Session {
                     let mut kexinit = KexInit::initiate_rekey(exchange, &enc.session_id);
                     kexinit.server_write(
                         self.common.config.as_ref(),
-                        &self.common.cipher,
+                        &mut *self.common.cipher.local_to_remote,
                         &mut self.common.write_buffer,
                     )?;
                     enc.rekey = Some(Kex::Init(kexinit))

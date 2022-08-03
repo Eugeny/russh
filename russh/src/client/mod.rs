@@ -13,30 +13,31 @@
 // limitations under the License.
 //
 
-use crate::auth;
-use crate::negotiation;
-use crate::pty::Pty;
-use crate::session::*;
-use crate::ssh_read::SshRead;
-use crate::sshbuffer::*;
-use crate::{ChannelId, ChannelMsg, ChannelOpenFailure, Disconnect, Limits, Sig};
-use futures::task::{Context, Poll};
-use futures::Future;
-use russh_cryptovec::CryptoVec;
-use russh_keys::encoding::{Encoding, Reader};
-use russh_keys::key::{self, SignatureHash};
-use russh_keys::key::parse_public_key;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
+
+use futures::task::{Context, Poll};
+use futures::Future;
+use russh_cryptovec::CryptoVec;
+use russh_keys::encoding::{Encoding, Reader};
+use russh_keys::key::{self, parse_public_key, SignatureHash};
 use tokio;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::pin;
 
+use crate::pty::Pty;
+use crate::session::*;
+use crate::ssh_read::SshRead;
+use crate::sshbuffer::*;
+use crate::{
+    auth, negotiation, ChannelId, ChannelMsg, ChannelOpenFailure, Disconnect, Limits, Sig,
+};
+
 mod kex;
-use crate::cipher;
+use crate::cipher::{self, clear, CipherPair, OpeningKey};
 use crate::{msg, Error};
 mod encrypted;
 mod session;
@@ -795,7 +796,10 @@ where
             kex: None,
             auth_user: String::new(),
             auth_method: None, // Client only.
-            cipher: Arc::new(cipher::CLEAR_PAIR),
+            cipher: CipherPair {
+                local_to_remote: Box::new(clear::Key),
+                remote_to_local: Box::new(clear::Key),
+            },
             encrypted: None,
             config,
             wants_reply: false,
@@ -812,8 +816,8 @@ where
     let (encrypted_signal, encrypted_recv) = tokio::sync::oneshot::channel();
     let join = tokio::spawn(session.run(stream, handler, Some(encrypted_signal)));
 
-    if let Err(_) = encrypted_recv.await {
-        join.await.map_err(|e| crate::Error::Join(e))??;
+    if encrypted_recv.await.is_err() {
+        join.await.map_err(crate::Error::Join)??;
         return Err(H::Error::from(crate::Error::Disconnect));
     }
 
@@ -827,11 +831,11 @@ where
 async fn start_reading<R: AsyncRead + Unpin>(
     mut stream_read: R,
     mut buffer: SSHBuffer,
-    cipher: Arc<crate::cipher::CipherPair>,
-) -> Result<(usize, R, SSHBuffer), Error> {
+    mut cipher: Box<dyn OpeningKey + Send>,
+) -> Result<(usize, R, SSHBuffer, Box<dyn OpeningKey + Send>), Error> {
     buffer.buffer.clear();
-    let n = cipher::read(&mut stream_read, &mut buffer, &cipher).await?;
-    Ok((n, stream_read, buffer))
+    let n = cipher::read(&mut stream_read, &mut buffer, &mut *cipher).await?;
+    Ok((n, stream_read, buffer, cipher))
 }
 
 impl Session {
@@ -855,17 +859,25 @@ impl Session {
 
         let (stream_read, mut stream_write) = stream.split();
         let buffer = SSHBuffer::new();
-        let reading = start_reading(stream_read, buffer, self.common.cipher.clone());
+
+        // Allow handing out references to the cipher
+        let mut opening_cipher = Box::new(clear::Key) as Box<dyn OpeningKey + Send>;
+        std::mem::swap(&mut opening_cipher, &mut self.common.cipher.remote_to_local);
+
+        let reading = start_reading(stream_read, buffer, opening_cipher);
         pin!(reading);
 
         #[allow(clippy::panic)] // false positive in select! macro
         while !self.common.disconnected {
             tokio::select! {
                 r = &mut reading => {
-                    let (stream_read, buffer) = match r {
-                        Ok((_, stream_read, buffer)) => (stream_read, buffer),
+                    let (stream_read, buffer, mut opening_cipher) = match r {
+                        Ok((_, stream_read, buffer, opening_cipher)) => (stream_read, buffer, opening_cipher),
                         Err(e) => return Err(e.into())
                     };
+
+                    std::mem::swap(&mut opening_cipher, &mut self.common.cipher.remote_to_local);
+
                     if buffer.buffer.len() < 5 {
                         break
                     }
@@ -893,7 +905,9 @@ impl Session {
                             self = s;
                         }
                     }
-                    reading.set(start_reading(stream_read, buffer, self.common.cipher.clone()));
+
+                    std::mem::swap(&mut opening_cipher, &mut self.common.cipher.remote_to_local);
+                    reading.set(start_reading(stream_read, buffer, opening_cipher));
                 }
                 msg = self.receiver.recv(), if !self.is_rekeying() => {
                     match msg {
@@ -1008,7 +1022,7 @@ impl Session {
         self.common.write_buffer.buffer.clear();
         kexinit.client_write(
             self.common.config.as_ref(),
-            &self.common.cipher,
+            &mut *self.common.cipher.local_to_remote,
             &mut self.common.write_buffer,
         )?;
         self.common.kex = Some(Kex::Init(kexinit));
@@ -1021,7 +1035,7 @@ impl Session {
         if let Some(ref mut enc) = self.common.encrypted {
             if enc.flush(
                 &self.common.config.as_ref().limits,
-                &self.common.cipher,
+                &mut *self.common.cipher.local_to_remote,
                 &mut self.common.write_buffer,
             )? {
                 info!("Re-exchanging keys");
@@ -1030,7 +1044,7 @@ impl Session {
                         let mut kexinit = KexInit::initiate_rekey(exchange, &enc.session_id);
                         kexinit.client_write(
                             self.common.config.as_ref(),
-                            &self.common.cipher,
+                            &mut *self.common.cipher.local_to_remote,
                             &mut self.common.write_buffer,
                         )?;
                         enc.rekey = Some(Kex::Init(kexinit))
@@ -1128,7 +1142,7 @@ async fn reply<H: Handler>(
             {
                 session.common.kex = Some(Kex::DhDone(kexinit.client_parse(
                     session.common.config.as_ref(),
-                    &session.common.cipher,
+                    &mut *session.common.cipher.local_to_remote,
                     buf,
                     &mut session.common.write_buffer,
                 )?));
@@ -1149,6 +1163,7 @@ async fn reply<H: Handler>(
                 session
                     .common
                     .cipher
+                    .local_to_remote
                     .write(&[msg::NEWKEYS], &mut session.common.write_buffer);
                 session.flush()?;
                 Ok((handler, session))

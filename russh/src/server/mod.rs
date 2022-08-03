@@ -23,6 +23,7 @@ use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::pin;
 
+use crate::cipher::{clear, CipherPair, OpeningKey};
 use crate::session::*;
 use crate::ssh_read::*;
 use crate::sshbuffer::*;
@@ -395,7 +396,7 @@ pub trait Server {
     /// The type of handlers.
     type Handler: Handler + Send;
     /// Called when a new client connects.
-    fn new(&mut self, peer_addr: Option<std::net::SocketAddr>) -> Self::Handler;
+    fn new_client(&mut self, peer_addr: Option<std::net::SocketAddr>) -> Self::Handler;
 }
 
 /// Run a server.
@@ -415,7 +416,7 @@ pub async fn run<H: Server + Send + 'static>(
     }
     while let Ok((socket, _)) = socket.accept().await {
         let config = config.clone();
-        let server = server.new(socket.peer_addr().ok());
+        let server = server.new_client(socket.peer_addr().ok());
         tokio::spawn(run_stream(config, socket, server));
     }
     Ok(())
@@ -438,11 +439,11 @@ pub async fn timeout(delay: Option<std::time::Duration>) {
 async fn start_reading<R: AsyncRead + Unpin>(
     mut stream_read: R,
     mut buffer: SSHBuffer,
-    cipher: Arc<crate::cipher::CipherPair>,
-) -> Result<(usize, R, SSHBuffer), Error> {
+    mut cipher: Box<dyn OpeningKey + Send>,
+) -> Result<(usize, R, SSHBuffer, Box<dyn OpeningKey + Send>), Error> {
     buffer.buffer.clear();
-    let n = cipher::read(&mut stream_read, &mut buffer, &cipher).await?;
-    Ok((n, stream_read, buffer))
+    let n = cipher::read(&mut stream_read, &mut buffer, &mut *cipher).await?;
+    Ok((n, stream_read, buffer, cipher))
 }
 
 pub async fn run_stream<H: Handler, R>(
@@ -484,7 +485,15 @@ where
 
     let (stream_read, mut stream_write) = stream.split();
     let buffer = SSHBuffer::new();
-    let reading = start_reading(stream_read, buffer, session.common.cipher.clone());
+
+    // Allow handing out references to the cipher
+    let mut opening_cipher = Box::new(clear::Key) as Box<dyn OpeningKey + Send>;
+    std::mem::swap(
+        &mut opening_cipher,
+        &mut session.common.cipher.remote_to_local,
+    );
+
+    let reading = start_reading(stream_read, buffer, opening_cipher);
     pin!(reading);
     let mut is_reading = None;
 
@@ -492,12 +501,12 @@ where
     while !session.common.disconnected {
         tokio::select! {
             r = &mut reading => {
-                let (stream_read, buffer) = match r {
-                    Ok((_, stream_read, buffer)) => (stream_read, buffer),
+                let (stream_read, buffer, mut opening_cipher) = match r {
+                    Ok((_, stream_read, buffer, opening_cipher)) => (stream_read, buffer, opening_cipher),
                     Err(e) => return Err(e.into())
                 };
                 if buffer.buffer.len() < 5 {
-                    is_reading = Some((stream_read, buffer));
+                    is_reading = Some((stream_read, buffer, opening_cipher));
                     break
                 }
                 #[allow(clippy::indexing_slicing)] // length checked
@@ -510,7 +519,7 @@ where
                         buf
                     } else {
                         debug!("err = {:?}", d);
-                        is_reading = Some((stream_read, buffer));
+                        is_reading = Some((stream_read, buffer, opening_cipher));
                         break
                     }
                 } else {
@@ -520,9 +529,11 @@ where
                     #[allow(clippy::indexing_slicing)] // length checked
                     if buf[0] == crate::msg::DISCONNECT {
                         debug!("break");
-                        is_reading = Some((stream_read, buffer));
+                        is_reading = Some((stream_read, buffer, opening_cipher));
                         break;
                     } else if buf[0] > 4 {
+                        std::mem::swap(&mut opening_cipher, &mut session.common.cipher.remote_to_local);
+                        // TODO it'd be cleaner to just pass cipher to reply()
                         match reply(session, handler, buf).await {
                             Ok((h, s)) => {
                                 handler = h;
@@ -530,9 +541,10 @@ where
                             },
                             Err(e) => return Err(e),
                         }
+                        std::mem::swap(&mut opening_cipher, &mut session.common.cipher.remote_to_local);
                     }
                 }
-                reading.set(start_reading(stream_read, buffer, session.common.cipher.clone()));
+                reading.set(start_reading(stream_read, buffer, opening_cipher));
             }
             _ = timeout(delay) => {
                 debug!("timeout");
@@ -584,15 +596,11 @@ where
     // Shutdown
     stream_write.shutdown().await.map_err(crate::Error::from)?;
     loop {
-        if let Some((stream_read, buffer)) = is_reading.take() {
-            reading.set(start_reading(
-                stream_read,
-                buffer,
-                session.common.cipher.clone(),
-            ));
+        if let Some((stream_read, buffer, opening_cipher)) = is_reading.take() {
+            reading.set(start_reading(stream_read, buffer, opening_cipher));
         }
-        let (n, r, b) = (&mut reading).await?;
-        is_reading = Some((r, b));
+        let (n, r, b, opening_cipher) = (&mut reading).await?;
+        is_reading = Some((r, b, opening_cipher));
         if n == 0 {
             break;
         }
@@ -621,9 +629,16 @@ async fn read_ssh_id<R: AsyncRead + Unpin>(
         sent: false,
         session_id: None,
     };
-    let cipher = Arc::new(cipher::CLEAR_PAIR);
+    let mut cipher = CipherPair {
+        local_to_remote: Box::new(clear::Key),
+        remote_to_local: Box::new(clear::Key),
+    };
     let mut write_buffer = SSHBuffer::new();
-    kexinit.server_write(config.as_ref(), cipher.as_ref(), &mut write_buffer)?;
+    kexinit.server_write(
+        config.as_ref(),
+        &mut *cipher.local_to_remote,
+        &mut write_buffer,
+    )?;
     Ok(CommonSession {
         write_buffer,
         kex: Some(Kex::Init(kexinit)),
@@ -650,7 +665,7 @@ async fn reply<H: Handler>(
                 if kexinit.algo.is_some() || buf.get(0) == Some(&msg::KEXINIT) {
                     session.common.kex = Some(kexinit.server_parse(
                         session.common.config.as_ref(),
-                        &session.common.cipher,
+                        &mut *session.common.cipher.local_to_remote,
                         buf,
                         &mut session.common.write_buffer,
                     )?);
@@ -665,7 +680,7 @@ async fn reply<H: Handler>(
             Some(Kex::Dh(kexdh)) => {
                 session.common.kex = Some(kexdh.parse(
                     session.common.config.as_ref(),
-                    &session.common.cipher,
+                    &mut *session.common.cipher.local_to_remote,
                     buf,
                     &mut session.common.write_buffer,
                 )?);

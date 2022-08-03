@@ -1,14 +1,14 @@
-use super::is_base64_char;
-use crate::key;
-use crate::Error;
+use std::io::Write;
+
 #[cfg(not(feature = "openssl"))]
 use data_encoding::BASE64_MIME;
 #[cfg(feature = "openssl")]
 use data_encoding::{BASE64_MIME, HEXLOWER_PERMISSIVE};
-
 #[cfg(feature = "openssl")]
 use openssl::rsa::Rsa;
-use std::io::Write;
+
+use super::is_base64_char;
+use crate::{key, Error};
 
 pub mod openssh;
 pub use self::openssh::*;
@@ -131,17 +131,4 @@ fn decode_rsa(secret: &[u8]) -> Result<key::KeyPair, Error> {
         key: Rsa::private_key_from_der(secret)?,
         hash: key::SignatureHash::SHA2_256,
     })
-}
-
-fn pkcs_unpad(dec: &mut Vec<u8>) {
-    let len = dec.len();
-    if len > 0 {
-        #[allow(clippy::indexing_slicing)]
-        let padding_len = dec[len - 1];
-        if let Some(s) = dec.get((len - padding_len as usize)..) {
-            if s.iter().all(|&x| x == padding_len) {
-                dec.truncate(len - padding_len as usize)
-            }
-        }
-    }
 }
