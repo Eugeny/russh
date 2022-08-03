@@ -1,4 +1,15 @@
-use crate::mac::{MacAlgorithm};
+use std::collections::HashMap;
+use std::fmt::Debug;
+use std::marker::PhantomData;
+use std::num::Wrapping;
+
+use aes::{Aes128, Aes192, Aes256};
+use byteorder::{BigEndian, ByteOrder};
+use ctr::Ctr128BE;
+use once_cell::sync::Lazy;
+use tokio::io::{AsyncRead, AsyncReadExt};
+
+use crate::mac::MacAlgorithm;
 // Copyright 2016 Pierre-Étienne Meunier
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,15 +26,6 @@ use crate::mac::{MacAlgorithm};
 //
 use crate::sshbuffer::SSHBuffer;
 use crate::Error;
-use aes::{Aes128, Aes192, Aes256};
-use byteorder::{BigEndian, ByteOrder};
-use ctr::Ctr128BE;
-use once_cell::sync::Lazy;
-use std::collections::HashMap;
-use std::fmt::Debug;
-use std::marker::PhantomData;
-use std::num::Wrapping;
-use tokio::io::{AsyncRead, AsyncReadExt};
 
 pub mod block;
 pub mod chacha20poly1305;
@@ -35,8 +37,13 @@ use clear::Clear;
 use gcm::GcmCipher;
 
 pub trait Cipher {
+    fn needs_mac(&self) -> bool {
+        false
+    }
     fn key_len(&self) -> usize;
-    fn nonce_len(&self) -> usize;
+    fn nonce_len(&self) -> usize {
+        0
+    }
     fn make_opening_key(
         &self,
         key: &[u8],

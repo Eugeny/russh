@@ -1,8 +1,7 @@
-use super::Encryption;
-use crate::key;
-use crate::Error;
-
 use aes::*;
+
+use super::Encryption;
+use crate::{key, Error};
 
 /// Decode a secret key in the PKCS#5 format, possible deciphering it
 /// using the supplied password.

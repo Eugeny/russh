@@ -1,10 +1,12 @@
+use std::cell::RefCell;
+
+use russh_keys::encoding::{Encoding, Reader};
+
 use super::*;
 use crate::cipher::SealingKey;
 use crate::key::PubKey;
 use crate::negotiation::Select;
 use crate::{kex, msg, negotiation};
-use russh_keys::encoding::{Encoding, Reader};
-use std::cell::RefCell;
 
 thread_local! {
     static HASH_BUF: RefCell<CryptoVec> = RefCell::new(CryptoVec::new());

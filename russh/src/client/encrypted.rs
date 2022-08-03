@@ -12,18 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-use super::{Msg, Reply};
-use crate::auth;
-use crate::key::PubKey;
-use crate::msg;
-use crate::negotiation;
-use crate::negotiation::Named;
-use crate::negotiation::Select;
-use crate::session::*;
-use crate::{ChannelId, ChannelOpenFailure, Error, Sig};
+use std::cell::RefCell;
+
 use russh_cryptovec::CryptoVec;
 use russh_keys::encoding::{Encoding, Reader};
-use std::cell::RefCell;
+
+use super::{Msg, Reply};
+use crate::key::PubKey;
+use crate::negotiation::{Named, Select};
+use crate::session::*;
+use crate::{auth, msg, negotiation, ChannelId, ChannelOpenFailure, Error, Sig};
 
 thread_local! {
     static SIGNATURE_BUFFER: RefCell<CryptoVec> = RefCell::new(CryptoVec::new());

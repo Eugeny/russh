@@ -1,14 +1,14 @@
-use super::is_base64_char;
-use crate::key;
-use crate::Error;
+use std::io::Write;
+
 #[cfg(not(feature = "openssl"))]
 use data_encoding::BASE64_MIME;
 #[cfg(feature = "openssl")]
 use data_encoding::{BASE64_MIME, HEXLOWER_PERMISSIVE};
-
 #[cfg(feature = "openssl")]
 use openssl::rsa::Rsa;
-use std::io::Write;
+
+use super::is_base64_char;
+use crate::{key, Error};
 
 pub mod openssh;
 pub use self::openssh::*;

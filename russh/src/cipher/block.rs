@@ -13,12 +13,12 @@
 
 use std::marker::PhantomData;
 
-use crate::mac::{Mac, MacAlgorithm};
-
-use super::super::Error;
 use aes::cipher::{IvSizeUser, KeyIvInit, KeySizeUser, StreamCipher};
 use generic_array::GenericArray;
 use russh_libsodium::random::randombytes;
+
+use super::super::Error;
+use crate::mac::{Mac, MacAlgorithm};
 
 pub struct SshBlockCipher<C: StreamCipher + KeySizeUser + IvSizeUser>(pub PhantomData<C>);
 
@@ -31,6 +31,10 @@ impl<C: StreamCipher + KeySizeUser + IvSizeUser + KeyIvInit + Send + 'static> su
 
     fn nonce_len(&self) -> usize {
         C::iv_size()
+    }
+
+    fn needs_mac(&self) -> bool {
+        true
     }
 
     fn make_opening_key(
@@ -102,11 +106,10 @@ impl<C: StreamCipher + KeySizeUser + IvSizeUser> super::OpeningKey for OpeningKe
     ) -> Result<&'a [u8], Error> {
         self.cipher.apply_keystream(ciphertext_in_plaintext_out);
 
-        if !self.mac.verify(
-            sequence_number,
-            ciphertext_in_plaintext_out,
-            tag,
-        ) {
+        if !self
+            .mac
+            .verify(sequence_number, ciphertext_in_plaintext_out, tag)
+        {
             return Err(Error::PacketAuth);
         }
 
@@ -149,13 +152,8 @@ impl<C: StreamCipher + KeySizeUser + IvSizeUser> super::SealingKey for SealingKe
         plaintext_in_ciphertext_out: &mut [u8],
         tag_out: &mut [u8],
     ) {
-        println!("plain {:?}", plaintext_in_ciphertext_out);
-        self.mac.compute(
-            sequence_number,
-            plaintext_in_ciphertext_out,
-            tag_out,
-        );
-        println!("mac {:?}", tag_out);
+        self.mac
+            .compute(sequence_number, plaintext_in_ciphertext_out, tag_out);
         self.cipher.apply_keystream(plaintext_in_ciphertext_out);
     }
 }

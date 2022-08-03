@@ -43,7 +43,6 @@ impl<M: digest::Mac + KeyInit + Send + 'static, KL: ArrayLength<u8> + 'static> M
     }
 
     fn compute(&self, sequence_number: u32, payload: &[u8], output: &mut [u8]) {
-        println!("mac key {:?}", self.key);
         let mut hmac = <M as digest::Mac>::new_from_slice(&self.key).unwrap();
         let mut seqno_buf = [0; 4];
         BigEndian::write_u32(&mut seqno_buf, sequence_number);

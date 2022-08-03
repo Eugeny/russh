@@ -13,7 +13,7 @@
 // limitations under the License.
 //
 
-use crate::mac::{MacAlgorithm};
+use crate::mac::MacAlgorithm;
 use crate::Error;
 
 #[derive(Debug)]
@@ -23,10 +23,6 @@ pub struct Clear {}
 
 impl super::Cipher for Clear {
     fn key_len(&self) -> usize {
-        0
-    }
-
-    fn nonce_len(&self) -> usize {
         0
     }
 

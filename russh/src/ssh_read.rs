@@ -1,9 +1,10 @@
-use crate::Error;
+use std::pin::Pin;
+
 use futures::task::*;
 use russh_cryptovec::CryptoVec;
-
-use std::pin::Pin;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, ReadBuf};
+
+use crate::Error;
 
 /// The buffer to read the identification string (first line in the
 /// protocol).

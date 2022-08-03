@@ -11,13 +11,14 @@
 // limitations under the License.
 //
 
+use std::collections::HashMap;
+use std::marker::PhantomData;
+
 use digest::typenum::{U20, U32, U64};
 use hmac::Hmac;
 use once_cell::sync::Lazy;
 use sha1::Sha1;
 use sha2::{Sha256, Sha512};
-use std::collections::HashMap;
-use std::marker::PhantomData;
 
 use self::crypto::CryptoMacAlgorithm;
 use self::none::NoMacAlgorithm;

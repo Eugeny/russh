@@ -13,8 +13,9 @@
 // limitations under the License.
 //
 
-use super::*;
 use std::num::Wrapping;
+
+use super::*;
 
 #[derive(Debug)]
 pub struct SSHBuffer {

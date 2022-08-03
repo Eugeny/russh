@@ -15,21 +15,17 @@
 
 // http://cvsweb.openbsd.org/cgi-bin/cvsweb/src/usr.bin/ssh/PROTOCOL.chacha20poly1305?annotate=HEAD
 
-use crate::mac::{MacAlgorithm};
-
-use super::super::Error;
 use byteorder::{BigEndian, ByteOrder};
 use sodium::chacha20::*;
+
+use super::super::Error;
+use crate::mac::MacAlgorithm;
 
 pub struct Chacha20Poly1305 {}
 
 impl super::Cipher for Chacha20Poly1305 {
     fn key_len(&self) -> usize {
         KEY_BYTES * 2
-    }
-
-    fn nonce_len(&self) -> usize {
-        0
     }
 
     #[allow(clippy::indexing_slicing)] // length checked

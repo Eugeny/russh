@@ -1,8 +1,5 @@
-use super::Encryption;
-use crate::key;
-#[cfg(feature = "openssl")]
-use crate::key::SignatureHash;
-use crate::Error;
+use std::borrow::Cow;
+
 use aes::cipher::block_padding::Pkcs7;
 use aes::cipher::{BlockDecryptMut, BlockEncryptMut, KeyIvInit};
 use bit_vec::BitVec;
@@ -10,10 +7,13 @@ use bit_vec::BitVec;
 use openssl::pkey::Private;
 #[cfg(feature = "openssl")]
 use openssl::rsa::Rsa;
-use std;
-use std::borrow::Cow;
-use yasna;
 use yasna::BERReaderSeq;
+use {std, yasna};
+
+use super::Encryption;
+#[cfg(feature = "openssl")]
+use crate::key::SignatureHash;
+use crate::{key, Error};
 
 const PBES2: &[u64] = &[1, 2, 840, 113549, 1, 5, 13];
 const PBKDF2: &[u64] = &[1, 2, 840, 113549, 1, 5, 12];

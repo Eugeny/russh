@@ -13,9 +13,10 @@
 // limitations under the License.
 //
 
-use crate::Error;
 use byteorder::{BigEndian, ByteOrder, WriteBytesExt};
 use russh_cryptovec::CryptoVec;
+
+use crate::Error;
 
 #[doc(hidden)]
 pub trait Bytes {

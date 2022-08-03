@@ -12,15 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-use crate::{cipher, kex, mac, msg, Error};
-use russh_keys::key;
 use std::str::from_utf8;
-// use super::mac; // unimplemented
-use crate::compression::*;
+
 use rand::RngCore;
 use russh_cryptovec::CryptoVec;
 use russh_keys::encoding::{Encoding, Reader};
+use russh_keys::key;
 use russh_keys::key::{KeyPair, PublicKey};
+
+use crate::cipher::CIPHERS;
+use crate::compression::*;
+use crate::{cipher, kex, mac, msg, Error};
 
 #[derive(Debug)]
 pub struct Names {
@@ -189,7 +191,10 @@ pub trait Select {
         r.read_string()?; // cipher server-to-client.
         debug!("kex {}", line!());
 
-        let need_mac = cipher.map(|x| x.1 == cipher::AES_256_CTR).unwrap_or(false);
+        let need_mac = cipher
+            .and_then(|x| CIPHERS.get(x.1))
+            .map(|x| x.needs_mac())
+            .unwrap_or(false);
 
         let client_mac = if let Some((_, m)) = Self::select(pref.mac, r.read_string()?) {
             m

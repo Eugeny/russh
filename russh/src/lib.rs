@@ -678,10 +678,11 @@ pub enum ChannelMsg {
 
 #[cfg(test)]
 mod test_compress {
-    use super::server::{Auth, Server as _, Session};
-    use super::*;
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
+
+    use super::server::{Auth, Server as _, Session};
+    use super::*;
 
     #[tokio::test]
     async fn compress_local_test() {
@@ -797,9 +798,9 @@ mod test_compress {
         }
         fn check_server_key(
             self,
-            server_public_key: &russh_keys::key::PublicKey,
+            _server_public_key: &russh_keys::key::PublicKey,
         ) -> Self::FutureBool {
-            println!("check_server_key: {:?}", server_public_key);
+            // println!("check_server_key: {:?}", server_public_key);
             self.finished_bool(true)
         }
     }

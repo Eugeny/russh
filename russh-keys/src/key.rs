@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-use crate::encoding::{Encoding, Reader};
-pub use crate::signature::*;
-use crate::Error;
 #[cfg(feature = "openssl")]
 use openssl::pkey::{Private, Public};
 use russh_cryptovec::CryptoVec;
 use russh_libsodium as sodium;
+
+use crate::encoding::{Encoding, Reader};
+pub use crate::signature::*;
+use crate::Error;
 
 /// Keys for elliptic curve Ed25519 cryptography.
 pub mod ed25519 {

@@ -1,9 +1,7 @@
 use super::*;
 use crate::cipher::SealingKey;
-use crate::negotiation;
 use crate::negotiation::Select;
-
-use crate::kex;
+use crate::{kex, negotiation};
 
 impl KexInit {
     pub fn client_parse(

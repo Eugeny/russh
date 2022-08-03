@@ -12,18 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-use super::super::*;
-use super::*;
+use std::cell::RefCell;
+
 use auth::*;
 use byteorder::{BigEndian, ByteOrder};
-use msg;
-use negotiation;
 use negotiation::Select;
 use russh_keys::encoding::{Encoding, Position, Reader};
 use russh_keys::key;
 use russh_keys::key::Verify;
-use std::cell::RefCell;
 use tokio::time::Instant;
+use {msg, negotiation};
+
+use super::super::*;
+use super::*;
 
 impl Session {
     /// Returns false iff a request was rejected.

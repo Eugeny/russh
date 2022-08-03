@@ -1,12 +1,12 @@
-use crate::encoding::Reader;
-use crate::key;
-use crate::{Error, KEYTYPE_ED25519, KEYTYPE_RSA};
 use aes::cipher::block_padding::Pkcs7;
 use aes::cipher::{BlockDecryptMut, KeyIvInit, StreamCipher};
 use bcrypt_pbkdf;
 use ctr::Ctr64LE;
 #[cfg(feature = "openssl")]
 use openssl::bn::BigNum;
+
+use crate::encoding::Reader;
+use crate::{key, Error, KEYTYPE_ED25519, KEYTYPE_RSA};
 
 /// Decode a secret key given in the OpenSSH format, deciphering it if
 /// needed using the supplied password.

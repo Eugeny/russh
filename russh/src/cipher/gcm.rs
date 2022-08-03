@@ -15,14 +15,14 @@
 
 // http://cvsweb.openbsd.org/cgi-bin/cvsweb/src/usr.bin/ssh/PROTOCOL.chacha20poly1305?annotate=HEAD
 
-use crate::mac::{MacAlgorithm};
-
-use super::super::Error;
 use aes_gcm::{AeadCore, AeadInPlace, Aes256Gcm, KeyInit, KeySizeUser};
 use byteorder::{BigEndian, ByteOrder};
 use digest::typenum::Unsigned;
 use generic_array::GenericArray;
 use sodium::random::randombytes;
+
+use super::super::Error;
+use crate::mac::MacAlgorithm;
 
 pub struct GcmCipher {}
 
@@ -143,12 +143,16 @@ impl super::OpeningKey for OpeningKey {
         let mut tag_buf = GenericArray::<u8, TagSize>::default();
         tag_buf.clone_from_slice(tag);
 
-        if self.cipher.decrypt_in_place_detached(
-            &nonce,
-            &packet_length,
-            &mut ciphertext_in_plaintext_out[super::PACKET_LENGTH_LEN..],
-            &tag_buf,
-        ).is_err() {
+        if self
+            .cipher
+            .decrypt_in_place_detached(
+                &nonce,
+                &packet_length,
+                &mut ciphertext_in_plaintext_out[super::PACKET_LENGTH_LEN..],
+                &tag_buf,
+            )
+            .is_err()
+        {
             return Err(Error::DecryptionError);
         }
 

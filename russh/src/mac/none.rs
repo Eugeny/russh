@@ -20,5 +20,7 @@ impl Mac for NoMac {
     }
 
     fn compute(&self, _: u32, _: &[u8], _: &mut [u8]) {}
-    fn verify(&self, _: u32, _: &[u8], _: &[u8]) -> bool { true }
+    fn verify(&self, _: u32, _: &[u8], _: &[u8]) -> bool {
+        true
+    }
 }
