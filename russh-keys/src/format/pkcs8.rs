@@ -1,8 +1,8 @@
 use std::borrow::Cow;
 
-use aes::cipher::block_padding::Pkcs7;
 use aes::cipher::{BlockDecryptMut, BlockEncryptMut, KeyIvInit};
 use bit_vec::BitVec;
+use block_padding::{NoPadding, Pkcs7};
 #[cfg(feature = "openssl")]
 use openssl::pkey::Private;
 #[cfg(feature = "openssl")]
@@ -286,7 +286,7 @@ pub fn encode_pkcs8_encrypted(
     #[allow(clippy::unwrap_used)] // parameters are static
     let c = cbc::Encryptor::<Aes256>::new_from_slices(&dkey, &iv).unwrap();
     let n = plaintext.len();
-    c.encrypt_padded_mut::<Pkcs7>(&mut plaintext, n)?;
+    let encrypted = c.encrypt_padded_mut::<NoPadding>(&mut plaintext, n)?;
 
     Ok(yasna::construct_der(|writer| {
         writer.write_sequence(|writer| {
@@ -298,7 +298,7 @@ pub fn encode_pkcs8_encrypted(
                 asn1_write_pbes2(writer.next(), rounds as u64, &salt, &iv)
             });
             // Ciphertext
-            writer.next().write_bytes(&plaintext[..])
+            writer.next().write_bytes(&encrypted[..])
         })
     }))
 }
@@ -422,15 +422,13 @@ impl Encryption {
                 #[allow(clippy::unwrap_used)] // parameters are static
                 let c = cbc::Decryptor::<Aes128>::new_from_slices(key, iv).unwrap();
                 let mut dec = ciphertext.to_vec();
-                c.decrypt_padded_mut::<Pkcs7>(&mut dec)?;
-                Ok(dec)
+                Ok(c.decrypt_padded_mut::<Pkcs7>(&mut dec)?.into())
             }
             Encryption::Aes256Cbc(ref iv) => {
                 #[allow(clippy::unwrap_used)] // parameters are static
                 let c = cbc::Decryptor::<Aes256>::new_from_slices(key, iv).unwrap();
                 let mut dec = ciphertext.to_vec();
-                c.decrypt_padded_mut::<Pkcs7>(&mut dec)?;
-                Ok(dec)
+                Ok(c.decrypt_padded_mut::<Pkcs7>(&mut dec)?.into())
             }
         }
     }

@@ -1,4 +1,4 @@
-use aes::cipher::block_padding::Pkcs7;
+use aes::cipher::block_padding::NoPadding;
 use aes::cipher::{BlockDecryptMut, KeyIvInit, StreamCipher};
 use bcrypt_pbkdf;
 use ctr::Ctr64LE;
@@ -130,13 +130,13 @@ fn decrypt_secret_key(
             b"aes128-cbc" => {
                 #[allow(clippy::unwrap_used)] // parameters are static
                 let cipher = cbc::Decryptor::<Aes128>::new_from_slices(key, iv).unwrap();
-                let n = cipher.decrypt_padded_mut::<Pkcs7>(&mut dec)?.len();
+                let n = cipher.decrypt_padded_mut::<NoPadding>(&mut dec)?.len();
                 dec.truncate(n)
             }
             b"aes256-cbc" => {
                 #[allow(clippy::unwrap_used)] // parameters are static
                 let cipher = cbc::Decryptor::<Aes256>::new_from_slices(key, iv).unwrap();
-                let n = cipher.decrypt_padded_mut::<Pkcs7>(&mut dec)?.len();
+                let n = cipher.decrypt_padded_mut::<NoPadding>(&mut dec)?.len();
                 dec.truncate(n)
             }
             b"aes128-ctr" => {
