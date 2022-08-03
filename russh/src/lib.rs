@@ -80,7 +80,7 @@
 //!
 //! impl server::Server for Server {
 //!     type Handler = Self;
-//!     fn new(&mut self, _: Option<std::net::SocketAddr>) -> Self {
+//!     fn new_client(&mut self, _: Option<std::net::SocketAddr>) -> Self {
 //!         let s = self.clone();
 //!         self.id += 1;
 //!         s

@@ -298,7 +298,7 @@ pub fn encode_pkcs8_encrypted(
                 asn1_write_pbes2(writer.next(), rounds as u64, &salt, &iv)
             });
             // Ciphertext
-            writer.next().write_bytes(&encrypted[..])
+            writer.next().write_bytes(encrypted)
         })
     }))
 }
