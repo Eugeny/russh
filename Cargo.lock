@@ -978,18 +978,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "russh-examples"
-version = "0.22.0-beta.1"
-dependencies = [
- "anyhow",
- "env_logger 0.8.4",
- "futures",
- "russh",
- "russh-keys",
- "tokio",
-]
-
-[[package]]
 name = "russh-keys"
 version = "0.22.0-beta.3"
 dependencies = [
