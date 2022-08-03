@@ -18,6 +18,7 @@ use generic_array::GenericArray;
 use russh_libsodium::random::randombytes;
 
 use super::super::Error;
+use super::PACKET_LENGTH_LEN;
 use crate::mac::{Mac, MacAlgorithm};
 
 pub struct SshBlockCipher<C: StreamCipher + KeySizeUser + IvSizeUser>(pub PhantomData<C>);
@@ -88,10 +89,14 @@ impl<C: StreamCipher + KeySizeUser + IvSizeUser> super::OpeningKey for OpeningKe
         _sequence_number: u32,
         mut encrypted_packet_length: [u8; 4],
     ) -> [u8; 4] {
-        // Work around uncloneable Aes<>
-        let mut cipher: C = unsafe { std::ptr::read(&self.cipher as *const C) };
-        cipher.apply_keystream(&mut encrypted_packet_length);
-        encrypted_packet_length
+        if self.mac.is_etm() {
+            encrypted_packet_length
+        } else {
+            // Work around uncloneable Aes<>
+            let mut cipher: C = unsafe { std::ptr::read(&self.cipher as *const C) };
+            cipher.apply_keystream(&mut encrypted_packet_length);
+            encrypted_packet_length
+        }
     }
 
     fn tag_len(&self) -> usize {
@@ -104,15 +109,26 @@ impl<C: StreamCipher + KeySizeUser + IvSizeUser> super::OpeningKey for OpeningKe
         ciphertext_in_plaintext_out: &'a mut [u8],
         tag: &[u8],
     ) -> Result<&'a [u8], Error> {
-        self.cipher.apply_keystream(ciphertext_in_plaintext_out);
+        if self.mac.is_etm() {
+            if !self
+                .mac
+                .verify(sequence_number, ciphertext_in_plaintext_out, tag)
+            {
+                return Err(Error::PacketAuth);
+            }
+            #[allow(clippy::indexing_slicing)]
+            self.cipher
+                .apply_keystream(&mut ciphertext_in_plaintext_out[PACKET_LENGTH_LEN..]);
+        } else {
+            self.cipher.apply_keystream(ciphertext_in_plaintext_out);
 
-        if !self
-            .mac
-            .verify(sequence_number, ciphertext_in_plaintext_out, tag)
-        {
-            return Err(Error::PacketAuth);
+            if !self
+                .mac
+                .verify(sequence_number, ciphertext_in_plaintext_out, tag)
+            {
+                return Err(Error::PacketAuth);
+            }
         }
-
         Ok(ciphertext_in_plaintext_out)
     }
 }
@@ -120,18 +136,21 @@ impl<C: StreamCipher + KeySizeUser + IvSizeUser> super::OpeningKey for OpeningKe
 impl<C: StreamCipher + KeySizeUser + IvSizeUser> super::SealingKey for SealingKey<C> {
     fn padding_length(&self, payload: &[u8]) -> usize {
         let block_size = 16;
-        let extra_len = super::PACKET_LENGTH_LEN + super::PADDING_LENGTH_LEN + self.mac.mac_len();
-        let padding_len = if payload.len() + extra_len <= super::MINIMUM_PACKET_LEN {
-            super::MINIMUM_PACKET_LEN
-                - payload.len()
-                - super::PADDING_LENGTH_LEN
-                - super::PACKET_LENGTH_LEN
+
+        let pll = if self.mac.is_etm() {
+            0
         } else {
-            block_size
-                - ((super::PACKET_LENGTH_LEN + super::PADDING_LENGTH_LEN + payload.len())
-                    % block_size)
+            PACKET_LENGTH_LEN
         };
-        if padding_len < super::PACKET_LENGTH_LEN {
+
+        let extra_len = PACKET_LENGTH_LEN + super::PADDING_LENGTH_LEN + self.mac.mac_len();
+
+        let padding_len = if payload.len() + extra_len <= super::MINIMUM_PACKET_LEN {
+            super::MINIMUM_PACKET_LEN - payload.len() - super::PADDING_LENGTH_LEN - pll
+        } else {
+            block_size - ((pll + super::PADDING_LENGTH_LEN + payload.len()) % block_size)
+        };
+        if padding_len < PACKET_LENGTH_LEN {
             padding_len + block_size
         } else {
             padding_len
@@ -152,8 +171,16 @@ impl<C: StreamCipher + KeySizeUser + IvSizeUser> super::SealingKey for SealingKe
         plaintext_in_ciphertext_out: &mut [u8],
         tag_out: &mut [u8],
     ) {
-        self.mac
-            .compute(sequence_number, plaintext_in_ciphertext_out, tag_out);
-        self.cipher.apply_keystream(plaintext_in_ciphertext_out);
+        if self.mac.is_etm() {
+            #[allow(clippy::indexing_slicing)]
+            self.cipher
+                .apply_keystream(&mut plaintext_in_ciphertext_out[PACKET_LENGTH_LEN..]);
+            self.mac
+                .compute(sequence_number, plaintext_in_ciphertext_out, tag_out);
+        } else {
+            self.mac
+                .compute(sequence_number, plaintext_in_ciphertext_out, tag_out);
+            self.cipher.apply_keystream(plaintext_in_ciphertext_out);
+        }
     }
 }

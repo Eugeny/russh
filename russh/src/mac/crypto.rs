@@ -14,8 +14,8 @@ pub struct CryptoMacAlgorithm<
 >(pub PhantomData<M>, pub PhantomData<KL>);
 
 pub struct CryptoMac<M: digest::Mac + KeyInit + Send + 'static, KL: ArrayLength<u8> + 'static> {
-    key: GenericArray<u8, KL>,
-    p: PhantomData<M>,
+    pub(crate) key: GenericArray<u8, KL>,
+    pub(crate) p: PhantomData<M>,
 }
 
 impl<M: digest::Mac + KeyInit + Send + 'static, KL: ArrayLength<u8> + 'static> MacAlgorithm

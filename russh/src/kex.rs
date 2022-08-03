@@ -174,9 +174,13 @@ impl Algorithm {
         local_to_remote_mac: mac::Name,
         is_server: bool,
     ) -> Result<super::cipher::CipherPair, crate::Error> {
-        let cipher = CIPHERS.get(&cipher).unwrap();
-        let remote_to_local_mac = MACS.get(&remote_to_local_mac).unwrap();
-        let local_to_remote_mac = MACS.get(&local_to_remote_mac).unwrap();
+        let cipher = CIPHERS.get(&cipher).ok_or(crate::Error::UnknownAlgo)?;
+        let remote_to_local_mac = MACS
+            .get(&remote_to_local_mac)
+            .ok_or(crate::Error::UnknownAlgo)?;
+        let local_to_remote_mac = MACS
+            .get(&local_to_remote_mac)
+            .ok_or(crate::Error::UnknownAlgo)?;
 
         // https://tools.ietf.org/html/rfc4253#section-7.2
         BUFFER.with(|buffer| {

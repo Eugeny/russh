@@ -341,6 +341,10 @@ pub enum Error {
     #[error("Key exchange init failed")]
     KexInit,
 
+    /// Unknown algorithm name.
+    #[error("Unknown algorithm")]
+    UnknownAlgo,
+
     /// No common key exchange algorithm.
     #[error("No common key exchange algorithm")]
     NoCommonKexAlgo,

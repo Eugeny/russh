@@ -143,6 +143,7 @@ impl super::OpeningKey for OpeningKey {
         let mut tag_buf = GenericArray::<u8, TagSize>::default();
         tag_buf.clone_from_slice(tag);
 
+        #[allow(clippy::indexing_slicing)]
         if self
             .cipher
             .decrypt_in_place_detached(
@@ -197,6 +198,7 @@ impl super::SealingKey for SealingKey {
 
         let nonce = make_nonce(&self.nonce, sequence_number);
 
+        #[allow(clippy::indexing_slicing)]
         let tag_out = self
             .cipher
             .encrypt_in_place_detached(

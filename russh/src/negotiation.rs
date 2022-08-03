@@ -51,57 +51,50 @@ pub struct Preferred {
     pub compression: &'static [&'static str],
 }
 
+const KEX_ORDER: &[kex::Name] = &[kex::CURVE25519];
+
+const CIPHER_ORDER: &[cipher::Name] = &[
+    cipher::CHACHA20_POLY1305,
+    cipher::AES_256_GCM,
+    cipher::AES_256_CTR,
+    cipher::AES_192_CTR,
+    cipher::AES_128_CTR,
+];
+
+const HMAC_ORDER: &[mac::Name] = &[
+    mac::HMAC_SHA512_ETM,
+    mac::HMAC_SHA256_ETM,
+    mac::HMAC_SHA512,
+    mac::HMAC_SHA256,
+    mac::HMAC_SHA1_ETM,
+    mac::HMAC_SHA1,
+    mac::NONE,
+];
+
 impl Preferred {
     #[cfg(feature = "openssl")]
     pub const DEFAULT: Preferred = Preferred {
-        kex: &[kex::CURVE25519],
+        kex: KEX_ORDER,
         key: &[key::ED25519, key::RSA_SHA2_256, key::RSA_SHA2_512],
-        cipher: &[
-            cipher::CHACHA20_POLY1305,
-            cipher::AES_256_GCM,
-            cipher::AES_256_CTR,
-        ],
-        mac: &[
-            mac::HMAC_SHA512,
-            mac::HMAC_SHA256,
-            mac::HMAC_SHA1,
-            mac::NONE,
-        ],
+        cipher: CIPHER_ORDER,
+        mac: HMAC_ORDER,
         compression: &["none", "zlib", "zlib@openssh.com"],
     };
 
     #[cfg(not(feature = "openssl"))]
     pub const DEFAULT: Preferred = Preferred {
-        kex: &[kex::CURVE25519],
+        kex: &KEX_ORDER,
         key: &[key::ED25519],
-        cipher: &[
-            cipher::CHACHA20_POLY1305,
-            cipher::AES_256_GCM,
-            cipher::AES_256_CTR,
-        ],
-        mac: &[
-            mac::HMAC_SHA512,
-            mac::HMAC_SHA256,
-            mac::HMAC_SHA1,
-            mac::NONE,
-        ],
+        cipher: &CIPHER_ORDER,
+        mac: &HMAC_ORDER,
         compression: &["none", "zlib", "zlib@openssh.com"],
     };
 
     pub const COMPRESSED: Preferred = Preferred {
-        kex: &[kex::CURVE25519],
+        kex: KEX_ORDER,
         key: &[key::ED25519, key::RSA_SHA2_256, key::RSA_SHA2_512],
-        cipher: &[
-            cipher::CHACHA20_POLY1305,
-            cipher::AES_256_GCM,
-            cipher::AES_256_CTR,
-        ],
-        mac: &[
-            mac::HMAC_SHA512,
-            mac::HMAC_SHA256,
-            mac::HMAC_SHA1,
-            mac::NONE,
-        ],
+        cipher: CIPHER_ORDER,
+        mac: HMAC_ORDER,
         compression: &["zlib", "zlib@openssh.com", "none"],
     };
 }
@@ -192,7 +185,7 @@ pub trait Select {
         debug!("kex {}", line!());
 
         let need_mac = cipher
-            .and_then(|x| CIPHERS.get(x.1))
+            .and_then(|x| CIPHERS.get(&x.1))
             .map(|x| x.needs_mac())
             .unwrap_or(false);
 
