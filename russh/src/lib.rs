@@ -296,6 +296,7 @@ pub mod cipher;
 mod compression;
 mod kex;
 mod key;
+pub mod mac;
 mod msg;
 mod negotiation;
 mod ssh_read;

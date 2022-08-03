@@ -13,22 +13,14 @@
 
 use std::marker::PhantomData;
 
+use crate::mac::{Mac, MacAlgorithm};
+
 use super::super::Error;
 use aes::cipher::{IvSizeUser, KeyIvInit, KeySizeUser, StreamCipher};
-use byteorder::{BigEndian, ByteOrder};
-use digest::typenum::U20;
-use digest::CtOutput;
 use generic_array::GenericArray;
-use hmac::{Hmac, Mac};
 use russh_libsodium::random::randombytes;
-use sha1::Sha1;
 
-const MAC_KEY_BYTES: usize = 20;
-type MacKey = GenericArray<u8, U20>;
-
-pub struct SshBlockCipher<C: StreamCipher + KeySizeUser + IvSizeUser> {
-    pub c: PhantomData<C>,
-}
+pub struct SshBlockCipher<C: StreamCipher + KeySizeUser + IvSizeUser>(pub PhantomData<C>);
 
 impl<C: StreamCipher + KeySizeUser + IvSizeUser + KeyIvInit + Send + 'static> super::Cipher
     for SshBlockCipher<C>
@@ -37,52 +29,54 @@ impl<C: StreamCipher + KeySizeUser + IvSizeUser + KeyIvInit + Send + 'static> su
         C::key_size()
     }
 
-    fn mac_key_len(&self) -> usize {
-        MAC_KEY_BYTES
-    }
-
     fn nonce_len(&self) -> usize {
         C::iv_size()
     }
 
-    fn make_opening_key(&self, k: &[u8], n: &[u8], m: &[u8]) -> Box<dyn super::OpeningKey + Send> {
+    fn make_opening_key(
+        &self,
+        k: &[u8],
+        n: &[u8],
+        m: &[u8],
+        mac: &dyn MacAlgorithm,
+    ) -> Box<dyn super::OpeningKey + Send> {
         let mut key = GenericArray::<u8, C::KeySize>::default();
         let mut nonce = GenericArray::<u8, C::IvSize>::default();
-        let mut mac_key = GenericArray::from([0u8; MAC_KEY_BYTES]);
         key.clone_from_slice(k);
         nonce.clone_from_slice(n);
-        mac_key.clone_from_slice(m);
         Box::new(OpeningKey {
             cipher: C::new(&key, &nonce),
-            mac_key,
+            mac: mac.make_mac(m),
         })
     }
 
-    fn make_sealing_key(&self, k: &[u8], n: &[u8], m: &[u8]) -> Box<dyn super::SealingKey + Send> {
+    fn make_sealing_key(
+        &self,
+        k: &[u8],
+        n: &[u8],
+        m: &[u8],
+        mac: &dyn MacAlgorithm,
+    ) -> Box<dyn super::SealingKey + Send> {
         let mut key = GenericArray::<u8, C::KeySize>::default();
         let mut nonce = GenericArray::<u8, C::IvSize>::default();
-        let mut mac_key = GenericArray::from([0u8; MAC_KEY_BYTES]);
         key.clone_from_slice(k);
         nonce.clone_from_slice(n);
-        mac_key.clone_from_slice(m);
         Box::new(SealingKey {
             cipher: C::new(&key, &nonce),
-            mac_key,
+            mac: mac.make_mac(m),
         })
     }
 }
 
 pub struct OpeningKey<C: StreamCipher + KeySizeUser + IvSizeUser> {
-    mac_key: MacKey,
     cipher: C,
+    mac: Box<dyn Mac + Send>,
 }
 
 pub struct SealingKey<C: StreamCipher + KeySizeUser + IvSizeUser> {
-    mac_key: MacKey,
     cipher: C,
+    mac: Box<dyn Mac + Send>,
 }
-
-const TAG_LEN: usize = 20;
 
 impl<C: StreamCipher + KeySizeUser + IvSizeUser> super::OpeningKey for OpeningKey<C> {
     fn decrypt_packet_length(
@@ -97,7 +91,7 @@ impl<C: StreamCipher + KeySizeUser + IvSizeUser> super::OpeningKey for OpeningKe
     }
 
     fn tag_len(&self) -> usize {
-        TAG_LEN
+        self.mac.mac_len()
     }
 
     fn open<'a>(
@@ -108,13 +102,11 @@ impl<C: StreamCipher + KeySizeUser + IvSizeUser> super::OpeningKey for OpeningKe
     ) -> Result<&'a [u8], Error> {
         self.cipher.apply_keystream(ciphertext_in_plaintext_out);
 
-        let mac = hmac(sequence_number, ciphertext_in_plaintext_out, &self.mac_key);
-
-        let mut rcvd_mac = GenericArray::from([0u8; TAG_LEN]);
-        rcvd_mac.copy_from_slice(tag);
-        let rcvd_mac = CtOutput::<Hmac<Sha1>>::new(rcvd_mac);
-
-        if mac != rcvd_mac {
+        if !self.mac.verify(
+            sequence_number,
+            ciphertext_in_plaintext_out,
+            tag,
+        ) {
             return Err(Error::PacketAuth);
         }
 
@@ -125,7 +117,7 @@ impl<C: StreamCipher + KeySizeUser + IvSizeUser> super::OpeningKey for OpeningKe
 impl<C: StreamCipher + KeySizeUser + IvSizeUser> super::SealingKey for SealingKey<C> {
     fn padding_length(&self, payload: &[u8]) -> usize {
         let block_size = 16;
-        let extra_len = super::PACKET_LENGTH_LEN + super::PADDING_LENGTH_LEN + TAG_LEN;
+        let extra_len = super::PACKET_LENGTH_LEN + super::PADDING_LENGTH_LEN + self.mac.mac_len();
         let padding_len = if payload.len() + extra_len <= super::MINIMUM_PACKET_LEN {
             super::MINIMUM_PACKET_LEN
                 - payload.len()
@@ -148,7 +140,7 @@ impl<C: StreamCipher + KeySizeUser + IvSizeUser> super::SealingKey for SealingKe
     }
 
     fn tag_len(&self) -> usize {
-        TAG_LEN
+        self.mac.mac_len()
     }
 
     fn seal(
@@ -157,18 +149,13 @@ impl<C: StreamCipher + KeySizeUser + IvSizeUser> super::SealingKey for SealingKe
         plaintext_in_ciphertext_out: &mut [u8],
         tag_out: &mut [u8],
     ) {
-        tag_out.copy_from_slice(
-            &hmac(sequence_number, plaintext_in_ciphertext_out, &self.mac_key).into_bytes(),
+        println!("plain {:?}", plaintext_in_ciphertext_out);
+        self.mac.compute(
+            sequence_number,
+            plaintext_in_ciphertext_out,
+            tag_out,
         );
+        println!("mac {:?}", tag_out);
         self.cipher.apply_keystream(plaintext_in_ciphertext_out);
     }
-}
-
-fn hmac(seq: u32, packet: &[u8], key: &MacKey) -> CtOutput<Hmac<Sha1>> {
-    let mut hmac = Hmac::<Sha1>::new_from_slice(key).unwrap();
-    let mut buf = vec![0; 4];
-    BigEndian::write_u32(&mut buf, seq);
-    hmac.update(&buf);
-    hmac.update(packet);
-    hmac.finalize()
 }

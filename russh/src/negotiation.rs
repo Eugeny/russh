@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-use crate::{cipher, kex, msg, Error};
+use crate::{cipher, kex, mac, msg, Error};
 use russh_keys::key;
 use std::str::from_utf8;
 // use super::mac; // unimplemented
@@ -27,8 +27,8 @@ pub struct Names {
     pub kex: kex::Name,
     pub key: key::Name,
     pub cipher: cipher::Name,
-    pub client_mac: &'static str,
-    pub server_mac: &'static str,
+    pub client_mac: mac::Name,
+    pub server_mac: mac::Name,
     pub server_compression: Compression,
     pub client_compression: Compression,
     pub ignore_guessed: bool,
@@ -44,7 +44,7 @@ pub struct Preferred {
     /// Preferred symmetric ciphers.
     pub cipher: &'static [cipher::Name],
     /// Preferred MAC algorithms.
-    pub mac: &'static [&'static str],
+    pub mac: &'static [mac::Name],
     /// Preferred compression algorithms.
     pub compression: &'static [&'static str],
 }
@@ -59,7 +59,12 @@ impl Preferred {
             cipher::AES_256_GCM,
             cipher::AES_256_CTR,
         ],
-        mac: &["none"],
+        mac: &[
+            mac::HMAC_SHA512,
+            mac::HMAC_SHA256,
+            mac::HMAC_SHA1,
+            mac::NONE,
+        ],
         compression: &["none", "zlib", "zlib@openssh.com"],
     };
 
@@ -72,7 +77,12 @@ impl Preferred {
             cipher::AES_256_GCM,
             cipher::AES_256_CTR,
         ],
-        mac: &["none"],
+        mac: &[
+            mac::HMAC_SHA512,
+            mac::HMAC_SHA256,
+            mac::HMAC_SHA1,
+            mac::NONE,
+        ],
         compression: &["none", "zlib", "zlib@openssh.com"],
     };
 
@@ -84,7 +94,12 @@ impl Preferred {
             cipher::AES_256_GCM,
             cipher::AES_256_CTR,
         ],
-        mac: &["none"],
+        mac: &[
+            mac::HMAC_SHA512,
+            mac::HMAC_SHA256,
+            mac::HMAC_SHA1,
+            mac::NONE,
+        ],
         compression: &["zlib", "zlib@openssh.com", "none"],
     };
 }
@@ -181,14 +196,14 @@ pub trait Select {
         } else if need_mac {
             return Err(Error::NoCommonMac);
         } else {
-            "none"
+            mac::NONE
         };
         let server_mac = if let Some((_, m)) = Self::select(pref.mac, r.read_string()?) {
             m
         } else if need_mac {
             return Err(Error::NoCommonMac);
         } else {
-            "none"
+            mac::NONE
         };
 
         debug!("kex {}", line!());

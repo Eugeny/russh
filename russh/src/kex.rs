@@ -1,4 +1,3 @@
-use crate::cipher::CIPHERS;
 // Copyright 2016 Pierre-Étienne Meunier
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,10 +12,11 @@ use crate::cipher::CIPHERS;
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
+use crate::cipher::CIPHERS;
+use crate::mac::{self, MACS};
+use crate::session::Exchange;
 use crate::{cipher, key, msg};
 use byteorder::{BigEndian, ByteOrder};
-
-use crate::session::Exchange;
 use russh_cryptovec::CryptoVec;
 
 use rand::RngCore;
@@ -169,9 +169,13 @@ impl Algorithm {
         session_id: &crate::Sha256Hash,
         exchange_hash: &crate::Sha256Hash,
         cipher: cipher::Name,
+        remote_to_local_mac: mac::Name,
+        local_to_remote_mac: mac::Name,
         is_server: bool,
     ) -> Result<super::cipher::CipherPair, crate::Error> {
         let cipher = CIPHERS.get(&cipher).unwrap();
+        let remote_to_local_mac = MACS.get(&remote_to_local_mac).unwrap();
+        let local_to_remote_mac = MACS.get(&local_to_remote_mac).unwrap();
 
         // https://tools.ietf.org/html/rfc4253#section-7.2
         BUFFER.with(|buffer| {
@@ -232,7 +236,7 @@ impl Algorithm {
                             (b'A', b'B')
                         };
 
-                        let (local_to_remote_mac, remote_to_local_mac) = if is_server {
+                        let (local_to_remote_mac_key, remote_to_local_mac_key) = if is_server {
                             (b'F', b'E')
                         } else {
                             (b'E', b'F')
@@ -244,13 +248,24 @@ impl Algorithm {
 
                         compute_key(local_to_remote, &mut key, cipher.key_len())?;
                         compute_key(local_to_remote_nonce, &mut nonce, cipher.nonce_len())?;
-                        compute_key(local_to_remote_mac, &mut mac, cipher.mac_key_len())?;
+                        compute_key(
+                            local_to_remote_mac_key,
+                            &mut mac,
+                            local_to_remote_mac.key_len(),
+                        )?;
 
-                        let local_to_remote = cipher.make_sealing_key(&key, &nonce, &mac);
+                        let local_to_remote =
+                            cipher.make_sealing_key(&key, &nonce, &mac, *local_to_remote_mac);
+
                         compute_key(remote_to_local, &mut key, cipher.key_len())?;
                         compute_key(remote_to_local_nonce, &mut nonce, cipher.nonce_len())?;
-                        compute_key(remote_to_local_mac, &mut mac, cipher.mac_key_len())?;
-                        let remote_to_local = cipher.make_opening_key(&key, &nonce, &mac);
+                        compute_key(
+                            remote_to_local_mac_key,
+                            &mut mac,
+                            remote_to_local_mac.key_len(),
+                        )?;
+                        let remote_to_local =
+                            cipher.make_opening_key(&key, &nonce, &mac, *remote_to_local_mac);
 
                         Ok(super::cipher::CipherPair {
                             local_to_remote,

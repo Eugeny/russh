@@ -13,6 +13,7 @@
 // limitations under the License.
 //
 
+use crate::mac::{MacAlgorithm};
 use crate::Error;
 
 #[derive(Debug)]
@@ -25,19 +26,27 @@ impl super::Cipher for Clear {
         0
     }
 
-    fn mac_key_len(&self) -> usize {
-        0
-    }
-
     fn nonce_len(&self) -> usize {
         0
     }
 
-    fn make_opening_key(&self, _: &[u8], _: &[u8], _: &[u8]) -> Box<dyn super::OpeningKey + Send> {
+    fn make_opening_key(
+        &self,
+        _: &[u8],
+        _: &[u8],
+        _: &[u8],
+        _: &dyn MacAlgorithm,
+    ) -> Box<dyn super::OpeningKey + Send> {
         Box::new(Key {})
     }
 
-    fn make_sealing_key(&self, _: &[u8], _: &[u8], _: &[u8]) -> Box<dyn super::SealingKey + Send> {
+    fn make_sealing_key(
+        &self,
+        _: &[u8],
+        _: &[u8],
+        _: &[u8],
+        _: &dyn MacAlgorithm,
+    ) -> Box<dyn super::SealingKey + Send> {
         Box::new(Key {})
     }
 }

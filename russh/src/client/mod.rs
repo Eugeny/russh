@@ -815,8 +815,8 @@ where
     let (encrypted_signal, encrypted_recv) = tokio::sync::oneshot::channel();
     let join = tokio::spawn(session.run(stream, handler, Some(encrypted_signal)));
 
-    if let Err(_) = encrypted_recv.await {
-        join.await.map_err(|e| crate::Error::Join(e))??;
+    if encrypted_recv.await.is_err() {
+        join.await.map_err(crate::Error::Join)??;
         return Err(H::Error::from(crate::Error::Disconnect));
     }
 

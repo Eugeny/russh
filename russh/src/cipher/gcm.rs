@@ -15,9 +15,12 @@
 
 // http://cvsweb.openbsd.org/cgi-bin/cvsweb/src/usr.bin/ssh/PROTOCOL.chacha20poly1305?annotate=HEAD
 
+use crate::mac::{MacAlgorithm};
+
 use super::super::Error;
 use aes_gcm::{AeadCore, AeadInPlace, Aes256Gcm, KeyInit, KeySizeUser};
 use byteorder::{BigEndian, ByteOrder};
+use digest::typenum::Unsigned;
 use generic_array::GenericArray;
 use sodium::random::randombytes;
 
@@ -32,15 +35,17 @@ impl super::Cipher for GcmCipher {
         Aes256Gcm::key_size()
     }
 
-    fn mac_key_len(&self) -> usize {
-        0
-    }
-
     fn nonce_len(&self) -> usize {
         GenericArray::<u8, NonceSize>::default().len()
     }
 
-    fn make_opening_key(&self, k: &[u8], n: &[u8], _: &[u8]) -> Box<dyn super::OpeningKey + Send> {
+    fn make_opening_key(
+        &self,
+        k: &[u8],
+        n: &[u8],
+        _: &[u8],
+        _: &dyn MacAlgorithm,
+    ) -> Box<dyn super::OpeningKey + Send> {
         let mut key = GenericArray::<u8, KeySize>::default();
         key.clone_from_slice(k);
         let mut nonce = GenericArray::<u8, NonceSize>::default();
@@ -51,7 +56,13 @@ impl super::Cipher for GcmCipher {
         })
     }
 
-    fn make_sealing_key(&self, k: &[u8], n: &[u8], _: &[u8]) -> Box<dyn super::SealingKey + Send> {
+    fn make_sealing_key(
+        &self,
+        k: &[u8],
+        n: &[u8],
+        _: &[u8],
+        _: &dyn MacAlgorithm,
+    ) -> Box<dyn super::SealingKey + Send> {
         let mut key = GenericArray::<u8, KeySize>::default();
         key.clone_from_slice(k);
         let mut nonce = GenericArray::<u8, NonceSize>::default();
@@ -80,7 +91,7 @@ fn make_nonce(
     sequence_number: u32,
 ) -> GenericArray<u8, NonceSize> {
     let mut new_nonce = GenericArray::<u8, NonceSize>::default();
-    new_nonce.clone_from_slice(&nonce);
+    new_nonce.clone_from_slice(nonce);
     // Increment the nonce
     let i0 = new_nonce.len() - 8;
 
@@ -106,7 +117,7 @@ impl super::OpeningKey for OpeningKey {
     }
 
     fn tag_len(&self) -> usize {
-        GenericArray::<u8, TagSize>::default().len()
+        TagSize::to_usize()
     }
 
     fn open<'a>(
@@ -130,14 +141,14 @@ impl super::OpeningKey for OpeningKey {
         let nonce = make_nonce(&self.nonce, sequence_number);
 
         let mut tag_buf = GenericArray::<u8, TagSize>::default();
-        tag_buf.clone_from_slice(&tag);
+        tag_buf.clone_from_slice(tag);
 
-        if let Err(_) = self.cipher.decrypt_in_place_detached(
+        if self.cipher.decrypt_in_place_detached(
             &nonce,
             &packet_length,
             &mut ciphertext_in_plaintext_out[super::PACKET_LENGTH_LEN..],
             &tag_buf,
-        ) {
+        ).is_err() {
             return Err(Error::DecryptionError);
         }
 
@@ -166,7 +177,7 @@ impl super::SealingKey for SealingKey {
     }
 
     fn tag_len(&self) -> usize {
-        GenericArray::<u8, TagSize>::default().len()
+        TagSize::to_usize()
     }
 
     fn seal(

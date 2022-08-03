@@ -1,3 +1,4 @@
+use crate::mac::{MacAlgorithm};
 // Copyright 2016 Pierre-Étienne Meunier
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -36,9 +37,20 @@ use gcm::GcmCipher;
 pub trait Cipher {
     fn key_len(&self) -> usize;
     fn nonce_len(&self) -> usize;
-    fn mac_key_len(&self) -> usize;
-    fn make_opening_key(&self, key: &[u8], nonce: &[u8], mac: &[u8]) -> Box<dyn OpeningKey + Send>;
-    fn make_sealing_key(&self, key: &[u8], nonce: &[u8], mac: &[u8]) -> Box<dyn SealingKey + Send>;
+    fn make_opening_key(
+        &self,
+        key: &[u8],
+        nonce: &[u8],
+        mac_key: &[u8],
+        mac: &dyn MacAlgorithm,
+    ) -> Box<dyn OpeningKey + Send>;
+    fn make_sealing_key(
+        &self,
+        key: &[u8],
+        nonce: &[u8],
+        mac_key: &[u8],
+        mac: &dyn MacAlgorithm,
+    ) -> Box<dyn SealingKey + Send>;
 }
 
 pub const CLEAR: Name = Name("clear");
@@ -49,12 +61,9 @@ pub const AES_256_GCM: Name = Name("aes256-gcm@openssh.com");
 pub const CHACHA20_POLY1305: Name = Name("chacha20-poly1305@openssh.com");
 
 static _CLEAR: Clear = Clear {};
-static _AES_128_CTR: SshBlockCipher<Ctr128BE<Aes128>> =
-    SshBlockCipher::<Ctr128BE<Aes128>> { c: PhantomData };
-static _AES_192_CTR: SshBlockCipher<Ctr128BE<Aes192>> =
-    SshBlockCipher::<Ctr128BE<Aes192>> { c: PhantomData };
-static _AES_256_CTR: SshBlockCipher<Ctr128BE<Aes256>> =
-    SshBlockCipher::<Ctr128BE<Aes256>> { c: PhantomData };
+static _AES_128_CTR: SshBlockCipher<Ctr128BE<Aes128>> = SshBlockCipher(PhantomData);
+static _AES_192_CTR: SshBlockCipher<Ctr128BE<Aes192>> = SshBlockCipher(PhantomData);
+static _AES_256_CTR: SshBlockCipher<Ctr128BE<Aes256>> = SshBlockCipher(PhantomData);
 static _AES_256_GCM: GcmCipher = GcmCipher {};
 static _CHACHA20_POLY1305: Chacha20Poly1305 = Chacha20Poly1305 {};
 

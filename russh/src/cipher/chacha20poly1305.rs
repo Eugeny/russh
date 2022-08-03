@@ -15,6 +15,8 @@
 
 // http://cvsweb.openbsd.org/cgi-bin/cvsweb/src/usr.bin/ssh/PROTOCOL.chacha20poly1305?annotate=HEAD
 
+use crate::mac::{MacAlgorithm};
+
 use super::super::Error;
 use byteorder::{BigEndian, ByteOrder};
 use sodium::chacha20::*;
@@ -26,16 +28,18 @@ impl super::Cipher for Chacha20Poly1305 {
         KEY_BYTES * 2
     }
 
-    fn mac_key_len(&self) -> usize {
-        0
-    }
-
     fn nonce_len(&self) -> usize {
         0
     }
 
     #[allow(clippy::indexing_slicing)] // length checked
-    fn make_opening_key(&self, k: &[u8], _: &[u8], _: &[u8]) -> Box<dyn super::OpeningKey + Send> {
+    fn make_opening_key(
+        &self,
+        k: &[u8],
+        _: &[u8],
+        _: &[u8],
+        _: &dyn MacAlgorithm,
+    ) -> Box<dyn super::OpeningKey + Send> {
         let mut k1 = Key([0; KEY_BYTES]);
         let mut k2 = Key([0; KEY_BYTES]);
         k1.0.clone_from_slice(&k[KEY_BYTES..]);
@@ -44,7 +48,13 @@ impl super::Cipher for Chacha20Poly1305 {
     }
 
     #[allow(clippy::indexing_slicing)] // length checked
-    fn make_sealing_key(&self, k: &[u8], _: &[u8], _: &[u8]) -> Box<dyn super::SealingKey + Send> {
+    fn make_sealing_key(
+        &self,
+        k: &[u8],
+        _: &[u8],
+        _: &[u8],
+        _: &dyn MacAlgorithm,
+    ) -> Box<dyn super::SealingKey + Send> {
         let mut k1 = Key([0; KEY_BYTES]);
         let mut k2 = Key([0; KEY_BYTES]);
         k1.0.clone_from_slice(&k[KEY_BYTES..]);

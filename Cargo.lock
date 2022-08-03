@@ -952,6 +952,7 @@ dependencies = [
  "russh-libsodium",
  "sha1",
  "sha2 0.10.2",
+ "subtle",
  "thiserror",
  "tokio",
 ]
