@@ -14,6 +14,7 @@
 //
 
 use std::collections::HashMap;
+use std::fmt::{Debug, Formatter};
 use std::num::Wrapping;
 
 use byteorder::{BigEndian, ByteOrder};
@@ -31,7 +32,7 @@ pub(crate) struct Encrypted {
 
     // It's always Some, except when we std::mem::replace it temporarily.
     pub exchange: Option<Exchange>,
-    pub kex: kex::Curve25519Kex,
+    pub kex: Box<dyn KexAlgorithm + Send>,
     pub key: usize,
     pub client_mac: mac::Name,
     pub server_mac: mac::Name,
@@ -476,13 +477,18 @@ pub struct KexDh {
     pub session_id: Option<crate::Sha256Hash>,
 }
 
-#[derive(Debug)]
 pub struct KexDhDone {
     pub exchange: Exchange,
-    pub kex: kex::Curve25519Kex,
+    pub kex: Box<dyn KexAlgorithm + Send>,
     pub key: usize,
     pub session_id: Option<crate::Sha256Hash>,
     pub names: negotiation::Names,
+}
+
+impl Debug for KexDhDone {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "KexDhDone")
+    }
 }
 
 impl KexDhDone {
@@ -530,7 +536,7 @@ impl KexDhDone {
 pub struct NewKeys {
     pub exchange: Exchange,
     pub names: negotiation::Names,
-    pub kex: kex::Curve25519Kex,
+    pub kex: Box<dyn KexAlgorithm + Send>,
     pub key: usize,
     pub cipher: cipher::CipherPair,
     pub session_id: crate::Sha256Hash,

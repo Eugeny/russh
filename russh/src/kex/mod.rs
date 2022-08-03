@@ -12,17 +12,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
+mod curve25519;
 use std::cell::RefCell;
+use std::collections::HashMap;
+use std::fmt::Debug;
 
-use byteorder::{BigEndian, ByteOrder};
-use rand::RngCore;
+use curve25519::Curve25519KexType;
+use once_cell::sync::Lazy;
 use russh_cryptovec::CryptoVec;
 use russh_keys::encoding::Encoding;
 
+use crate::cipher;
 use crate::cipher::CIPHERS;
 use crate::mac::{self, MACS};
 use crate::session::Exchange;
-use crate::{cipher, key, msg};
+
+pub trait KexType {
+    fn make(&self) -> Box<dyn KexAlgorithm + Send>;
+}
+
+impl Debug for dyn KexAlgorithm + Send {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "KexAlgorithm")
+    }
+}
 
 pub trait KexAlgorithm {
     fn server_dh(&mut self, exchange: &mut Exchange, payload: &[u8]) -> Result<(), crate::Error>;
@@ -35,9 +48,9 @@ pub trait KexAlgorithm {
 
     fn compute_shared_secret(&mut self, remote_pubkey_: &[u8]) -> Result<(), crate::Error>;
 
-    fn compute_exchange_hash<K: key::PubKey>(
+    fn compute_exchange_hash(
         &self,
-        key: &K,
+        key: &CryptoVec,
         exchange: &Exchange,
         buffer: &mut CryptoVec,
     ) -> Result<crate::Sha256Hash, crate::Error>;
@@ -53,29 +66,22 @@ pub trait KexAlgorithm {
     ) -> Result<super::cipher::CipherPair, crate::Error>;
 }
 
-#[doc(hidden)]
-pub struct Curve25519Kex {
-    local_secret: Option<sodium::scalarmult::Scalar>,
-    shared_secret: Option<sodium::scalarmult::GroupElement>,
-}
-
-impl std::fmt::Debug for Curve25519Kex {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(
-            f,
-            "Algorithm {{ local_secret: [hidden], shared_secret: [hidden] }}",
-        )
-    }
-}
-
-#[derive(Debug, PartialEq, Eq, Copy, Clone)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone, Hash)]
 pub struct Name(&'static str);
 impl AsRef<str> for Name {
     fn as_ref(&self) -> &str {
         self.0
     }
 }
+
 pub const CURVE25519: Name = Name("curve25519-sha256@libssh.org");
+const _CURVE25519: Curve25519KexType = Curve25519KexType {};
+
+pub static KEXES: Lazy<HashMap<&'static Name, &(dyn KexType + Send + Sync)>> = Lazy::new(|| {
+    let mut h: HashMap<&'static Name, &(dyn KexType + Send + Sync)> = HashMap::new();
+    h.insert(&CURVE25519, &_CURVE25519);
+    h
+});
 
 thread_local! {
     static KEY_BUF: RefCell<CryptoVec> = RefCell::new(CryptoVec::new());
@@ -84,142 +90,7 @@ thread_local! {
     static BUFFER: RefCell<CryptoVec> = RefCell::new(CryptoVec::new());
 }
 
-// We used to support curve "NIST P-256" here, but the security of
-// that curve is controversial, see
-// http://safecurves.cr.yp.to/rigid.html
-
-impl Curve25519Kex {
-    pub fn new() -> Self {
-        Self {
-            local_secret: None,
-            shared_secret: None,
-        }
-    }
-}
-impl KexAlgorithm for Curve25519Kex {
-    #[doc(hidden)]
-    fn server_dh(
-        &mut self,
-        exchange: &mut Exchange,
-        payload: &[u8],
-    ) -> Result<(), crate::Error> {
-        debug!("server_dh");
-
-        let mut client_pubkey = GroupElement([0; 32]);
-        {
-            if payload.get(0) != Some(&msg::KEX_ECDH_INIT) {
-                return Err(crate::Error::Inconsistent);
-            }
-
-            #[allow(clippy::indexing_slicing)] // length checked
-            let pubkey_len = BigEndian::read_u32(&payload[1..]) as usize;
-
-            if payload.len() < 5 + pubkey_len {
-                return Err(crate::Error::Inconsistent);
-            }
-
-            #[allow(clippy::indexing_slicing)] // length checked
-            client_pubkey
-                .0
-                .clone_from_slice(&payload[5..(5 + pubkey_len)])
-        };
-        debug!("client_pubkey: {:?}", client_pubkey);
-        use sodium::scalarmult::*;
-        let mut server_secret = Scalar([0; 32]);
-        rand::thread_rng().fill_bytes(&mut server_secret.0);
-        let server_pubkey = scalarmult_base(&server_secret);
-
-        // fill exchange.
-        exchange.server_ephemeral.clear();
-        exchange.server_ephemeral.extend(&server_pubkey.0);
-        let shared = scalarmult(&server_secret, &client_pubkey);
-        self.shared_secret = Some(shared);
-        Ok(())
-    }
-
-    #[doc(hidden)]
-    fn client_dh(
-        &mut self,
-        client_ephemeral: &mut CryptoVec,
-        buf: &mut CryptoVec,
-    ) -> Result<(), crate::Error> {
-        use sodium::scalarmult::*;
-        let mut client_secret = Scalar([0; 32]);
-        rand::thread_rng().fill_bytes(&mut client_secret.0);
-        let client_pubkey = scalarmult_base(&client_secret);
-
-        // fill exchange.
-        client_ephemeral.clear();
-        client_ephemeral.extend(&client_pubkey.0);
-
-        buf.push(msg::KEX_ECDH_INIT);
-        buf.extend_ssh_string(&client_pubkey.0);
-
-        self.local_secret =  Some(client_secret);
-        Ok(())
-    }
-
-    fn compute_shared_secret(&mut self, remote_pubkey_: &[u8]) -> Result<(), crate::Error> {
-        let local_secret =
-            std::mem::replace(&mut self.local_secret, None).ok_or(crate::Error::KexInit)?;
-
-        use sodium::scalarmult::*;
-        let mut remote_pubkey = GroupElement([0; 32]);
-        remote_pubkey.0.clone_from_slice(remote_pubkey_);
-        let shared = scalarmult(&local_secret, &remote_pubkey);
-        self.shared_secret = Some(shared);
-        Ok(())
-    }
-
-    fn compute_exchange_hash<K: key::PubKey>(
-        &self,
-        key: &K,
-        exchange: &Exchange,
-        buffer: &mut CryptoVec,
-    ) -> Result<crate::Sha256Hash, crate::Error> {
-        // Computing the exchange hash, see page 7 of RFC 5656.
-        buffer.clear();
-        buffer.extend_ssh_string(&exchange.client_id);
-        buffer.extend_ssh_string(&exchange.server_id);
-        buffer.extend_ssh_string(&exchange.client_kex_init);
-        buffer.extend_ssh_string(&exchange.server_kex_init);
-
-        key.push_to(buffer);
-        buffer.extend_ssh_string(&exchange.client_ephemeral);
-        buffer.extend_ssh_string(&exchange.server_ephemeral);
-
-        if let Some(ref shared) = self.shared_secret {
-            buffer.extend_ssh_mpint(&shared.0);
-        }
-
-        use sha2::Digest;
-        let mut hasher = sha2::Sha256::new();
-        hasher.update(&buffer);
-        Ok(hasher.finalize())
-    }
-
-    fn compute_keys(
-        &self,
-        session_id: &crate::Sha256Hash,
-        exchange_hash: &crate::Sha256Hash,
-        cipher: cipher::Name,
-        remote_to_local_mac: mac::Name,
-        local_to_remote_mac: mac::Name,
-        is_server: bool,
-    ) -> Result<super::cipher::CipherPair, crate::Error> {
-        compute_keys(
-            self.shared_secret.as_ref().map(|x| x.0.as_slice()),
-            session_id,
-            exchange_hash,
-            cipher,
-            remote_to_local_mac,
-            local_to_remote_mac,
-            is_server,
-        )
-    }
-}
-
-pub fn compute_keys(
+pub(crate) fn compute_keys(
     shared_secret: Option<&[u8]>,
     session_id: &crate::Sha256Hash,
     exchange_hash: &crate::Sha256Hash,

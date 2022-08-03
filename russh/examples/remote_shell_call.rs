@@ -1,15 +1,21 @@
-use anyhow::Result;
 use std::io::Write;
 use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::Arc;
+
+use anyhow::Result;
 use russh::*;
 use russh_keys::*;
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let pem = std::fs::read("./my-aws-key.pem")?;
-    let mut ssh = Session::connect(&pem, "ubuntu", SocketAddr::from_str("35.158.158.35:22").unwrap()).await?;
+    let mut ssh = Session::connect(
+        &pem,
+        "ubuntu",
+        SocketAddr::from_str("35.158.158.35:22").unwrap(),
+    )
+    .await?;
     let r = ssh.call("whoami").await?;
     assert!(r.success());
     assert_eq!(r.output(), "ubuntu\n");
@@ -40,11 +46,7 @@ pub struct Session {
 }
 
 impl Session {
-    async fn connect(
-        pem: &[u8],
-        user: impl Into<String>,
-        addr: SocketAddr,
-    ) -> Result<Self> {
+    async fn connect(pem: &[u8], user: impl Into<String>, addr: SocketAddr) -> Result<Self> {
         let key_pair = key::KeyPair::RSA {
             key: openssl::rsa::Rsa::private_key_from_pem(pem)?,
             hash: key::SignatureHash::SHA2_512,

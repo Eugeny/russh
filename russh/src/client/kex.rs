@@ -1,6 +1,6 @@
 use super::*;
 use crate::cipher::SealingKey;
-use crate::kex::KexAlgorithm;
+use crate::kex::{KexAlgorithm, KEXES};
 use crate::negotiation::Select;
 use crate::{kex, negotiation};
 
@@ -34,7 +34,18 @@ impl KexInit {
         let i0 = self.exchange.client_kex_init.len();
         debug!("i0 = {:?}", i0);
 
-        let mut kex = kex::Curve25519Kex::new();
+        let mut kex = KEXES
+            .get(
+                &self
+                    .algo
+                    .as_ref()
+                    .map(|x| &x.kex)
+                    .or(config.preferred.kex.first())
+                    .ok_or(Error::NoCommonKexAlgo)?
+            )
+            .ok_or(Error::UnknownAlgo)?
+            .make();
+
         kex.client_dh(
             &mut self.exchange.client_ephemeral,
             &mut self.exchange.client_kex_init,

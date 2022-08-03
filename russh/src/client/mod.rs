@@ -29,6 +29,7 @@ use tokio::net::TcpStream;
 use tokio::pin;
 
 use crate::kex::KexAlgorithm;
+use crate::key::PubKey;
 use crate::pty::Pty;
 use crate::session::*;
 use crate::ssh_read::SshRead;
@@ -1104,9 +1105,14 @@ impl KexDhDone {
                 self.kex
                     .compute_shared_secret(&self.exchange.server_ephemeral)?;
                 debug!("kexdhdone.exchange = {:?}", self.exchange);
+
+                let mut pubkey_vec = CryptoVec::new();
+                pubkey.push_to(&mut pubkey_vec);
+
                 let hash = self
                     .kex
-                    .compute_exchange_hash(&pubkey, &self.exchange, &mut buffer)?;
+                    .compute_exchange_hash(&pubkey_vec, &self.exchange, &mut buffer)?;
+
                 debug!("exchange hash: {:?}", hash);
                 let signature = {
                     let mut sig_reader = signature.reader(0);
