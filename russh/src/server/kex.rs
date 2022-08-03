@@ -4,6 +4,7 @@ use russh_keys::encoding::{Encoding, Reader};
 
 use super::*;
 use crate::cipher::SealingKey;
+use crate::kex::KexAlgorithm;
 use crate::key::PubKey;
 use crate::negotiation::Select;
 use crate::{kex, msg, negotiation};
@@ -83,7 +84,10 @@ impl KexDh {
             assert!(buf.get(0) == Some(&msg::KEX_ECDH_INIT));
             let mut r = buf.reader(1);
             self.exchange.client_ephemeral.extend(r.read_string()?);
-            let kex = kex::Algorithm::server_dh(self.names.kex, &mut self.exchange, buf)?;
+
+            let mut kex = kex::Curve25519Kex::new();
+            kex.server_dh(&mut self.exchange, buf)?;
+
             // Then, we fill the write buffer right away, so that we
             // can output it immediately when the time comes.
             let kexdhdone = KexDhDone {

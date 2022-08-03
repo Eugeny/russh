@@ -21,6 +21,7 @@ use russh_cryptovec::CryptoVec;
 use russh_keys::encoding::Encoding;
 
 use crate::cipher::SealingKey;
+use crate::kex::KexAlgorithm;
 use crate::sshbuffer::SSHBuffer;
 use crate::{auth, cipher, kex, mac, msg, negotiation, Channel, ChannelId, Disconnect, Limits};
 
@@ -30,7 +31,7 @@ pub(crate) struct Encrypted {
 
     // It's always Some, except when we std::mem::replace it temporarily.
     pub exchange: Option<Exchange>,
-    pub kex: kex::Algorithm,
+    pub kex: kex::Curve25519Kex,
     pub key: usize,
     pub client_mac: mac::Name,
     pub server_mac: mac::Name,
@@ -478,7 +479,7 @@ pub struct KexDh {
 #[derive(Debug)]
 pub struct KexDhDone {
     pub exchange: Exchange,
-    pub kex: kex::Algorithm,
+    pub kex: kex::Curve25519Kex,
     pub key: usize,
     pub session_id: Option<crate::Sha256Hash>,
     pub names: negotiation::Names,
@@ -529,7 +530,7 @@ impl KexDhDone {
 pub struct NewKeys {
     pub exchange: Exchange,
     pub names: negotiation::Names,
-    pub kex: kex::Algorithm,
+    pub kex: kex::Curve25519Kex,
     pub key: usize,
     pub cipher: cipher::CipherPair,
     pub session_id: crate::Sha256Hash,

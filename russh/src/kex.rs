@@ -24,13 +24,42 @@ use crate::mac::{self, MACS};
 use crate::session::Exchange;
 use crate::{cipher, key, msg};
 
+pub trait KexAlgorithm {
+    fn server_dh(&mut self, exchange: &mut Exchange, payload: &[u8]) -> Result<(), crate::Error>;
+
+    fn client_dh(
+        &mut self,
+        client_ephemeral: &mut CryptoVec,
+        buf: &mut CryptoVec,
+    ) -> Result<(), crate::Error>;
+
+    fn compute_shared_secret(&mut self, remote_pubkey_: &[u8]) -> Result<(), crate::Error>;
+
+    fn compute_exchange_hash<K: key::PubKey>(
+        &self,
+        key: &K,
+        exchange: &Exchange,
+        buffer: &mut CryptoVec,
+    ) -> Result<crate::Sha256Hash, crate::Error>;
+
+    fn compute_keys(
+        &self,
+        session_id: &crate::Sha256Hash,
+        exchange_hash: &crate::Sha256Hash,
+        cipher: cipher::Name,
+        remote_to_local_mac: mac::Name,
+        local_to_remote_mac: mac::Name,
+        is_server: bool,
+    ) -> Result<super::cipher::CipherPair, crate::Error>;
+}
+
 #[doc(hidden)]
-pub struct Algorithm {
+pub struct Curve25519Kex {
     local_secret: Option<sodium::scalarmult::Scalar>,
     shared_secret: Option<sodium::scalarmult::GroupElement>,
 }
 
-impl std::fmt::Debug for Algorithm {
+impl std::fmt::Debug for Curve25519Kex {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(
             f,
@@ -59,13 +88,21 @@ thread_local! {
 // that curve is controversial, see
 // http://safecurves.cr.yp.to/rigid.html
 
-impl Algorithm {
+impl Curve25519Kex {
+    pub fn new() -> Self {
+        Self {
+            local_secret: None,
+            shared_secret: None,
+        }
+    }
+}
+impl KexAlgorithm for Curve25519Kex {
     #[doc(hidden)]
-    pub fn server_dh(
-        _name: Name,
+    fn server_dh(
+        &mut self,
         exchange: &mut Exchange,
         payload: &[u8],
-    ) -> Result<Algorithm, crate::Error> {
+    ) -> Result<(), crate::Error> {
         debug!("server_dh");
 
         let mut client_pubkey = GroupElement([0; 32]);
@@ -96,18 +133,16 @@ impl Algorithm {
         exchange.server_ephemeral.clear();
         exchange.server_ephemeral.extend(&server_pubkey.0);
         let shared = scalarmult(&server_secret, &client_pubkey);
-        Ok(Algorithm {
-            local_secret: None,
-            shared_secret: Some(shared),
-        })
+        self.shared_secret = Some(shared);
+        Ok(())
     }
 
     #[doc(hidden)]
-    pub fn client_dh(
-        _name: Name,
+    fn client_dh(
+        &mut self,
         client_ephemeral: &mut CryptoVec,
         buf: &mut CryptoVec,
-    ) -> Result<Algorithm, crate::Error> {
+    ) -> Result<(), crate::Error> {
         use sodium::scalarmult::*;
         let mut client_secret = Scalar([0; 32]);
         rand::thread_rng().fill_bytes(&mut client_secret.0);
@@ -120,13 +155,11 @@ impl Algorithm {
         buf.push(msg::KEX_ECDH_INIT);
         buf.extend_ssh_string(&client_pubkey.0);
 
-        Ok(Algorithm {
-            local_secret: Some(client_secret),
-            shared_secret: None,
-        })
+        self.local_secret =  Some(client_secret);
+        Ok(())
     }
 
-    pub fn compute_shared_secret(&mut self, remote_pubkey_: &[u8]) -> Result<(), crate::Error> {
+    fn compute_shared_secret(&mut self, remote_pubkey_: &[u8]) -> Result<(), crate::Error> {
         let local_secret =
             std::mem::replace(&mut self.local_secret, None).ok_or(crate::Error::KexInit)?;
 
@@ -138,7 +171,7 @@ impl Algorithm {
         Ok(())
     }
 
-    pub fn compute_exchange_hash<K: key::PubKey>(
+    fn compute_exchange_hash<K: key::PubKey>(
         &self,
         key: &K,
         exchange: &Exchange,
@@ -165,7 +198,7 @@ impl Algorithm {
         Ok(hasher.finalize())
     }
 
-    pub fn compute_keys(
+    fn compute_keys(
         &self,
         session_id: &crate::Sha256Hash,
         exchange_hash: &crate::Sha256Hash,
@@ -174,111 +207,130 @@ impl Algorithm {
         local_to_remote_mac: mac::Name,
         is_server: bool,
     ) -> Result<super::cipher::CipherPair, crate::Error> {
-        let cipher = CIPHERS.get(&cipher).ok_or(crate::Error::UnknownAlgo)?;
-        let remote_to_local_mac = MACS
-            .get(&remote_to_local_mac)
-            .ok_or(crate::Error::UnknownAlgo)?;
-        let local_to_remote_mac = MACS
-            .get(&local_to_remote_mac)
-            .ok_or(crate::Error::UnknownAlgo)?;
+        compute_keys(
+            self.shared_secret.as_ref().map(|x| x.0.as_slice()),
+            session_id,
+            exchange_hash,
+            cipher,
+            remote_to_local_mac,
+            local_to_remote_mac,
+            is_server,
+        )
+    }
+}
 
-        // https://tools.ietf.org/html/rfc4253#section-7.2
-        BUFFER.with(|buffer| {
-            KEY_BUF.with(|key| {
-                NONCE_BUF.with(|nonce| {
-                    MAC_BUF.with(|mac| {
-                        let compute_key =
-                            |c, key: &mut CryptoVec, len| -> Result<(), crate::Error> {
-                                let mut buffer = buffer.borrow_mut();
-                                buffer.clear();
-                                key.clear();
+pub fn compute_keys(
+    shared_secret: Option<&[u8]>,
+    session_id: &crate::Sha256Hash,
+    exchange_hash: &crate::Sha256Hash,
+    cipher: cipher::Name,
+    remote_to_local_mac: mac::Name,
+    local_to_remote_mac: mac::Name,
+    is_server: bool,
+) -> Result<super::cipher::CipherPair, crate::Error> {
+    let cipher = CIPHERS.get(&cipher).ok_or(crate::Error::UnknownAlgo)?;
+    let remote_to_local_mac = MACS
+        .get(&remote_to_local_mac)
+        .ok_or(crate::Error::UnknownAlgo)?;
+    let local_to_remote_mac = MACS
+        .get(&local_to_remote_mac)
+        .ok_or(crate::Error::UnknownAlgo)?;
 
-                                if let Some(ref shared) = self.shared_secret {
-                                    buffer.extend_ssh_mpint(&shared.0);
-                                }
+    // https://tools.ietf.org/html/rfc4253#section-7.2
+    BUFFER.with(|buffer| {
+        KEY_BUF.with(|key| {
+            NONCE_BUF.with(|nonce| {
+                MAC_BUF.with(|mac| {
+                    let compute_key = |c, key: &mut CryptoVec, len| -> Result<(), crate::Error> {
+                        let mut buffer = buffer.borrow_mut();
+                        buffer.clear();
+                        key.clear();
 
-                                buffer.extend(exchange_hash.as_ref());
-                                buffer.push(c);
-                                buffer.extend(session_id.as_ref());
-                                let hash = {
-                                    use sha2::Digest;
-                                    let mut hasher = sha2::Sha256::new();
-                                    hasher.update(&buffer[..]);
-                                    hasher.finalize()
-                                };
-                                key.extend(hash.as_ref());
+                        if let Some(ref shared) = shared_secret {
+                            buffer.extend_ssh_mpint(&shared);
+                        }
 
-                                while key.len() < len {
-                                    // extend.
-                                    buffer.clear();
-                                    if let Some(ref shared) = self.shared_secret {
-                                        buffer.extend_ssh_mpint(&shared.0);
-                                    }
-                                    buffer.extend(exchange_hash.as_ref());
-                                    buffer.extend(key);
-                                    let hash = {
-                                        use sha2::Digest;
-                                        let mut hasher = sha2::Sha256::new();
-                                        hasher.update(&buffer[..]);
-                                        hasher.finalize()
-                                    };
-                                    key.extend(hash.as_ref());
-                                }
+                        buffer.extend(exchange_hash.as_ref());
+                        buffer.push(c);
+                        buffer.extend(session_id.as_ref());
+                        let hash = {
+                            use sha2::Digest;
+                            let mut hasher = sha2::Sha256::new();
+                            hasher.update(&buffer[..]);
+                            hasher.finalize()
+                        };
+                        key.extend(hash.as_ref());
 
-                                key.resize(len);
-                                Ok(())
+                        while key.len() < len {
+                            // extend.
+                            buffer.clear();
+                            if let Some(ref shared) = shared_secret {
+                                buffer.extend_ssh_mpint(&shared);
+                            }
+                            buffer.extend(exchange_hash.as_ref());
+                            buffer.extend(key);
+                            let hash = {
+                                use sha2::Digest;
+                                let mut hasher = sha2::Sha256::new();
+                                hasher.update(&buffer[..]);
+                                hasher.finalize()
                             };
+                            key.extend(hash.as_ref());
+                        }
 
-                        let (local_to_remote, remote_to_local) = if is_server {
-                            (b'D', b'C')
-                        } else {
-                            (b'C', b'D')
-                        };
+                        key.resize(len);
+                        Ok(())
+                    };
 
-                        let (local_to_remote_nonce, remote_to_local_nonce) = if is_server {
-                            (b'B', b'A')
-                        } else {
-                            (b'A', b'B')
-                        };
+                    let (local_to_remote, remote_to_local) = if is_server {
+                        (b'D', b'C')
+                    } else {
+                        (b'C', b'D')
+                    };
 
-                        let (local_to_remote_mac_key, remote_to_local_mac_key) = if is_server {
-                            (b'F', b'E')
-                        } else {
-                            (b'E', b'F')
-                        };
+                    let (local_to_remote_nonce, remote_to_local_nonce) = if is_server {
+                        (b'B', b'A')
+                    } else {
+                        (b'A', b'B')
+                    };
 
-                        let mut key = key.borrow_mut();
-                        let mut nonce = nonce.borrow_mut();
-                        let mut mac = mac.borrow_mut();
+                    let (local_to_remote_mac_key, remote_to_local_mac_key) = if is_server {
+                        (b'F', b'E')
+                    } else {
+                        (b'E', b'F')
+                    };
 
-                        compute_key(local_to_remote, &mut key, cipher.key_len())?;
-                        compute_key(local_to_remote_nonce, &mut nonce, cipher.nonce_len())?;
-                        compute_key(
-                            local_to_remote_mac_key,
-                            &mut mac,
-                            local_to_remote_mac.key_len(),
-                        )?;
+                    let mut key = key.borrow_mut();
+                    let mut nonce = nonce.borrow_mut();
+                    let mut mac = mac.borrow_mut();
 
-                        let local_to_remote =
-                            cipher.make_sealing_key(&key, &nonce, &mac, *local_to_remote_mac);
+                    compute_key(local_to_remote, &mut key, cipher.key_len())?;
+                    compute_key(local_to_remote_nonce, &mut nonce, cipher.nonce_len())?;
+                    compute_key(
+                        local_to_remote_mac_key,
+                        &mut mac,
+                        local_to_remote_mac.key_len(),
+                    )?;
 
-                        compute_key(remote_to_local, &mut key, cipher.key_len())?;
-                        compute_key(remote_to_local_nonce, &mut nonce, cipher.nonce_len())?;
-                        compute_key(
-                            remote_to_local_mac_key,
-                            &mut mac,
-                            remote_to_local_mac.key_len(),
-                        )?;
-                        let remote_to_local =
-                            cipher.make_opening_key(&key, &nonce, &mac, *remote_to_local_mac);
+                    let local_to_remote =
+                        cipher.make_sealing_key(&key, &nonce, &mac, *local_to_remote_mac);
 
-                        Ok(super::cipher::CipherPair {
-                            local_to_remote,
-                            remote_to_local,
-                        })
+                    compute_key(remote_to_local, &mut key, cipher.key_len())?;
+                    compute_key(remote_to_local_nonce, &mut nonce, cipher.nonce_len())?;
+                    compute_key(
+                        remote_to_local_mac_key,
+                        &mut mac,
+                        remote_to_local_mac.key_len(),
+                    )?;
+                    let remote_to_local =
+                        cipher.make_opening_key(&key, &nonce, &mac, *remote_to_local_mac);
+
+                    Ok(super::cipher::CipherPair {
+                        local_to_remote,
+                        remote_to_local,
                     })
                 })
             })
         })
-    }
+    })
 }
