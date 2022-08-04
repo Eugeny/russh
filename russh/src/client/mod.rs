@@ -28,7 +28,6 @@ use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::pin;
 
-use crate::kex::KexAlgorithm;
 use crate::key::PubKey;
 use crate::pty::Pty;
 use crate::session::*;

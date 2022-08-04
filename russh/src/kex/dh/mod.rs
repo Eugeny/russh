@@ -67,8 +67,10 @@ impl<D: Digest> std::fmt::Debug for DhGroupKex<D> {
 fn biguint_to_mpint(biguint: &BigUint) -> Vec<u8> {
     let mut mpint = Vec::new();
     let bytes = biguint.to_bytes_be();
-    if !bytes.is_empty() && bytes[0] > 0x7f {
-        mpint.push(0);
+    if let Some(b) = bytes.get(0) {
+        if b > &0x7f {
+            mpint.push(0);
+        }
     }
     mpint.extend(&bytes);
     mpint
@@ -91,7 +93,9 @@ impl<D: Digest> KexAlgorithm for DhGroupKex<D> {
                 return Err(crate::Error::Inconsistent);
             }
 
-            &payload[5..(5 + pubkey_len)]
+            &payload
+                .get(5..(5 + pubkey_len))
+                .ok_or(crate::Error::Inconsistent)?
         };
 
         debug!("client_pubkey: {:?}", client_pubkey);

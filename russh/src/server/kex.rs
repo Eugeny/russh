@@ -4,7 +4,7 @@ use russh_keys::encoding::{Encoding, Reader};
 
 use super::*;
 use crate::cipher::SealingKey;
-use crate::kex::{KexAlgorithm, KEXES};
+use crate::kex::KEXES;
 use crate::key::PubKey;
 use crate::negotiation::Select;
 use crate::{msg, negotiation};

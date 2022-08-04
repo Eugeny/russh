@@ -1,8 +1,8 @@
 use super::*;
 use crate::cipher::SealingKey;
-use crate::kex::{KexAlgorithm, KEXES};
+use crate::kex::KEXES;
+use crate::negotiation;
 use crate::negotiation::Select;
-use crate::{negotiation};
 
 impl KexInit {
     pub fn client_parse(
@@ -40,7 +40,7 @@ impl KexInit {
                     .algo
                     .as_ref()
                     .map(|x| &x.kex)
-                    .or(config.preferred.kex.first())
+                    .or_else(|| config.preferred.kex.first())
                     .ok_or(Error::NoCommonKexAlgo)?,
             )
             .ok_or(Error::UnknownAlgo)?
