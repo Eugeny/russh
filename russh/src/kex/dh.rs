@@ -1,31 +1,39 @@
 use byteorder::{BigEndian, ByteOrder};
-use rand::RngCore;
+use num_bigint::BigUint;
 use russh_cryptovec::CryptoVec;
 use russh_keys::encoding::Encoding;
 
+use super::dhgroup14::DH14;
 use super::{compute_keys, KexAlgorithm, KexType};
-use crate::mac::{self};
+use crate::mac;
 use crate::session::Exchange;
-use crate::{cipher, key, msg};
+use crate::{cipher, msg};
 
-pub struct DhGroup14Sha256KexType {}
+pub struct DhGroup14Sha1KexType {}
 
-impl KexType for DhGroup14Sha256KexType {
+impl KexType for DhGroup14Sha1KexType {
     fn make(&self) -> Box<dyn KexAlgorithm + Send> {
-        Box::new(DhGroup14Sha256Kex {
-            local_secret: None,
-            shared_secret: None,
-        }) as Box<dyn KexAlgorithm + Send>
+        Box::new(DhGroup14Sha1Kex::new()) as Box<dyn KexAlgorithm + Send>
     }
 }
 
 #[doc(hidden)]
-pub struct DhGroup14Sha256Kex {
-    local_secret: Option<sodium::scalarmult::Scalar>,
-    shared_secret: Option<sodium::scalarmult::GroupElement>,
+pub struct DhGroup14Sha1Kex {
+    dh: DH14,
+    shared_secret: Option<Vec<u8>>,
 }
 
-impl std::fmt::Debug for DhGroup14Sha256Kex {
+impl DhGroup14Sha1Kex {
+    pub fn new() -> DhGroup14Sha1Kex {
+        let dh = DH14::new();
+        DhGroup14Sha1Kex {
+            dh,
+            shared_secret: None,
+        }
+    }
+}
+
+impl std::fmt::Debug for DhGroup14Sha1Kex {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(
             f,
@@ -34,16 +42,22 @@ impl std::fmt::Debug for DhGroup14Sha256Kex {
     }
 }
 
-// We used to support curve "NIST P-256" here, but the security of
-// that curve is controversial, see
-// http://safecurves.cr.yp.to/rigid.html
-impl KexAlgorithm for DhGroup14Sha256Kex {
+fn biguint_to_mpint(biguint: &BigUint) -> Vec<u8> {
+    let mut mpint = Vec::new();
+    let bytes = biguint.to_bytes_be();
+    if bytes.len() > 0 && bytes[0] > 0x7f {
+        mpint.push(0);
+    }
+    mpint.extend(&bytes);
+    mpint
+}
+
+impl KexAlgorithm for DhGroup14Sha1Kex {
     #[doc(hidden)]
     fn server_dh(&mut self, exchange: &mut Exchange, payload: &[u8]) -> Result<(), crate::Error> {
         debug!("server_dh");
 
-        let mut client_pubkey = GroupElement([0; 32]);
-        {
+        let client_pubkey = {
             if payload.get(0) != Some(&msg::KEX_ECDH_INIT) {
                 return Err(crate::Error::Inconsistent);
             }
@@ -55,22 +69,22 @@ impl KexAlgorithm for DhGroup14Sha256Kex {
                 return Err(crate::Error::Inconsistent);
             }
 
-            #[allow(clippy::indexing_slicing)] // length checked
-            client_pubkey
-                .0
-                .clone_from_slice(&payload[5..(5 + pubkey_len)])
+            &payload[5..(5 + pubkey_len)]
         };
+
         debug!("client_pubkey: {:?}", client_pubkey);
-        use sodium::scalarmult::*;
-        let mut server_secret = Scalar([0; 32]);
-        rand::thread_rng().fill_bytes(&mut server_secret.0);
-        let server_pubkey = scalarmult_base(&server_secret);
+
+        self.dh.generate_private_key();
+        let server_pubkey = biguint_to_mpint(&self.dh.generate_public_key());
 
         // fill exchange.
         exchange.server_ephemeral.clear();
-        exchange.server_ephemeral.extend(&server_pubkey.0);
-        let shared = scalarmult(&server_secret, &client_pubkey);
-        self.shared_secret = Some(shared);
+        exchange.server_ephemeral.extend(&server_pubkey);
+
+        let shared = self
+            .dh
+            .compute_shared_secret(DH14::decode_public_key(client_pubkey));
+        self.shared_secret = Some(biguint_to_mpint(&shared));
         Ok(())
     }
 
@@ -80,31 +94,23 @@ impl KexAlgorithm for DhGroup14Sha256Kex {
         client_ephemeral: &mut CryptoVec,
         buf: &mut CryptoVec,
     ) -> Result<(), crate::Error> {
-        use sodium::scalarmult::*;
-        let mut client_secret = Scalar([0; 32]);
-        rand::thread_rng().fill_bytes(&mut client_secret.0);
-        let client_pubkey = scalarmult_base(&client_secret);
+        self.dh.generate_private_key();
+        let client_pubkey = biguint_to_mpint(&self.dh.generate_public_key());
 
         // fill exchange.
         client_ephemeral.clear();
-        client_ephemeral.extend(&client_pubkey.0);
+        client_ephemeral.extend(&client_pubkey);
 
         buf.push(msg::KEX_ECDH_INIT);
-        buf.extend_ssh_string(&client_pubkey.0);
+        buf.extend_ssh_string(&client_pubkey);
 
-        self.local_secret = Some(client_secret);
         Ok(())
     }
 
     fn compute_shared_secret(&mut self, remote_pubkey_: &[u8]) -> Result<(), crate::Error> {
-        let local_secret =
-            std::mem::replace(&mut self.local_secret, None).ok_or(crate::Error::KexInit)?;
-
-        use sodium::scalarmult::*;
-        let mut remote_pubkey = GroupElement([0; 32]);
-        remote_pubkey.0.clone_from_slice(remote_pubkey_);
-        let shared = scalarmult(&local_secret, &remote_pubkey);
-        self.shared_secret = Some(shared);
+        let remote_pubkey = DH14::decode_public_key(remote_pubkey_);
+        let shared = self.dh.compute_shared_secret(remote_pubkey);
+        self.shared_secret = Some(biguint_to_mpint(&shared));
         Ok(())
     }
 
@@ -113,7 +119,7 @@ impl KexAlgorithm for DhGroup14Sha256Kex {
         key: &CryptoVec,
         exchange: &Exchange,
         buffer: &mut CryptoVec,
-    ) -> Result<crate::Sha256Hash, crate::Error> {
+    ) -> Result<CryptoVec, crate::Error> {
         // Computing the exchange hash, see page 7 of RFC 5656.
         buffer.clear();
         buffer.extend_ssh_string(&exchange.client_id);
@@ -126,26 +132,29 @@ impl KexAlgorithm for DhGroup14Sha256Kex {
         buffer.extend_ssh_string(&exchange.server_ephemeral);
 
         if let Some(ref shared) = self.shared_secret {
-            buffer.extend_ssh_mpint(&shared.0);
+            buffer.extend_ssh_mpint(&shared);
         }
 
-        use sha2::Digest;
-        let mut hasher = sha2::Sha256::new();
+        use sha1::Digest;
+        let mut hasher = sha1::Sha1::new();
         hasher.update(&buffer);
-        Ok(hasher.finalize())
+
+        let mut res = CryptoVec::new();
+        res.extend(hasher.finalize().as_slice());
+        Ok(res)
     }
 
     fn compute_keys(
         &self,
-        session_id: &crate::Sha256Hash,
-        exchange_hash: &crate::Sha256Hash,
+        session_id: &CryptoVec,
+        exchange_hash: &CryptoVec,
         cipher: cipher::Name,
         remote_to_local_mac: mac::Name,
         local_to_remote_mac: mac::Name,
         is_server: bool,
     ) -> Result<super::cipher::CipherPair, crate::Error> {
-        compute_keys(
-            self.shared_secret.as_ref().map(|x| x.0.as_slice()),
+        compute_keys::<sha1::Sha1>(
+            self.shared_secret.as_ref().map(|x| x.as_slice()),
             session_id,
             exchange_hash,
             cipher,

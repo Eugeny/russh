@@ -41,7 +41,7 @@ impl KexInit {
                     .as_ref()
                     .map(|x| &x.kex)
                     .or(config.preferred.kex.first())
-                    .ok_or(Error::NoCommonKexAlgo)?
+                    .ok_or(Error::NoCommonKexAlgo)?,
             )
             .ok_or(Error::UnknownAlgo)?
             .make();

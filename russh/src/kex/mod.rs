@@ -14,11 +14,14 @@
 //
 mod curve25519;
 mod dh;
+mod dhgroup14;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt::Debug;
 
 use curve25519::Curve25519KexType;
+use dh::DhGroup14Sha1KexType;
+use digest::Digest;
 use once_cell::sync::Lazy;
 use russh_cryptovec::CryptoVec;
 use russh_keys::encoding::Encoding;
@@ -28,7 +31,6 @@ use crate::cipher::CIPHERS;
 use crate::mac::{self, MACS};
 use crate::session::Exchange;
 
-use self::dh::DhGroup14Sha256KexType;
 
 pub trait KexType {
     fn make(&self) -> Box<dyn KexAlgorithm + Send>;
@@ -56,12 +58,12 @@ pub trait KexAlgorithm {
         key: &CryptoVec,
         exchange: &Exchange,
         buffer: &mut CryptoVec,
-    ) -> Result<crate::Sha256Hash, crate::Error>;
+    ) -> Result<CryptoVec, crate::Error>;
 
     fn compute_keys(
         &self,
-        session_id: &crate::Sha256Hash,
-        exchange_hash: &crate::Sha256Hash,
+        session_id: &CryptoVec,
+        exchange_hash: &CryptoVec,
         cipher: cipher::Name,
         remote_to_local_mac: mac::Name,
         local_to_remote_mac: mac::Name,
@@ -78,14 +80,14 @@ impl AsRef<str> for Name {
 }
 
 pub const CURVE25519: Name = Name("curve25519-sha256@libssh.org");
-pub const DH_G14_SHA256: Name = Name("diffie-hellman-group14-sha256");
+pub const DH_G14_SHA1: Name = Name("diffie-hellman-group14-sha1");
 const _CURVE25519: Curve25519KexType = Curve25519KexType {};
-const _DH_G14_SHA256: DhGroup14Sha256KexType = DhGroup14Sha256KexType {};
+const _DH_G14_SHA1: DhGroup14Sha1KexType = DhGroup14Sha1KexType {};
 
 pub static KEXES: Lazy<HashMap<&'static Name, &(dyn KexType + Send + Sync)>> = Lazy::new(|| {
     let mut h: HashMap<&'static Name, &(dyn KexType + Send + Sync)> = HashMap::new();
     h.insert(&CURVE25519, &_CURVE25519);
-    h.insert(&DH_G14_SHA256, &_DH_G14_SHA256);
+    h.insert(&DH_G14_SHA1, &_DH_G14_SHA1);
     h
 });
 
@@ -96,10 +98,10 @@ thread_local! {
     static BUFFER: RefCell<CryptoVec> = RefCell::new(CryptoVec::new());
 }
 
-pub(crate) fn compute_keys(
+pub(crate) fn compute_keys<D: Digest>(
     shared_secret: Option<&[u8]>,
-    session_id: &crate::Sha256Hash,
-    exchange_hash: &crate::Sha256Hash,
+    session_id: &CryptoVec,
+    exchange_hash: &CryptoVec,
     cipher: cipher::Name,
     remote_to_local_mac: mac::Name,
     local_to_remote_mac: mac::Name,
@@ -131,8 +133,7 @@ pub(crate) fn compute_keys(
                         buffer.push(c);
                         buffer.extend(session_id.as_ref());
                         let hash = {
-                            use sha2::Digest;
-                            let mut hasher = sha2::Sha256::new();
+                            let mut hasher = D::new();
                             hasher.update(&buffer[..]);
                             hasher.finalize()
                         };
@@ -147,8 +148,7 @@ pub(crate) fn compute_keys(
                             buffer.extend(exchange_hash.as_ref());
                             buffer.extend(key);
                             let hash = {
-                                use sha2::Digest;
-                                let mut hasher = sha2::Sha256::new();
+                                let mut hasher = D::new();
                                 hasher.update(&buffer[..]);
                                 hasher.finalize()
                             };

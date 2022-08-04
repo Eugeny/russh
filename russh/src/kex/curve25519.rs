@@ -113,7 +113,7 @@ impl KexAlgorithm for Curve25519Kex {
         key: &CryptoVec,
         exchange: &Exchange,
         buffer: &mut CryptoVec,
-    ) -> Result<crate::Sha256Hash, crate::Error> {
+    ) -> Result<CryptoVec, crate::Error> {
         // Computing the exchange hash, see page 7 of RFC 5656.
         buffer.clear();
         buffer.extend_ssh_string(&exchange.client_id);
@@ -132,19 +132,22 @@ impl KexAlgorithm for Curve25519Kex {
         use sha2::Digest;
         let mut hasher = sha2::Sha256::new();
         hasher.update(&buffer);
-        Ok(hasher.finalize())
+
+        let mut res = CryptoVec::new();
+        res.extend(hasher.finalize().as_slice());
+        Ok(res)
     }
 
     fn compute_keys(
         &self,
-        session_id: &crate::Sha256Hash,
-        exchange_hash: &crate::Sha256Hash,
+        session_id: &CryptoVec,
+        exchange_hash: &CryptoVec,
         cipher: cipher::Name,
         remote_to_local_mac: mac::Name,
         local_to_remote_mac: mac::Name,
         is_server: bool,
     ) -> Result<super::cipher::CipherPair, crate::Error> {
-        compute_keys(
+        compute_keys::<sha2::Sha256>(
             self.shared_secret.as_ref().map(|x| x.0.as_slice()),
             session_id,
             exchange_hash,

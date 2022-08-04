@@ -294,7 +294,7 @@ pub use russh_cryptovec::CryptoVec;
 mod auth;
 pub mod cipher;
 mod compression;
-mod kex;
+pub mod kex;
 mod key;
 pub mod mac;
 mod msg;
