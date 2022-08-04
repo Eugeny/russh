@@ -14,6 +14,7 @@
 //
 
 use std::collections::HashMap;
+use std::fmt::{Debug, Formatter};
 use std::num::Wrapping;
 
 use byteorder::{BigEndian, ByteOrder};
@@ -21,8 +22,9 @@ use russh_cryptovec::CryptoVec;
 use russh_keys::encoding::Encoding;
 
 use crate::cipher::SealingKey;
+use crate::kex::KexAlgorithm;
 use crate::sshbuffer::SSHBuffer;
-use crate::{auth, cipher, kex, mac, msg, negotiation, Channel, ChannelId, Disconnect, Limits};
+use crate::{auth, cipher, mac, msg, negotiation, Channel, ChannelId, Disconnect, Limits};
 
 #[derive(Debug)]
 pub(crate) struct Encrypted {
@@ -30,11 +32,11 @@ pub(crate) struct Encrypted {
 
     // It's always Some, except when we std::mem::replace it temporarily.
     pub exchange: Option<Exchange>,
-    pub kex: kex::Algorithm,
+    pub kex: Box<dyn KexAlgorithm + Send>,
     pub key: usize,
     pub client_mac: mac::Name,
     pub server_mac: mac::Name,
-    pub session_id: crate::Sha256Hash,
+    pub session_id: CryptoVec,
     pub rekey: Option<Kex>,
     pub channels: HashMap<ChannelId, Channel>,
     pub last_channel_id: Wrapping<u32>,
@@ -429,21 +431,17 @@ pub enum Kex {
 pub struct KexInit {
     pub algo: Option<negotiation::Names>,
     pub exchange: Exchange,
-    pub session_id: Option<crate::Sha256Hash>,
+    pub session_id: Option<CryptoVec>,
     pub sent: bool,
 }
 
 impl KexInit {
-    pub fn received_rekey(
-        ex: Exchange,
-        algo: negotiation::Names,
-        session_id: &crate::Sha256Hash,
-    ) -> Self {
+    pub fn received_rekey(ex: Exchange, algo: negotiation::Names, session_id: &CryptoVec) -> Self {
         let mut kexinit = KexInit {
             exchange: ex,
             algo: Some(algo),
             sent: false,
-            session_id: Some(*session_id),
+            session_id: Some(session_id.clone()),
         };
         kexinit.exchange.client_kex_init.clear();
         kexinit.exchange.server_kex_init.clear();
@@ -452,12 +450,12 @@ impl KexInit {
         kexinit
     }
 
-    pub fn initiate_rekey(ex: Exchange, session_id: &crate::Sha256Hash) -> Self {
+    pub fn initiate_rekey(ex: Exchange, session_id: &CryptoVec) -> Self {
         let mut kexinit = KexInit {
             exchange: ex,
             algo: None,
             sent: true,
-            session_id: Some(*session_id),
+            session_id: Some(session_id.clone()),
         };
         kexinit.exchange.client_kex_init.clear();
         kexinit.exchange.server_kex_init.clear();
@@ -472,28 +470,29 @@ pub struct KexDh {
     pub exchange: Exchange,
     pub names: negotiation::Names,
     pub key: usize,
-    pub session_id: Option<crate::Sha256Hash>,
+    pub session_id: Option<CryptoVec>,
 }
 
-#[derive(Debug)]
 pub struct KexDhDone {
     pub exchange: Exchange,
-    pub kex: kex::Algorithm,
+    pub kex: Box<dyn KexAlgorithm + Send>,
     pub key: usize,
-    pub session_id: Option<crate::Sha256Hash>,
+    pub session_id: Option<CryptoVec>,
     pub names: negotiation::Names,
 }
 
+impl Debug for KexDhDone {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "KexDhDone")
+    }
+}
+
 impl KexDhDone {
-    pub fn compute_keys(
-        self,
-        hash: crate::Sha256Hash,
-        is_server: bool,
-    ) -> Result<NewKeys, crate::Error> {
+    pub fn compute_keys(self, hash: CryptoVec, is_server: bool) -> Result<NewKeys, crate::Error> {
         let session_id = if let Some(session_id) = self.session_id {
             session_id
         } else {
-            hash
+            hash.clone()
         };
         // Now computing keys.
         let c = self.kex.compute_keys(
@@ -529,10 +528,10 @@ impl KexDhDone {
 pub struct NewKeys {
     pub exchange: Exchange,
     pub names: negotiation::Names,
-    pub kex: kex::Algorithm,
+    pub kex: Box<dyn KexAlgorithm + Send>,
     pub key: usize,
     pub cipher: cipher::CipherPair,
-    pub session_id: crate::Sha256Hash,
+    pub session_id: CryptoVec,
     pub received: bool,
     pub sent: bool,
 }

@@ -4,9 +4,10 @@ use russh_keys::encoding::{Encoding, Reader};
 
 use super::*;
 use crate::cipher::SealingKey;
+use crate::kex::KEXES;
 use crate::key::PubKey;
 use crate::negotiation::Select;
-use crate::{kex, msg, negotiation};
+use crate::{msg, negotiation};
 
 thread_local! {
     static HASH_BUF: RefCell<CryptoVec> = RefCell::new(CryptoVec::new());
@@ -83,7 +84,11 @@ impl KexDh {
             assert!(buf.get(0) == Some(&msg::KEX_ECDH_INIT));
             let mut r = buf.reader(1);
             self.exchange.client_ephemeral.extend(r.read_string()?);
-            let kex = kex::Algorithm::server_dh(self.names.kex, &mut self.exchange, buf)?;
+
+            let mut kex = KEXES.get(&self.names.kex).ok_or(Error::UnknownAlgo)?.make();
+
+            kex.server_dh(&mut self.exchange, buf)?;
+
             // Then, we fill the write buffer right away, so that we
             // can output it immediately when the time comes.
             let kexdhdone = KexDhDone {
@@ -98,8 +103,12 @@ impl KexDh {
                 let mut buffer = buffer.borrow_mut();
                 buffer.clear();
                 debug!("server kexdhdone.exchange = {:?}", kexdhdone.exchange);
+
+                let mut pubkey_vec = CryptoVec::new();
+                config.keys[kexdhdone.key].push_to(&mut pubkey_vec);
+
                 let hash = kexdhdone.kex.compute_exchange_hash(
-                    &config.keys[kexdhdone.key],
+                    &pubkey_vec,
                     &kexdhdone.exchange,
                     &mut buffer,
                 )?;

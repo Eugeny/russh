@@ -289,12 +289,11 @@ extern crate thiserror;
 
 use std::fmt::{Display, Formatter};
 
-use digest::typenum::U32;
 pub use russh_cryptovec::CryptoVec;
 mod auth;
 pub mod cipher;
 mod compression;
-mod kex;
+pub mod kex;
 mod key;
 pub mod mac;
 mod msg;
@@ -320,8 +319,6 @@ macro_rules! push_packet {
         x
     }};
 }
-
-type Sha256Hash = generic_array::GenericArray<u8, U32>;
 
 mod session;
 

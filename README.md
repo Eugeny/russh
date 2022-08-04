@@ -10,6 +10,10 @@ This is a fork of [Thrussh](//nest.pijul.com/pijul/thrussh) by Pierre-Étienne M
   * aes256-ctr
   * aes192-ctr
   * aes128-ctr
+* New key exchanges:
+  * diffie-hellman-group1-sha1
+  * diffie-hellman-group14-sha1
+  * diffie-hellman-group14-sha256
 * HMACs:
   * hmac-sha1
   * hmac-sha2-256
