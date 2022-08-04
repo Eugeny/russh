@@ -72,12 +72,12 @@ impl DH {
     pub fn generate_private_key(&mut self) -> BigUint {
         let mut rng = rand::thread_rng();
         self.private_key = rng.gen_biguint((self.exp_size * 8) - 2u64).shl(1);
-        return self.private_key.clone();
+        self.private_key.clone()
     }
 
     pub fn generate_public_key(&mut self) -> BigUint {
         self.public_key = BigUint::from(self.generator).modpow(&self.private_key, &self.prime_num);
-        return self.public_key.clone();
+        self.public_key.clone()
     }
 
     pub fn compute_shared_secret(&mut self, other_public_key: BigUint) -> BigUint {

@@ -129,8 +129,8 @@ pub(crate) fn compute_keys<D: Digest>(
                         buffer.clear();
                         key.clear();
 
-                        if let Some(ref shared) = shared_secret {
-                            buffer.extend_ssh_mpint(&shared);
+                        if let Some(shared) = shared_secret {
+                            buffer.extend_ssh_mpint(shared);
                         }
 
                         buffer.extend(exchange_hash.as_ref());
@@ -146,8 +146,8 @@ pub(crate) fn compute_keys<D: Digest>(
                         while key.len() < len {
                             // extend.
                             buffer.clear();
-                            if let Some(ref shared) = shared_secret {
-                                buffer.extend_ssh_mpint(&shared);
+                            if let Some(shared) = shared_secret {
+                                buffer.extend_ssh_mpint(shared);
                             }
                             buffer.extend(exchange_hash.as_ref());
                             buffer.extend(key);

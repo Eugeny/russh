@@ -6,7 +6,7 @@ use russh_keys::encoding::Encoding;
 use super::{compute_keys, KexAlgorithm, KexType};
 use crate::mac::{self};
 use crate::session::Exchange;
-use crate::{cipher, key, msg};
+use crate::{cipher, msg};
 
 pub struct Curve25519KexType {}
 

@@ -2,7 +2,7 @@ use super::*;
 use crate::cipher::SealingKey;
 use crate::kex::{KexAlgorithm, KEXES};
 use crate::negotiation::Select;
-use crate::{kex, negotiation};
+use crate::{negotiation};
 
 impl KexInit {
     pub fn client_parse(

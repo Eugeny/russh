@@ -7,7 +7,7 @@ use crate::cipher::SealingKey;
 use crate::kex::{KexAlgorithm, KEXES};
 use crate::key::PubKey;
 use crate::negotiation::Select;
-use crate::{kex, msg, negotiation};
+use crate::{msg, negotiation};
 
 thread_local! {
     static HASH_BUF: RefCell<CryptoVec> = RefCell::new(CryptoVec::new());

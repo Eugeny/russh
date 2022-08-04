@@ -67,7 +67,7 @@ impl<D: Digest> std::fmt::Debug for DhGroupKex<D> {
 fn biguint_to_mpint(biguint: &BigUint) -> Vec<u8> {
     let mut mpint = Vec::new();
     let bytes = biguint.to_bytes_be();
-    if bytes.len() > 0 && bytes[0] > 0x7f {
+    if !bytes.is_empty() && bytes[0] > 0x7f {
         mpint.push(0);
     }
     mpint.extend(&bytes);
@@ -154,7 +154,7 @@ impl<D: Digest> KexAlgorithm for DhGroupKex<D> {
         buffer.extend_ssh_string(&exchange.server_ephemeral);
 
         if let Some(ref shared) = self.shared_secret {
-            buffer.extend_ssh_mpint(&shared);
+            buffer.extend_ssh_mpint(shared);
         }
 
         let mut hasher = D::new();
@@ -175,7 +175,7 @@ impl<D: Digest> KexAlgorithm for DhGroupKex<D> {
         is_server: bool,
     ) -> Result<super::cipher::CipherPair, crate::Error> {
         compute_keys::<D>(
-            self.shared_secret.as_ref().map(|x| x.as_slice()),
+            self.shared_secret.as_deref(),
             session_id,
             exchange_hash,
             cipher,

@@ -24,7 +24,7 @@ use russh_keys::encoding::Encoding;
 use crate::cipher::SealingKey;
 use crate::kex::KexAlgorithm;
 use crate::sshbuffer::SSHBuffer;
-use crate::{auth, cipher, kex, mac, msg, negotiation, Channel, ChannelId, Disconnect, Limits};
+use crate::{auth, cipher, mac, msg, negotiation, Channel, ChannelId, Disconnect, Limits};
 
 #[derive(Debug)]
 pub(crate) struct Encrypted {
