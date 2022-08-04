@@ -13,6 +13,7 @@
 // limitations under the License.
 //
 mod curve25519;
+mod dh;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -26,6 +27,8 @@ use crate::cipher;
 use crate::cipher::CIPHERS;
 use crate::mac::{self, MACS};
 use crate::session::Exchange;
+
+use self::dh::DhGroup14Sha256KexType;
 
 pub trait KexType {
     fn make(&self) -> Box<dyn KexAlgorithm + Send>;
@@ -75,11 +78,14 @@ impl AsRef<str> for Name {
 }
 
 pub const CURVE25519: Name = Name("curve25519-sha256@libssh.org");
+pub const DH_G14_SHA256: Name = Name("diffie-hellman-group14-sha256");
 const _CURVE25519: Curve25519KexType = Curve25519KexType {};
+const _DH_G14_SHA256: DhGroup14Sha256KexType = DhGroup14Sha256KexType {};
 
 pub static KEXES: Lazy<HashMap<&'static Name, &(dyn KexType + Send + Sync)>> = Lazy::new(|| {
     let mut h: HashMap<&'static Name, &(dyn KexType + Send + Sync)> = HashMap::new();
     h.insert(&CURVE25519, &_CURVE25519);
+    h.insert(&DH_G14_SHA256, &_DH_G14_SHA256);
     h
 });
 
