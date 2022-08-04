@@ -436,11 +436,7 @@ pub struct KexInit {
 }
 
 impl KexInit {
-    pub fn received_rekey(
-        ex: Exchange,
-        algo: negotiation::Names,
-        session_id: &CryptoVec,
-    ) -> Self {
+    pub fn received_rekey(ex: Exchange, algo: negotiation::Names, session_id: &CryptoVec) -> Self {
         let mut kexinit = KexInit {
             exchange: ex,
             algo: Some(algo),
@@ -492,11 +488,7 @@ impl Debug for KexDhDone {
 }
 
 impl KexDhDone {
-    pub fn compute_keys(
-        self,
-        hash: CryptoVec,
-        is_server: bool,
-    ) -> Result<NewKeys, crate::Error> {
+    pub fn compute_keys(self, hash: CryptoVec, is_server: bool) -> Result<NewKeys, crate::Error> {
         let session_id = if let Some(session_id) = self.session_id {
             session_id
         } else {

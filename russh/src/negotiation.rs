@@ -51,7 +51,12 @@ pub struct Preferred {
     pub compression: &'static [&'static str],
 }
 
-const KEX_ORDER: &[kex::Name] = &[kex::CURVE25519];
+const KEX_ORDER: &[kex::Name] = &[
+    kex::CURVE25519,
+    kex::DH_G14_SHA256,
+    kex::DH_G14_SHA1,
+    kex::DH_G1_SHA1,
+];
 
 const CIPHER_ORDER: &[cipher::Name] = &[
     cipher::CHACHA20_POLY1305,

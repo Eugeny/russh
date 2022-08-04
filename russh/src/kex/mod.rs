@@ -14,13 +14,12 @@
 //
 mod curve25519;
 mod dh;
-mod dhgroup14;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt::Debug;
 
 use curve25519::Curve25519KexType;
-use dh::DhGroup14Sha1KexType;
+use dh::{DhGroup14Sha1KexType, DhGroup14Sha256KexType, DhGroup1Sha1KexType};
 use digest::Digest;
 use once_cell::sync::Lazy;
 use russh_cryptovec::CryptoVec;
@@ -30,7 +29,6 @@ use crate::cipher;
 use crate::cipher::CIPHERS;
 use crate::mac::{self, MACS};
 use crate::session::Exchange;
-
 
 pub trait KexType {
     fn make(&self) -> Box<dyn KexAlgorithm + Send>;
@@ -80,14 +78,20 @@ impl AsRef<str> for Name {
 }
 
 pub const CURVE25519: Name = Name("curve25519-sha256@libssh.org");
+pub const DH_G1_SHA1: Name = Name("diffie-hellman-group1-sha1");
 pub const DH_G14_SHA1: Name = Name("diffie-hellman-group14-sha1");
+pub const DH_G14_SHA256: Name = Name("diffie-hellman-group14-sha256");
 const _CURVE25519: Curve25519KexType = Curve25519KexType {};
+const _DH_G1_SHA1: DhGroup1Sha1KexType = DhGroup1Sha1KexType {};
 const _DH_G14_SHA1: DhGroup14Sha1KexType = DhGroup14Sha1KexType {};
+const _DH_G14_SHA256: DhGroup14Sha256KexType = DhGroup14Sha256KexType {};
 
 pub static KEXES: Lazy<HashMap<&'static Name, &(dyn KexType + Send + Sync)>> = Lazy::new(|| {
     let mut h: HashMap<&'static Name, &(dyn KexType + Send + Sync)> = HashMap::new();
     h.insert(&CURVE25519, &_CURVE25519);
+    h.insert(&DH_G14_SHA256, &_DH_G14_SHA256);
     h.insert(&DH_G14_SHA1, &_DH_G14_SHA1);
+    h.insert(&DH_G1_SHA1, &_DH_G1_SHA1);
     h
 });
 

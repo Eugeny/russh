@@ -85,10 +85,7 @@ impl KexDh {
             let mut r = buf.reader(1);
             self.exchange.client_ephemeral.extend(r.read_string()?);
 
-            let mut kex = KEXES
-                .get(&self.names.kex)
-                .ok_or(Error::UnknownAlgo)?
-                .make();
+            let mut kex = KEXES.get(&self.names.kex).ok_or(Error::UnknownAlgo)?.make();
 
             kex.server_dh(&mut self.exchange, buf)?;
 

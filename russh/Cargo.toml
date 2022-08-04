@@ -34,7 +34,7 @@ russh-keys = { version = "0.22.0-beta.3", path = "../russh-keys" }
 russh-libsodium = { version = "0.3.0-beta.1", path = "../russh-libsodium" }
 sha1 = "0.10"
 sha2 = "0.10"
-static-dh-ecdh = "0.1.1"
+hex-literal = "0.3"
 num-bigint = { version = "0.4", features = ["rand"] }
 subtle = "2.4"
 thiserror = "1.0"

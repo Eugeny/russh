@@ -1109,9 +1109,9 @@ impl KexDhDone {
                 let mut pubkey_vec = CryptoVec::new();
                 pubkey.push_to(&mut pubkey_vec);
 
-                let hash = self
-                    .kex
-                    .compute_exchange_hash(&pubkey_vec, &self.exchange, &mut buffer)?;
+                let hash =
+                    self.kex
+                        .compute_exchange_hash(&pubkey_vec, &self.exchange, &mut buffer)?;
 
                 debug!("exchange hash: {:?}", hash);
                 let signature = {
