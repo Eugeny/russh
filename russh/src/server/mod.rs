@@ -109,7 +109,9 @@ use std::borrow::Cow;
 #[derive(Debug, PartialEq, Eq)]
 pub enum Auth {
     /// Reject the authentication request.
-    Reject,
+    Reject {
+        proceed_with_methods: Option<MethodSet>,
+    },
     /// Accept the authentication request.
     Accept,
 
@@ -160,7 +162,9 @@ pub trait Handler: Sized {
     /// except if this method takes more than that.
     #[allow(unused_variables)]
     fn auth_none(self, user: &str) -> Self::FutureAuth {
-        self.finished_auth(Auth::Reject)
+        self.finished_auth(Auth::Reject {
+            proceed_with_methods: None,
+        })
     }
 
     /// Check authentication using the "password" method. Russh
@@ -169,7 +173,9 @@ pub trait Handler: Sized {
     /// than that.
     #[allow(unused_variables)]
     fn auth_password(self, user: &str, password: &str) -> Self::FutureAuth {
-        self.finished_auth(Auth::Reject)
+        self.finished_auth(Auth::Reject {
+            proceed_with_methods: None,
+        })
     }
 
     /// Check authentication using the "publickey" method. This method
@@ -181,7 +187,9 @@ pub trait Handler: Sized {
     /// time than that.
     #[allow(unused_variables)]
     fn auth_publickey(self, user: &str, public_key: &key::PublicKey) -> Self::FutureAuth {
-        self.finished_auth(Auth::Reject)
+        self.finished_auth(Auth::Reject {
+            proceed_with_methods: None,
+        })
     }
 
     /// Check authentication using the "keyboard-interactive"
@@ -195,7 +203,9 @@ pub trait Handler: Sized {
         submethods: &str,
         response: Option<Response>,
     ) -> Self::FutureAuth {
-        self.finished_auth(Auth::Reject)
+        self.finished_auth(Auth::Reject {
+            proceed_with_methods: None,
+        })
     }
 
     /// Called when the client closes a channel.

@@ -388,29 +388,37 @@ impl Encrypted {
                     auth_user.push_str(user);
                     let (h, auth) = handler.auth_publickey(user, &pubkey).await?;
                     handler = h;
-                    if auth == Auth::Accept {
-                        let mut public_key = CryptoVec::new();
-                        public_key.extend(pubkey_key);
+                    match auth {
+                        Auth::Accept => {
+                            let mut public_key = CryptoVec::new();
+                            public_key.extend(pubkey_key);
 
-                        let mut algo = CryptoVec::new();
-                        algo.extend(pubkey_algo);
-                        debug!("pubkey_key: {:?}", pubkey_key);
-                        push_packet!(self.write, {
-                            self.write.push(msg::USERAUTH_PK_OK);
-                            self.write.extend_ssh_string(pubkey_algo);
-                            self.write.extend_ssh_string(pubkey_key);
-                        });
+                            let mut algo = CryptoVec::new();
+                            algo.extend(pubkey_algo);
+                            debug!("pubkey_key: {:?}", pubkey_key);
+                            push_packet!(self.write, {
+                                self.write.push(msg::USERAUTH_PK_OK);
+                                self.write.extend_ssh_string(pubkey_algo);
+                                self.write.extend_ssh_string(pubkey_key);
+                            });
 
-                        auth_request.current = Some(CurrentRequest::PublicKey {
-                            key: public_key,
-                            algo,
-                            sent_pk_ok: true,
-                        });
-                    } else {
-                        debug!("signature wrong");
-                        auth_request.partial_success = false;
-                        auth_user.clear();
-                        reject_auth_request(until, &mut self.write, auth_request).await;
+                            auth_request.current = Some(CurrentRequest::PublicKey {
+                                key: public_key,
+                                algo,
+                                sent_pk_ok: true,
+                            });
+                        }
+                        auth => {
+                            if let Auth::Reject {
+                                proceed_with_methods: Some(proceed_with_methods),
+                            } = auth
+                            {
+                                auth_request.methods = proceed_with_methods;
+                            }
+                            auth_request.partial_success = false;
+                            auth_user.clear();
+                            reject_auth_request(until, &mut self.write, auth_request).await;
+                        }
                     }
                     Ok(handler)
                 }
@@ -487,7 +495,12 @@ async fn reply_userauth_info_response(
             server_auth_request_success(write);
             Ok(true)
         }
-        Auth::Reject => {
+        Auth::Reject {
+            proceed_with_methods,
+        } => {
+            if let Some(proceed_with_methods) = proceed_with_methods {
+                auth_request.methods = proceed_with_methods;
+            }
             auth_request.partial_success = false;
             reject_auth_request(until, write, auth_request).await;
             Ok(false)
