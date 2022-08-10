@@ -83,7 +83,7 @@ impl super::Session {
                         // We've sent ECDH_INIT, waiting for ECDH_REPLY
                         let (kex, h) = kexdhdone.server_key_check(true, client, buf).await?;
                         client = h;
-                        enc.rekey = Some(kex);
+                        enc.rekey = Some(Kex::Keys(kex));
                         self.common
                             .cipher
                             .local_to_remote
@@ -142,7 +142,7 @@ impl super::Session {
         let mut is_authenticated = false;
         if let Some(ref mut enc) = self.common.encrypted {
             match enc.state {
-                EncryptedState::WaitingServiceRequest {
+                EncryptedState::WaitingAuthServiceRequest {
                     ref mut accepted, ..
                 } => {
                     debug!(
@@ -507,7 +507,7 @@ impl super::Session {
         if let Some(ref mut enc) = self.common.encrypted {
             is_waiting = match enc.state {
                 EncryptedState::WaitingAuthRequest(_) => true,
-                EncryptedState::WaitingServiceRequest {
+                EncryptedState::WaitingAuthServiceRequest {
                     accepted,
                     ref mut sent,
                 } => {
@@ -546,6 +546,12 @@ impl Encrypted {
             self.write.push(msg::USERAUTH_REQUEST);
 
             match *auth_method {
+                auth::Method::None => {
+                    self.write.extend_ssh_string(user.as_bytes());
+                    self.write.extend_ssh_string(b"ssh-connection");
+                    self.write.extend_ssh_string(b"none");
+                    true
+                }
                 auth::Method::Password { ref password } => {
                     self.write.extend_ssh_string(user.as_bytes());
                     self.write.extend_ssh_string(b"ssh-connection");

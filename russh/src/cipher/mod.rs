@@ -66,6 +66,7 @@ pub const AES_192_CTR: Name = Name("aes192-ctr");
 pub const AES_256_CTR: Name = Name("aes256-ctr");
 pub const AES_256_GCM: Name = Name("aes256-gcm@openssh.com");
 pub const CHACHA20_POLY1305: Name = Name("chacha20-poly1305@openssh.com");
+pub const NONE: Name = Name("none");
 
 static _CLEAR: Clear = Clear {};
 static _AES_128_CTR: SshBlockCipher<Ctr128BE<Aes128>> = SshBlockCipher(PhantomData);
@@ -77,6 +78,7 @@ static _CHACHA20_POLY1305: SshChacha20Poly1305Cipher = SshChacha20Poly1305Cipher
 pub static CIPHERS: Lazy<HashMap<&'static Name, &(dyn Cipher + Send + Sync)>> = Lazy::new(|| {
     let mut h: HashMap<&'static Name, &(dyn Cipher + Send + Sync)> = HashMap::new();
     h.insert(&CLEAR, &_CLEAR);
+    h.insert(&NONE, &_CLEAR);
     h.insert(&AES_128_CTR, &_AES_128_CTR);
     h.insert(&AES_192_CTR, &_AES_192_CTR);
     h.insert(&AES_256_CTR, &_AES_256_CTR);

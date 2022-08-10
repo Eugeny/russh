@@ -94,7 +94,7 @@ impl<R: AsyncRead + AsyncWrite + Unpin + Send + 'static> Signer
 
 #[derive(Debug)]
 pub enum Method {
-    // None,
+    None,
     Password { password: String },
     PublicKey { key: Arc<key::KeyPair> },
     FuturePublicKey { key: key::PublicKey },
