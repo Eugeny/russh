@@ -45,6 +45,8 @@ pub const RSA_SHA2_512: Name = Name("rsa-sha2-512");
 /// The name of the ssh-sha2-256 algorithm for SSH.
 pub const RSA_SHA2_256: Name = Name("rsa-sha2-256");
 
+pub const NONE: Name = Name("none");
+
 pub const SSH_RSA: Name = Name("ssh-rsa");
 
 impl Name {

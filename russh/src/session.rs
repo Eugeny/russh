@@ -381,7 +381,7 @@ impl Encrypted {
 
 #[derive(Debug)]
 pub enum EncryptedState {
-    WaitingServiceRequest { sent: bool, accepted: bool },
+    WaitingAuthServiceRequest { sent: bool, accepted: bool },
     WaitingAuthRequest(auth::AuthRequest),
     InitCompression,
     Authenticated,

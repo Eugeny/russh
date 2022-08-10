@@ -216,6 +216,25 @@ impl<H: Handler> Handle<H> {
         self.sender.is_closed()
     }
 
+    pub async fn authenticate_none<U: Into<String>>(&mut self, user: U) -> Result<bool, Error> {
+        let user = user.into();
+        self.sender
+            .send(Msg::Authenticate {
+                user,
+                method: auth::Method::None,
+            })
+            .await
+            .map_err(|_| Error::SendError)?;
+        loop {
+            match self.receiver.recv().await {
+                Some(Reply::AuthSuccess) => return Ok(true),
+                Some(Reply::AuthFailure) => return Ok(false),
+                None => return Ok(false),
+                _ => {}
+            }
+        }
+    }
+
     pub async fn authenticate_password<U: Into<String>, P: Into<String>>(
         &mut self,
         user: U,
@@ -1076,7 +1095,7 @@ impl KexDhDone {
         rekey: bool,
         mut handler: H,
         buf: &[u8],
-    ) -> Result<(Kex, H), H::Error> {
+    ) -> Result<(NewKeys, H), H::Error> {
         let mut reader = buf.reader(1);
         let pubkey = reader.read_string().map_err(crate::Error::from)?; // server public key.
         let pubkey = parse_public_key(
@@ -1129,7 +1148,7 @@ impl KexDhDone {
             };
             let mut newkeys = self.compute_keys(hash, false)?;
             newkeys.sent = true;
-            Ok((Kex::Keys(newkeys), handler))
+            Ok((newkeys, handler))
         })
     }
 }
@@ -1146,12 +1165,25 @@ async fn reply<H: Handler>(
                 || buf.get(0) == Some(&msg::KEXINIT)
                 || session.common.encrypted.is_none()
             {
-                session.common.kex = Some(Kex::DhDone(kexinit.client_parse(
+                let done = kexinit.client_parse(
                     session.common.config.as_ref(),
                     &mut *session.common.cipher.local_to_remote,
                     buf,
                     &mut session.common.write_buffer,
-                )?));
+                )?;
+
+                if done.kex.skip_exchange() {
+                    session.common.encrypted(
+                        initial_encrypted_state(&session),
+                        done.compute_keys(CryptoVec::new(), false)?,
+                    );
+
+                    if let Some(sender) = sender.take() {
+                        sender.send(()).unwrap_or(());
+                    }
+                } else {
+                    session.common.kex = Some(Kex::DhDone(done));
+                }
                 session.flush()?;
             }
             Ok((handler, session))
@@ -1165,7 +1197,7 @@ async fn reply<H: Handler>(
                 // We've sent ECDH_INIT, waiting for ECDH_REPLY
                 let (kex, h) = kexdhdone.server_key_check(false, handler, buf).await?;
                 handler = h;
-                session.common.kex = Some(kex);
+                session.common.kex = Some(Kex::Keys(kex));
                 session
                     .common
                     .cipher
@@ -1186,13 +1218,9 @@ async fn reply<H: Handler>(
             if let Some(sender) = sender.take() {
                 sender.send(()).unwrap_or(());
             }
-            session.common.encrypted(
-                EncryptedState::WaitingServiceRequest {
-                    accepted: false,
-                    sent: false,
-                },
-                newkeys,
-            );
+            session
+                .common
+                .encrypted(initial_encrypted_state(&session), newkeys);
             // Ok, NEWKEYS received, now encrypted.
             Ok((handler, session))
         }
@@ -1201,6 +1229,17 @@ async fn reply<H: Handler>(
             Ok((handler, session))
         }
         None => session.client_read_encrypted(handler, buf).await,
+    }
+}
+
+fn initial_encrypted_state(session: &Session) -> EncryptedState {
+    if session.common.config.anonymous {
+        EncryptedState::Authenticated
+    } else {
+        EncryptedState::WaitingAuthServiceRequest {
+            accepted: false,
+            sent: false,
+        }
     }
 }
 
@@ -1219,6 +1258,8 @@ pub struct Config {
     pub preferred: negotiation::Preferred,
     /// Time after which the connection is garbage-collected.
     pub connection_timeout: Option<std::time::Duration>,
+    /// Whether to expect and wait for an authentication call.
+    pub anonymous: bool,
 }
 
 impl Default for Config {
@@ -1234,6 +1275,7 @@ impl Default for Config {
             maximum_packet_size: 32768,
             preferred: Default::default(),
             connection_timeout: None,
+            anonymous: false,
         }
     }
 }

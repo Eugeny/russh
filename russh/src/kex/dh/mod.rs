@@ -77,6 +77,10 @@ fn biguint_to_mpint(biguint: &BigUint) -> Vec<u8> {
 }
 
 impl<D: Digest> KexAlgorithm for DhGroupKex<D> {
+    fn skip_exchange(&self) -> bool {
+        false
+    }
+
     #[doc(hidden)]
     fn server_dh(&mut self, exchange: &mut Exchange, payload: &[u8]) -> Result<(), crate::Error> {
         debug!("server_dh");

@@ -1,0 +1,68 @@
+use russh_cryptovec::CryptoVec;
+
+use super::{KexAlgorithm, KexType};
+
+pub struct NoneKexType {}
+
+impl KexType for NoneKexType {
+    fn make(&self) -> Box<dyn KexAlgorithm + Send> {
+        Box::new(NoneKexAlgorithm {}) as Box<dyn KexAlgorithm + Send>
+    }
+}
+
+struct NoneKexAlgorithm {}
+
+impl KexAlgorithm for NoneKexAlgorithm {
+    fn skip_exchange(&self) -> bool {
+        true
+    }
+
+    fn server_dh(
+        &mut self,
+        _exchange: &mut crate::session::Exchange,
+        _payload: &[u8],
+    ) -> Result<(), crate::Error> {
+        Ok(())
+    }
+
+    fn client_dh(
+        &mut self,
+        _client_ephemeral: &mut russh_cryptovec::CryptoVec,
+        _buf: &mut russh_cryptovec::CryptoVec,
+    ) -> Result<(), crate::Error> {
+        Ok(())
+    }
+
+    fn compute_shared_secret(&mut self, _remote_pubkey: &[u8]) -> Result<(), crate::Error> {
+        Ok(())
+    }
+
+    fn compute_exchange_hash(
+        &self,
+        _key: &russh_cryptovec::CryptoVec,
+        _exchange: &crate::session::Exchange,
+        _buffer: &mut russh_cryptovec::CryptoVec,
+    ) -> Result<russh_cryptovec::CryptoVec, crate::Error> {
+        Ok(CryptoVec::new())
+    }
+
+    fn compute_keys(
+        &self,
+        session_id: &russh_cryptovec::CryptoVec,
+        exchange_hash: &russh_cryptovec::CryptoVec,
+        cipher: crate::cipher::Name,
+        remote_to_local_mac: crate::mac::Name,
+        local_to_remote_mac: crate::mac::Name,
+        is_server: bool,
+    ) -> Result<crate::cipher::CipherPair, crate::Error> {
+        super::compute_keys::<sha2::Sha256>(
+            None,
+            session_id,
+            exchange_hash,
+            cipher,
+            remote_to_local_mac,
+            local_to_remote_mac,
+            is_server,
+        )
+    }
+}

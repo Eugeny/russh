@@ -38,6 +38,10 @@ impl std::fmt::Debug for Curve25519Kex {
 // that curve is controversial, see
 // http://safecurves.cr.yp.to/rigid.html
 impl KexAlgorithm for Curve25519Kex {
+    fn skip_exchange(&self) -> bool {
+        false
+    }
+
     #[doc(hidden)]
     fn server_dh(&mut self, exchange: &mut Exchange, payload: &[u8]) -> Result<(), crate::Error> {
         debug!("server_dh");

@@ -130,7 +130,7 @@ impl Session {
         let mut enc = self.common.encrypted.as_mut().unwrap();
         // If we've successfully read a packet.
         match enc.state {
-            EncryptedState::WaitingServiceRequest {
+            EncryptedState::WaitingAuthServiceRequest {
                 ref mut accepted, ..
             } if buf.get(0) == Some(&msg::SERVICE_REQUEST) => {
                 let mut r = buf.reader(1);
