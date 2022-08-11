@@ -13,6 +13,7 @@ version = "0.34.0-beta.8"
 
 [features]
 default = ["flate2"]
+vendored-openssl = ["openssl", "openssl/vendored"]
 
 [dependencies]
 aes = "0.8"
