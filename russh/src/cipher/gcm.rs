@@ -19,7 +19,7 @@ use aes_gcm::{AeadCore, AeadInPlace, Aes256Gcm, KeyInit, KeySizeUser};
 use byteorder::{BigEndian, ByteOrder};
 use digest::typenum::Unsigned;
 use generic_array::GenericArray;
-use sodium::random::randombytes;
+use rand::RngCore;
 
 use super::super::Error;
 use crate::mac::MacAlgorithm;
@@ -144,18 +144,14 @@ impl super::OpeningKey for OpeningKey {
         tag_buf.clone_from_slice(tag);
 
         #[allow(clippy::indexing_slicing)]
-        if self
-            .cipher
+        self.cipher
             .decrypt_in_place_detached(
                 &nonce,
                 &packet_length,
                 &mut ciphertext_in_plaintext_out[super::PACKET_LENGTH_LEN..],
                 &tag_buf,
             )
-            .is_err()
-        {
-            return Err(Error::DecryptionError);
-        }
+            .map_err(|_| Error::DecryptionError)?;
 
         Ok(ciphertext_in_plaintext_out)
     }
@@ -178,7 +174,7 @@ impl super::SealingKey for SealingKey {
     }
 
     fn fill_padding(&self, padding_out: &mut [u8]) {
-        randombytes(padding_out);
+        rand::thread_rng().fill_bytes(padding_out);
     }
 
     fn tag_len(&self) -> usize {

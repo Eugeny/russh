@@ -32,7 +32,7 @@ pub mod chacha20poly1305;
 pub mod clear;
 pub mod gcm;
 use block::SshBlockCipher;
-use chacha20poly1305::Chacha20Poly1305;
+use chacha20poly1305::SshChacha20Poly1305Cipher;
 use clear::Clear;
 use gcm::GcmCipher;
 
@@ -72,7 +72,7 @@ static _AES_128_CTR: SshBlockCipher<Ctr128BE<Aes128>> = SshBlockCipher(PhantomDa
 static _AES_192_CTR: SshBlockCipher<Ctr128BE<Aes192>> = SshBlockCipher(PhantomData);
 static _AES_256_CTR: SshBlockCipher<Ctr128BE<Aes256>> = SshBlockCipher(PhantomData);
 static _AES_256_GCM: GcmCipher = GcmCipher {};
-static _CHACHA20_POLY1305: Chacha20Poly1305 = Chacha20Poly1305 {};
+static _CHACHA20_POLY1305: SshChacha20Poly1305Cipher = SshChacha20Poly1305Cipher {};
 
 pub static CIPHERS: Lazy<HashMap<&'static Name, &(dyn Cipher + Send + Sync)>> = Lazy::new(|| {
     let mut h: HashMap<&'static Name, &(dyn Cipher + Send + Sync)> = HashMap::new();
