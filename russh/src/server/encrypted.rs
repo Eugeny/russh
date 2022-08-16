@@ -23,6 +23,8 @@ use russh_keys::key::Verify;
 use tokio::time::Instant;
 use {msg, negotiation};
 
+use crate::parsing::{ChannelType, OpenChannelMessage};
+
 use super::super::*;
 use super::*;
 
@@ -817,17 +819,14 @@ impl Session {
         }
     }
 
+
     async fn server_handle_channel_open<H: Handler>(
         mut self,
         handler: H,
         buf: &[u8],
     ) -> Result<(H, Self), H::Error> {
-        // https://tools.ietf.org/html/rfc4254#section-5.1
         let mut r = buf.reader(1);
-        let typ = r.read_string().map_err(crate::Error::from)?;
-        let sender = r.read_u32().map_err(crate::Error::from)?;
-        let window = r.read_u32().map_err(crate::Error::from)?;
-        let maxpacket = r.read_u32().map_err(crate::Error::from)?;
+        let msg = OpenChannelMessage::parse(&mut r)?;
 
         let sender_channel = if let Some(ref mut enc) = self.common.encrypted {
             enc.new_channel_id()
@@ -835,72 +834,89 @@ impl Session {
             unreachable!()
         };
         let channel = Channel {
-            recipient_channel: sender,
+            recipient_channel: msg.recipient_channel,
 
             // "sender" is the local end, i.e. we're the sender, the remote is the recipient.
             sender_channel,
 
-            recipient_window_size: window,
+            recipient_window_size: msg.recipient_window_size,
             sender_window_size: self.common.config.window_size,
-            recipient_maximum_packet_size: maxpacket,
+            recipient_maximum_packet_size: msg.recipient_maximum_packet_size,
             sender_maximum_packet_size: self.common.config.maximum_packet_size,
             confirmed: true,
             wants_reply: false,
             pending_data: std::collections::VecDeque::new(),
         };
-        match typ {
-            b"session" => {
-                self.confirm_channel_open(channel);
+
+        match &msg.typ {
+            ChannelType::Session => {
+                self.confirm_channel_open(&msg, channel);
                 handler.channel_open_session(sender_channel, self).await
             }
-            b"x11" => {
-                self.confirm_channel_open(channel);
-                let a = std::str::from_utf8(r.read_string().map_err(crate::Error::from)?)
-                    .map_err(crate::Error::from)?;
-                let b = r.read_u32().map_err(crate::Error::from)?;
-                handler.channel_open_x11(sender_channel, a, b, self).await
-            }
-            b"direct-tcpip" => {
-                self.confirm_channel_open(channel);
-                let a = std::str::from_utf8(r.read_string().map_err(crate::Error::from)?)
-                    .map_err(crate::Error::from)?;
-                let b = r.read_u32().map_err(crate::Error::from)?;
-                let c = std::str::from_utf8(r.read_string().map_err(crate::Error::from)?)
-                    .map_err(crate::Error::from)?;
-                let d = r.read_u32().map_err(crate::Error::from)?;
-                handler
-                    .channel_open_direct_tcpip(sender_channel, a, b, c, d, self)
-                    .await
-            }
-            t => {
-                debug!("unknown channel type: {:?}", t);
-                if let Some(ref mut enc) = self.common.encrypted {
-                    push_packet!(enc.write, {
-                        enc.write.push(msg::CHANNEL_OPEN_FAILURE);
-                        enc.write.push_u32_be(sender);
-                        enc.write.push_u32_be(3); // SSH_OPEN_UNKNOWN_CHANNEL_TYPE
-                        enc.write.extend_ssh_string(b"Unknown channel type");
-                        enc.write.extend_ssh_string(b"en");
-                    });
+            ChannelType::X11 {
+                originator_address,
+                originator_port,
+            } => {
+                let mut result = handler
+                    .channel_open_x11(sender_channel, originator_address, *originator_port, self)
+                    .await;
+                if let Ok((_, s)) = &mut result {
+                    s.confirm_channel_open(&msg, channel);
                 }
+                result
+            }
+            ChannelType::DirectTcpip(d) => {
+                let mut result = handler
+                    .channel_open_direct_tcpip(
+                        sender_channel,
+                        &d.host_to_connect,
+                        d.port_to_connect,
+                        &d.originator_address,
+                        d.originator_port,
+                        self,
+                    )
+                    .await;
+                if let Ok((_, s)) = &mut result {
+                    s.confirm_channel_open(&msg, channel);
+                }
+                result
+            }
+            ChannelType::ForwardedTcpIp(d) => {
+                let mut result = handler
+                    .channel_open_forwarded_tcpip(
+                        sender_channel,
+                        &d.host_to_connect,
+                        d.port_to_connect,
+                        &d.originator_address,
+                        d.originator_port,
+                        self,
+                    )
+                    .await;
+                if let Ok((_, s)) = &mut result {
+                    s.confirm_channel_open(&msg, channel);
+                }
+                result
+            }
+            ChannelType::Unknown { typ } => {
+                debug!("unknown channel type: {}", String::from_utf8_lossy(typ));
+                if let Some(ref mut enc) = self.common.encrypted {
+                    msg.unknown_type(&mut enc.write);
+                }
+
                 Ok((handler, self))
             }
         }
     }
-    fn confirm_channel_open(&mut self, channel: Channel) {
+
+    fn confirm_channel_open(&mut self, open: &OpenChannelMessage, channel: Channel) {
         if let Some(ref mut enc) = self.common.encrypted {
-            server_confirm_channel_open(&mut enc.write, &channel, self.common.config.as_ref());
+            open.confirm(
+                &mut enc.write,
+                channel.sender_channel.0,
+                channel.sender_window_size,
+                channel.sender_maximum_packet_size,
+            );
             enc.channels.insert(channel.sender_channel, channel);
         }
     }
-}
-
-fn server_confirm_channel_open(buffer: &mut CryptoVec, channel: &Channel, config: &Config) {
-    push_packet!(buffer, {
-        buffer.push(msg::CHANNEL_OPEN_CONFIRMATION);
-        buffer.push_u32_be(channel.recipient_channel); // remote channel number.
-        buffer.push_u32_be(channel.sender_channel.0); // our channel number.
-        buffer.push_u32_be(config.window_size);
-        buffer.push_u32_be(config.maximum_packet_size);
-    });
 }

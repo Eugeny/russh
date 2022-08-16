@@ -444,4 +444,32 @@ impl Session {
         };
         Ok(result)
     }
+
+    /// Requests that the client forward connections to the given host and port.
+    /// See [RFC4254](https://tools.ietf.org/html/rfc4254#section-7). The client
+    /// will open forwarded_tcpip channels for each connection.
+    pub fn tcpip_forward(&mut self, address: &str, port: u32) {
+        if let Some(ref mut enc) = self.common.encrypted {
+            push_packet!(enc.write, {
+                enc.write.push(msg::GLOBAL_REQUEST);
+                enc.write.extend_ssh_string(b"tcpip-forward");
+                enc.write.push(0);
+                enc.write.extend_ssh_string(address.as_bytes());
+                enc.write.push_u32_be(port);
+            });
+        }
+    }
+
+    /// Cancels a previously tcpip_forward request.
+    pub fn cancel_tcpip_forward(&mut self, address: &str, port: u32) {
+        if let Some(ref mut enc) = self.common.encrypted {
+            push_packet!(enc.write, {
+                enc.write.push(msg::GLOBAL_REQUEST);
+                enc.write.extend_ssh_string(b"cancel-tcpip-forward");
+                enc.write.push(0);
+                enc.write.extend_ssh_string(address.as_bytes());
+                enc.write.push_u32_be(port);
+            });
+        }
+    }
 }

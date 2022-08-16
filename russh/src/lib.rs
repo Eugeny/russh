@@ -321,6 +321,7 @@ macro_rules! push_packet {
     }};
 }
 
+mod parsing;
 mod session;
 
 /// Server side of this library.
