@@ -252,6 +252,21 @@ pub trait Handler: Sized {
         self.finished(session)
     }
 
+    /// Called when a new forwarded connection comes in.
+    /// https://www.rfc-editor.org/rfc/rfc4254#section-7
+    #[allow(unused_variables)]
+    fn channel_open_forwarded_tcpip(
+        self,
+        channel: ChannelId,
+        host_to_connect: &str,
+        port_to_connect: u32,
+        originator_address: &str,
+        originator_port: u32,
+        session: Session,
+    ) -> Self::FutureUnit {
+        self.finished(session)
+    }
+
     /// Called when a data packet is received. A response can be
     /// written to the `response` argument.
     #[allow(unused_variables)]
