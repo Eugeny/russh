@@ -261,6 +261,24 @@ impl Encrypted {
             } else if method == b"publickey" {
                 self.server_read_auth_request_pk(until, handler, buf, auth_user, user, r)
                     .await
+            } else if method == b"none" {
+                let auth_request = if let EncryptedState::WaitingAuthRequest(ref mut a) = self.state
+                {
+                    a
+                } else {
+                    unreachable!()
+                };
+                let (handler, auth) = handler.auth_none(user).await?;
+                if let Auth::Accept = auth {
+                    server_auth_request_success(&mut self.write);
+                    self.state = EncryptedState::InitCompression;
+                } else {
+                    auth_user.clear();
+                    auth_request.methods -= MethodSet::NONE;
+                    auth_request.partial_success = false;
+                    reject_auth_request(until, &mut self.write, auth_request).await;
+                }
+                Ok(handler)
             } else if method == b"keyboard-interactive" {
                 let auth_request = if let EncryptedState::WaitingAuthRequest(ref mut a) = self.state
                 {
