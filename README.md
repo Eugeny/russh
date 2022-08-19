@@ -28,6 +28,8 @@ This is a fork of [Thrussh](//nest.pijul.com/pijul/thrussh) by Pierre-Étienne M
   * `hmac-sha2-512-etm@openssh.com` :sparkles:
 * Host keys:
   * `ssh-ed25519`
+  * `rsa-sha2-256`
+  * `rsa-sha2-512`
   * `ssh-rsa` :sparkles:
 * Dependency updates 
 
