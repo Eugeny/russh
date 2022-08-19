@@ -8,6 +8,7 @@ This is a fork of [Thrussh](//nest.pijul.com/pijul/thrussh) by Pierre-Étienne M
 > :sparkles: = added in this fork
 
 * More safety guarantees :sparkles:
+* `forward-tcpip` (remote port forwarding) :sparkles:
 * Ciphers:
   * `chacha20-poly1305@openssh.com`
   * `aes256-gcm@openssh.com` :sparkles:
