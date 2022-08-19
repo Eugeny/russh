@@ -19,7 +19,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
 
 //! Server and client SSH asynchronous library, based on tokio/futures.
 //!
@@ -31,7 +30,7 @@
 //! # Writing servers
 //!
 //! In the specific case of servers, a server must implement
-//! `server::Server`, a trait for creating new `server::Handler`.  The
+//! `server::Server`, a trait for creating new `server::Handler`. The
 //! main type to look at in the `server` module is `Session` (and
 //! `Config`, of course).
 //!
@@ -133,8 +132,8 @@
 //!
 //! Note that this is just a toy server. In particular:
 //!
-//! - It doesn't handle errors when `s.data` returns an error,
-//!   i.e. when the client has disappeared
+//! - It doesn't handle errors when `s.data` returns an error, i.e. when the
+//!   client has disappeared
 //!
 //! - Each new connection increments the `id` field. Even though we
 //! would need a lot of connections per second for a very long time to
@@ -159,24 +158,24 @@
 //! data.
 //!
 //! ```
-//!extern crate russh;
-//!extern crate russh_keys;
-//!extern crate futures;
-//!extern crate tokio;
-//!extern crate env_logger;
-//!use std::sync::Arc;
-//!use russh::*;
-//!use russh::server::{Auth, Session};
-//!use russh_keys::*;
-//!use futures::Future;
-//!use std::io::Read;
-//!use std::net::SocketAddr;
-//!use std::str::FromStr;
+//! extern crate russh;
+//! extern crate russh_keys;
+//! extern crate futures;
+//! extern crate tokio;
+//! extern crate env_logger;
+//! use std::sync::Arc;
+//! use russh::*;
+//! use russh::server::{Auth, Session};
+//! use russh_keys::*;
+//! use futures::Future;
+//! use std::io::Read;
+//! use std::net::SocketAddr;
+//! use std::str::FromStr;
 //!
-//!struct Client {
-//!}
+//! struct Client {
+//! }
 //!
-//!impl client::Handler for Client {
+//! impl client::Handler for Client {
 //!    type Error = anyhow::Error;
 //!    type FutureUnit = futures::future::Ready<Result<(Self, client::Session), anyhow::Error>>;
 //!    type FutureBool = futures::future::Ready<Result<(Self, bool), anyhow::Error>>;
@@ -199,7 +198,7 @@
 //!        println!("data on channel {:?}: {:?}", channel, std::str::from_utf8(data));
 //!        self.finished(session)
 //!    }
-//!}
+//! }
 //!
 //! #[tokio::main]
 //! async fn main() {
@@ -278,7 +277,6 @@
 //! starts again. In the special case of the server, unsollicited
 //! messages sent through a `server::Handle` are processed when there
 //! is no incoming packet to read.
-//!
 #[macro_use]
 extern crate bitflags;
 #[macro_use]
@@ -290,6 +288,7 @@ extern crate thiserror;
 use std::fmt::{Display, Formatter};
 
 pub use russh_cryptovec::CryptoVec;
+
 mod auth;
 pub mod cipher;
 mod compression;
@@ -302,7 +301,9 @@ mod ssh_read;
 mod sshbuffer;
 
 pub use negotiation::{Named, Preferred};
+
 mod pty;
+
 pub use pty::Pty;
 
 macro_rules! push_packet {
@@ -462,7 +463,9 @@ pub enum Error {
 #[error("Could not reach the event loop")]
 pub struct SendError {}
 
-/// Since handlers are large, their associated future types must implement this trait to provide reasonable default implementations (basically, rejecting all requests).
+/// Since handlers are large, their associated future types must implement this
+/// trait to provide reasonable default implementations (basically, rejecting
+/// all requests).
 pub trait FromFinished<T>: futures::Future<Output = Result<T, Error>> {
     /// Turns type `T` into `Self`, a future yielding `T`.
     fn finished(t: T) -> Self;
@@ -484,7 +487,8 @@ impl<T: 'static> FromFinished<T> for Box<dyn futures::Future<Output = Result<T, 
 // use mac::*;
 // mod compression;
 
-/// The number of bytes read/written, and the number of seconds before a key re-exchange is requested.
+/// The number of bytes read/written, and the number of seconds before a key
+/// re-exchange is requested.
 #[derive(Debug, Clone)]
 pub struct Limits {
     pub rekey_write_limit: usize,
@@ -493,7 +497,8 @@ pub struct Limits {
 }
 
 impl Limits {
-    /// Create a new `Limits`, checking that the given bounds cannot lead to nonce reuse.
+    /// Create a new `Limits`, checking that the given bounds cannot lead to
+    /// nonce reuse.
     pub fn new(write_limit: usize, read_limit: usize, time_limit: std::time::Duration) -> Limits {
         assert!(write_limit <= 1 << 30 && read_limit <= 1 << 30);
         Limits {
@@ -650,27 +655,104 @@ pub(crate) struct Channel {
 
 #[derive(Debug)]
 pub enum ChannelMsg {
+    /// Contains data sent by the other side. This is the most common message
+    /// type, and is the one returned when expecting data during
+    /// [`Channel::wait`][client::Channel::wait] operations. The maximum amount
+    /// of data allowed is determined by the maximum packet size for the
+    /// channel, and the current window size, whichever is smaller. The
+    /// window size is decremented by the amount of data sent. Both parties
+    /// MAY ignore all extra data sent after the allowed window is empty.
     Data {
         data: CryptoVec,
     },
+    /// Some channels can transfer several types of data. An example of this is
+    /// `stderr` data from interactive sessions. Such data can be passed with
+    /// [`ChannelMsg::ExtendedData`] messages, where a separate integer
+    /// specifies the type of data (The `ext` field). The available types and
+    /// their interpretation depend on the type of channel.
+    ///
+    /// Data sent with these messages consumes the same window as ordinary
+    /// data.
+    ///
+    /// Currently, only the following type is defined by the IETF.
+    /// ```text
+    ///             Symbolic name                  data_type_code
+    ///             -------------                  --------------
+    ///           SSH_EXTENDED_DATA_STDERR               1
+    /// ```
+    /// Extended Channel Data Transfer `ext` (known as 'data_type_code' in [RFC
+    /// 4254](https://www.rfc-editor.org/rfc/rfc4254))  values MUST be assigned sequentially. The IANA will not
+    /// assign Extended Channel Data Transfer 'data_type_code' values in the
+    /// range of 0xFE000000 to 0xFFFFFFFF. Extended Channel Data Transfer
+    /// `ext` values in that range are left for private use.
     ExtendedData {
         data: CryptoVec,
         ext: u32,
     },
+    /// When a party will no longer send more data to a channel, it should
+    /// send [`ChannelMsg::Eof`].
+    ///
+    /// No explicit response is sent to this message. However, the
+    /// application may send EOF to whatever is at the other end of the
+    /// channel. Note that the channel remains open after this message, and
+    /// more data may still be sent in the other direction. This message
+    /// does not consume window space and can be sent even if no window space
+    /// is available.
     Eof,
+    /// When either party wishes to terminate the channel, it sends
+    /// [`ChannelMsg::Close`]. Upon receiving this message, a party MUST
+    /// send back a [`ChannelMsg::Close`] unless it has already sent this
+    /// message for the channel. Generally when using this library, this should
+    /// only be implemented for servers, as the [`client::Handler`] handles
+    /// close messages internally. The channel is considered closed for a
+    /// party when it has both sent and received [`ChannelMsg::Close`], and
+    /// the party may then reuse the channel number. A party may send
+    /// [`ChannelMsg::Close`] without having sent or received
+    /// [`ChannelMsg::Eof`].
     Close,
+    /// On many systems, it is possible to determine if a pseudo-terminal is
+    /// using control-S/control-Q flow control. When flow control is
+    /// allowed, it is often desirable to do the flow control at the client
+    /// end to speed up responses to user requests. This is facilitated by
+    /// the following notification. Initially, the server is responsible for
+    /// flow control. (Here, again, client means the side originating the
+    /// session, and server means the other side.)
+    ///
+    /// The message below is used by the server to inform the client when it
+    /// can or cannot perform flow control (control-S/control-Q processing).
+    /// If `client_can_do` is true, the client is allowed to do flow control
+    /// using control-S and control-Q. The client may ignore this message.
     XonXoff {
         client_can_do: bool,
     },
+    /// When the command running at the other end terminates, the following
+    /// message can be sent to return the exit status of the command.
+    /// Returning the status is RECOMMENDED. No acknowledgement is sent for
+    /// this message. The channel needs to be closed with
+    /// [`ChannelMsg::Close`] after this message.
+    ///
+    /// The client may choose to ignore these messages.
     ExitStatus {
         exit_status: u32,
     },
+    /// The remote command may also terminate violently due to a signal.
+    /// Such a condition can be indicated by the following message.  A zero
+    /// [`ChannelMsg::ExitSignal`] usually means that the command terminated
+    /// successfully.
     ExitSignal {
         signal_name: Sig,
         core_dumped: bool,
         error_message: String,
         lang_tag: String,
     },
+    /// The window size specifies how many bytes the other party can send
+    /// before it must wait for the window to be adjusted.  Both parties use
+    /// the following message to adjust the window.
+    ///
+    /// After receiving this message, the recipient may send the given number
+    /// of bytes more than it was previously allowed to send; the window size
+    /// is incremented. The window MUST NOT be increased above
+    /// 2^32 - 1 bytes (hence the [u32][std::u32] type).
     WindowAdjusted {
         new_size: u32,
     },

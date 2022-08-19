@@ -45,6 +45,9 @@ mod session;
 
 use tokio::sync::mpsc::*;
 
+/// Not typically used by end users, this struct contains the actual session's
+/// state. It is in charge of multiplexing and keeping track of various channels
+/// that may get opened and closed during the lifetime of an SSH session.
 pub struct Session {
     common: CommonSession<Arc<Config>>,
     receiver: Receiver<Msg>,
@@ -211,11 +214,14 @@ pub struct Channel {
     window_size: u32,
 }
 
+/// A "handle" to a session initialized with a configuration.
 impl<H: Handler> Handle<H> {
     pub fn is_closed(&self) -> bool {
         self.sender.is_closed()
     }
 
+    /// Perform no authentication. This is useful for testing, but should not be
+    /// used in most other circumstances.
     pub async fn authenticate_none<U: Into<String>>(&mut self, user: U) -> Result<bool, Error> {
         let user = user.into();
         self.sender
@@ -235,6 +241,7 @@ impl<H: Handler> Handle<H> {
         }
     }
 
+    /// Perform password-based SSH authentication.
     pub async fn authenticate_password<U: Into<String>, P: Into<String>>(
         &mut self,
         user: U,
@@ -260,6 +267,7 @@ impl<H: Handler> Handle<H> {
         }
     }
 
+    /// Perform public key-based SSH authentication.
     pub async fn authenticate_publickey<U: Into<String>>(
         &mut self,
         user: U,
@@ -283,6 +291,10 @@ impl<H: Handler> Handle<H> {
         }
     }
 
+    /// Authenticate using a custom method that implements the
+    /// [`Signer`][auth::Signer] trait. Currently, this crate only provides an
+    /// implementation for an [SSH
+    /// agent][russh_keys::agent::client::AgentClient].
     pub async fn authenticate_future<U: Into<String>, S: auth::Signer>(
         &mut self,
         user: U,
@@ -323,6 +335,7 @@ impl<H: Handler> Handle<H> {
         }
     }
 
+    /// Wait for confirmation that a channel is open
     async fn wait_channel_confirmation(
         &self,
         mut receiver: UnboundedReceiver<OpenChannelMsg>,
@@ -390,7 +403,10 @@ impl<H: Handler> Handle<H> {
     /// connection comes to a locally forwarded TCP/IP port. See
     /// [RFC4254](https://tools.ietf.org/html/rfc4254#section-7). The
     /// TCP/IP packets can then be tunneled through the channel using
-    /// `.data()`.
+    /// `.data()`. After writing a stream to a channel using
+    /// [`.data()`][Channel::data], be sure to call [`.eof()`][Channel::eof] to
+    /// indicate that no more data will be sent, or you may see hangs when
+    /// writing large streams.
     pub async fn channel_open_direct_tcpip<A: Into<String>, B: Into<String>>(
         &mut self,
         host_to_connect: A,
@@ -732,6 +748,7 @@ impl Channel {
         Ok(())
     }
 
+    /// Sent when a client will no longer send more data to a channel
     pub async fn eof(&mut self) -> Result<(), Error> {
         self.sender
             .sender
@@ -772,15 +789,27 @@ impl<H: Handler> Future for Handle<H> {
 }
 
 use std::net::SocketAddr;
+
+/// Connect to a server at the address specified, using the [`Handler`]
+/// (implemented by you) and [`Config`] specified. Returns a future that
+/// resolves to a [`Handle`]. This handle can then be used to create channels,
+/// which in turn can be used to tunnel TCP connections, request a PTY, execute
+/// commands, etc. The future will resolve to an error if the connection fails.
+/// This function creates a connection to the `addr` specified using a
+/// [`tokio::net::TcpStream`] and then calls [`connect_stream`] under the hood.
 pub async fn connect<H: Handler + Send + 'static>(
     config: Arc<Config>,
     addr: SocketAddr,
     handler: H,
 ) -> Result<Handle<H>, H::Error> {
-    let socket = TcpStream::connect(addr).await.map_err(crate::Error::from)?;
+    let socket = TcpStream::connect(addr).await.map_err(Error::from)?;
     connect_stream(config, socket, handler).await
 }
 
+/// Connect a stream to a server. This stream must implement
+/// [`tokio::io::AsyncRead`] and [`tokio::io::AsyncWrite`], as well as [`Unpin`]
+/// and [`Send`]. Typically, you may prefer to use [`connect`], which uses a
+/// [`tokio::net::TcpStream`] and then calls this function under the hood.
 pub async fn connect_stream<H, R>(
     config: Arc<Config>,
     mut stream: R,
