@@ -1,19 +1,22 @@
-use futures::FutureExt;
-use russh::server::{Auth, Session};
-use russh::*;
-use russh_keys::*;
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
+
+use futures::FutureExt;
+use russh::server::{Auth, Session};
+use russh::*;
+use russh_keys::*;
 use tokio::sync::Mutex;
 
 #[tokio::main]
 async fn main() {
-    env_logger::init();
+    env_logger::builder()
+        .filter_level(log::LevelFilter::Debug)
+        .init();
 
     let mut config = russh::server::Config::default();
-    config.connection_timeout = Some(std::time::Duration::from_secs(3));
+    config.connection_timeout = Some(std::time::Duration::from_secs(3600));
     config.auth_rejection_time = std::time::Duration::from_secs(3);
     config
         .keys
@@ -43,7 +46,7 @@ impl Server {
         let mut clients = self.clients.lock().await;
         for ((id, channel), ref mut s) in clients.iter_mut() {
             if *id != self.id {
-                s.data(*channel, data.clone()).await.unwrap();
+                let _ = s.data(*channel, data.clone()).await;
             }
         }
     }
@@ -95,7 +98,7 @@ impl server::Handler for Server {
     }
 
     fn data(mut self, channel: ChannelId, data: &[u8], mut session: Session) -> Self::FutureUnit {
-        let data = CryptoVec::from_slice(data);
+        let data = CryptoVec::from(format!("Got data: {}\r\n", String::from_utf8_lossy(data)));
         async move {
             {
                 self.post(data.clone()).await;
@@ -104,5 +107,19 @@ impl server::Handler for Server {
             Ok((self, session))
         }
         .boxed()
+    }
+
+    fn tcpip_forward(self, address: &str, port: u32, session: Session) -> Self::FutureBool {
+        let mut handle = session.handle();
+        let address = address.to_string();
+        tokio::spawn(async move {
+            let mut channel = handle
+                .channel_open_forwarded_tcpip(address, port, "1.2.3.4", 1234)
+                .await
+                .unwrap();
+            let _ = channel.data(&b"Hello from a forwarded port"[..]).await;
+            let _ = channel.eof().await;
+        });
+        self.finished_bool(true, session)
     }
 }

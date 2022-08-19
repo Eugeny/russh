@@ -24,7 +24,7 @@ use russh_keys::encoding::Encoding;
 use crate::cipher::SealingKey;
 use crate::kex::KexAlgorithm;
 use crate::sshbuffer::SSHBuffer;
-use crate::{auth, cipher, mac, msg, negotiation, Channel, ChannelId, Disconnect, Limits};
+use crate::{auth, cipher, mac, msg, negotiation, ChannelId, ChannelParams, Disconnect, Limits};
 
 #[derive(Debug)]
 pub(crate) struct Encrypted {
@@ -38,7 +38,7 @@ pub(crate) struct Encrypted {
     pub server_mac: mac::Name,
     pub session_id: CryptoVec,
     pub rekey: Option<Kex>,
-    pub channels: HashMap<ChannelId, Channel>,
+    pub channels: HashMap<ChannelId, ChannelParams>,
     pub last_channel_id: Wrapping<u32>,
     pub write: CryptoVec,
     pub write_cursor: usize,
@@ -222,7 +222,7 @@ impl Encrypted {
     /// return the length that was written.
     fn data_noqueue(
         write: &mut CryptoVec,
-        channel: &mut Channel,
+        channel: &mut ChannelParams,
         buf0: &[u8],
         from: usize,
     ) -> usize {
@@ -329,10 +329,12 @@ impl Encrypted {
                 #[allow(clippy::indexing_slicing)] // length checked
                 let len = BigEndian::read_u32(&self.write[self.write_cursor..]) as usize;
                 #[allow(clippy::indexing_slicing)]
-                let packet = self.compress.compress(
-                    &self.write[(self.write_cursor + 4)..(self.write_cursor + 4 + len)],
-                    &mut self.compress_buffer,
-                )?;
+                let to_write = &self.write[(self.write_cursor + 4)..(self.write_cursor + 4 + len)];
+                trace!("server_write_encrypted, buf = {:?}", to_write);
+                #[allow(clippy::indexing_slicing)]
+                let packet = self
+                    .compress
+                    .compress(to_write, &mut self.compress_buffer)?;
                 cipher.write(packet, write_buffer);
                 self.write_cursor += 4 + len
             }
@@ -362,7 +364,7 @@ impl Encrypted {
             if let std::collections::hash_map::Entry::Vacant(vacant_entry) =
                 self.channels.entry(ChannelId(self.last_channel_id.0))
             {
-                vacant_entry.insert(Channel {
+                vacant_entry.insert(ChannelParams {
                     recipient_channel: 0,
                     sender_channel: ChannelId(self.last_channel_id.0),
                     sender_window_size: window_size,
@@ -387,7 +389,7 @@ pub enum EncryptedState {
     Authenticated,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Exchange {
     pub client_id: CryptoVec,
     pub server_id: CryptoVec,

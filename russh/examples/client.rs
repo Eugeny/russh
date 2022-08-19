@@ -63,7 +63,7 @@ async fn main() {
         use std::io::Write;
         match msg {
             russh::ChannelMsg::Data { ref data } => {
-                f.write_all(&data).unwrap();
+                f.write_all(data).unwrap();
             }
             russh::ChannelMsg::Eof => {
                 f.flush().unwrap();

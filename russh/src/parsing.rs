@@ -1,6 +1,7 @@
-use super::*;
 use russh_cryptovec::CryptoVec;
 use russh_keys::encoding::{Encoding, Position};
+
+use super::*;
 
 #[derive(Debug)]
 pub struct OpenChannelMessage {
@@ -111,6 +112,30 @@ impl TcpChannelInfo {
             port_to_connect,
             originator_address,
             originator_port,
+        })
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct ChannelOpenConfirmation {
+    pub recipient_channel: u32,
+    pub sender_channel: u32,
+    pub initial_window_size: u32,
+    pub maximum_packet_size: u32,
+}
+
+impl ChannelOpenConfirmation {
+    pub fn parse(r: &mut Position) -> Result<Self, crate::Error> {
+        let recipient_channel = r.read_u32().map_err(crate::Error::from)?;
+        let sender_channel = r.read_u32().map_err(crate::Error::from)?;
+        let initial_window_size = r.read_u32().map_err(crate::Error::from)?;
+        let maximum_packet_size = r.read_u32().map_err(crate::Error::from)?;
+
+        Ok(Self {
+            recipient_channel,
+            sender_channel,
+            initial_window_size,
+            maximum_packet_size,
         })
     }
 }

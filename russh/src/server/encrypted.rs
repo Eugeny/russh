@@ -23,10 +23,9 @@ use russh_keys::key::Verify;
 use tokio::time::Instant;
 use {msg, negotiation};
 
-use crate::parsing::{ChannelType, OpenChannelMessage};
-
 use super::super::*;
 use super::*;
+use crate::parsing::{ChannelOpenConfirmation, ChannelType, OpenChannelMessage};
 
 impl Session {
     /// Returns false iff a request was rejected.
@@ -150,13 +149,15 @@ impl Session {
                 Ok((handler, self))
             }
             EncryptedState::WaitingAuthRequest(_) if buf.get(0) == Some(&msg::USERAUTH_REQUEST) => {
-                let h = enc
+                handler = enc
                     .server_read_auth_request(instant, handler, buf, &mut self.common.auth_user)
                     .await?;
                 if let EncryptedState::InitCompression = enc.state {
                     enc.client_compression.init_decompress(&mut enc.decompress);
+                    handler.auth_succeeded(self).await
+                } else {
+                    Ok((handler, self))
                 }
-                Ok((h, self))
             }
             EncryptedState::WaitingAuthRequest(ref mut auth)
                 if buf.get(0) == Some(&msg::USERAUTH_INFO_RESPONSE) =>
@@ -625,6 +626,33 @@ impl Session {
                     .await
             }
 
+            Some(&msg::CHANNEL_OPEN_CONFIRMATION) => {
+                debug!("channel_open_confirmation");
+                let mut reader = buf.reader(1);
+                let msg = ChannelOpenConfirmation::parse(&mut reader)?;
+                let local_id = ChannelId(msg.recipient_channel);
+
+                if let Some(ref mut enc) = self.common.encrypted {
+                    if let Some(parameters) = enc.channels.get_mut(&local_id) {
+                        parameters.confirm(&msg);
+                    } else {
+                        // We've not requested this channel, close connection.
+                        return Err(Error::Inconsistent.into());
+                    }
+                } else {
+                    return Err(Error::Inconsistent.into());
+                };
+
+                handler
+                    .channel_open_confirmation(
+                        local_id,
+                        msg.maximum_packet_size,
+                        msg.initial_window_size,
+                        self,
+                    )
+                    .await
+            }
+
             Some(&msg::CHANNEL_REQUEST) => {
                 let mut r = buf.reader(1);
                 let channel_num = ChannelId(r.read_u32().map_err(crate::Error::from)?);
@@ -819,7 +847,6 @@ impl Session {
         }
     }
 
-
     async fn server_handle_channel_open<H: Handler>(
         mut self,
         handler: H,
@@ -833,7 +860,7 @@ impl Session {
         } else {
             unreachable!()
         };
-        let channel = Channel {
+        let channel = ChannelParams {
             recipient_channel: msg.recipient_channel,
 
             // "sender" is the local end, i.e. we're the sender, the remote is the recipient.
@@ -902,13 +929,12 @@ impl Session {
                 if let Some(ref mut enc) = self.common.encrypted {
                     msg.unknown_type(&mut enc.write);
                 }
-
                 Ok((handler, self))
             }
         }
     }
 
-    fn confirm_channel_open(&mut self, open: &OpenChannelMessage, channel: Channel) {
+    fn confirm_channel_open(&mut self, open: &OpenChannelMessage, channel: ChannelParams) {
         if let Some(ref mut enc) = self.common.encrypted {
             open.confirm(
                 &mut enc.write,

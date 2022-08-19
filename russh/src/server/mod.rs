@@ -14,14 +14,18 @@
 //
 
 use std;
+use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 
 use futures::future::Future;
 use russh_keys::key;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::pin;
+use tokio::task::JoinHandle;
 
 use crate::cipher::{clear, CipherPair, OpeningKey};
 use crate::session::*;
@@ -157,6 +161,12 @@ pub trait Handler: Sized {
     /// default handlers.
     fn finished(self, session: Session) -> Self::FutureUnit;
 
+    /// Called when a session disconnects.
+    #[allow(unused_variables)]
+    fn disconnected(self, session: Session) -> Self::FutureUnit {
+        self.finished(session)
+    }
+
     /// Check authentication using the "none" method. Russh makes
     /// sure rejection happens in time `config.auth_rejection_time`,
     /// except if this method takes more than that.
@@ -208,6 +218,12 @@ pub trait Handler: Sized {
         })
     }
 
+    /// Called when authentication succeeds for a session.
+    #[allow(unused_variables)]
+    fn auth_succeeded(self, session: Session) -> Self::FutureUnit {
+        self.finished(session)
+    }
+
     /// Called when the client closes a channel.
     #[allow(unused_variables)]
     fn channel_close(self, channel: ChannelId, session: Session) -> Self::FutureUnit {
@@ -238,7 +254,7 @@ pub trait Handler: Sized {
         self.finished(session)
     }
 
-    /// Called when a new channel is created.
+    /// Called when a new TCP/IP is created.
     #[allow(unused_variables)]
     fn channel_open_direct_tcpip(
         self,
@@ -267,10 +283,41 @@ pub trait Handler: Sized {
         self.finished(session)
     }
 
+    /// Called when the client confirmed our request to open a
+    /// channel. A channel can only be written to after receiving this
+    /// message (this library panics otherwise).
+    #[allow(unused_variables)]
+    fn channel_open_confirmation(
+        self,
+        id: ChannelId,
+        max_packet_size: u32,
+        window_size: u32,
+        session: Session,
+    ) -> Self::FutureUnit {
+        if let Some(channel) = session.channels.get(&id) {
+            channel
+                .send(ChannelMsg::Open {
+                    id,
+                    max_packet_size,
+                    window_size,
+                })
+                .unwrap_or(());
+        } else {
+            error!("no channel for id {:?}", id);
+        }
+        self.finished(session)
+    }
+
     /// Called when a data packet is received. A response can be
     /// written to the `response` argument.
     #[allow(unused_variables)]
     fn data(self, channel: ChannelId, data: &[u8], session: Session) -> Self::FutureUnit {
+        if let Some(chan) = session.channels.get(&channel) {
+            chan.send(ChannelMsg::Data {
+                data: CryptoVec::from_slice(data),
+            })
+            .unwrap_or(())
+        }
         self.finished(session)
     }
 
@@ -286,6 +333,13 @@ pub trait Handler: Sized {
         data: &[u8],
         session: Session,
     ) -> Self::FutureUnit {
+        if let Some(chan) = session.channels.get(&channel) {
+            chan.send(ChannelMsg::ExtendedData {
+                ext: code,
+                data: CryptoVec::from_slice(data),
+            })
+            .unwrap_or(())
+        }
         self.finished(session)
     }
 
@@ -471,17 +525,42 @@ async fn start_reading<R: AsyncRead + Unpin>(
     Ok((n, stream_read, buffer, cipher))
 }
 
-pub async fn run_stream<H: Handler, R>(
+pub struct RunningSession<H: Handler> {
+    handle: Handle,
+    join: JoinHandle<Result<(), H::Error>>,
+}
+
+impl<H: Handler> RunningSession<H> {
+    /// Returns a copy of the handle for the session.
+    pub fn handle(&self) -> Handle {
+        self.handle.clone()
+    }
+}
+
+impl<H: Handler> Future for RunningSession<H> {
+    type Output = Result<(), H::Error>;
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+        match Future::poll(Pin::new(&mut self.join), cx) {
+            Poll::Ready(r) => Poll::Ready(match r {
+                Ok(Ok(x)) => Ok(x),
+                Err(e) => Err(crate::Error::from(e).into()),
+                Ok(Err(e)) => Err(e),
+            }),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+pub async fn run_stream<H, R>(
     config: Arc<Config>,
     mut stream: R,
-    mut handler: H,
-) -> Result<H, H::Error>
+    handler: H,
+) -> Result<RunningSession<H>, H::Error>
 where
-    R: AsyncRead + AsyncWrite + Unpin,
+    H: Handler + Send + 'static,
+    R: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
-    let delay = config.connection_timeout;
     // Writing SSH id.
-    let mut decomp = CryptoVec::new();
     let mut write_buffer = SSHBuffer::new();
     write_buffer.send_ssh_id(config.as_ref().server_id.as_bytes());
     stream
@@ -490,147 +569,24 @@ where
         .map_err(crate::Error::from)?;
 
     // Reading SSH id and allocating a session.
-    let mut stream = SshRead::new(&mut stream);
+    let mut stream = SshRead::new(stream);
     let common = read_ssh_id(config, &mut stream).await?;
     let (sender, receiver) = tokio::sync::mpsc::channel(10);
-    let mut session = Session {
+    let handle = server::session::Handle { sender };
+    let session = Session {
+        session_id: get_session_id(),
         target_window_size: common.config.window_size,
         common,
         receiver,
-        sender: server::session::Handle { sender },
+        sender: handle.clone(),
         pending_reads: Vec::new(),
         pending_len: 0,
+        channels: HashMap::new(),
     };
-    session.flush()?;
-    stream
-        .write_all(&session.common.write_buffer.buffer)
-        .await
-        .map_err(crate::Error::from)?;
-    session.common.write_buffer.buffer.clear();
 
-    let (stream_read, mut stream_write) = stream.split();
-    let buffer = SSHBuffer::new();
+    let join = tokio::spawn(session.run(stream, handler));
 
-    // Allow handing out references to the cipher
-    let mut opening_cipher = Box::new(clear::Key) as Box<dyn OpeningKey + Send>;
-    std::mem::swap(
-        &mut opening_cipher,
-        &mut session.common.cipher.remote_to_local,
-    );
-
-    let reading = start_reading(stream_read, buffer, opening_cipher);
-    pin!(reading);
-    let mut is_reading = None;
-
-    #[allow(clippy::panic)] // false positive in macro
-    while !session.common.disconnected {
-        tokio::select! {
-            r = &mut reading => {
-                let (stream_read, buffer, mut opening_cipher) = match r {
-                    Ok((_, stream_read, buffer, opening_cipher)) => (stream_read, buffer, opening_cipher),
-                    Err(e) => return Err(e.into())
-                };
-                if buffer.buffer.len() < 5 {
-                    is_reading = Some((stream_read, buffer, opening_cipher));
-                    break
-                }
-                #[allow(clippy::indexing_slicing)] // length checked
-                let buf = if let Some(ref mut enc) = session.common.encrypted {
-                    let d = enc.decompress.decompress(
-                        &buffer.buffer[5..],
-                        &mut decomp,
-                    );
-                    if let Ok(buf) = d {
-                        buf
-                    } else {
-                        debug!("err = {:?}", d);
-                        is_reading = Some((stream_read, buffer, opening_cipher));
-                        break
-                    }
-                } else {
-                    &buffer.buffer[5..]
-                };
-                if !buf.is_empty() {
-                    #[allow(clippy::indexing_slicing)] // length checked
-                    if buf[0] == crate::msg::DISCONNECT {
-                        debug!("break");
-                        is_reading = Some((stream_read, buffer, opening_cipher));
-                        break;
-                    } else if buf[0] > 4 {
-                        std::mem::swap(&mut opening_cipher, &mut session.common.cipher.remote_to_local);
-                        // TODO it'd be cleaner to just pass cipher to reply()
-                        match reply(session, handler, buf).await {
-                            Ok((h, s)) => {
-                                handler = h;
-                                session = s;
-                            },
-                            Err(e) => return Err(e),
-                        }
-                        std::mem::swap(&mut opening_cipher, &mut session.common.cipher.remote_to_local);
-                    }
-                }
-                reading.set(start_reading(stream_read, buffer, opening_cipher));
-            }
-            _ = timeout(delay) => {
-                debug!("timeout");
-                break
-            },
-            msg = session.receiver.recv(), if !session.is_rekeying() => {
-                match msg {
-                    Some((id, ChannelMsg::Data { data })) => {
-                        session.data(id, data);
-                    }
-                    Some((id, ChannelMsg::ExtendedData { ext, data })) => {
-                        session.extended_data(id, ext, data);
-                    }
-                    Some((id, ChannelMsg::Eof)) => {
-                        session.eof(id);
-                    }
-                    Some((id, ChannelMsg::Close)) => {
-                        session.close(id);
-                    }
-                    Some((id, ChannelMsg::Success)) => {
-                        session.channel_success(id);
-                    }
-                    Some((id, ChannelMsg::XonXoff { client_can_do })) => {
-                        session.xon_xoff_request(id, client_can_do);
-                    }
-                    Some((id, ChannelMsg::ExitStatus { exit_status })) => {
-                        session.exit_status_request(id, exit_status);
-                    }
-                    Some((id, ChannelMsg::ExitSignal { signal_name, core_dumped, error_message, lang_tag })) => {
-                        session.exit_signal_request(id, signal_name, core_dumped, &error_message, &lang_tag);
-                    }
-                    Some((id, ChannelMsg::WindowAdjusted { new_size })) => {
-                        debug!("window adjusted to {:?} for channel {:?}", new_size, id);
-                    }
-                    None => {
-                        debug!("session.receiver: received None");
-                    }
-                }
-            }
-        }
-        session.flush()?;
-        stream_write
-            .write_all(&session.common.write_buffer.buffer)
-            .await
-            .map_err(crate::Error::from)?;
-        session.common.write_buffer.buffer.clear();
-    }
-    debug!("disconnected");
-    // Shutdown
-    stream_write.shutdown().await.map_err(crate::Error::from)?;
-    loop {
-        if let Some((stream_read, buffer, opening_cipher)) = is_reading.take() {
-            reading.set(start_reading(stream_read, buffer, opening_cipher));
-        }
-        let (n, r, b, opening_cipher) = (&mut reading).await?;
-        is_reading = Some((r, b, opening_cipher));
-        if n == 0 {
-            break;
-        }
-    }
-    Ok(handler)
+    Ok(RunningSession { handle, join })
 }
 
 async fn read_ssh_id<R: AsyncRead + Unpin>(
