@@ -429,7 +429,7 @@ fn rsa_signature(
 }
 
 /// Parse a public key from a byte slice.
-pub fn parse_public_key(p: &[u8], _prefer_hash: Option<SignatureHash>) -> Result<PublicKey, Error> {
+pub fn parse_public_key(p: &[u8], prefer_hash: Option<SignatureHash>) -> Result<PublicKey, Error> {
     let mut pos = p.reader(0);
     let t = pos.read_string()?;
     if t == b"ssh-ed25519" {
