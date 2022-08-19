@@ -1,8 +1,10 @@
-use super::*;
 use crate::cipher::SealingKey;
+use crate::client::Config;
 use crate::kex::KEXES;
 use crate::negotiation;
 use crate::negotiation::Select;
+use crate::session::{KexDhDone, KexInit};
+use crate::sshbuffer::SSHBuffer;
 
 impl KexInit {
     pub fn client_parse(
@@ -11,13 +13,13 @@ impl KexInit {
         cipher: &mut dyn SealingKey,
         buf: &[u8],
         write_buffer: &mut SSHBuffer,
-    ) -> Result<KexDhDone, Error> {
+    ) -> Result<KexDhDone, crate::Error> {
         debug!("client parse {:?} {:?}", buf.len(), buf);
         let algo = {
             // read algorithms from packet.
             debug!("extending {:?}", &self.exchange.server_kex_init[..]);
             self.exchange.server_kex_init.extend(buf);
-            super::negotiation::Client::read_kex(buf, &config.preferred)?
+            negotiation::Client::read_kex(buf, &config.preferred)?
         };
         debug!("algo = {:?}", algo);
         debug!("write = {:?}", &write_buffer.buffer[..]);
@@ -41,9 +43,9 @@ impl KexInit {
                     .as_ref()
                     .map(|x| &x.kex)
                     .or_else(|| config.preferred.kex.first())
-                    .ok_or(Error::NoCommonKexAlgo)?,
+                    .ok_or(crate::Error::NoCommonKexAlgo)?,
             )
-            .ok_or(Error::UnknownAlgo)?
+            .ok_or(crate::Error::UnknownAlgo)?
             .make();
 
         kex.client_dh(
@@ -70,7 +72,7 @@ impl KexInit {
         config: &Config,
         cipher: &mut dyn SealingKey,
         write_buffer: &mut SSHBuffer,
-    ) -> Result<(), Error> {
+    ) -> Result<(), crate::Error> {
         self.exchange.client_kex_init.clear();
         negotiation::write_kex(&config.preferred, &mut self.exchange.client_kex_init)?;
         self.sent = true;
