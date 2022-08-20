@@ -82,13 +82,13 @@ impl server::Handler for Server {
         async { Ok((self, s)) }.boxed()
     }
 
-    fn channel_open_session(self, channel: ChannelId, session: Session) -> Self::FutureUnit {
+    fn channel_open_session(self, channel: ChannelId, session: Session) -> Self::FutureBool {
         async move {
             {
                 let mut clients = self.clients.lock().await;
                 clients.insert((self.id, channel), session.handle());
             }
-            Ok((self, session))
+            Ok((self, session, true))
         }
         .boxed()
     }

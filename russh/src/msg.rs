@@ -57,3 +57,8 @@ pub const CHANNEL_CLOSE: u8 = 97;
 pub const CHANNEL_REQUEST: u8 = 98;
 pub const CHANNEL_SUCCESS: u8 = 99;
 pub const CHANNEL_FAILURE: u8 = 100;
+
+pub const SSH_OPEN_ADMINISTRATIVELY_PROHIBITED: u8 = 1;
+pub const SSH_OPEN_CONNECT_FAILED: u8 = 2;
+pub const SSH_OPEN_UNKNOWN_CHANNEL_TYPE: u8 = 3;
+pub const SSH_OPEN_RESOURCE_SHORTAGE: u8 = 4;

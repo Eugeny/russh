@@ -25,6 +25,7 @@ use {msg, negotiation};
 
 use super::super::*;
 use super::*;
+use crate::msg::SSH_OPEN_ADMINISTRATIVELY_PROHIBITED;
 use crate::parsing::{ChannelOpenConfirmation, ChannelType, OpenChannelMessage};
 
 impl Session {
@@ -562,7 +563,10 @@ impl Session {
             );
         }
         match buf.get(0) {
-            Some(&msg::CHANNEL_OPEN) => self.server_handle_channel_open(handler, buf).await,
+            Some(&msg::CHANNEL_OPEN) => self
+                .server_handle_channel_open(handler, buf)
+                .await
+                .map(|(h, s, _)| (h, s)),
             Some(&msg::CHANNEL_CLOSE) => {
                 let mut r = buf.reader(1);
                 let channel_num = ChannelId(r.read_u32().map_err(crate::Error::from)?);
@@ -851,7 +855,7 @@ impl Session {
         mut self,
         handler: H,
         buf: &[u8],
-    ) -> Result<(H, Self), H::Error> {
+    ) -> Result<(H, Self, bool), H::Error> {
         let mut r = buf.reader(1);
         let msg = OpenChannelMessage::parse(&mut r)?;
 
@@ -877,8 +881,11 @@ impl Session {
 
         match &msg.typ {
             ChannelType::Session => {
-                self.confirm_channel_open(&msg, channel);
-                handler.channel_open_session(sender_channel, self).await
+                let mut result = handler.channel_open_session(sender_channel, self).await;
+                if let Ok((_, s, allowed)) = &mut result {
+                    s.finalize_channel_open(&msg, channel, *allowed);
+                }
+                result
             }
             ChannelType::X11 {
                 originator_address,
@@ -887,8 +894,8 @@ impl Session {
                 let mut result = handler
                     .channel_open_x11(sender_channel, originator_address, *originator_port, self)
                     .await;
-                if let Ok((_, s)) = &mut result {
-                    s.confirm_channel_open(&msg, channel);
+                if let Ok((_, s, allowed)) = &mut result {
+                    s.finalize_channel_open(&msg, channel, *allowed);
                 }
                 result
             }
@@ -903,8 +910,8 @@ impl Session {
                         self,
                     )
                     .await;
-                if let Ok((_, s)) = &mut result {
-                    s.confirm_channel_open(&msg, channel);
+                if let Ok((_, s, allowed)) = &mut result {
+                    s.finalize_channel_open(&msg, channel, *allowed);
                 }
                 result
             }
@@ -919,8 +926,8 @@ impl Session {
                         self,
                     )
                     .await;
-                if let Ok((_, s)) = &mut result {
-                    s.confirm_channel_open(&msg, channel);
+                if let Ok((_, s, allowed)) = &mut result {
+                    s.finalize_channel_open(&msg, channel, *allowed);
                 }
                 result
             }
@@ -929,20 +936,33 @@ impl Session {
                 if let Some(ref mut enc) = self.common.encrypted {
                     msg.unknown_type(&mut enc.write);
                 }
-                Ok((handler, self))
+                Ok((handler, self, false))
             }
         }
     }
 
-    fn confirm_channel_open(&mut self, open: &OpenChannelMessage, channel: ChannelParams) {
+    fn finalize_channel_open(
+        &mut self,
+        open: &OpenChannelMessage,
+        channel: ChannelParams,
+        allowed: bool,
+    ) {
         if let Some(ref mut enc) = self.common.encrypted {
-            open.confirm(
-                &mut enc.write,
-                channel.sender_channel.0,
-                channel.sender_window_size,
-                channel.sender_maximum_packet_size,
-            );
-            enc.channels.insert(channel.sender_channel, channel);
+            if allowed {
+                open.confirm(
+                    &mut enc.write,
+                    channel.sender_channel.0,
+                    channel.sender_window_size,
+                    channel.sender_maximum_packet_size,
+                );
+                enc.channels.insert(channel.sender_channel, channel);
+            } else {
+                open.fail(
+                    &mut enc.write,
+                    SSH_OPEN_ADMINISTRATIVELY_PROHIBITED,
+                    b"Rejected",
+                );
+            }
         }
     }
 }

@@ -1,6 +1,8 @@
 use russh_cryptovec::CryptoVec;
 use russh_keys::encoding::{Encoding, Position};
 
+use crate::msg::SSH_OPEN_UNKNOWN_CHANNEL_TYPE;
+
 use super::*;
 
 #[derive(Debug)]
@@ -62,15 +64,20 @@ impl OpenChannelMessage {
         });
     }
 
-    /// Pushes an unknown type error to the vec.
-    pub fn unknown_type(&self, buffer: &mut CryptoVec) {
+    /// Pushes a failure message to the vec.
+    pub fn fail(&self, buffer: &mut CryptoVec, reason: u8, message: &[u8]) {
         push_packet!(buffer, {
             buffer.push(msg::CHANNEL_OPEN_FAILURE);
             buffer.push_u32_be(self.recipient_channel);
-            buffer.push_u32_be(3); // SSH_OPEN_UNKNOWN_CHANNEL_TYPE
-            buffer.extend_ssh_string(b"Unknown channel type");
+            buffer.push_u32_be(reason as u32);
+            buffer.extend_ssh_string(message);
             buffer.extend_ssh_string(b"en");
         });
+    }
+
+    /// Pushes an unknown type error to the vec.
+    pub fn unknown_type(&self, buffer: &mut CryptoVec) {
+        self.fail(buffer, SSH_OPEN_UNKNOWN_CHANNEL_TYPE, b"Unknown channel type");
     }
 }
 
