@@ -91,6 +91,8 @@ pub enum ChannelMsg {
     /// (server only)
     Success,
     /// (server only)
+    Failure,
+    /// (server only)
     Close,
 }
 

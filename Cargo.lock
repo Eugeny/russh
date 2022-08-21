@@ -968,7 +968,7 @@ dependencies = [
 
 [[package]]
 name = "russh"
-version = "0.34.0-beta.10"
+version = "0.34.0-beta.12"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -1022,7 +1022,7 @@ dependencies = [
 
 [[package]]
 name = "russh-keys"
-version = "0.22.0-beta.4"
+version = "0.22.0-beta.5"
 dependencies = [
  "aes",
  "bcrypt-pbkdf",

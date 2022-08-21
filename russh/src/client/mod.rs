@@ -979,6 +979,15 @@ pub trait Handler: Sized {
         self.finished(session)
     }
 
+    /// Called when the server signals failure.
+    #[allow(unused_variables)]
+    fn channel_failure(self, channel: ChannelId, session: Session) -> Self::FutureUnit {
+        if let Some(chan) = session.channels.get(&channel) {
+            chan.send(ChannelMsg::Failure).unwrap_or(())
+        }
+        self.finished(session)
+    }
+
     /// Called when the server closes a channel.
     #[allow(unused_variables)]
     fn channel_close(self, channel: ChannelId, mut session: Session) -> Self::FutureUnit {

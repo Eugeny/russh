@@ -106,6 +106,14 @@ impl Handle {
             .map_err(|_| ())
     }
 
+    /// Send failure to the session referenced by this handler.
+    pub async fn channel_failure(&mut self, id: ChannelId) -> Result<(), ()> {
+        self.sender
+            .send(Msg::Channel(id, ChannelMsg::Failure))
+            .await
+            .map_err(|_| ())
+    }
+
     /// Close a channel.
     pub async fn close(&mut self, id: ChannelId) -> Result<(), ()> {
         self.sender
@@ -352,6 +360,9 @@ impl Session {
                         }
                         Some(Msg::Channel(id, ChannelMsg::Success)) => {
                             self.channel_success(id);
+                        }
+                        Some(Msg::Channel(id, ChannelMsg::Failure)) => {
+                            self.channel_failure(id);
                         }
                         Some(Msg::Channel(id, ChannelMsg::XonXoff { client_can_do })) => {
                             self.xon_xoff_request(id, client_can_do);

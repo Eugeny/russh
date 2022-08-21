@@ -497,6 +497,11 @@ impl super::Session {
                 let channel_num = ChannelId(r.read_u32().map_err(crate::Error::from)?);
                 client.channel_success(channel_num, self).await
             }
+            Some(&msg::CHANNEL_FAILURE) => {
+                let mut r = buf.reader(1);
+                let channel_num = ChannelId(r.read_u32().map_err(crate::Error::from)?);
+                client.channel_failure(channel_num, self).await
+            }
             Some(&msg::CHANNEL_OPEN) => {
                 let mut r = buf.reader(1);
                 let msg = OpenChannelMessage::parse(&mut r)?;
