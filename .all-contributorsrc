@@ -31,6 +31,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "amtelekom",
+      "name": "Adrian Müller (DTT)",
+      "avatar_url": "https://avatars.githubusercontent.com/u/21334898?v=4",
+      "profile": "https://www.telekom.de",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,
