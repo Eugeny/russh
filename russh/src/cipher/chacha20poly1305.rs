@@ -15,9 +15,6 @@
 
 // http://cvsweb.openbsd.org/cgi-bin/cvsweb/src/usr.bin/ssh/PROTOCOL.chacha20poly1305?annotate=HEAD
 
-use super::super::Error;
-use crate::cipher::PACKET_LENGTH_LEN;
-use crate::mac::MacAlgorithm;
 use aes::cipher::{BlockSizeUser, StreamCipherSeek};
 use byteorder::{BigEndian, ByteOrder};
 use chacha20::cipher::{KeyInit, KeyIvInit, StreamCipher};
@@ -26,6 +23,10 @@ use generic_array::typenum::{Unsigned, U16, U32, U8};
 use generic_array::GenericArray;
 use poly1305::Poly1305;
 use subtle::ConstantTimeEq;
+
+use super::super::Error;
+use crate::cipher::PACKET_LENGTH_LEN;
+use crate::mac::MacAlgorithm;
 
 pub struct SshChacha20Poly1305Cipher {}
 

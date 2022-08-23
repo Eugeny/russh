@@ -33,6 +33,7 @@ use tokio::sync::mpsc::{
 };
 
 use crate::cipher::{self, clear, CipherPair, OpeningKey};
+use crate::channels::{Channel, ChannelMsg};
 use crate::key::PubKey;
 use crate::pty::Pty;
 use crate::session::{CommonSession, EncryptedState, Exchange, Kex, KexDhDone, KexInit, NewKeys};
@@ -41,6 +42,8 @@ use crate::sshbuffer::SSHBuffer;
 use crate::{
     auth, msg, negotiation, ChannelId, ChannelMsg, ChannelOpenFailure, Disconnect, Limits, Sig,
 };
+use crate::sshbuffer::*;
+use crate::{auth, negotiation, ChannelId, ChannelOpenFailure, Disconnect, Limits, Sig};
 
 mod encrypted;
 mod kex;
@@ -53,7 +56,7 @@ pub struct Session {
     common: CommonSession<Arc<Config>>,
     receiver: Receiver<Msg>,
     sender: UnboundedSender<Reply>,
-    channels: HashMap<ChannelId, UnboundedSender<OpenChannelMsg>>,
+    channels: HashMap<ChannelId, UnboundedSender<ChannelMsg>>,
     target_window_size: u32,
     pending_reads: Vec<CryptoVec>,
     pending_len: u32,
@@ -77,7 +80,7 @@ enum Reply {
 }
 
 #[derive(Debug)]
-enum Msg {
+pub enum Msg {
     Authenticate {
         user: String,
         method: auth::Method,
@@ -86,19 +89,19 @@ enum Msg {
         data: CryptoVec,
     },
     ChannelOpenSession {
-        sender: UnboundedSender<OpenChannelMsg>,
+        sender: UnboundedSender<ChannelMsg>,
     },
     ChannelOpenX11 {
         originator_address: String,
         originator_port: u32,
-        sender: UnboundedSender<OpenChannelMsg>,
+        sender: UnboundedSender<ChannelMsg>,
     },
     ChannelOpenDirectTcpIp {
         host_to_connect: String,
         port_to_connect: u32,
         originator_address: String,
         originator_port: u32,
-        sender: UnboundedSender<OpenChannelMsg>,
+        sender: UnboundedSender<ChannelMsg>,
     },
     TcpIpForward {
         want_reply: bool,
@@ -115,77 +118,13 @@ enum Msg {
         description: String,
         language_tag: String,
     },
-    Data {
-        id: ChannelId,
-        data: CryptoVec,
-    },
-    ExtendedData {
-        id: ChannelId,
-        data: CryptoVec,
-        ext: u32,
-    },
-    Eof {
-        id: ChannelId,
-    },
-    RequestPty {
-        id: ChannelId,
-        want_reply: bool,
-        term: String,
-        col_width: u32,
-        row_height: u32,
-        pix_width: u32,
-        pix_height: u32,
-        terminal_modes: Vec<(Pty, u32)>,
-    },
-    RequestShell {
-        id: ChannelId,
-        want_reply: bool,
-    },
-    Exec {
-        id: ChannelId,
-        want_reply: bool,
-        command: String,
-    },
-    Signal {
-        id: ChannelId,
-        signal: Sig,
-    },
-    RequestSubsystem {
-        id: ChannelId,
-        want_reply: bool,
-        name: String,
-    },
-    RequestX11 {
-        id: ChannelId,
-        want_reply: bool,
-        single_connection: bool,
-        x11_authentication_protocol: String,
-        x11_authentication_cookie: String,
-        x11_screen_number: u32,
-    },
-    SetEnv {
-        id: ChannelId,
-        want_reply: bool,
-        variable_name: String,
-        variable_value: String,
-    },
-    WindowChange {
-        id: ChannelId,
-        col_width: u32,
-        row_height: u32,
-        pix_width: u32,
-        pix_height: u32,
-    },
+    Channel(ChannelId, ChannelMsg),
 }
 
-#[derive(Debug)]
-enum OpenChannelMsg {
-    Open {
-        id: ChannelId,
-        max_packet_size: u32,
-        window_size: u32,
-    },
-    Msg(ChannelMsg),
+impl From<(ChannelId, ChannelMsg)> for Msg {
+    fn from((id, msg): (ChannelId, ChannelMsg)) -> Self {
+        Msg::Channel(id, msg)
+    }
 }
 
 /// Handle to a session, used to send messages to a client outside of
@@ -202,20 +141,6 @@ impl<H: Handler> Drop for Handle<H> {
     }
 }
 
-#[derive(Clone)]
-pub struct ChannelSender {
-    sender: Sender<Msg>,
-    id: ChannelId,
-}
-
-pub struct Channel {
-    sender: ChannelSender,
-    receiver: UnboundedReceiver<OpenChannelMsg>,
-    max_packet_size: u32,
-    window_size: u32,
-}
-
-/// A "handle" to a session initialized with a configuration.
 impl<H: Handler> Handle<H> {
     pub fn is_closed(&self) -> bool {
         self.sender.is_closed()
@@ -332,20 +257,18 @@ impl<H: Handler> Handle<H> {
     /// Wait for confirmation that a channel is open
     async fn wait_channel_confirmation(
         &self,
-        mut receiver: UnboundedReceiver<OpenChannelMsg>,
-    ) -> Result<Channel, crate::Error> {
+        mut receiver: UnboundedReceiver<ChannelMsg>,
+    ) -> Result<Channel<Msg>, crate::Error> {
         loop {
             match receiver.recv().await {
-                Some(OpenChannelMsg::Open {
+                Some(ChannelMsg::Open {
                     id,
                     max_packet_size,
                     window_size,
                 }) => {
                     return Ok(Channel {
-                        sender: ChannelSender {
-                            sender: self.sender.clone(),
-                            id,
-                        },
+                        id,
+                        sender: self.sender.clone(),
                         receiver,
                         max_packet_size,
                         window_size,
@@ -366,7 +289,7 @@ impl<H: Handler> Handle<H> {
     /// connection is authenticated, but the channel only becomes
     /// usable when it's confirmed by the server, as indicated by the
     /// `confirmed` field of the corresponding `Channel`.
-    pub async fn channel_open_session(&mut self) -> Result<Channel, crate::Error> {
+    pub async fn channel_open_session(&mut self) -> Result<Channel<Msg>, crate::Error> {
         let (sender, receiver) = unbounded_channel();
         self.sender
             .send(Msg::ChannelOpenSession { sender })
@@ -380,7 +303,7 @@ impl<H: Handler> Handle<H> {
         &mut self,
         originator_address: A,
         originator_port: u32,
-    ) -> Result<Channel, crate::Error> {
+    ) -> Result<Channel<Msg>, crate::Error> {
         let (sender, receiver) = unbounded_channel();
         self.sender
             .send(Msg::ChannelOpenX11 {
@@ -407,7 +330,7 @@ impl<H: Handler> Handle<H> {
         port_to_connect: u32,
         originator_address: B,
         originator_port: u32,
-    ) -> Result<Channel, crate::Error> {
+    ) -> Result<Channel<Msg>, crate::Error> {
         let (sender, receiver) = unbounded_channel();
         self.sender
             .send(Msg::ChannelOpenDirectTcpIp {
@@ -438,337 +361,6 @@ impl<H: Handler> Handle<H> {
             .await
             .map_err(|_| crate::Error::SendError)?;
         Ok(())
-    }
-}
-
-impl Channel {
-    pub fn id(&self) -> ChannelId {
-        self.sender.id
-    }
-
-    /// Returns the min between the maximum packet size and the
-    /// remaining window size in the channel.
-    pub fn writable_packet_size(&self) -> usize {
-        self.max_packet_size.min(self.window_size) as usize
-    }
-
-    /// Request a pseudo-terminal with the given characteristics.
-    #[allow(clippy::too_many_arguments)] // length checked
-    pub async fn request_pty(
-        &mut self,
-        want_reply: bool,
-        term: &str,
-        col_width: u32,
-        row_height: u32,
-        pix_width: u32,
-        pix_height: u32,
-        terminal_modes: &[(Pty, u32)],
-    ) -> Result<(), crate::Error> {
-        self.sender
-            .sender
-            .send(Msg::RequestPty {
-                id: self.sender.id,
-                want_reply,
-                term: term.to_string(),
-                col_width,
-                row_height,
-                pix_width,
-                pix_height,
-                terminal_modes: terminal_modes.to_vec(),
-            })
-            .await
-            .map_err(|_| crate::Error::SendError)?;
-        Ok(())
-    }
-
-    /// Request a remote shell.
-    pub async fn request_shell(&mut self, want_reply: bool) -> Result<(), crate::Error> {
-        self.sender
-            .sender
-            .send(Msg::RequestShell {
-                id: self.sender.id,
-                want_reply,
-            })
-            .await
-            .map_err(|_| crate::Error::SendError)?;
-        Ok(())
-    }
-
-    /// Execute a remote program (will be passed to a shell). This can
-    /// be used to implement scp (by calling a remote scp and
-    /// tunneling to its standard input).
-    pub async fn exec<A: Into<String>>(
-        &mut self,
-        want_reply: bool,
-        command: A,
-    ) -> Result<(), crate::Error> {
-        self.sender
-            .sender
-            .send(Msg::Exec {
-                id: self.sender.id,
-                want_reply,
-                command: command.into(),
-            })
-            .await
-            .map_err(|e| {
-                debug!("e = {:?}", e);
-                crate::Error::SendError
-            })?;
-        Ok(())
-    }
-
-    /// Signal a remote process.
-    pub async fn signal(&mut self, signal: Sig) -> Result<(), crate::Error> {
-        self.sender
-            .sender
-            .send(Msg::Signal {
-                id: self.sender.id,
-                signal,
-            })
-            .await
-            .map_err(|_| crate::Error::SendError)?;
-        Ok(())
-    }
-
-    /// Request the start of a subsystem with the given name.
-    pub async fn request_subsystem<A: Into<String>>(
-        &mut self,
-        want_reply: bool,
-        name: A,
-    ) -> Result<(), crate::Error> {
-        self.sender
-            .sender
-            .send(Msg::RequestSubsystem {
-                id: self.sender.id,
-                want_reply,
-                name: name.into(),
-            })
-            .await
-            .map_err(|_| crate::Error::SendError)?;
-        Ok(())
-    }
-
-    /// Request the forwarding of a remote port to the client. The
-    /// server will then open forwarding channels (which cause the
-    /// client to call `.channel_open_forwarded_tcpip()`).
-    pub async fn tcpip_forward<A: Into<String>>(
-        &mut self,
-        want_reply: bool,
-        address: A,
-        port: u32,
-    ) -> Result<(), crate::Error> {
-        self.sender
-            .sender
-            .send(Msg::TcpIpForward {
-                want_reply,
-                address: address.into(),
-                port,
-            })
-            .await
-            .map_err(|_| crate::Error::SendError)?;
-        Ok(())
-    }
-
-    /// Cancel a previous forwarding request.
-    pub async fn cancel_tcpip_forward<A: Into<String>>(
-        &mut self,
-        want_reply: bool,
-        address: A,
-        port: u32,
-    ) -> Result<(), crate::Error> {
-        self.sender
-            .sender
-            .send(Msg::CancelTcpIpForward {
-                want_reply,
-                address: address.into(),
-                port,
-            })
-            .await
-            .map_err(|_| crate::Error::SendError)?;
-        Ok(())
-    }
-
-    /// Request X11 forwarding through an already opened X11
-    /// channel. See
-    /// [RFC4254](https://tools.ietf.org/html/rfc4254#section-6.3.1)
-    /// for security issues related to cookies.
-    pub async fn request_x11<A: Into<String>, B: Into<String>>(
-        &mut self,
-        want_reply: bool,
-        single_connection: bool,
-        x11_authentication_protocol: A,
-        x11_authentication_cookie: B,
-        x11_screen_number: u32,
-    ) -> Result<(), crate::Error> {
-        self.sender
-            .sender
-            .send(Msg::RequestX11 {
-                id: self.sender.id,
-                want_reply,
-                single_connection,
-                x11_authentication_protocol: x11_authentication_protocol.into(),
-                x11_authentication_cookie: x11_authentication_cookie.into(),
-                x11_screen_number,
-            })
-            .await
-            .map_err(|_| crate::Error::SendError)?;
-        Ok(())
-    }
-
-    /// Set a remote environment variable.
-    pub async fn set_env<A: Into<String>, B: Into<String>>(
-        &mut self,
-        want_reply: bool,
-        variable_name: A,
-        variable_value: B,
-    ) -> Result<(), crate::Error> {
-        self.sender
-            .sender
-            .send(Msg::SetEnv {
-                id: self.sender.id,
-                want_reply,
-                variable_name: variable_name.into(),
-                variable_value: variable_value.into(),
-            })
-            .await
-            .map_err(|_| crate::Error::SendError)?;
-        Ok(())
-    }
-
-    /// Inform the server that our window size has changed.
-    pub async fn window_change(
-        &mut self,
-        col_width: u32,
-        row_height: u32,
-        pix_width: u32,
-        pix_height: u32,
-    ) -> Result<(), crate::Error> {
-        self.sender
-            .sender
-            .send(Msg::WindowChange {
-                id: self.sender.id,
-                col_width,
-                row_height,
-                pix_width,
-                pix_height,
-            })
-            .await
-            .map_err(|_| crate::Error::SendError)?;
-        Ok(())
-    }
-
-    /// Send data to a channel.
-    pub async fn data<R: tokio::io::AsyncReadExt + Unpin>(
-        &mut self,
-        data: R,
-    ) -> Result<(), crate::Error> {
-        self.send_data(None, data).await
-    }
-
-    /// Send data to a channel. The number of bytes added to the
-    /// "sending pipeline" (to be processed by the event loop) is
-    /// returned.
-    pub async fn extended_data<R: tokio::io::AsyncReadExt + Unpin>(
-        &mut self,
-        ext: u32,
-        data: R,
-    ) -> Result<(), crate::Error> {
-        self.send_data(Some(ext), data).await
-    }
-
-    async fn send_data<R: tokio::io::AsyncReadExt + Unpin>(
-        &mut self,
-        ext: Option<u32>,
-        mut data: R,
-    ) -> Result<(), crate::Error> {
-        let mut total = 0;
-        loop {
-            // wait for the window to be restored.
-            while self.window_size == 0 {
-                match self.receiver.recv().await {
-                    Some(OpenChannelMsg::Msg(ChannelMsg::WindowAdjusted { new_size })) => {
-                        debug!("window adjusted: {:?}", new_size);
-                        self.window_size = new_size;
-                        break;
-                    }
-                    Some(OpenChannelMsg::Msg(msg)) => {
-                        debug!("unexpected channel msg: {:?}", msg);
-                    }
-                    Some(_) => debug!("unexpected channel msg"),
-                    None => break,
-                }
-            }
-            debug!(
-                "sending data, self.window_size = {:?}, self.max_packet_size = {:?}, total = {:?}",
-                self.window_size, self.max_packet_size, total
-            );
-            let sendable = self.window_size.min(self.max_packet_size) as usize;
-            debug!("sendable {:?}", sendable);
-            let mut c = CryptoVec::new_zeroed(sendable);
-            let n = data.read(&mut c[..]).await?;
-            total += n;
-            c.resize(n);
-            self.window_size -= n as u32;
-            self.send_data_packet(ext, c).await?;
-            if n == 0 {
-                break;
-            } else if self.window_size > 0 {
-                continue;
-            }
-        }
-        Ok(())
-    }
-
-    async fn send_data_packet(
-        &mut self,
-        ext: Option<u32>,
-        data: CryptoVec,
-    ) -> Result<(), crate::Error> {
-        self.sender
-            .sender
-            .send(if let Some(ext) = ext {
-                Msg::ExtendedData {
-                    id: self.sender.id,
-                    ext,
-                    data,
-                }
-            } else {
-                Msg::Data {
-                    id: self.sender.id,
-                    data,
-                }
-            })
-            .await
-            .map_err(|e| {
-                error!("{:?}", e);
-                crate::Error::SendError
-            })?;
-        Ok(())
-    }
-
-    /// Sent when a client will no longer send more data to a channel
-    pub async fn eof(&mut self) -> Result<(), crate::Error> {
-        self.sender
-            .sender
-            .send(Msg::Eof { id: self.sender.id })
-            .await
-            .map_err(|_| crate::Error::SendError)?;
-        Ok(())
-    }
-
-    /// Wait for data to come.
-    pub async fn wait(&mut self) -> Option<ChannelMsg> {
-        loop {
-            match self.receiver.recv().await {
-                Some(OpenChannelMsg::Msg(ChannelMsg::WindowAdjusted { new_size })) => {
-                    self.window_size += new_size;
-                    return Some(ChannelMsg::WindowAdjusted { new_size });
-                }
-                Some(OpenChannelMsg::Msg(msg)) => return Some(msg),
-                None => return None,
-                _ => {}
-            }
-        }
     }
 }
 
@@ -981,32 +573,37 @@ impl Session {
                         Some(Msg::Disconnect { reason, description, language_tag }) => {
                             self.disconnect(reason, &description, &language_tag)
                         },
-                        Some(Msg::Data { data, id }) => { self.data(id, data) },
-                        Some(Msg::Eof { id }) => { self.eof(id); },
-                        Some(Msg::ExtendedData { data, ext, id }) => { self.extended_data(id, ext, data); },
-                        Some(Msg::RequestPty { id, want_reply, term, col_width, row_height, pix_width, pix_height, terminal_modes }) => {
+                        Some(Msg::Channel(id, ChannelMsg::Data { data })) => { self.data(id, data) },
+                        Some(Msg::Channel(id, ChannelMsg::Eof)) => { self.eof(id); },
+                        Some(Msg::Channel(id, ChannelMsg::ExtendedData { data, ext })) => { self.extended_data(id, ext, data); },
+                        Some(Msg::Channel(id, ChannelMsg::RequestPty { want_reply, term, col_width, row_height, pix_width, pix_height, terminal_modes })) => {
                             self.request_pty(id, want_reply, &term, col_width, row_height, pix_width, pix_height, &terminal_modes)
                         },
-                        Some(Msg::WindowChange { id, col_width, row_height, pix_width, pix_height }) => {
+                        Some(Msg::Channel(id, ChannelMsg::WindowChange { col_width, row_height, pix_width, pix_height })) => {
                             self.window_change(id, col_width, row_height, pix_width, pix_height)
                         },
-                        Some(Msg::RequestX11 { id, want_reply, single_connection, x11_authentication_protocol, x11_authentication_cookie, x11_screen_number }) => {
+                        Some(Msg::Channel(id, ChannelMsg::RequestX11 { want_reply, single_connection, x11_authentication_protocol, x11_authentication_cookie, x11_screen_number })) => {
                             self.request_x11(id, want_reply, single_connection, &x11_authentication_protocol, &x11_authentication_cookie, x11_screen_number)
                         },
-                        Some(Msg::SetEnv { id, want_reply, variable_name, variable_value }) => {
+                        Some(Msg::Channel(id, ChannelMsg::SetEnv { want_reply, variable_name, variable_value })) => {
                             self.set_env(id, want_reply, &variable_name, &variable_value)
                         },
-                        Some(Msg::RequestShell { id, want_reply }) => {
+                        Some(Msg::Channel(id, ChannelMsg::RequestShell { want_reply })) => {
                             self.request_shell(want_reply, id)
                         },
-                        Some(Msg::Exec { id, want_reply, command }) => {
+                        Some(Msg::Channel(id, ChannelMsg::Exec { want_reply, command })) => {
                             self.exec(id, want_reply, &command)
                         },
-                        Some(Msg::Signal { id, signal }) => {
+                        Some(Msg::Channel(id, ChannelMsg::Signal { signal })) => {
                             self.signal(id, signal)
                         },
-                        Some(Msg::RequestSubsystem { id, want_reply, name }) => {
+                        Some(Msg::Channel(id, ChannelMsg::RequestSubsystem { want_reply, name })) => {
                             self.request_subsystem(want_reply, id, &name)
+                        },
+                        Some(_) => {
+                            // should be unreachable, since the receiver only gets
+                            // messages from methods implemented within russh
+                            unimplemented!("unimplemented (server-only?) message: {:?}", msg)
                         },
                         None => {
                             self.common.disconnected = true;
@@ -1103,7 +700,7 @@ impl Session {
     /// Send a `ChannelMsg` from the background handler to the client.
     pub fn send_channel_msg(&self, channel: ChannelId, msg: ChannelMsg) -> bool {
         if let Some(chan) = self.channels.get(&channel) {
-            chan.send(OpenChannelMsg::Msg(msg)).unwrap_or(());
+            chan.send(msg).unwrap_or(());
             true
         } else {
             false
@@ -1357,7 +954,7 @@ pub trait Handler: Sized {
     ) -> Self::FutureUnit {
         if let Some(channel) = session.channels.get(&id) {
             channel
-                .send(OpenChannelMsg::Open {
+                .send(ChannelMsg::Open {
                     id,
                     max_packet_size,
                     window_size,
@@ -1373,8 +970,16 @@ pub trait Handler: Sized {
     #[allow(unused_variables)]
     fn channel_success(self, channel: ChannelId, session: Session) -> Self::FutureUnit {
         if let Some(chan) = session.channels.get(&channel) {
-            chan.send(OpenChannelMsg::Msg(ChannelMsg::Success))
-                .unwrap_or(())
+            chan.send(ChannelMsg::Success).unwrap_or(())
+        }
+        self.finished(session)
+    }
+
+    /// Called when the server signals failure.
+    #[allow(unused_variables)]
+    fn channel_failure(self, channel: ChannelId, session: Session) -> Self::FutureUnit {
+        if let Some(chan) = session.channels.get(&channel) {
+            chan.send(ChannelMsg::Failure).unwrap_or(())
         }
         self.finished(session)
     }
@@ -1390,8 +995,7 @@ pub trait Handler: Sized {
     #[allow(unused_variables)]
     fn channel_eof(self, channel: ChannelId, session: Session) -> Self::FutureUnit {
         if let Some(chan) = session.channels.get(&channel) {
-            chan.send(OpenChannelMsg::Msg(ChannelMsg::Eof))
-                .unwrap_or(())
+            chan.send(ChannelMsg::Eof).unwrap_or(())
         }
         self.finished(session)
     }
@@ -1411,13 +1015,53 @@ pub trait Handler: Sized {
         self.finished(session)
     }
 
-    /// Called when a new channel is created.
+    /// Called when a port foward request is made on a channel.
     #[allow(unused_variables)]
     fn channel_open_forwarded_tcpip(
         self,
         channel: ChannelId,
         connected_address: &str,
         connected_port: u32,
+        originator_address: &str,
+        originator_port: u32,
+        session: Session,
+    ) -> Self::FutureUnit {
+        self.finished(session)
+    }
+
+    /// Called when the server gets an unknown channel. It may return `true`,
+    /// if the channel of unknown type should be handled. If it returns `false`,
+    /// the channel will not be created and an error will be sent to the server.
+    #[allow(unused_variables)]
+    fn server_channel_handle_unknown(&self, channel: ChannelId, channel_type: &[u8]) -> bool {
+        false
+    }
+
+    /// Called when the server opens a session channel.
+    #[allow(unused_variables)]
+    fn server_channel_open_session(self, channel: ChannelId, session: Session) -> Self::FutureUnit {
+        self.finished(session)
+    }
+
+    /// Called when the server opens a direct tcp/ip channel.
+    #[allow(unused_variables)]
+    fn server_channel_open_direct_tcpip(
+        self,
+        channel: ChannelId,
+        host_to_connect: &str,
+        port_to_connect: u32,
+        originator_address: &str,
+        originator_port: u32,
+        session: Session,
+    ) -> Self::FutureUnit {
+        self.finished(session)
+    }
+
+    /// Called when the server opens an X11 channel.
+    #[allow(unused_variables)]
+    fn server_channel_open_x11(
+        self,
+        channel: ChannelId,
         originator_address: &str,
         originator_port: u32,
         session: Session,
@@ -1432,9 +1076,9 @@ pub trait Handler: Sized {
     #[allow(unused_variables)]
     fn data(self, channel: ChannelId, data: &[u8], session: Session) -> Self::FutureUnit {
         if let Some(chan) = session.channels.get(&channel) {
-            chan.send(OpenChannelMsg::Msg(ChannelMsg::Data {
+            chan.send(ChannelMsg::Data {
                 data: CryptoVec::from_slice(data),
-            }))
+            })
             .unwrap_or(())
         }
         self.finished(session)
@@ -1453,10 +1097,10 @@ pub trait Handler: Sized {
         session: Session,
     ) -> Self::FutureUnit {
         if let Some(chan) = session.channels.get(&channel) {
-            chan.send(OpenChannelMsg::Msg(ChannelMsg::ExtendedData {
+            chan.send(ChannelMsg::ExtendedData {
                 ext,
                 data: CryptoVec::from_slice(data),
-            }))
+            })
             .unwrap_or(())
         }
         self.finished(session)
@@ -1473,7 +1117,7 @@ pub trait Handler: Sized {
         session: Session,
     ) -> Self::FutureUnit {
         if let Some(chan) = session.channels.get(&channel) {
-            chan.send(OpenChannelMsg::Msg(ChannelMsg::XonXoff { client_can_do }))
+            chan.send(ChannelMsg::XonXoff { client_can_do })
                 .unwrap_or(())
         }
         self.finished(session)
@@ -1488,7 +1132,7 @@ pub trait Handler: Sized {
         session: Session,
     ) -> Self::FutureUnit {
         if let Some(chan) = session.channels.get(&channel) {
-            chan.send(OpenChannelMsg::Msg(ChannelMsg::ExitStatus { exit_status }))
+            chan.send(ChannelMsg::ExitStatus { exit_status })
                 .unwrap_or(())
         }
         self.finished(session)
@@ -1506,12 +1150,12 @@ pub trait Handler: Sized {
         session: Session,
     ) -> Self::FutureUnit {
         if let Some(chan) = session.channels.get(&channel) {
-            chan.send(OpenChannelMsg::Msg(ChannelMsg::ExitSignal {
+            chan.send(ChannelMsg::ExitSignal {
                 signal_name,
                 core_dumped,
                 error_message: error_message.to_string(),
                 lang_tag: lang_tag.to_string(),
-            }))
+            })
             .unwrap_or(())
         }
         self.finished(session)
@@ -1533,7 +1177,7 @@ pub trait Handler: Sized {
             new_size -= enc.flush_pending(channel) as u32;
         }
         if let Some(chan) = session.channels.get(&channel) {
-            chan.send(OpenChannelMsg::Msg(ChannelMsg::WindowAdjusted { new_size }))
+            chan.send(ChannelMsg::WindowAdjusted { new_size })
                 .unwrap_or(())
         }
         self.finished(session)

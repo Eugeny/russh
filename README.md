@@ -1,31 +1,38 @@
 # Russh
-<!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
-[![All Contributors](https://img.shields.io/badge/all_contributors-3-orange.svg?style=flat-square)](#contributors-)
-<!-- ALL-CONTRIBUTORS-BADGE:END -->
+[![Rust](https://github.com/warp-tech/russh/actions/workflows/rust.yml/badge.svg)](https://github.com/warp-tech/russh/actions/workflows/rust.yml)  <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->[![All Contributors](https://img.shields.io/badge/all_contributors-3-orange.svg?style=flat-square)](#contributors-)<!-- ALL-CONTRIBUTORS-BADGE:END --> 
 
-Async (tokio) SSH2 client and server rimplementation.
+Async (tokio) SSH2 client and server implementation.
 
 This is a fork of [Thrussh](//nest.pijul.com/pijul/thrussh) by Pierre-Étienne Meunier which adds:
 
-* More safety guarantees
-* New ciphers:
-  * aes256-gcm@openssh.com
-  * aes256-ctr
-  * aes192-ctr
-  * aes128-ctr
-* New key exchanges:
-  * diffie-hellman-group1-sha1
-  * diffie-hellman-group14-sha1
-  * diffie-hellman-group14-sha256
+> :sparkles: = added in this fork
+
+* More safety guarantees :sparkles:
+* `forward-tcpip` (remote port forwarding) :sparkles:
+* Ciphers:
+  * `chacha20-poly1305@openssh.com`
+  * `aes256-gcm@openssh.com` :sparkles:
+  * `aes256-ctr` :sparkles:
+  * `aes192-ctr` :sparkles:
+  * `aes128-ctr` :sparkles:
+* Key exchanges:
+  * `curve25519-sha256@libssh.org`
+  * `diffie-hellman-group1-sha1` :sparkles:
+  * `diffie-hellman-group14-sha1` :sparkles:
+  * `diffie-hellman-group14-sha256` :sparkles:
 * HMACs:
-  * hmac-sha1
-  * hmac-sha2-256
-  * hmac-sha2-512
-  * hmac-sha1-etm@openssh.com
-  * hmac-sha2-256-etm@openssh.com
-  * hmac-sha2-512-etm@openssh.com
-* Legacy `ssh-rsa` host keys support
-* Dependency updates
+  * `hmac-sha1` :sparkles:
+  * `hmac-sha2-256` :sparkles:
+  * `hmac-sha2-512` :sparkles:
+  * `hmac-sha1-etm@openssh.com` :sparkles:
+  * `hmac-sha2-256-etm@openssh.com` :sparkles:
+  * `hmac-sha2-512-etm@openssh.com` :sparkles:
+* Host keys:
+  * `ssh-ed25519`
+  * `rsa-sha2-256`
+  * `rsa-sha2-512`
+  * `ssh-rsa` :sparkles:
+* Dependency updates 
 
 ## Safety
 

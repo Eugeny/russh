@@ -184,6 +184,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
+name = "chacha20"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c7fc89c7c5b9e7a02dfe45cd2367bae382f9ed31c61ca8debe5f827c420a2f08"
+dependencies = [
+ "cfg-if",
+ "cipher 0.4.3",
+ "cpufeatures",
+]
+
+[[package]]
 name = "cipher"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -708,6 +719,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "openssl-src"
+version = "111.22.0+1.1.1q"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f31f0d509d1c1ae9cada2f9539ff8f37933831fd5098879e482aa687d659853"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "openssl-sys"
 version = "0.9.72"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -716,6 +736,7 @@ dependencies = [
  "autocfg",
  "cc",
  "libc",
+ "openssl-src",
  "pkg-config",
  "vcpkg",
 ]
@@ -769,6 +790,17 @@ name = "pkg-config"
 version = "0.3.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "58893f751c9b0412871a09abd62ecd2a00298c6c83befa223ef98c52aef40cbe"
+
+[[package]]
+name = "poly1305"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8159bd90725d2df49889a078b54f4f79e87f1f8a8444194cdca81d38f5393abf"
+dependencies = [
+ "cpufeatures",
+ "opaque-debug",
+ "universal-hash",
+]
 
 [[package]]
 name = "polyval"
@@ -936,13 +968,14 @@ dependencies = [
 
 [[package]]
 name = "russh"
-version = "0.34.0-beta.7"
+version = "0.34.0-beta.12"
 dependencies = [
  "aes",
  "aes-gcm",
  "anyhow",
  "bitflags",
  "byteorder",
+ "chacha20",
  "ctr",
  "digest 0.10.3",
  "env_logger 0.7.1",
@@ -955,6 +988,7 @@ dependencies = [
  "num-bigint",
  "once_cell",
  "openssl",
+ "poly1305",
  "rand 0.8.4",
  "russh-cryptovec",
  "russh-keys",
@@ -988,7 +1022,7 @@ dependencies = [
 
 [[package]]
 name = "russh-keys"
-version = "0.22.0-beta.4"
+version = "0.22.0-beta.5"
 dependencies = [
  "aes",
  "bcrypt-pbkdf",

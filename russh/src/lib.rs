@@ -287,6 +287,7 @@ extern crate thiserror;
 
 use std::fmt::{Display, Formatter};
 
+use parsing::ChannelOpenConfirmation;
 pub use russh_cryptovec::CryptoVec;
 
 mod auth;
@@ -321,6 +322,8 @@ macro_rules! push_packet {
     }};
 }
 
+mod channels;
+pub use channels::{Channel, ChannelMsg};
 mod parsing;
 mod session;
 
@@ -641,7 +644,7 @@ impl Display for ChannelId {
 
 /// The parameters of a channel.
 #[derive(Debug)]
-pub(crate) struct Channel {
+pub(crate) struct ChannelParams {
     recipient_channel: u32,
     sender_channel: ChannelId,
     recipient_window_size: u32,
@@ -654,110 +657,13 @@ pub(crate) struct Channel {
     pending_data: std::collections::VecDeque<(CryptoVec, Option<u32>, usize)>,
 }
 
-#[derive(Debug)]
-pub enum ChannelMsg {
-    /// Contains data sent by the other side. This is the most common message
-    /// type, and is the one returned when expecting data during
-    /// [`Channel::wait`][client::Channel::wait] operations. The maximum amount
-    /// of data allowed is determined by the maximum packet size for the
-    /// channel, and the current window size, whichever is smaller. The
-    /// window size is decremented by the amount of data sent. Both parties
-    /// MAY ignore all extra data sent after the allowed window is empty.
-    Data {
-        data: CryptoVec,
-    },
-    /// Some channels can transfer several types of data. An example of this is
-    /// `stderr` data from interactive sessions. Such data can be passed with
-    /// [`ChannelMsg::ExtendedData`] messages, where a separate integer
-    /// specifies the type of data (The `ext` field). The available types and
-    /// their interpretation depend on the type of channel.
-    ///
-    /// Data sent with these messages consumes the same window as ordinary
-    /// data.
-    ///
-    /// Currently, only the following type is defined by the IETF.
-    /// ```text
-    ///             Symbolic name                  data_type_code
-    ///             -------------                  --------------
-    ///           SSH_EXTENDED_DATA_STDERR               1
-    /// ```
-    /// Extended Channel Data Transfer `ext` (known as 'data_type_code' in [RFC
-    /// 4254](https://www.rfc-editor.org/rfc/rfc4254))  values MUST be assigned sequentially. The IANA will not
-    /// assign Extended Channel Data Transfer 'data_type_code' values in the
-    /// range of 0xFE000000 to 0xFFFFFFFF. Extended Channel Data Transfer
-    /// `ext` values in that range are left for private use.
-    ExtendedData {
-        data: CryptoVec,
-        ext: u32,
-    },
-    /// When a party will no longer send more data to a channel, it should
-    /// send [`ChannelMsg::Eof`].
-    ///
-    /// No explicit response is sent to this message. However, the
-    /// application may send EOF to whatever is at the other end of the
-    /// channel. Note that the channel remains open after this message, and
-    /// more data may still be sent in the other direction. This message
-    /// does not consume window space and can be sent even if no window space
-    /// is available.
-    Eof,
-    /// When either party wishes to terminate the channel, it sends
-    /// [`ChannelMsg::Close`]. Upon receiving this message, a party MUST
-    /// send back a [`ChannelMsg::Close`] unless it has already sent this
-    /// message for the channel. Generally when using this library, this should
-    /// only be implemented for servers, as the [`client::Handler`] handles
-    /// close messages internally. The channel is considered closed for a
-    /// party when it has both sent and received [`ChannelMsg::Close`], and
-    /// the party may then reuse the channel number. A party may send
-    /// [`ChannelMsg::Close`] without having sent or received
-    /// [`ChannelMsg::Eof`].
-    Close,
-    /// On many systems, it is possible to determine if a pseudo-terminal is
-    /// using control-S/control-Q flow control. When flow control is
-    /// allowed, it is often desirable to do the flow control at the client
-    /// end to speed up responses to user requests. This is facilitated by
-    /// the following notification. Initially, the server is responsible for
-    /// flow control. (Here, again, client means the side originating the
-    /// session, and server means the other side.)
-    ///
-    /// The message below is used by the server to inform the client when it
-    /// can or cannot perform flow control (control-S/control-Q processing).
-    /// If `client_can_do` is true, the client is allowed to do flow control
-    /// using control-S and control-Q. The client may ignore this message.
-    XonXoff {
-        client_can_do: bool,
-    },
-    /// When the command running at the other end terminates, the following
-    /// message can be sent to return the exit status of the command.
-    /// Returning the status is RECOMMENDED. No acknowledgement is sent for
-    /// this message. The channel needs to be closed with
-    /// [`ChannelMsg::Close`] after this message.
-    ///
-    /// The client may choose to ignore these messages.
-    ExitStatus {
-        exit_status: u32,
-    },
-    /// The remote command may also terminate violently due to a signal.
-    /// Such a condition can be indicated by the following message.  A zero
-    /// [`ChannelMsg::ExitSignal`] usually means that the command terminated
-    /// successfully.
-    ExitSignal {
-        signal_name: Sig,
-        core_dumped: bool,
-        error_message: String,
-        lang_tag: String,
-    },
-    /// The window size specifies how many bytes the other party can send
-    /// before it must wait for the window to be adjusted.  Both parties use
-    /// the following message to adjust the window.
-    ///
-    /// After receiving this message, the recipient may send the given number
-    /// of bytes more than it was previously allowed to send; the window size
-    /// is incremented. The window MUST NOT be increased above
-    /// 2^32 - 1 bytes (hence the [u32][std::u32] type).
-    WindowAdjusted {
-        new_size: u32,
-    },
-    Success,
+impl ChannelParams {
+    pub fn confirm(&mut self, c: &ChannelOpenConfirmation) {
+        self.recipient_channel = c.sender_channel; // "sender" is the sender of the confirmation
+        self.recipient_window_size = c.initial_window_size;
+        self.recipient_maximum_packet_size = c.maximum_packet_size;
+        self.confirmed = true;
+    }
 }
 
 #[cfg(test)]
@@ -849,12 +755,12 @@ mod test_compress {
         fn finished(self, s: Session) -> Self::FutureUnit {
             futures::future::ready(Ok((self, s)))
         }
-        fn channel_open_session(self, channel: ChannelId, session: Session) -> Self::FutureUnit {
+        fn channel_open_session(self, channel: ChannelId, session: Session) -> Self::FutureBool {
             {
                 let mut clients = self.clients.lock().unwrap();
                 clients.insert((self.id, channel), session.handle());
             }
-            self.finished(session)
+            self.finished_bool(true, session)
         }
         fn auth_publickey(self, _: &str, _: &russh_keys::key::PublicKey) -> Self::FutureAuth {
             debug!("auth_publickey");
@@ -886,6 +792,143 @@ mod test_compress {
         ) -> Self::FutureBool {
             // println!("check_server_key: {:?}", server_public_key);
             self.finished_bool(true)
+        }
+    }
+}
+
+#[cfg(test)]
+mod test_server_channels {
+    use std::sync::Arc;
+
+    use super::server::{Auth, Server as _, Session};
+    use super::*;
+
+    #[tokio::test]
+    async fn test_server_channels() {
+        let _ = env_logger::try_init();
+
+        let client_key = russh_keys::key::KeyPair::generate_ed25519().unwrap();
+        let mut config = server::Config::default();
+        config.connection_timeout = None;
+        config.auth_rejection_time = std::time::Duration::from_secs(3);
+        config
+            .keys
+            .push(russh_keys::key::KeyPair::generate_ed25519().unwrap());
+        let config = Arc::new(config);
+        let mut sh = Server {};
+        let socket = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = socket.local_addr().unwrap();
+
+        let join = tokio::spawn(async move {
+            let (socket, _) = socket.accept().await.unwrap();
+            let mut server = sh.new_client(socket.peer_addr().ok());
+            let auth_waiter = server.get_auth_waiter();
+            let session = server::run_stream(config, socket, server).await.unwrap();
+
+            auth_waiter.await.unwrap();
+
+            let mut ch = session.handle().channel_open_session().await.unwrap();
+            ch.data(&b"hello world!"[..]).await.unwrap();
+
+            let msg = ch.wait().await.unwrap();
+            if let ChannelMsg::Data { data } = msg {
+                assert_eq!(data.as_ref(), &b"hey there!"[..]);
+            } else {
+                panic!("Unexpected message {:?}", msg);
+            }
+        });
+
+        let config = Arc::new(client::Config::default());
+        let mut session = client::connect(config, addr, Client {}).await.unwrap();
+        let authenticated = session
+            .authenticate_publickey(std::env::var("USER").unwrap(), Arc::new(client_key))
+            .await
+            .unwrap();
+
+        assert!(authenticated);
+
+        join.await.unwrap();
+
+        drop(session);
+    }
+
+    #[derive(Clone)]
+    struct Server {}
+
+    impl server::Server for Server {
+        type Handler = ServerHandle;
+        fn new_client(&mut self, _: Option<std::net::SocketAddr>) -> ServerHandle {
+            ServerHandle { did_auth: None }
+        }
+    }
+
+    struct ServerHandle {
+        did_auth: Option<tokio::sync::oneshot::Sender<()>>,
+    }
+
+    impl ServerHandle {
+        fn get_auth_waiter(&mut self) -> tokio::sync::oneshot::Receiver<()> {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            self.did_auth = Some(tx);
+            rx
+        }
+    }
+
+    impl server::Handler for ServerHandle {
+        type Error = super::Error;
+        type FutureAuth = futures::future::Ready<Result<(Self, server::Auth), Self::Error>>;
+        type FutureUnit = futures::future::Ready<Result<(Self, Session), Self::Error>>;
+        type FutureBool = futures::future::Ready<Result<(Self, Session, bool), Self::Error>>;
+
+        fn finished_auth(self, auth: Auth) -> Self::FutureAuth {
+            futures::future::ready(Ok((self, auth)))
+        }
+        fn finished_bool(self, b: bool, s: Session) -> Self::FutureBool {
+            futures::future::ready(Ok((self, s, b)))
+        }
+        fn finished(self, s: Session) -> Self::FutureUnit {
+            futures::future::ready(Ok((self, s)))
+        }
+        fn auth_publickey(self, _: &str, _: &russh_keys::key::PublicKey) -> Self::FutureAuth {
+            self.finished_auth(server::Auth::Accept)
+        }
+        fn auth_succeeded(mut self, session: Session) -> Self::FutureUnit {
+            if let Some(a) = self.did_auth.take() {
+                a.send(()).unwrap();
+            }
+            self.finished(session)
+        }
+    }
+
+    struct Client {}
+
+    impl client::Handler for Client {
+        type Error = super::Error;
+        type FutureUnit = futures::future::Ready<Result<(Self, client::Session), Self::Error>>;
+        type FutureBool = futures::future::Ready<Result<(Self, bool), Self::Error>>;
+
+        fn finished_bool(self, b: bool) -> Self::FutureBool {
+            futures::future::ready(Ok((self, b)))
+        }
+        fn finished(self, session: client::Session) -> Self::FutureUnit {
+            futures::future::ready(Ok((self, session)))
+        }
+        fn check_server_key(
+            self,
+            _server_public_key: &russh_keys::key::PublicKey,
+        ) -> Self::FutureBool {
+            self.finished_bool(true)
+        }
+
+        fn data(
+            self,
+            channel: ChannelId,
+            data: &[u8],
+            mut session: client::Session,
+        ) -> Self::FutureUnit {
+            assert_eq!(data, &b"hello world!"[..]);
+            session.data(channel, CryptoVec::from_slice(&b"hey there!"[..]));
+            self.finished(session)
         }
     }
 }

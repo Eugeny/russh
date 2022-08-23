@@ -23,10 +23,10 @@ use russh_keys::key::Verify;
 use tokio::time::Instant;
 use {msg, negotiation};
 
-use crate::parsing::{ChannelType, OpenChannelMessage};
-
 use super::super::*;
 use super::*;
+use crate::msg::SSH_OPEN_ADMINISTRATIVELY_PROHIBITED;
+use crate::parsing::{ChannelOpenConfirmation, ChannelType, OpenChannelMessage};
 
 impl Session {
     /// Returns false iff a request was rejected.
@@ -150,13 +150,15 @@ impl Session {
                 Ok((handler, self))
             }
             EncryptedState::WaitingAuthRequest(_) if buf.get(0) == Some(&msg::USERAUTH_REQUEST) => {
-                let h = enc
+                handler = enc
                     .server_read_auth_request(instant, handler, buf, &mut self.common.auth_user)
                     .await?;
                 if let EncryptedState::InitCompression = enc.state {
                     enc.client_compression.init_decompress(&mut enc.decompress);
+                    handler.auth_succeeded(self).await
+                } else {
+                    Ok((handler, self))
                 }
-                Ok((h, self))
             }
             EncryptedState::WaitingAuthRequest(ref mut auth)
                 if buf.get(0) == Some(&msg::USERAUTH_INFO_RESPONSE) =>
@@ -561,7 +563,10 @@ impl Session {
             );
         }
         match buf.get(0) {
-            Some(&msg::CHANNEL_OPEN) => self.server_handle_channel_open(handler, buf).await,
+            Some(&msg::CHANNEL_OPEN) => self
+                .server_handle_channel_open(handler, buf)
+                .await
+                .map(|(h, s, _)| (h, s)),
             Some(&msg::CHANNEL_CLOSE) => {
                 let mut r = buf.reader(1);
                 let channel_num = ChannelId(r.read_u32().map_err(crate::Error::from)?);
@@ -622,6 +627,33 @@ impl Session {
                 debug!("handler.window_adjusted {:?}", channel_num);
                 handler
                     .window_adjusted(channel_num, new_value as usize, self)
+                    .await
+            }
+
+            Some(&msg::CHANNEL_OPEN_CONFIRMATION) => {
+                debug!("channel_open_confirmation");
+                let mut reader = buf.reader(1);
+                let msg = ChannelOpenConfirmation::parse(&mut reader)?;
+                let local_id = ChannelId(msg.recipient_channel);
+
+                if let Some(ref mut enc) = self.common.encrypted {
+                    if let Some(parameters) = enc.channels.get_mut(&local_id) {
+                        parameters.confirm(&msg);
+                    } else {
+                        // We've not requested this channel, close connection.
+                        return Err(Error::Inconsistent.into());
+                    }
+                } else {
+                    return Err(Error::Inconsistent.into());
+                };
+
+                handler
+                    .channel_open_confirmation(
+                        local_id,
+                        msg.maximum_packet_size,
+                        msg.initial_window_size,
+                        self,
+                    )
                     .await
             }
 
@@ -819,12 +851,11 @@ impl Session {
         }
     }
 
-
     async fn server_handle_channel_open<H: Handler>(
         mut self,
         handler: H,
         buf: &[u8],
-    ) -> Result<(H, Self), H::Error> {
+    ) -> Result<(H, Self, bool), H::Error> {
         let mut r = buf.reader(1);
         let msg = OpenChannelMessage::parse(&mut r)?;
 
@@ -833,7 +864,7 @@ impl Session {
         } else {
             unreachable!()
         };
-        let channel = Channel {
+        let channel = ChannelParams {
             recipient_channel: msg.recipient_channel,
 
             // "sender" is the local end, i.e. we're the sender, the remote is the recipient.
@@ -850,8 +881,11 @@ impl Session {
 
         match &msg.typ {
             ChannelType::Session => {
-                self.confirm_channel_open(&msg, channel);
-                handler.channel_open_session(sender_channel, self).await
+                let mut result = handler.channel_open_session(sender_channel, self).await;
+                if let Ok((_, s, allowed)) = &mut result {
+                    s.finalize_channel_open(&msg, channel, *allowed);
+                }
+                result
             }
             ChannelType::X11 {
                 originator_address,
@@ -860,8 +894,8 @@ impl Session {
                 let mut result = handler
                     .channel_open_x11(sender_channel, originator_address, *originator_port, self)
                     .await;
-                if let Ok((_, s)) = &mut result {
-                    s.confirm_channel_open(&msg, channel);
+                if let Ok((_, s, allowed)) = &mut result {
+                    s.finalize_channel_open(&msg, channel, *allowed);
                 }
                 result
             }
@@ -876,8 +910,8 @@ impl Session {
                         self,
                     )
                     .await;
-                if let Ok((_, s)) = &mut result {
-                    s.confirm_channel_open(&msg, channel);
+                if let Ok((_, s, allowed)) = &mut result {
+                    s.finalize_channel_open(&msg, channel, *allowed);
                 }
                 result
             }
@@ -892,8 +926,8 @@ impl Session {
                         self,
                     )
                     .await;
-                if let Ok((_, s)) = &mut result {
-                    s.confirm_channel_open(&msg, channel);
+                if let Ok((_, s, allowed)) = &mut result {
+                    s.finalize_channel_open(&msg, channel, *allowed);
                 }
                 result
             }
@@ -902,21 +936,33 @@ impl Session {
                 if let Some(ref mut enc) = self.common.encrypted {
                     msg.unknown_type(&mut enc.write);
                 }
-
-                Ok((handler, self))
+                Ok((handler, self, false))
             }
         }
     }
 
-    fn confirm_channel_open(&mut self, open: &OpenChannelMessage, channel: Channel) {
+    fn finalize_channel_open(
+        &mut self,
+        open: &OpenChannelMessage,
+        channel: ChannelParams,
+        allowed: bool,
+    ) {
         if let Some(ref mut enc) = self.common.encrypted {
-            open.confirm(
-                &mut enc.write,
-                channel.sender_channel.0,
-                channel.sender_window_size,
-                channel.sender_maximum_packet_size,
-            );
-            enc.channels.insert(channel.sender_channel, channel);
+            if allowed {
+                open.confirm(
+                    &mut enc.write,
+                    channel.sender_channel.0,
+                    channel.sender_window_size,
+                    channel.sender_maximum_packet_size,
+                );
+                enc.channels.insert(channel.sender_channel, channel);
+            } else {
+                open.fail(
+                    &mut enc.write,
+                    SSH_OPEN_ADMINISTRATIVELY_PROHIBITED,
+                    b"Rejected",
+                );
+            }
         }
     }
 }
