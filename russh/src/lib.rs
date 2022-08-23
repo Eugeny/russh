@@ -101,12 +101,12 @@
 //!     fn finished(self, s: Session) -> Self::FutureUnit {
 //!         futures::future::ready(Ok((self, s)))
 //!     }
-//!     fn channel_open_session(self, channel: ChannelId, session: Session) -> Self::FutureUnit {
+//!     fn channel_open_session(self, channel: ChannelId, session: Session) -> Self::FutureBool {
 //!         {
 //!             let mut clients = self.clients.lock().unwrap();
 //!             clients.insert((self.id, channel), session.handle());
 //!         }
-//!         self.finished(session)
+//!         self.finished_bool(true, session)
 //!     }
 //!     fn auth_publickey(self, _: &str, _: &key::PublicKey) -> Self::FutureAuth {
 //!         self.finished_auth(server::Auth::Accept)
