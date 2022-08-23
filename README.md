@@ -32,7 +32,8 @@ This is a fork of [Thrussh](//nest.pijul.com/pijul/thrussh) by Pierre-Étienne M
   * `rsa-sha2-256`
   * `rsa-sha2-512`
   * `ssh-rsa` :sparkles:
-* Dependency updates 
+* Dependency updates
+* Handle openssh sshd keepalive channel requests :sparkles:
 
 ## Safety
 
