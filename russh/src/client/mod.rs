@@ -515,6 +515,7 @@ impl Session {
                     if buffer.buffer.len() < 5 {
                         break
                     }
+
                     let buf = if let Some(ref mut enc) = self.common.encrypted {
                         #[allow(clippy::indexing_slicing)] // length checked
                         if let Ok(buf) = enc.decompress.decompress(

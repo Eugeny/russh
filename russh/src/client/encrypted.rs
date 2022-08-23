@@ -17,7 +17,7 @@ use std::cell::RefCell;
 use russh_cryptovec::CryptoVec;
 use russh_keys::encoding::{Encoding, Reader};
 
-use crate::client::{Msg, Reply};
+use crate::client::{Handler, Msg, Reply, Session};
 use crate::key::PubKey;
 use crate::negotiation::{Named, Select};
 use crate::parsing::{ChannelOpenConfirmation, ChannelType, OpenChannelMessage};
@@ -28,12 +28,12 @@ thread_local! {
     static SIGNATURE_BUFFER: RefCell<CryptoVec> = RefCell::new(CryptoVec::new());
 }
 
-impl super::Session {
-    pub(crate) async fn client_read_encrypted<C: super::Handler>(
+impl Session {
+    pub(crate) async fn client_read_encrypted<H: Handler>(
         mut self,
-        mut client: C,
+        mut client: H,
         buf: &[u8],
-    ) -> Result<(C, Self), C::Error> {
+    ) -> Result<(H, Self), H::Error> {
         #[allow(clippy::indexing_slicing)] // length checked
         {
             debug!(
@@ -43,9 +43,10 @@ impl super::Session {
         }
         // Either this packet is a KEXINIT, in which case we start a key re-exchange.
         if buf.get(0) == Some(&msg::KEXINIT) {
+            debug!("Received KEXINIT");
             // Now, if we're encrypted:
             if let Some(ref mut enc) = self.common.encrypted {
-                // If we're not currently rekeying, but buf is a rekey request
+                // If we're not currently re-keying, but buf is a rekey request
                 if let Some(Kex::Init(kexinit)) = enc.rekey.take() {
                     enc.rekey = Some(Kex::DhDone(kexinit.client_parse(
                         self.common.config.as_ref(),
@@ -132,13 +133,13 @@ impl super::Session {
         self.process_packet(client, buf).await
     }
 
-    async fn process_packet<H: super::Handler>(
+    async fn process_packet<H: Handler>(
         mut self,
         client: H,
         buf: &[u8],
     ) -> Result<(H, Self), H::Error> {
         // If we've successfully read a packet.
-        debug!("buf = {:?} bytes", buf.len());
+        debug!("process_packet buf = {:?} bytes", buf.len());
         trace!("buf = {:?}", buf);
         let mut is_authenticated = false;
         if let Some(ref mut enc) = self.common.encrypted {
@@ -285,11 +286,11 @@ impl super::Session {
         }
     }
 
-    async fn client_read_authenticated<C: super::Handler>(
+    async fn client_read_authenticated<H: Handler>(
         mut self,
-        mut client: C,
+        mut client: H,
         buf: &[u8],
-    ) -> Result<(C, Self), C::Error> {
+    ) -> Result<(H, Self), H::Error> {
         match buf.get(0) {
             Some(&msg::CHANNEL_OPEN_CONFIRMATION) => {
                 debug!("channel_open_confirmation");

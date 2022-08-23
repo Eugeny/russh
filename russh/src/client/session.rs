@@ -248,7 +248,6 @@ impl Session {
             if let Some(channel) = enc.channels.get(&channel) {
                 push_packet!(enc.write, {
                     enc.write.push(msg::CHANNEL_REQUEST);
-
                     enc.write.push_u32_be(channel.recipient_channel);
                     enc.write.extend_ssh_string(b"signal");
                     enc.write.push(0);
