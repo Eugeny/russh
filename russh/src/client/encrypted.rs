@@ -441,21 +441,6 @@ impl Session {
                             )
                             .await
                     }
-                    b"keepalive@openssh.com" => {
-                        let wants_reply = r.read_byte().map_err(crate::Error::from)?; // should be 1
-                        if wants_reply == 1 {
-                            if let Some(ref mut enc) = self.common.encrypted {
-                                self.common.wants_reply = false;
-                                push_packet!(enc.write, {
-                                    enc.write.push(msg::CHANNEL_SUCCESS);
-                                    enc.write.push_u32_be(channel_num.0)
-                                })
-                            }
-                        } else {
-                            warn!("Received keepalive@openssh.com without reply request!");
-                        }
-                        Ok((client, self))
-                    }
                     _ => {
                         let wants_reply = r.read_byte().map_err(crate::Error::from)?;
                         if wants_reply == 1 {
@@ -499,14 +484,18 @@ impl Session {
                 let wants_reply = r.read_byte().map_err(crate::Error::from)?;
                 if let Some(ref mut enc) = self.common.encrypted {
                     if req.starts_with(b"keepalive") {
-                        info!(
-                            "Received keep alive message: {:?}",
-                            std::str::from_utf8(req),
-                        );
-                        self.common.wants_reply = false;
-                        push_packet!(enc.write, enc.write.push(msg::REQUEST_SUCCESS))
+                        if wants_reply == 1 {
+                            info!(
+                                "Received keep alive message: {:?}",
+                                std::str::from_utf8(req),
+                            );
+                            self.common.wants_reply = false;
+                            push_packet!(enc.write, enc.write.push(msg::REQUEST_SUCCESS));
+                        } else {
+                            warn!("Received keepalive@openssh.com without reply request!");
+                        }
                     } else {
-                        info!(
+                        warn!(
                             "Unhandled global request: {:?} {:?}",
                             std::str::from_utf8(req),
                             wants_reply
