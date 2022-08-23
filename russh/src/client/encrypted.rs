@@ -22,7 +22,7 @@ use crate::key::PubKey;
 use crate::negotiation::{Named, Select};
 use crate::parsing::{ChannelOpenConfirmation, ChannelType, OpenChannelMessage};
 use crate::session::{Encrypted, EncryptedState, Kex, KexInit};
-use crate::{auth, msg, negotiation, ChannelId, ChannelOpenFailure, ChannelParams, Error, Sig};
+use crate::{auth, msg, negotiation, ChannelId, ChannelOpenFailure, ChannelParams, Sig};
 
 thread_local! {
     static SIGNATURE_BUFFER: RefCell<CryptoVec> = RefCell::new(CryptoVec::new());
@@ -482,14 +482,23 @@ impl super::Session {
                 let req = r.read_string().map_err(crate::Error::from)?;
                 let wants_reply = r.read_byte().map_err(crate::Error::from)?;
                 if let Some(ref mut enc) = self.common.encrypted {
-                    self.common.wants_reply = false;
-                    push_packet!(enc.write, enc.write.push(msg::REQUEST_FAILURE))
+                    if req.starts_with(b"keepalive") {
+                        info!(
+                            "Received keep alive message: {:?}",
+                            std::str::from_utf8(req),
+                        );
+                        self.common.wants_reply = false;
+                        push_packet!(enc.write, enc.write.push(msg::REQUEST_SUCCESS))
+                    } else {
+                        info!(
+                            "Unhandled global request: {:?} {:?}",
+                            std::str::from_utf8(req),
+                            wants_reply
+                        );
+                        self.common.wants_reply = false;
+                        push_packet!(enc.write, enc.write.push(msg::REQUEST_FAILURE))
+                    }
                 }
-                info!(
-                    "Unhandled global request: {:?} {:?}",
-                    std::str::from_utf8(req),
-                    wants_reply
-                );
                 Ok((client, self))
             }
             Some(&msg::CHANNEL_SUCCESS) => {
@@ -587,7 +596,7 @@ impl super::Session {
                         }
                     })
                 } else {
-                    Err(Error::Inconsistent.into())
+                    Err(crate::Error::Inconsistent.into())
                 }
             }
             _ => {

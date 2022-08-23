@@ -23,7 +23,9 @@ use futures::task::{Context, Poll};
 use futures::Future;
 use russh_cryptovec::CryptoVec;
 use russh_keys::encoding::Reader;
-use russh_keys::key::{self, parse_public_key, SignatureHash};
+#[cfg(feature = "openssl")]
+use russh_keys::key::SignatureHash;
+use russh_keys::key::{self, parse_public_key};
 use tokio;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -32,18 +34,13 @@ use tokio::sync::mpsc::{
     channel, unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender,
 };
 
-use crate::cipher::{self, clear, CipherPair, OpeningKey};
 use crate::channels::{Channel, ChannelMsg};
+use crate::cipher::{self, clear, CipherPair, OpeningKey};
 use crate::key::PubKey;
-use crate::pty::Pty;
 use crate::session::{CommonSession, EncryptedState, Exchange, Kex, KexDhDone, KexInit, NewKeys};
 use crate::ssh_read::SshRead;
 use crate::sshbuffer::SSHBuffer;
-use crate::{
-    auth, msg, negotiation, ChannelId, ChannelMsg, ChannelOpenFailure, Disconnect, Limits, Sig,
-};
-use crate::sshbuffer::*;
-use crate::{auth, negotiation, ChannelId, ChannelOpenFailure, Disconnect, Limits, Sig};
+use crate::{auth, msg, negotiation, ChannelId, ChannelOpenFailure, Disconnect, Limits, Sig};
 
 mod encrypted;
 mod kex;
@@ -418,8 +415,8 @@ where
     // Reading SSH id and allocating a session if correct.
     let mut stream = SshRead::new(stream);
     let sshid = stream.read_ssh_id().await?;
-    let (sender, receiver) = channel(10);
-    let (sender2, receiver2) = unbounded_channel();
+    let (handle_sender, session_receiver) = channel(10);
+    let (session_sender, handle_receiver) = unbounded_channel();
     if config.maximum_packet_size > 65535 {
         error!(
             "Maximum packet size ({:?}) should not larger than a TCP packet (65535)",
@@ -443,8 +440,8 @@ where
             disconnected: false,
             buffer: CryptoVec::new(),
         },
-        receiver,
-        sender: sender2,
+        receiver: session_receiver,
+        sender: session_sender,
         channels: HashMap::new(),
         pending_reads: Vec::new(),
         pending_len: 0,
@@ -459,8 +456,8 @@ where
     }
 
     Ok(Handle {
-        sender,
-        receiver: receiver2,
+        sender: handle_sender,
+        receiver: handle_receiver,
         join,
     })
 }
@@ -722,6 +719,7 @@ impl KexDhDone {
         let pubkey = reader.read_string().map_err(crate::Error::from)?; // server public key.
         let pubkey = parse_public_key(
             pubkey,
+            #[cfg(feature = "openssl")]
             SignatureHash::from_rsa_hostkey_algo(self.names.key.0.as_bytes()),
         )
         .map_err(crate::Error::from)?;
