@@ -72,7 +72,7 @@ impl Session {
         while let Some(msg) = channel.wait().await {
             match msg {
                 russh::ChannelMsg::Data { ref data } => {
-                    output.write_all(&data).unwrap();
+                    output.write_all(data).unwrap();
                 }
                 russh::ChannelMsg::ExitStatus { exit_status } => {
                     code = Some(exit_status);

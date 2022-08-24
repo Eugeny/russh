@@ -30,7 +30,7 @@ use crate::parsing::{ChannelOpenConfirmation, ChannelType, OpenChannelMessage};
 
 impl Session {
     /// Returns false iff a request was rejected.
-    pub(in crate) async fn server_read_encrypted<H: Handler>(
+    pub(crate) async fn server_read_encrypted<H: Handler>(
         mut self,
         mut handler: H,
         buf: &[u8],

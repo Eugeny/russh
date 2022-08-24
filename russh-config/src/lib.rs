@@ -62,7 +62,7 @@ impl Config {
         self.update_proxy_command();
         if let Some(ref proxy_command) = self.proxy_command {
             let cmd: Vec<&str> = proxy_command.split(' ').collect();
-            Stream::proxy_command(cmd.get(0).unwrap_or(&""), cmd.get(1..).unwrap_or(&[]))
+            Stream::proxy_command(cmd.first().unwrap_or(&""), cmd.get(1..).unwrap_or(&[]))
                 .await
                 .map_err(Into::into)
         } else {
