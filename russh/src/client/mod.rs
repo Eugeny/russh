@@ -344,7 +344,7 @@ impl<H: Handler> Handle<H> {
 
     /// Sends a disconnect message.
     pub async fn disconnect(
-        &mut self,
+        &self,
         reason: Disconnect,
         description: &str,
         language_tag: &str,
@@ -358,6 +358,20 @@ impl<H: Handler> Handle<H> {
             .await
             .map_err(|_| crate::Error::SendError)?;
         Ok(())
+    }
+
+    /// Send data to the session referenced by this handler.
+    ///
+    /// This is useful for server-initiated channels; for channels created by
+    /// the client, prefer to use the Channel returned from the `open_*` methods.
+    pub async fn data(&self, id: ChannelId, data: CryptoVec) -> Result<(), CryptoVec> {
+        self.sender
+            .send(Msg::Channel(id, ChannelMsg::Data { data }))
+            .await
+            .map_err(|e| match e.0 {
+                Msg::Channel(_, ChannelMsg::Data { data, .. }) => data,
+                _ => unreachable!(),
+            })
     }
 }
 

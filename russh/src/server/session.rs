@@ -46,6 +46,14 @@ pub enum Msg {
         originator_port: u32,
         sender: UnboundedSender<ChannelMsg>,
     },
+    TcpIpForward {
+        address: String,
+        port: u32,
+    },
+    CancelTcpIpForward {
+        address: String,
+        port: u32,
+    },
     Channel(ChannelId, ChannelMsg),
 }
 
@@ -136,6 +144,22 @@ impl Handle {
     pub async fn exit_status_request(&mut self, id: ChannelId, exit_status: u32) -> Result<(), ()> {
         self.sender
             .send(Msg::Channel(id, ChannelMsg::ExitStatus { exit_status }))
+            .await
+            .map_err(|_| ())
+    }
+
+    /// Notifies the client that it can open TCP/IP forwarding channels for a port.
+    pub async fn forward_tcpip(&self, address: String, port: u32) -> Result<(), ()> {
+        self.sender
+            .send(Msg::TcpIpForward { address, port })
+            .await
+            .map_err(|_| ())
+    }
+
+    /// Notifies the client that it can no longer open TCP/IP forwarding channel for a port.
+    pub async fn cancel_forward_tcpip(&self, address: String, port: u32) -> Result<(), ()> {
+        self.sender
+            .send(Msg::CancelTcpIpForward { address, port })
             .await
             .map_err(|_| ())
     }
@@ -387,6 +411,12 @@ impl Session {
                         Some(Msg::ChannelOpenForwardedTcpIp { connected_address, connected_port, originator_address, originator_port, sender }) => {
                             let id = self.channel_open_forwarded_tcpip(&connected_address, connected_port, &originator_address, originator_port)?;
                             self.channels.insert(id, sender);
+                        }
+                        Some(Msg::TcpIpForward { address, port }) => {
+                            self.tcpip_forward(&address, port);
+                        }
+                        Some(Msg::CancelTcpIpForward { address, port }) => {
+                            self.cancel_tcpip_forward(&address, port);
                         }
                         Some(_) => {
                             // should be unreachable, since the receiver only gets
