@@ -42,7 +42,7 @@ impl Session {
             );
         }
         // Either this packet is a KEXINIT, in which case we start a key re-exchange.
-        if buf.get(0) == Some(&msg::KEXINIT) {
+        if buf.first() == Some(&msg::KEXINIT) {
             debug!("Received KEXINIT");
             // Now, if we're encrypted:
             if let Some(ref mut enc) = self.common.encrypted {
@@ -81,7 +81,7 @@ impl Session {
                         kexdhdone.names.ignore_guessed = false;
                         enc.rekey = Some(Kex::DhDone(kexdhdone));
                         Ok((client, self))
-                    } else if buf.get(0) == Some(&msg::KEX_ECDH_REPLY) {
+                    } else if buf.first() == Some(&msg::KEX_ECDH_REPLY) {
                         // We've sent ECDH_INIT, waiting for ECDH_REPLY
                         let (kex, h) = kexdhdone.server_key_check(true, client, buf).await?;
                         client = h;
@@ -98,7 +98,7 @@ impl Session {
                     };
                 }
                 Some(Kex::Keys(newkeys)) => {
-                    if buf.get(0) != Some(&msg::NEWKEYS) {
+                    if buf.first() != Some(&msg::NEWKEYS) {
                         return Err(crate::Error::Kex.into());
                     }
                     self.common.write_buffer.bytes = 0;
@@ -149,10 +149,10 @@ impl Session {
                 } => {
                     debug!(
                         "waiting service request, {:?} {:?}",
-                        buf.get(0),
+                        buf.first(),
                         msg::SERVICE_ACCEPT
                     );
-                    if buf.get(0) == Some(&msg::SERVICE_ACCEPT) {
+                    if buf.first() == Some(&msg::SERVICE_ACCEPT) {
                         let mut r = buf.reader(1);
                         if r.read_string().map_err(crate::Error::from)? == b"ssh-userauth" {
                             *accepted = true;
@@ -179,7 +179,7 @@ impl Session {
                     }
                 }
                 EncryptedState::WaitingAuthRequest(ref mut auth_request) => {
-                    if buf.get(0) == Some(&msg::USERAUTH_SUCCESS) {
+                    if buf.first() == Some(&msg::USERAUTH_SUCCESS) {
                         debug!("userauth_success");
                         self.sender
                             .send(Reply::AuthSuccess)
@@ -187,7 +187,7 @@ impl Session {
                         enc.state = EncryptedState::InitCompression;
                         enc.server_compression.init_decompress(&mut enc.decompress);
                         return Ok((client, self));
-                    } else if buf.get(0) == Some(&msg::USERAUTH_BANNER) {
+                    } else if buf.first() == Some(&msg::USERAUTH_BANNER) {
                         let mut r = buf.reader(1);
                         let banner = r.read_string().map_err(crate::Error::from)?;
                         return if let Ok(banner) = std::str::from_utf8(banner) {
@@ -196,7 +196,7 @@ impl Session {
                         } else {
                             Ok((client, self))
                         };
-                    } else if buf.get(0) == Some(&msg::USERAUTH_FAILURE) {
+                    } else if buf.first() == Some(&msg::USERAUTH_FAILURE) {
                         debug!("userauth_failure");
 
                         let mut r = buf.reader(1);
@@ -221,7 +221,7 @@ impl Session {
                         if no_more_methods {
                             return Err(crate::Error::NoAuthMethod.into());
                         }
-                    } else if buf.get(0) == Some(&msg::USERAUTH_PK_OK) {
+                    } else if buf.first() == Some(&msg::USERAUTH_PK_OK) {
                         debug!("userauth_pk_ok");
                         if let Some(auth::CurrentRequest::PublicKey {
                             ref mut sent_pk_ok, ..
@@ -280,7 +280,7 @@ impl Session {
             }
         }
         if is_authenticated {
-            return self.client_read_authenticated(client, buf).await;
+            self.client_read_authenticated(client, buf).await
         } else {
             Ok((client, self))
         }
@@ -291,7 +291,7 @@ impl Session {
         mut client: H,
         buf: &[u8],
     ) -> Result<(H, Self), H::Error> {
-        match buf.get(0) {
+        match buf.first() {
             Some(&msg::CHANNEL_OPEN_CONFIRMATION) => {
                 debug!("channel_open_confirmation");
                 let mut reader = buf.reader(1);

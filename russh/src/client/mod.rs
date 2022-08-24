@@ -797,7 +797,7 @@ async fn reply<H: Handler>(
     match session.common.kex.take() {
         Some(Kex::Init(kexinit)) => {
             if kexinit.algo.is_some()
-                || buf.get(0) == Some(&msg::KEXINIT)
+                || buf.first() == Some(&msg::KEXINIT)
                 || session.common.encrypted.is_none()
             {
                 let done = kexinit.client_parse(
@@ -828,7 +828,7 @@ async fn reply<H: Handler>(
                 kexdhdone.names.ignore_guessed = false;
                 session.common.kex = Some(Kex::DhDone(kexdhdone));
                 Ok((handler, session))
-            } else if buf.get(0) == Some(&msg::KEX_ECDH_REPLY) {
+            } else if buf.first() == Some(&msg::KEX_ECDH_REPLY) {
                 // We've sent ECDH_INIT, waiting for ECDH_REPLY
                 let (kex, h) = kexdhdone.server_key_check(false, handler, buf).await?;
                 handler = h;
@@ -847,7 +847,7 @@ async fn reply<H: Handler>(
         }
         Some(Kex::Keys(newkeys)) => {
             debug!("newkeys received");
-            if buf.get(0) != Some(&msg::NEWKEYS) {
+            if buf.first() != Some(&msg::NEWKEYS) {
                 return Err(crate::Error::Kex.into());
             }
             if let Some(sender) = sender.take() {

@@ -48,7 +48,7 @@ impl KexAlgorithm for Curve25519Kex {
 
         let mut client_pubkey = GroupElement([0; 32]);
         {
-            if payload.get(0) != Some(&msg::KEX_ECDH_INIT) {
+            if payload.first() != Some(&msg::KEX_ECDH_INIT) {
                 return Err(crate::Error::Inconsistent);
             }
 

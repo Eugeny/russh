@@ -194,7 +194,7 @@ pub async fn read<'a, R: AsyncRead + Unpin>(
     let (ciphertext, tag) = buffer.buffer.split_at_mut(ciphertext_len);
     let plaintext = cipher.open(seqn, ciphertext, tag)?;
 
-    let padding_length = *plaintext.get(0).to_owned().unwrap_or(&0) as usize;
+    let padding_length = *plaintext.first().to_owned().unwrap_or(&0) as usize;
     debug!("reading, padding_length {:?}", padding_length);
     let plaintext_end = plaintext
         .len()

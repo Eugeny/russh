@@ -21,7 +21,7 @@ impl KexInit {
         buf: &[u8],
         write_buffer: &mut SSHBuffer,
     ) -> Result<Kex, Error> {
-        if buf.get(0) == Some(&msg::KEXINIT) {
+        if buf.first() == Some(&msg::KEXINIT) {
             let algo = {
                 // read algorithms from packet.
                 self.exchange.client_kex_init.extend(buf);
@@ -81,7 +81,7 @@ impl KexDh {
             Ok(Kex::Dh(self))
         } else {
             // Else, process it.
-            assert!(buf.get(0) == Some(&msg::KEX_ECDH_INIT));
+            assert!(buf.first() == Some(&msg::KEX_ECDH_INIT));
             let mut r = buf.reader(1);
             self.exchange.client_ephemeral.extend(r.read_string()?);
 

@@ -65,8 +65,7 @@ impl<R: AsyncRead + Unpin> AsyncRead for SshRead<R> {
             if id.total > id.bytes_read {
                 let total = id.total.min(id.bytes_read + buf.remaining());
                 #[allow(clippy::indexing_slicing)] // length checked
-                let result = { buf.put_slice(&id.buf[id.bytes_read..total]) };
-                debug!("read {:?} bytes from id.buf", result);
+                buf.put_slice(&id.buf[id.bytes_read..total]);
                 id.bytes_read += total - id.bytes_read;
                 self.id = Some(id);
                 return Poll::Ready(Ok(()));

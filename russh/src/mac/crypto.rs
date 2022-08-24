@@ -55,6 +55,6 @@ impl<M: digest::Mac + KeyInit + Send + 'static, KL: ArrayLength<u8> + 'static> M
     fn verify(&self, sequence_number: u32, payload: &[u8], mac: &[u8]) -> bool {
         let mut buf = GenericArray::<u8, M::OutputSize>::default();
         self.compute(sequence_number, payload, &mut buf);
-        (&buf).ct_eq(mac).into()
+        buf.ct_eq(mac).into()
     }
 }

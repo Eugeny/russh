@@ -646,7 +646,7 @@ async fn reply<H: Handler>(
     if session.common.encrypted.is_none() {
         match session.common.kex.take() {
             Some(Kex::Init(kexinit)) => {
-                if kexinit.algo.is_some() || buf.get(0) == Some(&msg::KEXINIT) {
+                if kexinit.algo.is_some() || buf.first() == Some(&msg::KEXINIT) {
                     session.common.kex = Some(kexinit.server_parse(
                         session.common.config.as_ref(),
                         &mut *session.common.cipher.local_to_remote,
@@ -671,7 +671,7 @@ async fn reply<H: Handler>(
                 return Ok((handler, session));
             }
             Some(Kex::Keys(newkeys)) => {
-                if buf.get(0) != Some(&msg::NEWKEYS) {
+                if buf.first() != Some(&msg::NEWKEYS) {
                     return Err(Error::Kex.into());
                 }
                 // Ok, NEWKEYS received, now encrypted.
