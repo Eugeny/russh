@@ -56,7 +56,7 @@
 //!        Ok::<(), Error>(())
 //!    }).unwrap()
 //! }
-//!```
+//! ```
 
 #![recursion_limit = "128"]
 #[macro_use]
@@ -146,8 +146,8 @@ pub enum Error {
     #[error("Environment variable `{0}` not found")]
     EnvVar(&'static str),
     #[error(
-        "Unable to connect to ssh-agent. The environment variable `SSH_AUTH_SOCK` \
-    was set, but it points to a nonexistent file or directory."
+        "Unable to connect to ssh-agent. The environment variable `SSH_AUTH_SOCK` was set, but it \
+         points to a nonexistent file or directory."
     )]
     BadAuthSock,
 }
@@ -188,7 +188,11 @@ pub fn load_public_key<P: AsRef<Path>>(path: P) -> Result<key::PublicKey, Error>
 /// ```
 pub fn parse_public_key_base64(key: &str) -> Result<key::PublicKey, Error> {
     let base = BASE64_MIME.decode(key.as_bytes())?;
-    key::parse_public_key(&base, None)
+    key::parse_public_key(
+        &base,
+        #[cfg(feature = "openssl")]
+        None,
+    )
 }
 
 pub trait PublicKeyBase64 {
