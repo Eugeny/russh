@@ -30,7 +30,7 @@ use crate::parsing::{ChannelOpenConfirmation, ChannelType, OpenChannelMessage};
 
 impl Session {
     /// Returns false iff a request was rejected.
-    pub(in crate) async fn server_read_encrypted<H: Handler>(
+    pub(crate) async fn server_read_encrypted<H: Handler>(
         mut self,
         mut handler: H,
         buf: &[u8],
@@ -46,7 +46,7 @@ impl Session {
 
         #[allow(clippy::unwrap_used)]
         let mut enc = self.common.encrypted.as_mut().unwrap();
-        if buf.get(0) == Some(&msg::KEXINIT) {
+        if buf.first() == Some(&msg::KEXINIT) {
             debug!("Received rekeying request");
             // If we're not currently rekeying, but `buf` is a rekey request
             if let Some(Kex::Init(kexinit)) = enc.rekey.take() {
@@ -85,7 +85,7 @@ impl Session {
                 return Ok((handler, self));
             }
             Some(Kex::Keys(newkeys)) => {
-                if buf.get(0) != Some(&msg::NEWKEYS) {
+                if buf.first() != Some(&msg::NEWKEYS) {
                     return Err(Error::Kex.into());
                 }
                 self.common.write_buffer.bytes = 0;
@@ -134,7 +134,7 @@ impl Session {
         match enc.state {
             EncryptedState::WaitingAuthServiceRequest {
                 ref mut accepted, ..
-            } if buf.get(0) == Some(&msg::SERVICE_REQUEST) => {
+            } if buf.first() == Some(&msg::SERVICE_REQUEST) => {
                 let mut r = buf.reader(1);
                 let request = r.read_string().map_err(crate::Error::from)?;
                 debug!("request: {:?}", std::str::from_utf8(request));
@@ -149,7 +149,7 @@ impl Session {
                 }
                 Ok((handler, self))
             }
-            EncryptedState::WaitingAuthRequest(_) if buf.get(0) == Some(&msg::USERAUTH_REQUEST) => {
+            EncryptedState::WaitingAuthRequest(_) if buf.first() == Some(&msg::USERAUTH_REQUEST) => {
                 handler = enc
                     .server_read_auth_request(instant, handler, buf, &mut self.common.auth_user)
                     .await?;
@@ -161,7 +161,7 @@ impl Session {
                 }
             }
             EncryptedState::WaitingAuthRequest(ref mut auth)
-                if buf.get(0) == Some(&msg::USERAUTH_INFO_RESPONSE) =>
+                if buf.first() == Some(&msg::USERAUTH_INFO_RESPONSE) =>
             {
                 let (h, resp) = read_userauth_info_response(
                     instant,
@@ -562,7 +562,7 @@ impl Session {
                 &buf[..std::cmp::min(buf.len(), 100)]
             );
         }
-        match buf.get(0) {
+        match buf.first() {
             Some(&msg::CHANNEL_OPEN) => self
                 .server_handle_channel_open(handler, buf)
                 .await
@@ -586,7 +586,7 @@ impl Session {
                 let mut r = buf.reader(1);
                 let channel_num = ChannelId(r.read_u32().map_err(crate::Error::from)?);
 
-                let ext = if buf.get(0) == Some(&msg::CHANNEL_DATA) {
+                let ext = if buf.first() == Some(&msg::CHANNEL_DATA) {
                     None
                 } else {
                     Some(r.read_u32().map_err(crate::Error::from)?)

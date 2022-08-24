@@ -304,7 +304,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AgentClient<S> {
                     return (self, Err(e));
                 }
                 (self, Ok(data))
-            } else if self.buf.get(0) == Some(&msg::FAILURE) {
+            } else if self.buf.first() == Some(&msg::FAILURE) {
                 (self, Err(Error::AgentFailure))
             } else {
                 debug!("self.buf = {:?}", &self.buf[..]);

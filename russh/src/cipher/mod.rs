@@ -23,7 +23,6 @@ use crate::mac::MacAlgorithm;
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
 use crate::sshbuffer::SSHBuffer;
 use crate::Error;
 
@@ -100,7 +99,7 @@ pub struct CipherPair {
     pub remote_to_local: Box<dyn OpeningKey + Send>,
 }
 
-impl std::fmt::Debug for CipherPair {
+impl Debug for CipherPair {
     fn fmt(&self, _: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
         Ok(())
     }
@@ -184,6 +183,7 @@ pub async fn read<'a, R: AsyncRead + Unpin>(
             debug!("reading, clear len = {:?}", buffer.len);
         }
     }
+
     buffer.buffer.resize(buffer.len + 4);
     debug!("read_exact {:?}", buffer.len + 4);
     #[allow(clippy::indexing_slicing)] // length checked
@@ -194,7 +194,7 @@ pub async fn read<'a, R: AsyncRead + Unpin>(
     let (ciphertext, tag) = buffer.buffer.split_at_mut(ciphertext_len);
     let plaintext = cipher.open(seqn, ciphertext, tag)?;
 
-    let padding_length = *plaintext.get(0).to_owned().unwrap_or(&0) as usize;
+    let padding_length = *plaintext.first().to_owned().unwrap_or(&0) as usize;
     debug!("reading, padding_length {:?}", padding_length);
     let plaintext_end = plaintext
         .len()

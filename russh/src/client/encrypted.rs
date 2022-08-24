@@ -17,23 +17,23 @@ use std::cell::RefCell;
 use russh_cryptovec::CryptoVec;
 use russh_keys::encoding::{Encoding, Reader};
 
-use super::{Msg, Reply};
+use crate::client::{Handler, Msg, Reply, Session};
 use crate::key::PubKey;
 use crate::negotiation::{Named, Select};
 use crate::parsing::{ChannelOpenConfirmation, ChannelType, OpenChannelMessage};
-use crate::session::*;
-use crate::{auth, msg, negotiation, ChannelId, ChannelOpenFailure, ChannelParams, Error, Sig};
+use crate::session::{Encrypted, EncryptedState, Kex, KexInit};
+use crate::{auth, msg, negotiation, ChannelId, ChannelOpenFailure, ChannelParams, Sig};
 
 thread_local! {
     static SIGNATURE_BUFFER: RefCell<CryptoVec> = RefCell::new(CryptoVec::new());
 }
 
-impl super::Session {
-    pub(crate) async fn client_read_encrypted<C: super::Handler>(
+impl Session {
+    pub(crate) async fn client_read_encrypted<H: Handler>(
         mut self,
-        mut client: C,
+        mut client: H,
         buf: &[u8],
-    ) -> Result<(C, Self), C::Error> {
+    ) -> Result<(H, Self), H::Error> {
         #[allow(clippy::indexing_slicing)] // length checked
         {
             debug!(
@@ -42,10 +42,11 @@ impl super::Session {
             );
         }
         // Either this packet is a KEXINIT, in which case we start a key re-exchange.
-        if buf.get(0) == Some(&msg::KEXINIT) {
+        if buf.first() == Some(&msg::KEXINIT) {
+            debug!("Received KEXINIT");
             // Now, if we're encrypted:
             if let Some(ref mut enc) = self.common.encrypted {
-                // If we're not currently rekeying, but buf is a rekey request
+                // If we're not currently re-keying, but buf is a rekey request
                 if let Some(Kex::Init(kexinit)) = enc.rekey.take() {
                     enc.rekey = Some(Kex::DhDone(kexinit.client_parse(
                         self.common.config.as_ref(),
@@ -76,11 +77,11 @@ impl super::Session {
         if let Some(ref mut enc) = self.common.encrypted {
             match enc.rekey.take() {
                 Some(Kex::DhDone(mut kexdhdone)) => {
-                    if kexdhdone.names.ignore_guessed {
+                    return if kexdhdone.names.ignore_guessed {
                         kexdhdone.names.ignore_guessed = false;
                         enc.rekey = Some(Kex::DhDone(kexdhdone));
-                        return Ok((client, self));
-                    } else if buf.get(0) == Some(&msg::KEX_ECDH_REPLY) {
+                        Ok((client, self))
+                    } else if buf.first() == Some(&msg::KEX_ECDH_REPLY) {
                         // We've sent ECDH_INIT, waiting for ECDH_REPLY
                         let (kex, h) = kexdhdone.server_key_check(true, client, buf).await?;
                         client = h;
@@ -90,15 +91,15 @@ impl super::Session {
                             .local_to_remote
                             .write(&[msg::NEWKEYS], &mut self.common.write_buffer);
                         self.flush()?;
-                        return Ok((client, self));
+                        Ok((client, self))
                     } else {
                         error!("Wrong packet received");
-                        return Err(Error::Inconsistent.into());
-                    }
+                        Err(crate::Error::Inconsistent.into())
+                    };
                 }
                 Some(Kex::Keys(newkeys)) => {
-                    if buf.get(0) != Some(&msg::NEWKEYS) {
-                        return Err(Error::Kex.into());
+                    if buf.first() != Some(&msg::NEWKEYS) {
+                        return Err(crate::Error::Kex.into());
                     }
                     self.common.write_buffer.bytes = 0;
                     enc.last_rekey = std::time::Instant::now();
@@ -121,7 +122,7 @@ impl super::Session {
                     enc.rekey = Some(Kex::Init(k));
                     self.pending_len += buf.len() as u32;
                     if self.pending_len > 2 * self.target_window_size {
-                        return Err(Error::Pending.into());
+                        return Err(crate::Error::Pending.into());
                     }
                     self.pending_reads.push(CryptoVec::from_slice(buf));
                     return Ok((client, self));
@@ -132,13 +133,13 @@ impl super::Session {
         self.process_packet(client, buf).await
     }
 
-    async fn process_packet<H: super::Handler>(
+    async fn process_packet<H: Handler>(
         mut self,
         client: H,
         buf: &[u8],
     ) -> Result<(H, Self), H::Error> {
         // If we've successfully read a packet.
-        debug!("buf = {:?} bytes", buf.len());
+        debug!("process_packet buf = {:?} bytes", buf.len());
         trace!("buf = {:?}", buf);
         let mut is_authenticated = false;
         if let Some(ref mut enc) = self.common.encrypted {
@@ -148,10 +149,10 @@ impl super::Session {
                 } => {
                     debug!(
                         "waiting service request, {:?} {:?}",
-                        buf.get(0),
+                        buf.first(),
                         msg::SERVICE_ACCEPT
                     );
-                    if buf.get(0) == Some(&msg::SERVICE_ACCEPT) {
+                    if buf.first() == Some(&msg::SERVICE_ACCEPT) {
                         let mut r = buf.reader(1);
                         if r.read_string().map_err(crate::Error::from)? == b"ssh-userauth" {
                             *accepted = true;
@@ -174,28 +175,28 @@ impl super::Session {
                         }
                     } else {
                         debug!("unknown message: {:?}", buf);
-                        return Err(Error::Inconsistent.into());
+                        return Err(crate::Error::Inconsistent.into());
                     }
                 }
                 EncryptedState::WaitingAuthRequest(ref mut auth_request) => {
-                    if buf.get(0) == Some(&msg::USERAUTH_SUCCESS) {
+                    if buf.first() == Some(&msg::USERAUTH_SUCCESS) {
                         debug!("userauth_success");
                         self.sender
                             .send(Reply::AuthSuccess)
-                            .map_err(|_| Error::SendError)?;
+                            .map_err(|_| crate::Error::SendError)?;
                         enc.state = EncryptedState::InitCompression;
                         enc.server_compression.init_decompress(&mut enc.decompress);
                         return Ok((client, self));
-                    } else if buf.get(0) == Some(&msg::USERAUTH_BANNER) {
+                    } else if buf.first() == Some(&msg::USERAUTH_BANNER) {
                         let mut r = buf.reader(1);
                         let banner = r.read_string().map_err(crate::Error::from)?;
-                        if let Ok(banner) = std::str::from_utf8(banner) {
+                        return if let Ok(banner) = std::str::from_utf8(banner) {
                             let (h, s) = client.auth_banner(banner, self).await?;
-                            return Ok((h, s));
+                            Ok((h, s))
                         } else {
-                            return Ok((client, self));
-                        }
-                    } else if buf.get(0) == Some(&msg::USERAUTH_FAILURE) {
+                            Ok((client, self))
+                        };
+                    } else if buf.first() == Some(&msg::USERAUTH_FAILURE) {
                         debug!("userauth_failure");
 
                         let mut r = buf.reader(1);
@@ -214,13 +215,13 @@ impl super::Session {
                         self.common.auth_method = None;
                         self.sender
                             .send(Reply::AuthFailure)
-                            .map_err(|_| Error::SendError)?;
+                            .map_err(|_| crate::Error::SendError)?;
 
                         // If no other authentication method is allowed by the server, give up.
                         if no_more_methods {
-                            return Err(Error::NoAuthMethod.into());
+                            return Err(crate::Error::NoAuthMethod.into());
                         }
-                    } else if buf.get(0) == Some(&msg::USERAUTH_PK_OK) {
+                    } else if buf.first() == Some(&msg::USERAUTH_PK_OK) {
                         debug!("userauth_pk_ok");
                         if let Some(auth::CurrentRequest::PublicKey {
                             ref mut sent_pk_ok, ..
@@ -252,7 +253,7 @@ impl super::Session {
 
                                 self.sender
                                     .send(Reply::SignRequest { key, data: buf })
-                                    .map_err(|_| Error::SendError)?;
+                                    .map_err(|_| crate::Error::SendError)?;
                                 self.common.buffer = loop {
                                     match self.receiver.recv().await {
                                         Some(Msg::Signed { data }) => break data,
@@ -271,7 +272,7 @@ impl super::Session {
                         }
                     } else {
                         debug!("unknown message: {:?}", buf);
-                        return Err(Error::Inconsistent.into());
+                        return Err(crate::Error::Inconsistent.into());
                     }
                 }
                 EncryptedState::InitCompression => unreachable!(),
@@ -279,18 +280,18 @@ impl super::Session {
             }
         }
         if is_authenticated {
-            return self.client_read_authenticated(client, buf).await;
+            self.client_read_authenticated(client, buf).await
         } else {
             Ok((client, self))
         }
     }
 
-    async fn client_read_authenticated<C: super::Handler>(
+    async fn client_read_authenticated<H: Handler>(
         mut self,
-        mut client: C,
+        mut client: H,
         buf: &[u8],
-    ) -> Result<(C, Self), C::Error> {
-        match buf.get(0) {
+    ) -> Result<(H, Self), H::Error> {
+        match buf.first() {
             Some(&msg::CHANNEL_OPEN_CONFIRMATION) => {
                 debug!("channel_open_confirmation");
                 let mut reader = buf.reader(1);
@@ -302,10 +303,10 @@ impl super::Session {
                         parameters.confirm(&msg);
                     } else {
                         // We've not requested this channel, close connection.
-                        return Err(Error::Inconsistent.into());
+                        return Err(crate::Error::Inconsistent.into());
                     }
                 } else {
-                    return Err(Error::Inconsistent.into());
+                    return Err(crate::Error::Inconsistent.into());
                 };
 
                 client
@@ -440,21 +441,6 @@ impl super::Session {
                             )
                             .await
                     }
-                    b"keepalive@openssh.com" => {
-                        let wants_reply = r.read_byte().map_err(crate::Error::from)?; // should be 1
-                        if wants_reply == 1 {
-                            if let Some(ref mut enc) = self.common.encrypted {
-                                self.common.wants_reply = false;
-                                push_packet!(enc.write, {
-                                    enc.write.push(msg::CHANNEL_SUCCESS);
-                                    enc.write.push_u32_be(channel_num.0)
-                                })
-                            }
-                        } else {
-                            warn!("Received keepalive@openssh.com without reply request!");
-                        }
-                        Ok((client, self))
-                    }
                     _ => {
                         let wants_reply = r.read_byte().map_err(crate::Error::from)?;
                         if wants_reply == 1 {
@@ -487,7 +473,7 @@ impl super::Session {
                         channel.recipient_window_size += amount;
                         new_value = channel.recipient_window_size;
                     } else {
-                        return Err(Error::WrongChannel.into());
+                        return Err(crate::Error::WrongChannel.into());
                     }
                 }
                 client.window_adjusted(channel_num, new_value, self).await
@@ -497,14 +483,27 @@ impl super::Session {
                 let req = r.read_string().map_err(crate::Error::from)?;
                 let wants_reply = r.read_byte().map_err(crate::Error::from)?;
                 if let Some(ref mut enc) = self.common.encrypted {
-                    self.common.wants_reply = false;
-                    push_packet!(enc.write, enc.write.push(msg::REQUEST_FAILURE))
+                    if req.starts_with(b"keepalive") {
+                        if wants_reply == 1 {
+                            info!(
+                                "Received keep alive message: {:?}",
+                                std::str::from_utf8(req),
+                            );
+                            self.common.wants_reply = false;
+                            push_packet!(enc.write, enc.write.push(msg::REQUEST_SUCCESS));
+                        } else {
+                            warn!("Received keepalive@openssh.com without reply request!");
+                        }
+                    } else {
+                        warn!(
+                            "Unhandled global request: {:?} {:?}",
+                            std::str::from_utf8(req),
+                            wants_reply
+                        );
+                        self.common.wants_reply = false;
+                        push_packet!(enc.write, enc.write.push(msg::REQUEST_FAILURE))
+                    }
                 }
-                info!(
-                    "Unhandled global request: {:?} {:?}",
-                    std::str::from_utf8(req),
-                    wants_reply
-                );
                 Ok((client, self))
             }
             Some(&msg::CHANNEL_SUCCESS) => {
@@ -602,7 +601,7 @@ impl super::Session {
                         }
                     })
                 } else {
-                    Err(Error::Inconsistent.into())
+                    Err(crate::Error::Inconsistent.into())
                 }
             }
             _ => {
@@ -720,7 +719,7 @@ impl Encrypted {
         user: &str,
         method: &auth::Method,
         buffer: &mut CryptoVec,
-    ) -> Result<(), Error> {
+    ) -> Result<(), crate::Error> {
         match method {
             auth::Method::PublicKey { ref key } => {
                 let i0 = self.client_make_to_sign(user, key.as_ref(), buffer);

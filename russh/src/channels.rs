@@ -241,17 +241,14 @@ impl<Send: From<(ChannelId, ChannelMsg)>> Channel<Send> {
     }
 
     /// Send data to a channel.
-    pub async fn data<R: tokio::io::AsyncReadExt + std::marker::Unpin>(
-        &mut self,
-        data: R,
-    ) -> Result<(), Error> {
+    pub async fn data<R: tokio::io::AsyncReadExt + Unpin>(&mut self, data: R) -> Result<(), Error> {
         self.send_data(None, data).await
     }
 
     /// Send data to a channel. The number of bytes added to the
     /// "sending pipeline" (to be processed by the event loop) is
     /// returned.
-    pub async fn extended_data<R: tokio::io::AsyncReadExt + std::marker::Unpin>(
+    pub async fn extended_data<R: tokio::io::AsyncReadExt + Unpin>(
         &mut self,
         ext: u32,
         data: R,
@@ -259,7 +256,7 @@ impl<Send: From<(ChannelId, ChannelMsg)>> Channel<Send> {
         self.send_data(Some(ext), data).await
     }
 
-    async fn send_data<R: tokio::io::AsyncReadExt + std::marker::Unpin>(
+    async fn send_data<R: tokio::io::AsyncReadExt + Unpin>(
         &mut self,
         ext: Option<u32>,
         mut data: R,

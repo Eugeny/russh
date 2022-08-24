@@ -348,7 +348,7 @@ pub fn check_known_hosts_path<P: AsRef<Path>>(
     let mut line = 1;
     while f.read_line(&mut buffer)? > 0 {
         {
-            if buffer.as_bytes().get(0) == Some(&b'#') {
+            if buffer.as_bytes().first() == Some(&b'#') {
                 buffer.clear();
                 continue;
             }

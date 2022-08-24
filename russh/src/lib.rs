@@ -610,7 +610,7 @@ impl Sig {
 }
 
 /// Reason for not being able to open a channel.
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[allow(missing_docs)]
 pub enum ChannelOpenFailure {
     AdministrativelyProhibited = 1,

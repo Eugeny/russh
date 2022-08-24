@@ -47,7 +47,7 @@ pub const DH_GROUP14: DhGroup = DhGroup {
     exp_size: 256,
 };
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct DH {
     prime_num: BigUint,
     generator: usize,

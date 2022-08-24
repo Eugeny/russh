@@ -1,5 +1,5 @@
 #[allow(non_camel_case_types, missing_docs)]
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 /// Standard pseudo-terminal codes.
 pub enum Pty {
     TTY_OP_END = 0,

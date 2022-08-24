@@ -1,7 +1,12 @@
-use super::*;
+use russh_cryptovec::CryptoVec;
+use russh_keys::encoding::Encoding;
+
+use crate::client::Session;
+use crate::session::EncryptedState;
+use crate::{msg, ChannelId, Disconnect, Pty, Sig};
 
 impl Session {
-    pub fn channel_open_session(&mut self) -> Result<ChannelId, Error> {
+    pub fn channel_open_session(&mut self) -> Result<ChannelId, crate::Error> {
         let result = if let Some(ref mut enc) = self.common.encrypted {
             match enc.state {
                 EncryptedState::Authenticated => {
@@ -26,10 +31,10 @@ impl Session {
                     });
                     sender_channel
                 }
-                _ => return Err(Error::NotAuthenticated),
+                _ => return Err(crate::Error::NotAuthenticated),
             }
         } else {
-            return Err(Error::Inconsistent);
+            return Err(crate::Error::Inconsistent);
         };
         Ok(result)
     }
@@ -38,7 +43,7 @@ impl Session {
         &mut self,
         originator_address: &str,
         originator_port: u32,
-    ) -> Result<ChannelId, Error> {
+    ) -> Result<ChannelId, crate::Error> {
         let result = if let Some(ref mut enc) = self.common.encrypted {
             match enc.state {
                 EncryptedState::Authenticated => {
@@ -66,10 +71,10 @@ impl Session {
                     });
                     sender_channel
                 }
-                _ => return Err(Error::NotAuthenticated),
+                _ => return Err(crate::Error::NotAuthenticated),
             }
         } else {
-            return Err(Error::Inconsistent);
+            return Err(crate::Error::Inconsistent);
         };
         Ok(result)
     }
@@ -80,7 +85,7 @@ impl Session {
         port_to_connect: u32,
         originator_address: &str,
         originator_port: u32,
-    ) -> Result<ChannelId, Error> {
+    ) -> Result<ChannelId, crate::Error> {
         let result = if let Some(ref mut enc) = self.common.encrypted {
             match enc.state {
                 EncryptedState::Authenticated => {
@@ -110,10 +115,10 @@ impl Session {
                     });
                     sender_channel
                 }
-                _ => return Err(Error::NotAuthenticated),
+                _ => return Err(crate::Error::NotAuthenticated),
             }
         } else {
-            return Err(Error::Inconsistent);
+            return Err(crate::Error::Inconsistent);
         };
         Ok(result)
     }
@@ -243,7 +248,6 @@ impl Session {
             if let Some(channel) = enc.channels.get(&channel) {
                 push_packet!(enc.write, {
                     enc.write.push(msg::CHANNEL_REQUEST);
-
                     enc.write.push_u32_be(channel.recipient_channel);
                     enc.write.extend_ssh_string(b"signal");
                     enc.write.push(0);

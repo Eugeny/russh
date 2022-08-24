@@ -67,7 +67,7 @@ impl<D: Digest> std::fmt::Debug for DhGroupKex<D> {
 fn biguint_to_mpint(biguint: &BigUint) -> Vec<u8> {
     let mut mpint = Vec::new();
     let bytes = biguint.to_bytes_be();
-    if let Some(b) = bytes.get(0) {
+    if let Some(b) = bytes.first() {
         if b > &0x7f {
             mpint.push(0);
         }
@@ -86,7 +86,7 @@ impl<D: Digest> KexAlgorithm for DhGroupKex<D> {
         debug!("server_dh");
 
         let client_pubkey = {
-            if payload.get(0) != Some(&msg::KEX_ECDH_INIT) {
+            if payload.first() != Some(&msg::KEX_ECDH_INIT) {
                 return Err(crate::Error::Inconsistent);
             }
 

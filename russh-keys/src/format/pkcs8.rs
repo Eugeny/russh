@@ -319,7 +319,7 @@ fn clone(src: &[u8], dest: &mut [u8]) {
     let i = src.iter().take_while(|b| **b == 0).count();
     let src = &src[i..];
     let l = dest.len();
-    (&mut dest[l - src.len()..]).clone_from_slice(src)
+    dest[l - src.len()..].clone_from_slice(src)
 }
 
 fn asn1_write_pbes2(writer: yasna::DERWriter, rounds: u64, salt: &[u8], iv: &[u8]) {
