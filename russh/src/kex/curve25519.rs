@@ -1,5 +1,7 @@
 use byteorder::{BigEndian, ByteOrder};
-use rand::RngCore;
+use curve25519_dalek::constants::ED25519_BASEPOINT_TABLE;
+use curve25519_dalek::montgomery::MontgomeryPoint;
+use curve25519_dalek::scalar::Scalar;
 use russh_cryptovec::CryptoVec;
 use russh_keys::encoding::Encoding;
 
@@ -21,8 +23,8 @@ impl KexType for Curve25519KexType {
 
 #[doc(hidden)]
 pub struct Curve25519Kex {
-    local_secret: Option<sodium::scalarmult::Scalar>,
-    shared_secret: Option<sodium::scalarmult::GroupElement>,
+    local_secret: Option<Scalar>,
+    shared_secret: Option<MontgomeryPoint>,
 }
 
 impl std::fmt::Debug for Curve25519Kex {
@@ -46,8 +48,7 @@ impl KexAlgorithm for Curve25519Kex {
     fn server_dh(&mut self, exchange: &mut Exchange, payload: &[u8]) -> Result<(), crate::Error> {
         debug!("server_dh");
 
-        let mut client_pubkey = GroupElement([0; 32]);
-        {
+        let client_pubkey = {
             if payload.first() != Some(&msg::KEX_ECDH_INIT) {
                 return Err(crate::Error::Inconsistent);
             }
@@ -55,26 +56,29 @@ impl KexAlgorithm for Curve25519Kex {
             #[allow(clippy::indexing_slicing)] // length checked
             let pubkey_len = BigEndian::read_u32(&payload[1..]) as usize;
 
+            if pubkey_len != 32 {
+                return Err(crate::Error::Kex);
+            }
+
             if payload.len() < 5 + pubkey_len {
                 return Err(crate::Error::Inconsistent);
             }
 
+            let mut pubkey = MontgomeryPoint([0; 32]);
             #[allow(clippy::indexing_slicing)] // length checked
-            client_pubkey
-                .0
-                .clone_from_slice(&payload[5..(5 + pubkey_len)])
+            pubkey.0.clone_from_slice(&payload[5..5 + 32]);
+            pubkey
         };
-        debug!("client_pubkey: {:?}", client_pubkey);
-        use sodium::scalarmult::*;
-        let mut server_secret = Scalar([0; 32]);
-        rand::thread_rng().fill_bytes(&mut server_secret.0);
-        let server_pubkey = scalarmult_base(&server_secret);
+
+        let server_secret = Scalar::from_bytes_mod_order(rand::random::<[u8; 32]>());
+        let server_pubkey = (&ED25519_BASEPOINT_TABLE * &server_secret).to_montgomery();
 
         // fill exchange.
         exchange.server_ephemeral.clear();
         exchange.server_ephemeral.extend(&server_pubkey.0);
-        let shared = scalarmult(&server_secret, &client_pubkey);
+        let shared = server_secret * client_pubkey;
         self.shared_secret = Some(shared);
+        println!("kex 1 ok");
         Ok(())
     }
 
@@ -84,10 +88,8 @@ impl KexAlgorithm for Curve25519Kex {
         client_ephemeral: &mut CryptoVec,
         buf: &mut CryptoVec,
     ) -> Result<(), crate::Error> {
-        use sodium::scalarmult::*;
-        let mut client_secret = Scalar([0; 32]);
-        rand::thread_rng().fill_bytes(&mut client_secret.0);
-        let client_pubkey = scalarmult_base(&client_secret);
+        let client_secret = Scalar::from_bytes_mod_order(rand::random::<[u8; 32]>());
+        let client_pubkey = (&ED25519_BASEPOINT_TABLE * &client_secret).to_montgomery();
 
         // fill exchange.
         client_ephemeral.clear();
@@ -104,10 +106,9 @@ impl KexAlgorithm for Curve25519Kex {
         let local_secret =
             std::mem::replace(&mut self.local_secret, None).ok_or(crate::Error::KexInit)?;
 
-        use sodium::scalarmult::*;
-        let mut remote_pubkey = GroupElement([0; 32]);
+        let mut remote_pubkey = MontgomeryPoint([0; 32]);
         remote_pubkey.0.clone_from_slice(remote_pubkey_);
-        let shared = scalarmult(&local_secret, &remote_pubkey);
+        let shared = local_secret * remote_pubkey;
         self.shared_secret = Some(shared);
         Ok(())
     }
