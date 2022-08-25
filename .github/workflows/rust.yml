@@ -15,7 +15,11 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
-    - name: Build
+
+    - name: Build (no features enabled)
+      run: cargo build --verbose
+
+    - name: Build (all features enabled)
       run: cargo build --verbose --all-features
 
   Clippy:
@@ -23,7 +27,11 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
-    - name: Build
+
+    - name: Clippy (no features enabled)
+      run: cargo clippy -- -D warnings
+
+    - name: Clippy (all features enabled)
       run: cargo clippy --all-features -- -D warnings
 
   Test:
@@ -31,7 +39,15 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
-    - name: Run tests
+
+    - name: Test (no features enabled)
+      run: |
+        eval `ssh-agent`
+        cargo test --verbose
+      env:
+        RUST_BACKTRACE: 1
+
+    - name: Test (all features enabled)
       run: |
         eval `ssh-agent`
         cargo test --verbose --all-features
