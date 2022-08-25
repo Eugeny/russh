@@ -344,6 +344,11 @@ impl Encrypted {
             self.write_cursor = 0;
             self.write.clear();
         }
+
+        if self.kex.skip_exchange() {
+            return Ok(false);
+        }
+
         let now = std::time::Instant::now();
         let dur = now.duration_since(self.last_rekey);
         Ok(write_buffer.bytes >= limits.rekey_write_limit || dur >= limits.rekey_time_limit)
