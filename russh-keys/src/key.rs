@@ -12,21 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
+use ed25519_dalek::ed25519::signature::Signature as EdSignature;
+use ed25519_dalek::{Signer, Verifier};
 #[cfg(feature = "openssl")]
 use openssl::pkey::{Private, Public};
+use rand::rngs::OsRng;
 use russh_cryptovec::CryptoVec;
-use russh_libsodium as sodium;
 
 use crate::encoding::{Encoding, Reader};
 pub use crate::signature::*;
 use crate::Error;
-
-/// Keys for elliptic curve Ed25519 cryptography.
-pub mod ed25519 {
-    pub use russh_libsodium::ed25519::{
-        keypair, sign_detached, verify_detached, PublicKey, SecretKey,
-    };
-}
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 /// Name of a public key algorithm.
@@ -113,7 +108,7 @@ impl SignatureHash {
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub enum PublicKey {
     #[doc(hidden)]
-    Ed25519(russh_libsodium::ed25519::PublicKey),
+    Ed25519(ed25519_dalek::PublicKey),
     #[doc(hidden)]
     #[cfg(feature = "openssl")]
     RSA {
@@ -129,6 +124,7 @@ pub struct OpenSSLPKey(pub openssl::pkey::PKey<Public>);
 
 #[cfg(feature = "openssl")]
 use std::cmp::{Eq, PartialEq};
+use std::convert::TryInto;
 #[cfg(feature = "openssl")]
 impl PartialEq for OpenSSLPKey {
     fn eq(&self, b: &OpenSSLPKey) -> bool {
@@ -152,15 +148,13 @@ impl PublicKey {
                 let mut p = pubkey.reader(0);
                 let key_algo = p.read_string()?;
                 let key_bytes = p.read_string()?;
-                if key_algo != b"ssh-ed25519" || key_bytes.len() != sodium::ed25519::PUBLICKEY_BYTES
+                if key_algo != b"ssh-ed25519" || key_bytes.len() != ed25519_dalek::PUBLIC_KEY_LENGTH
                 {
                     return Err(Error::CouldNotReadKey);
                 }
-                let mut p = sodium::ed25519::PublicKey {
-                    key: [0; sodium::ed25519::PUBLICKEY_BYTES],
-                };
-                p.key.clone_from_slice(key_bytes);
-                Ok(PublicKey::Ed25519(p))
+                ed25519_dalek::PublicKey::from_bytes(key_bytes)
+                    .map(PublicKey::Ed25519)
+                    .map_err(Error::from)
             }
             b"ssh-rsa" | b"rsa-sha2-256" | b"rsa-sha2-512" if cfg!(feature = "openssl") => {
                 #[cfg(feature = "openssl")]
@@ -209,7 +203,10 @@ impl PublicKey {
     /// Verify a signature.
     pub fn verify_detached(&self, buffer: &[u8], sig: &[u8]) -> bool {
         match self {
-            PublicKey::Ed25519(ref public) => sodium::ed25519::verify_detached(sig, buffer, public),
+            PublicKey::Ed25519(ref public) => ed25519_dalek::Signature::from_bytes(sig)
+                .and_then(|sig| public.verify(buffer, &sig))
+                .is_ok(),
+
             #[cfg(feature = "openssl")]
             PublicKey::RSA { ref key, ref hash } => {
                 use openssl::sign::*;
@@ -260,8 +257,9 @@ impl Verify for PublicKey {
 }
 
 /// Public key exchange algorithms.
+#[allow(clippy::large_enum_variant)]
 pub enum KeyPair {
-    Ed25519(sodium::ed25519::SecretKey),
+    Ed25519(ed25519_dalek::Keypair),
     #[cfg(feature = "openssl")]
     RSA {
         key: openssl::rsa::Rsa<Private>,
@@ -275,7 +273,7 @@ impl std::fmt::Debug for KeyPair {
             KeyPair::Ed25519(ref key) => write!(
                 f,
                 "Ed25519 {{ public: {:?}, secret: (hidden) }}",
-                &key.key[32..]
+                key.public.as_bytes()
             ),
             #[cfg(feature = "openssl")]
             KeyPair::RSA { .. } => write!(f, "RSA {{ (hidden) }}"),
@@ -293,11 +291,7 @@ impl KeyPair {
     /// Copy the public key of this algorithm.
     pub fn clone_public_key(&self) -> Result<PublicKey, Error> {
         Ok(match self {
-            KeyPair::Ed25519(ref key) => {
-                let mut public = sodium::ed25519::PublicKey { key: [0; 32] };
-                public.key.clone_from_slice(&key.key[32..]);
-                PublicKey::Ed25519(public)
-            }
+            KeyPair::Ed25519(ref key) => PublicKey::Ed25519(key.public),
             #[cfg(feature = "openssl")]
             KeyPair::RSA { ref key, ref hash } => {
                 use openssl::pkey::PKey;
@@ -322,9 +316,12 @@ impl KeyPair {
 
     /// Generate a key pair.
     pub fn generate_ed25519() -> Option<Self> {
-        let (public, secret) = sodium::ed25519::keypair();
-        assert_eq!(&public.key, &secret.key[32..]);
-        Some(KeyPair::Ed25519(secret))
+        let keypair = ed25519_dalek::Keypair::generate(&mut OsRng {});
+        assert_eq!(
+            keypair.public.as_bytes(),
+            ed25519_dalek::PublicKey::from(&keypair.secret).as_bytes()
+        );
+        Some(KeyPair::Ed25519(keypair))
     }
 
     #[cfg(feature = "openssl")]
@@ -336,10 +333,12 @@ impl KeyPair {
     /// Sign a slice using this algorithm.
     pub fn sign_detached(&self, to_sign: &[u8]) -> Result<Signature, Error> {
         match self {
+            #[allow(clippy::unwrap_used)]
             KeyPair::Ed25519(ref secret) => Ok(Signature::Ed25519(SignatureBytes(
-                sodium::ed25519::sign_detached(to_sign, secret).0,
+                ed25519_dalek::ed25519::signature::Signature::as_bytes(&secret.sign(to_sign))
+                    .try_into()
+                    .unwrap(),
             ))),
-
             #[cfg(feature = "openssl")]
             KeyPair::RSA { ref key, ref hash } => Ok(Signature::RSA {
                 bytes: rsa_signature(hash, key, to_sign)?,
@@ -359,11 +358,13 @@ impl KeyPair {
     ) -> Result<(), Error> {
         match self {
             KeyPair::Ed25519(ref secret) => {
-                let signature = sodium::ed25519::sign_detached(to_sign.as_ref(), secret);
+                let signature = secret.sign(to_sign.as_ref());
 
-                buffer.push_u32_be((ED25519.0.len() + signature.0.len() + 8) as u32);
+                buffer.push_u32_be(
+                    (ED25519.0.len() + EdSignature::as_bytes(&signature).len() + 8) as u32,
+                );
                 buffer.extend_ssh_string(ED25519.0.as_bytes());
-                buffer.extend_ssh_string(&signature.0);
+                buffer.extend_ssh_string(signature.as_bytes());
             }
             #[cfg(feature = "openssl")]
             KeyPair::RSA { ref key, ref hash } => {
@@ -385,10 +386,10 @@ impl KeyPair {
     pub fn add_self_signature(&self, buffer: &mut CryptoVec) -> Result<(), Error> {
         match self {
             KeyPair::Ed25519(ref secret) => {
-                let signature = sodium::ed25519::sign_detached(buffer, secret);
-                buffer.push_u32_be((ED25519.0.len() + signature.0.len() + 8) as u32);
+                let signature = secret.sign(buffer);
+                buffer.push_u32_be((ED25519.0.len() + signature.as_bytes().len() + 8) as u32);
                 buffer.extend_ssh_string(ED25519.0.as_bytes());
-                buffer.extend_ssh_string(&signature.0);
+                buffer.extend_ssh_string(signature.as_bytes());
             }
             #[cfg(feature = "openssl")]
             KeyPair::RSA { ref key, ref hash } => {
@@ -437,11 +438,7 @@ pub fn parse_public_key(
     let t = pos.read_string()?;
     if t == b"ssh-ed25519" {
         if let Ok(pubkey) = pos.read_string() {
-            use russh_libsodium::ed25519;
-            let mut p = ed25519::PublicKey {
-                key: [0; ed25519::PUBLICKEY_BYTES],
-            };
-            p.key.clone_from_slice(pubkey);
+            let p = ed25519_dalek::PublicKey::from_bytes(pubkey).map_err(Error::from)?;
             return Ok(PublicKey::Ed25519(p));
         }
     }

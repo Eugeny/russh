@@ -42,10 +42,14 @@ pub fn decode_openssh(secret: &[u8], password: Option<&str>) -> Result<key::KeyP
                 if Some(pubkey) != seckey.get(32..) {
                     return Err(Error::KeyIsCorrupt);
                 }
-                use key::ed25519::*;
-                let mut secret = SecretKey::new_zeroed();
-                secret.key.clone_from_slice(seckey);
-                return Ok(key::KeyPair::Ed25519(secret));
+                let secret = ed25519_dalek::SecretKey::from_bytes(
+                    seckey.get(..32).ok_or(Error::KeyIsCorrupt)?,
+                )?;
+                let public = (&secret).into();
+                return Ok(key::KeyPair::Ed25519(ed25519_dalek::Keypair {
+                    secret,
+                    public,
+                }));
             } else if key_type == KEYTYPE_RSA && cfg!(feature = "openssl") {
                 #[cfg(feature = "openssl")]
                 {

@@ -7,6 +7,8 @@ use block_padding::{NoPadding, Pkcs7};
 use openssl::pkey::Private;
 #[cfg(feature = "openssl")]
 use openssl::rsa::Rsa;
+#[cfg(test)]
+use rand_core::OsRng;
 use yasna::BERReaderSeq;
 use {std, yasna};
 
@@ -114,7 +116,7 @@ fn asn1_read_aes256cbc(
     Ok(Ok(Encryption::Aes256Cbc(i)))
 }
 
-fn write_key_v1(writer: &mut yasna::DERWriterSeq, secret: &key::ed25519::SecretKey) {
+fn write_key_v1(writer: &mut yasna::DERWriterSeq, secret: &ed25519_dalek::SecretKey) {
     writer.next().write_u32(1);
     // write OID
     writer.next().write_sequence(|writer| {
@@ -122,13 +124,14 @@ fn write_key_v1(writer: &mut yasna::DERWriterSeq, secret: &key::ed25519::SecretK
             .next()
             .write_oid(&ObjectIdentifier::from_slice(ED25519));
     });
-    let seed = yasna::construct_der(|writer| writer.write_bytes(&secret.key));
+    let seed = yasna::construct_der(|writer| writer.write_bytes(secret.as_bytes()));
     writer.next().write_bytes(&seed);
     writer
         .next()
         .write_tagged(yasna::Tag::context(1), |writer| {
-            let public = &secret.key[32..];
-            writer.write_bitvec(&BitVec::from_bytes(public))
+            writer.write_bitvec(&BitVec::from_bytes(
+                ed25519_dalek::PublicKey::from(secret).as_bytes(),
+            ))
         })
 }
 
@@ -137,23 +140,19 @@ fn read_key_v1(reader: &mut BERReaderSeq) -> Result<key::KeyPair, Error> {
         .next()
         .read_sequence(|reader| reader.next().read_oid())?;
     if oid.components().as_slice() == ED25519 {
-        use key::ed25519::{PublicKey, SecretKey};
+        use ed25519_dalek::{Keypair, PublicKey, SecretKey};
         let secret = {
-            let mut seed = SecretKey::new_zeroed();
             let s = yasna::parse_der(&reader.next().read_bytes()?, |reader| reader.read_bytes())?;
-            clone(&s, &mut seed.key);
-            seed
+            SecretKey::from_bytes(&s).map_err(|_| Error::CouldNotReadKey)?
         };
-        let _public = {
+        let public = {
             let public = reader
                 .next()
                 .read_tagged(yasna::Tag::context(1), |reader| reader.read_bitvec())?
                 .to_bytes();
-            let mut p = PublicKey::new_zeroed();
-            clone(&public, &mut p.key);
-            p
+            PublicKey::from_bytes(&public).map_err(|_| Error::CouldNotReadKey)?
         };
-        Ok(key::KeyPair::Ed25519(secret))
+        Ok(key::KeyPair::Ed25519(Keypair { public, secret }))
     } else {
         Err(Error::CouldNotReadKey)
     }
@@ -248,9 +247,12 @@ fn read_key_v0(_: &mut BERReaderSeq) -> Result<key::KeyPair, Error> {
 
 #[test]
 fn test_read_write_pkcs8() {
-    let (public, secret) = key::ed25519::keypair();
-    assert_eq!(&public.key, &secret.key[32..]);
-    let key = key::KeyPair::Ed25519(secret);
+    let ed25519_dalek::Keypair { public, secret } = ed25519_dalek::Keypair::generate(&mut OsRng {});
+    assert_eq!(
+        public.as_bytes(),
+        ed25519_dalek::PublicKey::from(&secret).as_bytes()
+    );
+    let key = key::KeyPair::Ed25519(ed25519_dalek::Keypair { public, secret });
     let password = b"blabla";
     let ciphertext = encode_pkcs8_encrypted(password, 100, &key).unwrap();
     let key = decode_pkcs8(&ciphertext, Some(password)).unwrap();
@@ -307,19 +309,11 @@ pub fn encode_pkcs8_encrypted(
 pub fn encode_pkcs8(key: &key::KeyPair) -> Vec<u8> {
     yasna::construct_der(|writer| {
         writer.write_sequence(|writer| match *key {
-            key::KeyPair::Ed25519(ref secret) => write_key_v1(writer, secret),
+            key::KeyPair::Ed25519(ref pair) => write_key_v1(writer, &pair.secret),
             #[cfg(feature = "openssl")]
             key::KeyPair::RSA { ref key, .. } => write_key_v0(writer, key),
         })
     })
-}
-
-#[allow(clippy::indexing_slicing)]
-fn clone(src: &[u8], dest: &mut [u8]) {
-    let i = src.iter().take_while(|b| **b == 0).count();
-    let src = &src[i..];
-    let l = dest.len();
-    dest[l - src.len()..].clone_from_slice(src)
 }
 
 fn asn1_write_pbes2(writer: yasna::DERWriter, rounds: u64, salt: &[u8], iv: &[u8]) {

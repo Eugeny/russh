@@ -97,6 +97,9 @@ pub enum Error {
     /// The type of the key is unsupported
     #[error("Unsupported key type")]
     UnsupportedKeyType(Vec<u8>),
+    /// The type of the key is unsupported
+    #[error("Invalid Ed25519 key data")]
+    Ed25519KeyError(#[from] ed25519_dalek::SignatureError),
     /// The key is encrypted (should supply a password?)
     #[error("The key is encrypted")]
     KeyIsEncrypted,
@@ -209,9 +212,9 @@ impl PublicKeyBase64 for key::PublicKey {
                 s.write_u32::<BigEndian>(name.len() as u32).unwrap();
                 s.extend_from_slice(name);
                 #[allow(clippy::unwrap_used)] // Vec<>.write can't fail
-                s.write_u32::<BigEndian>(publickey.key.len() as u32)
+                s.write_u32::<BigEndian>(publickey.as_bytes().len() as u32)
                     .unwrap();
-                s.extend_from_slice(&publickey.key);
+                s.extend_from_slice(publickey.as_bytes());
             }
             #[cfg(feature = "openssl")]
             key::PublicKey::RSA { ref key, .. } => {
@@ -239,9 +242,9 @@ impl PublicKeyBase64 for key::KeyPair {
         s.extend_from_slice(name);
         match *self {
             key::KeyPair::Ed25519(ref key) => {
-                let public = &key.key[32..];
+                let public = key.public.as_bytes();
                 #[allow(clippy::unwrap_used)] // Vec<>.write can't fail
-                s.write_u32::<BigEndian>(32).unwrap();
+                s.write_u32::<BigEndian>(public.len() as u32).unwrap();
                 s.extend_from_slice(public);
             }
             #[cfg(feature = "openssl")]
