@@ -1,24 +1,37 @@
 use std::io::Write;
 use std::net::SocketAddr;
+use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Result;
+use log::info;
 use russh::*;
 use russh_keys::*;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let pem = std::fs::read("./my-aws-key.pem")?;
-    let mut ssh = Session::connect(
-        &pem,
-        "ubuntu",
-        SocketAddr::from_str("35.158.158.35:22").unwrap(),
-    )
-    .await?;
+    env_logger::builder()
+        .filter_level(log::LevelFilter::Debug)
+        .init();
+
+    let args: Vec<String> = std::env::args().collect();
+    let (host, key) = match args.get(1..3) {
+        Some(args) => (&args[0], &args[1]),
+        None => {
+            eprintln!("Usage: {} <host:port> <private-key-path>", args[0]);
+            std::process::exit(1);
+        }
+    };
+
+    info!("Connecting to {host}");
+    info!("Key path: {key}");
+
+    let mut ssh = Session::connect(key, "root", SocketAddr::from_str(host).unwrap()).await?;
     let r = ssh.call("whoami").await?;
     assert!(r.success());
-    assert_eq!(r.output(), "ubuntu\n");
+    println!("Result: {}", r.output());
     ssh.close().await?;
     Ok(())
 }
@@ -46,21 +59,22 @@ pub struct Session {
 }
 
 impl Session {
-    async fn connect(pem: &[u8], user: impl Into<String>, addr: SocketAddr) -> Result<Self> {
-        let key_pair = key::KeyPair::RSA {
-            key: openssl::rsa::Rsa::private_key_from_pem(pem)?,
-            hash: key::SignatureHash::SHA2_512,
+    async fn connect<P: AsRef<Path>>(
+        key_path: P,
+        user: impl Into<String>,
+        addr: SocketAddr,
+    ) -> Result<Self> {
+        let key_pair = load_secret_key(key_path, None)?;
+        let config = client::Config {
+            connection_timeout: Some(Duration::from_secs(5)),
+            ..<_>::default()
         };
-        let config = client::Config::default();
         let config = Arc::new(config);
         let sh = Client {};
-        let mut agent = agent::client::AgentClient::connect_env().await?;
-        agent.add_identity(&key_pair, &[]).await?;
-        let mut identities = agent.request_identities().await?;
         let mut session = client::connect(config, addr, sh).await?;
-        let pubkey = identities.pop().unwrap();
-        let (_, auth_res) = session.authenticate_future(user, pubkey, agent).await;
-        let _auth_res = auth_res?;
+        let _auth_res = session
+            .authenticate_publickey(user, Arc::new(key_pair))
+            .await?;
         Ok(Self { session })
     }
 
