@@ -117,6 +117,7 @@ fn asn1_read_aes256cbc(
 }
 
 fn write_key_v1(writer: &mut yasna::DERWriterSeq, secret: &ed25519_dalek::SecretKey) {
+    let public = ed25519_dalek::PublicKey::from(secret);
     writer.next().write_u32(1);
     // write OID
     writer.next().write_sequence(|writer| {
@@ -124,14 +125,18 @@ fn write_key_v1(writer: &mut yasna::DERWriterSeq, secret: &ed25519_dalek::Secret
             .next()
             .write_oid(&ObjectIdentifier::from_slice(ED25519));
     });
-    let seed = yasna::construct_der(|writer| writer.write_bytes(secret.as_bytes()));
+    let seed = yasna::construct_der(|writer| {
+        writer.write_bytes(
+            [secret.as_bytes().as_slice(), public.as_bytes().as_slice()]
+                .concat()
+                .as_slice(),
+        )
+    });
     writer.next().write_bytes(&seed);
     writer
         .next()
         .write_tagged(yasna::Tag::context(1), |writer| {
-            writer.write_bitvec(&BitVec::from_bytes(
-                ed25519_dalek::PublicKey::from(secret).as_bytes(),
-            ))
+            writer.write_bitvec(&BitVec::from_bytes(public.as_bytes()))
         })
 }
 
@@ -143,9 +148,9 @@ fn read_key_v1(reader: &mut BERReaderSeq) -> Result<key::KeyPair, Error> {
         use ed25519_dalek::{Keypair, PublicKey, SecretKey};
         let secret = {
             let s = yasna::parse_der(&reader.next().read_bytes()?, |reader| reader.read_bytes())?;
-            SecretKey::from_bytes(&s).map_err(|_| Error::CouldNotReadKey)?
+            SecretKey::from_bytes(&s[..ed25519_dalek::SECRET_KEY_LENGTH]).map_err(|_| Error::CouldNotReadKey)?
         };
-        let public = {
+            let public = {
             let public = reader
                 .next()
                 .read_tagged(yasna::Tag::context(1), |reader| reader.read_bitvec())?
