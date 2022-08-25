@@ -148,9 +148,12 @@ fn read_key_v1(reader: &mut BERReaderSeq) -> Result<key::KeyPair, Error> {
         use ed25519_dalek::{Keypair, PublicKey, SecretKey};
         let secret = {
             let s = yasna::parse_der(&reader.next().read_bytes()?, |reader| reader.read_bytes())?;
-            SecretKey::from_bytes(&s[..ed25519_dalek::SECRET_KEY_LENGTH]).map_err(|_| Error::CouldNotReadKey)?
+
+            s.get(..ed25519_dalek::SECRET_KEY_LENGTH)
+                .ok_or(Error::KeyIsCorrupt)
+                .and_then(|s| SecretKey::from_bytes(s).map_err(|_| Error::CouldNotReadKey))?
         };
-            let public = {
+        let public = {
             let public = reader
                 .next()
                 .read_tagged(yasna::Tag::context(1), |reader| reader.read_bitvec())?
