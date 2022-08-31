@@ -149,7 +149,9 @@ impl Session {
                 }
                 Ok((handler, self))
             }
-            EncryptedState::WaitingAuthRequest(_) if buf.first() == Some(&msg::USERAUTH_REQUEST) => {
+            EncryptedState::WaitingAuthRequest(_)
+                if buf.first() == Some(&msg::USERAUTH_REQUEST) =>
+            {
                 handler = enc
                     .server_read_auth_request(instant, handler, buf, &mut self.common.auth_user)
                     .await?;

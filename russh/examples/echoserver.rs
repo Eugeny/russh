@@ -110,7 +110,7 @@ impl server::Handler for Server {
     }
 
     fn tcpip_forward(self, address: &str, port: u32, session: Session) -> Self::FutureBool {
-        let mut handle = session.handle();
+        let handle = session.handle();
         let address = address.to_string();
         tokio::spawn(async move {
             let mut channel = handle

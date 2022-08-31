@@ -25,9 +25,9 @@ impl PubKey for PublicKey {
     fn push_to(&self, buffer: &mut CryptoVec) {
         match self {
             PublicKey::Ed25519(ref public) => {
-                buffer.push_u32_be((ED25519.0.len() + public.key.len() + 8) as u32);
+                buffer.push_u32_be((ED25519.0.len() + public.as_bytes().len() + 8) as u32);
                 buffer.extend_ssh_string(ED25519.0.as_bytes());
-                buffer.extend_ssh_string(&public.key);
+                buffer.extend_ssh_string(public.as_bytes());
             }
             #[cfg(feature = "openssl")]
             PublicKey::RSA { ref key, .. } => {
@@ -48,7 +48,7 @@ impl PubKey for KeyPair {
     fn push_to(&self, buffer: &mut CryptoVec) {
         match self {
             KeyPair::Ed25519(ref key) => {
-                let public = &key.key[32..];
+                let public = key.public.as_bytes();
                 buffer.push_u32_be((ED25519.0.len() + public.len() + 8) as u32);
                 buffer.extend_ssh_string(ED25519.0.as_bytes());
                 buffer.extend_ssh_string(public);

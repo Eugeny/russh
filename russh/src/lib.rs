@@ -281,7 +281,6 @@
 extern crate bitflags;
 #[macro_use]
 extern crate log;
-extern crate russh_libsodium as sodium;
 #[macro_use]
 extern crate thiserror;
 

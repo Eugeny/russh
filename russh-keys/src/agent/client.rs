@@ -99,12 +99,12 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AgentClient<S> {
             self.buf.push(msg::ADD_ID_CONSTRAINED)
         }
         match *key {
-            key::KeyPair::Ed25519(ref secret) => {
+            key::KeyPair::Ed25519(ref pair) => {
                 self.buf.extend_ssh_string(b"ssh-ed25519");
-                let public = &secret.key[32..];
-                self.buf.extend_ssh_string(public);
+                self.buf.extend_ssh_string(pair.public.as_bytes());
                 self.buf.push_u32_be(64);
-                self.buf.extend(&secret.key);
+                self.buf.extend(pair.secret.as_bytes());
+                self.buf.extend(pair.public.as_bytes());
                 self.buf.extend_ssh_string(b"");
             }
             #[cfg(feature = "openssl")]
@@ -261,11 +261,9 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AgentClient<S> {
                             hash: SignatureHash::SHA2_512,
                         })
                     }
-                    b"ssh-ed25519" => {
-                        let mut p = key::ed25519::PublicKey::new_zeroed();
-                        p.key.clone_from_slice(r.read_string()?);
-                        keys.push(PublicKey::Ed25519(p))
-                    }
+                    b"ssh-ed25519" => keys.push(PublicKey::Ed25519(
+                        ed25519_dalek::PublicKey::from_bytes(r.read_string()?)?,
+                    )),
                     t => {
                         info!("Unsupported key type: {:?}", std::str::from_utf8(t))
                     }
@@ -516,7 +514,7 @@ fn key_blob(public: &key::PublicKey, buf: &mut CryptoVec) -> Result<(), Error> {
             buf.extend(&[0, 0, 0, 0]);
             let len0 = buf.len();
             buf.extend_ssh_string(b"ssh-ed25519");
-            buf.extend_ssh_string(&p.key[0..]);
+            buf.extend_ssh_string(p.as_bytes());
             let len1 = buf.len();
             #[allow(clippy::indexing_slicing)] // length is known
             BigEndian::write_u32(&mut buf[5..], (len1 - len0) as u32);

@@ -21,6 +21,7 @@ aes-gcm = "0.10"
 bitflags = "1.2"
 byteorder = "1.3"
 chacha20 = "0.9"
+curve25519-dalek = "3.2"
 poly1305 = "0.8"
 ctr = "0.9"
 digest = "0.10"
@@ -34,7 +35,6 @@ openssl = { version = "0.10", optional = true }
 rand = "0.8"
 russh-cryptovec = { version = "0.7.0-beta.1", path = "../cryptovec" }
 russh-keys = { version = "0.22.0-beta.3", path = "../russh-keys" }
-russh-libsodium = { version = "0.3.0-beta.1", path = "../russh-libsodium" }
 sha1 = "0.10"
 sha2 = "0.10"
 hex-literal = "0.3"

@@ -1,7 +1,7 @@
 # Russh
 [![Rust](https://github.com/warp-tech/russh/actions/workflows/rust.yml/badge.svg)](https://github.com/warp-tech/russh/actions/workflows/rust.yml)  <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
 [![All Contributors](https://img.shields.io/badge/all_contributors-4-orange.svg?style=flat-square)](#contributors-)
-<!-- ALL-CONTRIBUTORS-BADGE:END --> 
+<!-- ALL-CONTRIBUTORS-BADGE:END -->
 
 Async (tokio) SSH2 client and server implementation.
 
@@ -22,7 +22,7 @@ This is a fork of [Thrussh](//nest.pijul.com/pijul/thrussh) by Pierre-Étienne M
   * `diffie-hellman-group1-sha1` :sparkles:
   * `diffie-hellman-group14-sha1` :sparkles:
   * `diffie-hellman-group14-sha256` :sparkles:
-* HMACs:
+* MACs:
   * `hmac-sha1` :sparkles:
   * `hmac-sha2-256` :sparkles:
   * `hmac-sha2-512` :sparkles:
@@ -52,7 +52,6 @@ This is a fork of [Thrussh](//nest.pijul.com/pijul/thrussh) by Pierre-Étienne M
 ### Unsafe code
 
 * `cryptovec` uses `unsafe` for faster copying, initialization and binding to native API.
-* `russh-libsodium` uses `unsafe` for `libsodium` bindings.
 
 ## Contributors ✨
 

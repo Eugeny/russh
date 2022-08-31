@@ -241,20 +241,21 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + 'stat
                 let pos1 = r.position;
                 let concat = r.read_string()?;
                 let _comment = r.read_string()?;
-                if concat.get(32..64) != Some(public_) {
-                    return Ok(false);
-                }
-                use key::ed25519::*;
-                let mut public = PublicKey::new_zeroed();
-                let mut secret = SecretKey::new_zeroed();
-
                 #[allow(clippy::indexing_slicing)] // length checked before
-                public.key.clone_from_slice(&public_[..32]);
-                secret.key.clone_from_slice(concat);
+                let public = ed25519_dalek::PublicKey::from_bytes(
+                    public_.get(..32).ok_or(Error::KeyIsCorrupt)?,
+                )?;
+                let secret = ed25519_dalek::SecretKey::from_bytes(
+                    concat.get(..32).ok_or(Error::KeyIsCorrupt)?,
+                )?;
+
                 writebuf.push(msg::SUCCESS);
 
                 #[allow(clippy::indexing_slicing)] // positions checked before
-                (self.buf[pos0..pos1].to_vec(), key::KeyPair::Ed25519(secret))
+                (
+                    self.buf[pos0..pos1].to_vec(),
+                    key::KeyPair::Ed25519(ed25519_dalek::Keypair { public, secret }),
+                )
             }
             #[cfg(feature = "openssl")]
             b"ssh-rsa" => {
