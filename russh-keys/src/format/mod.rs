@@ -73,7 +73,11 @@ pub fn decode_secret_key(secret: &str, password: Option<&str>) -> Result<key::Ke
             if l == "-----BEGIN OPENSSH PRIVATE KEY-----" {
                 started = true;
                 format = Some(Format::Openssh);
-            } else if l == "-----BEGIN RSA PRIVATE KEY-----" && cfg!(feature = "openssl") {
+            } else if l == "-----BEGIN RSA PRIVATE KEY-----" {
+                #[cfg(not(feature = "openssl"))]
+                {
+                    return Err(Error::UnsupportedKeyType("rsa".as_bytes().to_vec()));
+                }
                 #[cfg(feature = "openssl")]
                 {
                     started = true;
