@@ -10,10 +10,12 @@ name = "russh"
 readme = "../README.md"
 repository = "https://github.com/warp-tech/russh"
 version = "0.34.0-beta.12"
+rust-version = "1.60"
 
 [features]
 default = ["flate2"]
-vendored-openssl = ["openssl", "openssl/vendored"]
+openssl = ["russh-keys/openssl", "dep:openssl"]
+vendored-openssl = ["openssl/vendored", "russh-keys/vendored-openssl"]
 
 [dependencies]
 aes = "0.8"
