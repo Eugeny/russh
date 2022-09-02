@@ -343,6 +343,41 @@ impl<H: Handler> Handle<H> {
         self.wait_channel_confirmation(receiver).await
     }
 
+    pub async fn tcpip_forward<A: Into<String>>(
+        &mut self,
+        address: A,
+        port: u32,
+    ) -> Result<bool, crate::Error> {
+        self.sender
+            .send(Msg::TcpIpForward {
+                want_reply: true,
+                address: address.into(),
+                port,
+            })
+            .await
+            .map_err(|_| crate::Error::SendError)?;
+        if port == 0 {
+            self.wait_recv_reply().await?;
+        }
+        Ok(true)
+    }
+
+    pub async fn cancel_tcpip_forward<A: Into<String>>(
+        &mut self,
+        address: A,
+        port: u32,
+    ) -> Result<bool, crate::Error> {
+        self.sender
+            .send(Msg::CancelTcpIpForward {
+                want_reply: true,
+                address: address.into(),
+                port,
+            })
+            .await
+            .map_err(|_| crate::Error::SendError)?;
+        Ok(true)
+    }
+
     /// Sends a disconnect message.
     pub async fn disconnect(
         &self,
