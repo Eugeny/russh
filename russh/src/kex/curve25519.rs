@@ -78,7 +78,6 @@ impl KexAlgorithm for Curve25519Kex {
         exchange.server_ephemeral.extend(&server_pubkey.0);
         let shared = server_secret * client_pubkey;
         self.shared_secret = Some(shared);
-        println!("kex 1 ok");
         Ok(())
     }
 
