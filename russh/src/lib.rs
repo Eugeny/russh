@@ -4,7 +4,7 @@
     clippy::indexing_slicing,
     clippy::panic
 )]
-#![allow(clippy::single_match)]
+#![allow(clippy::single_match, clippy::upper_case_acronyms)]
 // length checked
 // Copyright 2016 Pierre-Étienne Meunier
 //

@@ -57,6 +57,8 @@ pub struct Session {
     target_window_size: u32,
     pending_reads: Vec<CryptoVec>,
     pending_len: u32,
+    inbound_channel_sender: Sender<Msg>,
+    inbound_channel_receiver: Receiver<Msg>,
 }
 
 impl Drop for Session {
@@ -473,9 +475,9 @@ where
             config.maximum_packet_size
         );
     }
-    let mut session = Session {
-        target_window_size: config.window_size,
-        common: CommonSession {
+    let mut session = Session::new(
+        config.window_size,
+        CommonSession {
             write_buffer,
             kex: None,
             auth_user: String::new(),
@@ -490,12 +492,9 @@ where
             disconnected: false,
             buffer: CryptoVec::new(),
         },
-        receiver: session_receiver,
-        sender: session_sender,
-        channels: HashMap::new(),
-        pending_reads: Vec::new(),
-        pending_len: 0,
-    };
+        session_receiver,
+        session_sender,
+    );
     session.read_ssh_id(sshid)?;
     let (encrypted_signal, encrypted_recv) = tokio::sync::oneshot::channel();
     let join = tokio::spawn(session.run(stream, handler, Some(encrypted_signal)));
@@ -523,6 +522,26 @@ async fn start_reading<R: AsyncRead + Unpin>(
 }
 
 impl Session {
+    fn new(
+        target_window_size: u32,
+        common: CommonSession<Arc<Config>>,
+        receiver: Receiver<Msg>,
+        sender: UnboundedSender<Reply>,
+    ) -> Self {
+        let (inbound_channel_sender, inbound_channel_receiver) = channel(10);
+        Self {
+            common,
+            receiver,
+            sender,
+            target_window_size,
+            inbound_channel_sender,
+            inbound_channel_receiver,
+            channels: HashMap::new(),
+            pending_reads: Vec::new(),
+            pending_len: 0,
+        }
+    }
+
     async fn run<H: Handler + Send, R: AsyncRead + AsyncWrite + Unpin + Send>(
         mut self,
         mut stream: SshRead<R>,
@@ -596,67 +615,17 @@ impl Session {
                 }
                 msg = self.receiver.recv(), if !self.is_rekeying() => {
                     match msg {
-                        Some(Msg::Authenticate { user, method }) => {
-                            self.write_auth_request_if_needed(&user, method);
-                        }
-                        Some(Msg::Signed { .. }) => {},
-                        Some(Msg::ChannelOpenSession { sender }) => {
-                            let id = self.channel_open_session()?;
-                            self.channels.insert(id, sender);
-                        }
-                        Some(Msg::ChannelOpenX11 { originator_address, originator_port, sender }) => {
-                            let id = self.channel_open_x11(&originator_address, originator_port)?;
-                            self.channels.insert(id, sender);
-                        }
-                        Some(Msg::ChannelOpenDirectTcpIp { host_to_connect, port_to_connect, originator_address, originator_port, sender }) => {
-                            let id = self.channel_open_direct_tcpip(&host_to_connect, port_to_connect, &originator_address, originator_port)?;
-                            self.channels.insert(id, sender);
-                        }
-                        Some(Msg::TcpIpForward { want_reply, address, port }) => {
-                            self.tcpip_forward(want_reply, &address, port)
-                        },
-                        Some(Msg::CancelTcpIpForward { want_reply, address, port }) => {
-                            self.cancel_tcpip_forward(want_reply, &address, port)
-                        },
-                        Some(Msg::Disconnect { reason, description, language_tag }) => {
-                            self.disconnect(reason, &description, &language_tag)
-                        },
-                        Some(Msg::Channel(id, ChannelMsg::Data { data })) => { self.data(id, data) },
-                        Some(Msg::Channel(id, ChannelMsg::Eof)) => { self.eof(id); },
-                        Some(Msg::Channel(id, ChannelMsg::ExtendedData { data, ext })) => { self.extended_data(id, ext, data); },
-                        Some(Msg::Channel(id, ChannelMsg::RequestPty { want_reply, term, col_width, row_height, pix_width, pix_height, terminal_modes })) => {
-                            self.request_pty(id, want_reply, &term, col_width, row_height, pix_width, pix_height, &terminal_modes)
-                        },
-                        Some(Msg::Channel(id, ChannelMsg::WindowChange { col_width, row_height, pix_width, pix_height })) => {
-                            self.window_change(id, col_width, row_height, pix_width, pix_height)
-                        },
-                        Some(Msg::Channel(id, ChannelMsg::RequestX11 { want_reply, single_connection, x11_authentication_protocol, x11_authentication_cookie, x11_screen_number })) => {
-                            self.request_x11(id, want_reply, single_connection, &x11_authentication_protocol, &x11_authentication_cookie, x11_screen_number)
-                        },
-                        Some(Msg::Channel(id, ChannelMsg::SetEnv { want_reply, variable_name, variable_value })) => {
-                            self.set_env(id, want_reply, &variable_name, &variable_value)
-                        },
-                        Some(Msg::Channel(id, ChannelMsg::RequestShell { want_reply })) => {
-                            self.request_shell(want_reply, id)
-                        },
-                        Some(Msg::Channel(id, ChannelMsg::Exec { want_reply, command })) => {
-                            self.exec(id, want_reply, &command)
-                        },
-                        Some(Msg::Channel(id, ChannelMsg::Signal { signal })) => {
-                            self.signal(id, signal)
-                        },
-                        Some(Msg::Channel(id, ChannelMsg::RequestSubsystem { want_reply, name })) => {
-                            self.request_subsystem(want_reply, id, &name)
-                        },
-                        Some(_) => {
-                            // should be unreachable, since the receiver only gets
-                            // messages from methods implemented within russh
-                            unimplemented!("unimplemented (server-only?) message: {:?}", msg)
-                        },
+                        Some(msg) => self.handle_msg(msg)?,
                         None => {
                             self.common.disconnected = true;
                             break
                         }
+                    }
+                }
+                msg = self.inbound_channel_receiver.recv(), if !self.is_rekeying() => {
+                    match msg {
+                        Some(msg) => self.handle_msg(msg)?,
+                        None => (),
                     }
                 }
             }
@@ -683,6 +652,139 @@ impl Session {
         debug!("disconnected");
         if self.common.disconnected {
             stream_write.shutdown().await.map_err(crate::Error::from)?;
+        }
+        Ok(())
+    }
+
+    fn handle_msg(&mut self, msg: Msg) -> Result<(), crate::Error> {
+        match msg {
+            Msg::Authenticate { user, method } => {
+                self.write_auth_request_if_needed(&user, method);
+            }
+            Msg::Signed { .. } => {}
+            Msg::ChannelOpenSession { sender } => {
+                let id = self.channel_open_session()?;
+                self.channels.insert(id, sender);
+            }
+            Msg::ChannelOpenX11 {
+                originator_address,
+                originator_port,
+                sender,
+            } => {
+                let id = self.channel_open_x11(&originator_address, originator_port)?;
+                self.channels.insert(id, sender);
+            }
+            Msg::ChannelOpenDirectTcpIp {
+                host_to_connect,
+                port_to_connect,
+                originator_address,
+                originator_port,
+                sender,
+            } => {
+                let id = self.channel_open_direct_tcpip(
+                    &host_to_connect,
+                    port_to_connect,
+                    &originator_address,
+                    originator_port,
+                )?;
+                self.channels.insert(id, sender);
+            }
+            Msg::TcpIpForward {
+                want_reply,
+                address,
+                port,
+            } => self.tcpip_forward(want_reply, &address, port),
+            Msg::CancelTcpIpForward {
+                want_reply,
+                address,
+                port,
+            } => self.cancel_tcpip_forward(want_reply, &address, port),
+            Msg::Disconnect {
+                reason,
+                description,
+                language_tag,
+            } => self.disconnect(reason, &description, &language_tag),
+            Msg::Channel(id, ChannelMsg::Data { data }) => self.data(id, data),
+            Msg::Channel(id, ChannelMsg::Eof) => {
+                self.eof(id);
+            }
+            Msg::Channel(id, ChannelMsg::ExtendedData { data, ext }) => {
+                self.extended_data(id, ext, data);
+            }
+            Msg::Channel(
+                id,
+                ChannelMsg::RequestPty {
+                    want_reply,
+                    term,
+                    col_width,
+                    row_height,
+                    pix_width,
+                    pix_height,
+                    terminal_modes,
+                },
+            ) => self.request_pty(
+                id,
+                want_reply,
+                &term,
+                col_width,
+                row_height,
+                pix_width,
+                pix_height,
+                &terminal_modes,
+            ),
+            Msg::Channel(
+                id,
+                ChannelMsg::WindowChange {
+                    col_width,
+                    row_height,
+                    pix_width,
+                    pix_height,
+                },
+            ) => self.window_change(id, col_width, row_height, pix_width, pix_height),
+            Msg::Channel(
+                id,
+                ChannelMsg::RequestX11 {
+                    want_reply,
+                    single_connection,
+                    x11_authentication_protocol,
+                    x11_authentication_cookie,
+                    x11_screen_number,
+                },
+            ) => self.request_x11(
+                id,
+                want_reply,
+                single_connection,
+                &x11_authentication_protocol,
+                &x11_authentication_cookie,
+                x11_screen_number,
+            ),
+            Msg::Channel(
+                id,
+                ChannelMsg::SetEnv {
+                    want_reply,
+                    variable_name,
+                    variable_value,
+                },
+            ) => self.set_env(id, want_reply, &variable_name, &variable_value),
+            Msg::Channel(id, ChannelMsg::RequestShell { want_reply }) => {
+                self.request_shell(want_reply, id)
+            }
+            Msg::Channel(
+                id,
+                ChannelMsg::Exec {
+                    want_reply,
+                    command,
+                },
+            ) => self.exec(id, want_reply, &command),
+            Msg::Channel(id, ChannelMsg::Signal { signal }) => self.signal(id, signal),
+            Msg::Channel(id, ChannelMsg::RequestSubsystem { want_reply, name }) => {
+                self.request_subsystem(want_reply, id, &name)
+            }
+            msg => {
+                // should be unreachable, since the receiver only gets
+                // messages from methods implemented within russh
+                unimplemented!("unimplemented (server-only?) message: {:?}", msg)
+            }
         }
         Ok(())
     }
@@ -1068,7 +1170,7 @@ pub trait Handler: Sized {
     #[allow(unused_variables)]
     fn channel_open_forwarded_tcpip(
         self,
-        channel: ChannelId,
+        channel: Channel<Msg>,
         connected_address: &str,
         connected_port: u32,
         originator_address: &str,

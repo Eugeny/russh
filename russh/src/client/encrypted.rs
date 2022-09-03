@@ -16,13 +16,16 @@ use std::cell::RefCell;
 
 use russh_cryptovec::CryptoVec;
 use russh_keys::encoding::{Encoding, Reader};
+use tokio::sync::mpsc::unbounded_channel;
 
 use crate::client::{Handler, Msg, Reply, Session};
 use crate::key::PubKey;
 use crate::negotiation::{Named, Select};
 use crate::parsing::{ChannelOpenConfirmation, ChannelType, OpenChannelMessage};
 use crate::session::{Encrypted, EncryptedState, Kex, KexInit};
-use crate::{auth, msg, negotiation, ChannelId, ChannelOpenFailure, ChannelParams, Sig};
+use crate::{
+    auth, msg, negotiation, Channel, ChannelId, ChannelOpenFailure, ChannelParams, Sig,
+};
 
 thread_local! {
     static SIGNATURE_BUFFER: RefCell<CryptoVec> = RefCell::new(CryptoVec::new());
@@ -398,17 +401,6 @@ impl Session {
                     std::str::from_utf8(req)
                 );
                 match req {
-                    b"forwarded_tcpip" => {
-                        let a = std::str::from_utf8(r.read_string().map_err(crate::Error::from)?)
-                            .map_err(crate::Error::from)?;
-                        let b = r.read_u32().map_err(crate::Error::from)?;
-                        let c = std::str::from_utf8(r.read_string().map_err(crate::Error::from)?)
-                            .map_err(crate::Error::from)?;
-                        let d = r.read_u32().map_err(crate::Error::from)?;
-                        client
-                            .channel_open_forwarded_tcpip(channel_num, a, b, c, d, self)
-                            .await
-                    }
                     b"xon-xoff" => {
                         r.read_byte().map_err(crate::Error::from)?; // should be 0.
                         let client_can_do = r.read_byte().map_err(crate::Error::from)?;
@@ -579,9 +571,10 @@ impl Session {
                         }
                         ChannelType::ForwardedTcpIp(d) => {
                             confirm();
+                            let channel = self.accept_server_initiated_channel(id, &msg);
                             client
                                 .channel_open_forwarded_tcpip(
-                                    id,
+                                    channel,
                                     &d.host_to_connect,
                                     d.port_to_connect,
                                     &d.originator_address,
@@ -608,6 +601,22 @@ impl Session {
                 info!("Unhandled packet: {:?}", buf);
                 Ok((client, self))
             }
+        }
+    }
+
+    fn accept_server_initiated_channel(
+        &mut self,
+        id: ChannelId,
+        msg: &OpenChannelMessage,
+    ) -> Channel<Msg> {
+        let (sender, receiver) = unbounded_channel();
+        self.channels.insert(id, sender);
+        Channel {
+            id: ChannelId(msg.recipient_channel),
+            sender: self.inbound_channel_sender.clone(),
+            receiver,
+            max_packet_size: msg.recipient_maximum_packet_size,
+            window_size: msg.recipient_window_size,
         }
     }
 

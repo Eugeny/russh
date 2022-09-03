@@ -1,5 +1,4 @@
 use russh_cryptovec::CryptoVec;
-use tokio::sync::broadcast;
 use tokio::sync::mpsc::{Sender, UnboundedReceiver};
 
 use crate::{ChannelId, Error, Pty, Sig};
