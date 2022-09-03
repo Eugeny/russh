@@ -1168,7 +1168,7 @@ pub trait Handler: Sized {
 
     /// Called when a port foward request is made on a channel.
     #[allow(unused_variables)]
-    fn channel_open_forwarded_tcpip(
+    fn server_channel_open_forwarded_tcpip(
         self,
         channel: Channel<Msg>,
         connected_address: &str,
@@ -1212,7 +1212,7 @@ pub trait Handler: Sized {
     #[allow(unused_variables)]
     fn server_channel_open_x11(
         self,
-        channel: ChannelId,
+        channel: Channel<Msg>,
         originator_address: &str,
         originator_port: u32,
         session: Session,

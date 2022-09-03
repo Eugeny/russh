@@ -560,9 +560,10 @@ impl Session {
                             originator_port,
                         } => {
                             confirm();
+                            let channel = self.accept_server_initiated_channel(id, &msg);
                             client
                                 .server_channel_open_x11(
-                                    id,
+                                    channel,
                                     originator_address,
                                     *originator_port,
                                     self,
@@ -573,7 +574,7 @@ impl Session {
                             confirm();
                             let channel = self.accept_server_initiated_channel(id, &msg);
                             client
-                                .channel_open_forwarded_tcpip(
+                                .server_channel_open_forwarded_tcpip(
                                     channel,
                                     &d.host_to_connect,
                                     d.port_to_connect,

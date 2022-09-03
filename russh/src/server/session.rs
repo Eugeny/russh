@@ -46,6 +46,11 @@ pub enum Msg {
         originator_port: u32,
         sender: UnboundedSender<ChannelMsg>,
     },
+    ChannelOpenX11 {
+        originator_address: String,
+        originator_port: u32,
+        sender: UnboundedSender<ChannelMsg>,
+    },
     TcpIpForward {
         address: String,
         port: u32,
@@ -224,6 +229,24 @@ impl Handle {
             .map_err(|_| Error::SendError)?;
         self.wait_channel_confirmation(receiver).await
     }
+
+    pub async fn channel_open_x11<A: Into<String>> (
+        &self,
+        originator_address: A,
+        originator_port: u32,
+    ) -> Result<Channel<Msg>, Error> {
+        let (sender, receiver) = unbounded_channel();
+        self.sender
+            .send(Msg::ChannelOpenX11 {
+                originator_address: originator_address.into(),
+                originator_port,
+                sender,
+            })
+            .await
+            .map_err(|_| Error::SendError)?;
+        self.wait_channel_confirmation(receiver).await
+    }
+
     async fn wait_channel_confirmation(
         &self,
         mut receiver: UnboundedReceiver<ChannelMsg>,
@@ -410,6 +433,10 @@ impl Session {
                         }
                         Some(Msg::ChannelOpenForwardedTcpIp { connected_address, connected_port, originator_address, originator_port, sender }) => {
                             let id = self.channel_open_forwarded_tcpip(&connected_address, connected_port, &originator_address, originator_port)?;
+                            self.channels.insert(id, sender);
+                        }
+                        Some(Msg::ChannelOpenX11 { originator_address, originator_port, sender }) => {
+                            let id = self.channel_open_x11(&originator_address, originator_port)?;
                             self.channels.insert(id, sender);
                         }
                         Some(Msg::TcpIpForward { address, port }) => {
@@ -852,6 +879,53 @@ impl Session {
 
                 enc.write.extend_ssh_string(connected_address.as_bytes());
                 enc.write.push_u32_be(connected_port); // sender channel id.
+                enc.write.extend_ssh_string(originator_address.as_bytes());
+                enc.write.push_u32_be(originator_port); // sender channel id.
+            });
+            sender_channel
+        } else {
+            return Err(Error::Inconsistent);
+        };
+        Ok(result)
+    }
+
+
+    /// Open a new X11 channel, when a connection comes to a
+    /// local port. See [RFC4254](https://tools.ietf.org/html/rfc4254#section-6.3.2).
+    /// TCP/IP packets can then be tunneled through the channel using `.data()`.
+    pub fn channel_open_x11(
+        &mut self,
+        originator_address: &str,
+        originator_port: u32,
+    ) -> Result<ChannelId, Error> {
+        let result = if let Some(ref mut enc) = self.common.encrypted {
+            if !matches!(
+                enc.state,
+                EncryptedState::Authenticated | EncryptedState::InitCompression
+            ) {
+                return Err(Error::Inconsistent);
+            }
+
+            debug!("sending open request");
+            let sender_channel = enc.new_channel(
+                self.common.config.window_size,
+                self.common.config.maximum_packet_size,
+            );
+            push_packet!(enc.write, {
+                enc.write.push(msg::CHANNEL_OPEN);
+                enc.write.extend_ssh_string(b"x11");
+
+                // sender channel id.
+                enc.write.push_u32_be(sender_channel.0);
+
+                // window.
+                enc.write
+                    .push_u32_be(self.common.config.as_ref().window_size);
+
+                // max packet size.
+                enc.write
+                    .push_u32_be(self.common.config.as_ref().maximum_packet_size);
+
                 enc.write.extend_ssh_string(originator_address.as_bytes());
                 enc.write.push_u32_be(originator_port); // sender channel id.
             });
