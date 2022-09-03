@@ -1,4 +1,5 @@
 use russh_cryptovec::CryptoVec;
+use tokio::sync::broadcast;
 use tokio::sync::mpsc::{Sender, UnboundedReceiver};
 
 use crate::{ChannelId, Error, Pty, Sig};
@@ -102,6 +103,12 @@ pub struct Channel<Send: From<(ChannelId, ChannelMsg)>> {
     pub(crate) receiver: UnboundedReceiver<ChannelMsg>,
     pub(crate) max_packet_size: u32,
     pub(crate) window_size: u32,
+}
+
+impl<T: From<(ChannelId, ChannelMsg)>> std::fmt::Debug for Channel<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Channel").field("id", &self.id).finish()
+    }
 }
 
 impl<Send: From<(ChannelId, ChannelMsg)>> Channel<Send> {
