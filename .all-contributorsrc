@@ -40,6 +40,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "evilsocket",
+      "name": "Simone Margaritelli",
+      "avatar_url": "https://avatars.githubusercontent.com/u/86922?v=4",
+      "profile": "https://www.evilsocket.net",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,
