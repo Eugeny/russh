@@ -305,6 +305,7 @@ pub use negotiation::{Named, Preferred};
 mod pty;
 
 pub use pty::Pty;
+pub use sshbuffer::SshId;
 
 macro_rules! push_packet {
     ( $buffer:expr, $x:expr ) => {{
@@ -465,30 +466,6 @@ pub enum Error {
 #[derive(Debug, Error)]
 #[error("Could not reach the event loop")]
 pub struct SendError {}
-
-/// Since handlers are large, their associated future types must implement this
-/// trait to provide reasonable default implementations (basically, rejecting
-/// all requests).
-pub trait FromFinished<T>: futures::Future<Output = Result<T, Error>> {
-    /// Turns type `T` into `Self`, a future yielding `T`.
-    fn finished(t: T) -> Self;
-}
-
-impl<T> FromFinished<T> for futures::future::Ready<Result<T, Error>> {
-    fn finished(t: T) -> Self {
-        futures::future::ready(Ok(t))
-    }
-}
-
-impl<T: 'static> FromFinished<T> for Box<dyn futures::Future<Output = Result<T, Error>> + Unpin> {
-    fn finished(t: T) -> Self {
-        Box::new(futures::future::ready(Ok(t)))
-    }
-}
-
-// mod mac;
-// use mac::*;
-// mod compression;
 
 /// The number of bytes read/written, and the number of seconds before a key
 /// re-exchange is requested.
