@@ -39,7 +39,7 @@ use crate::cipher::{self, clear, CipherPair, OpeningKey};
 use crate::key::PubKey;
 use crate::session::{CommonSession, EncryptedState, Exchange, Kex, KexDhDone, KexInit, NewKeys};
 use crate::ssh_read::SshRead;
-use crate::sshbuffer::SSHBuffer;
+use crate::sshbuffer::{SSHBuffer, SSHId};
 use crate::{auth, msg, negotiation, ChannelId, ChannelOpenFailure, Disconnect, Limits, Sig};
 
 mod encrypted;
@@ -458,7 +458,7 @@ where
 {
     // Writing SSH id.
     let mut write_buffer = SSHBuffer::new();
-    write_buffer.send_ssh_id(config.as_ref().client_id.as_bytes());
+    write_buffer.send_ssh_id(&config.as_ref().client_id);
     stream
         .write_all(&write_buffer.buffer)
         .await
@@ -804,7 +804,7 @@ impl Session {
         // Preparing the response
         exchange
             .client_id
-            .extend(self.common.config.as_ref().client_id.as_bytes());
+            .extend(&self.common.config.as_ref().client_id.to_bytes());
         let mut kexinit = KexInit {
             exchange,
             algo: None,
@@ -1020,7 +1020,7 @@ fn initial_encrypted_state(session: &Session) -> EncryptedState {
 #[derive(Debug)]
 pub struct Config {
     /// The client ID string sent at the beginning of the protocol.
-    pub client_id: String,
+    pub client_id: SSHId,
     /// The bytes and time limits before key re-exchange.
     pub limits: Limits,
     /// The initial size of a channel (used for flow control).
@@ -1038,11 +1038,11 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Config {
         Config {
-            client_id: format!(
+            client_id: SSHId::Standard(format!(
                 "SSH-2.0-{}_{}",
                 env!("CARGO_PKG_NAME"),
                 env!("CARGO_PKG_VERSION")
-            ),
+            )),
             limits: Limits::default(),
             window_size: 2097152,
             maximum_packet_size: 32768,

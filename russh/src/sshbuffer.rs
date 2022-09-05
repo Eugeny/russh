@@ -17,6 +17,24 @@ use std::num::Wrapping;
 
 use super::*;
 
+/// The SSH id buffer.
+#[derive(Debug)]
+pub enum SSHId {
+    /// When sending the id, append RFC standard '\r\n'
+    Standard(String),
+    /// When sending the id, use this buffer as it is and do not append additional line terminators.
+    Raw(String),
+}
+
+impl SSHId {
+    pub fn to_bytes(&self) -> Vec<u8> {
+        match self {
+            Self::Standard(s) => format!("{}\r\n", s).as_bytes().to_vec(),
+            Self::Raw(s) => s.as_bytes().to_vec(),
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct SSHBuffer {
     pub buffer: CryptoVec,
@@ -37,9 +55,7 @@ impl SSHBuffer {
         }
     }
 
-    pub fn send_ssh_id(&mut self, id: &[u8]) {
-        self.buffer.extend(id);
-        self.buffer.push(b'\r');
-        self.buffer.push(b'\n');
+    pub fn send_ssh_id(&mut self, id: &SSHId) {
+        self.buffer.extend(&id.to_bytes());
     }
 }

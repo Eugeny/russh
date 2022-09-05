@@ -43,7 +43,7 @@ mod encrypted;
 /// Configuration of a server.
 pub struct Config {
     /// The server ID string sent at the beginning of the protocol.
-    pub server_id: String,
+    pub server_id: SSHId,
     /// Authentication methods proposed to the client.
     pub methods: auth::MethodSet,
     /// The authentication banner, usually a warning message shown to the client.
@@ -70,11 +70,11 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Config {
         Config {
-            server_id: format!(
+            server_id: SSHId::Standard(format!(
                 "SSH-2.0-{}_{}",
                 env!("CARGO_PKG_NAME"),
                 env!("CARGO_PKG_VERSION")
-            ),
+            )),
             methods: auth::MethodSet::all(),
             auth_banner: None,
             auth_rejection_time: std::time::Duration::from_secs(1),
@@ -565,7 +565,7 @@ where
 {
     // Writing SSH id.
     let mut write_buffer = SSHBuffer::new();
-    write_buffer.send_ssh_id(config.as_ref().server_id.as_bytes());
+    write_buffer.send_ssh_id(&config.as_ref().server_id);
     stream
         .write_all(&write_buffer.buffer[..])
         .await
@@ -606,7 +606,7 @@ async fn read_ssh_id<R: AsyncRead + Unpin>(
     // Preparing the response
     exchange
         .server_id
-        .extend(config.as_ref().server_id.as_bytes());
+        .extend(&config.as_ref().server_id.to_bytes());
     let mut kexinit = KexInit {
         exchange,
         algo: None,
