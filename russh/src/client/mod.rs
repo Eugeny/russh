@@ -804,7 +804,7 @@ impl Session {
         // Preparing the response
         exchange
             .client_id
-            .extend(&self.common.config.client_id.as_kex_hash_bytes());
+            .extend(self.common.config.client_id.as_kex_hash_bytes());
         let mut kexinit = KexInit {
             exchange,
             algo: None,

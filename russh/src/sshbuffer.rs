@@ -36,7 +36,7 @@ impl SshId {
 
     pub(crate) fn write(&self, buffer: &mut CryptoVec) {
         match self {
-            Self::Standard(s) => buffer.extend(&format!("{}\r\n", s).as_bytes()),
+            Self::Standard(s) => buffer.extend(format!("{}\r\n", s).as_bytes()),
             Self::Raw(s) => buffer.extend(s.as_bytes()),
         }
     }

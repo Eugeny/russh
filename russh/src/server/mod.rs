@@ -606,7 +606,7 @@ async fn read_ssh_id<R: AsyncRead + Unpin>(
     // Preparing the response
     exchange
         .server_id
-        .extend(&config.as_ref().server_id.as_kex_hash_bytes());
+        .extend(config.as_ref().server_id.as_kex_hash_bytes());
     let mut kexinit = KexInit {
         exchange,
         algo: None,
