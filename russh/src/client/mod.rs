@@ -39,7 +39,7 @@ use crate::cipher::{self, clear, CipherPair, OpeningKey};
 use crate::key::PubKey;
 use crate::session::{CommonSession, EncryptedState, Exchange, Kex, KexDhDone, KexInit, NewKeys};
 use crate::ssh_read::SshRead;
-use crate::sshbuffer::{SSHBuffer, SSHId};
+use crate::sshbuffer::{SSHBuffer, SshId};
 use crate::{auth, msg, negotiation, ChannelId, ChannelOpenFailure, Disconnect, Limits, Sig};
 
 mod encrypted;
@@ -804,7 +804,7 @@ impl Session {
         // Preparing the response
         exchange
             .client_id
-            .extend(&self.common.config.as_ref().client_id.to_bytes());
+            .extend(&self.common.config.client_id.as_kex_hash_bytes());
         let mut kexinit = KexInit {
             exchange,
             algo: None,
@@ -1020,7 +1020,7 @@ fn initial_encrypted_state(session: &Session) -> EncryptedState {
 #[derive(Debug)]
 pub struct Config {
     /// The client ID string sent at the beginning of the protocol.
-    pub client_id: SSHId,
+    pub client_id: SshId,
     /// The bytes and time limits before key re-exchange.
     pub limits: Limits,
     /// The initial size of a channel (used for flow control).
@@ -1038,7 +1038,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Config {
         Config {
-            client_id: SSHId::Standard(format!(
+            client_id: SshId::Standard(format!(
                 "SSH-2.0-{}_{}",
                 env!("CARGO_PKG_NAME"),
                 env!("CARGO_PKG_VERSION")
