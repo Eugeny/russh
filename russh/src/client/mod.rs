@@ -620,12 +620,28 @@ impl Session {
                             self.common.disconnected = true;
                             break
                         }
+                    };
+
+                    // eagerly take all outgoing messages so writes are batched
+                    while !self.is_rekeying() {
+                        match self.receiver.try_recv() {
+                            Ok(next) => self.handle_msg(next)?,
+                            Err(_) => break
+                        }
                     }
                 }
                 msg = self.inbound_channel_receiver.recv(), if !self.is_rekeying() => {
                     match msg {
                         Some(msg) => self.handle_msg(msg)?,
                         None => (),
+                    }
+
+                    // eagerly take all outgoing messages so writes are batched
+                    while !self.is_rekeying() {
+                        match self.inbound_channel_receiver.try_recv() {
+                            Ok(next) => self.handle_msg(next)?,
+                            Err(_) => break
+                        }
                     }
                 }
             }
