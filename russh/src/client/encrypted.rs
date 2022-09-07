@@ -36,7 +36,7 @@ impl Session {
     ) -> Result<(H, Self), H::Error> {
         #[allow(clippy::indexing_slicing)] // length checked
         {
-            debug!(
+            trace!(
                 "client_read_encrypted, buf = {:?}",
                 &buf[..buf.len().min(20)]
             );
@@ -139,7 +139,7 @@ impl Session {
         buf: &[u8],
     ) -> Result<(H, Self), H::Error> {
         // If we've successfully read a packet.
-        debug!("process_packet buf = {:?} bytes", buf.len());
+        trace!("process_packet buf = {:?} bytes", buf.len());
         trace!("buf = {:?}", buf);
         let mut is_authenticated = false;
         if let Some(ref mut enc) = self.common.encrypted {
@@ -352,7 +352,7 @@ impl Session {
                     .await
             }
             Some(&msg::CHANNEL_DATA) => {
-                debug!("channel_data");
+                trace!("channel_data");
                 let mut r = buf.reader(1);
                 let channel_num = ChannelId(r.read_u32().map_err(crate::Error::from)?);
                 let data = r.read_string().map_err(crate::Error::from)?;

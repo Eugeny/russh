@@ -157,9 +157,12 @@ impl Encrypted {
     }
 
     pub fn adjust_window_size(&mut self, channel: ChannelId, data: &[u8], target: u32) -> bool {
-        debug!("adjust_window_size");
-        if let Some(ref mut channel) = self.channels.get_mut(&channel) {
-            debug!("channel {:?}", channel);
+        if let Some(channel) = self.channels.get_mut(&channel) {
+            trace!(
+                "adjust_window_size, channel = {}, size = {},",
+                channel.sender_channel,
+                target
+            );
             // Ignore extra data.
             // https://tools.ietf.org/html/rfc4254#section-5.2
             if data.len() as u32 <= channel.sender_window_size {
@@ -247,7 +250,7 @@ impl Encrypted {
                 #[allow(clippy::indexing_slicing)] // length checked
                 write.extend_ssh_string(&buf[..off]);
             });
-            debug!(
+            trace!(
                 "buffer: {:?} {:?}",
                 write.len(),
                 channel.recipient_window_size
@@ -258,7 +261,7 @@ impl Encrypted {
                 buf = &buf[off..]
             }
         }
-        debug!("buf.len() = {:?}, buf_len = {:?}", buf.len(), buf_len);
+        trace!("buf.len() = {:?}, buf_len = {:?}", buf.len(), buf_len);
         buf_len
     }
 
@@ -302,14 +305,14 @@ impl Encrypted {
                     #[allow(clippy::indexing_slicing)] // length checked
                     self.write.extend_ssh_string(&buf[..off]);
                 });
-                debug!("buffer: {:?}", self.write.deref().len());
+                trace!("buffer: {:?}", self.write.deref().len());
                 channel.recipient_window_size -= off as u32;
                 #[allow(clippy::indexing_slicing)] // length checked
                 {
                     buf = &buf[off..]
                 }
             }
-            debug!("buf.len() = {:?}, buf_len = {:?}", buf.len(), buf_len);
+            trace!("buf.len() = {:?}, buf_len = {:?}", buf.len(), buf_len);
             if buf_len < buf0.len() {
                 channel.pending_data.push_back((buf0, Some(ext), buf_len))
             }

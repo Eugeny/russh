@@ -627,7 +627,7 @@ impl Session {
             }
             self.flush()?;
             if !self.common.write_buffer.buffer.is_empty() {
-                debug!(
+                trace!(
                     "writing to stream: {:?} bytes",
                     self.common.write_buffer.buffer.len()
                 );
