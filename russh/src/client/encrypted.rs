@@ -50,25 +50,29 @@ impl Session {
             // Now, if we're encrypted:
             if let Some(ref mut enc) = self.common.encrypted {
                 // If we're not currently re-keying, but buf is a rekey request
-                if let Some(Kex::Init(kexinit)) = enc.rekey.take() {
-                    enc.rekey = Some(Kex::DhDone(kexinit.client_parse(
-                        self.common.config.as_ref(),
-                        &mut *self.common.cipher.local_to_remote,
-                        buf,
-                        &mut self.common.write_buffer,
-                    )?));
+                let kexinit = if let Some(Kex::Init(kexinit)) = enc.rekey.take() {
+                    Some(kexinit)
                 } else if let Some(exchange) = std::mem::replace(&mut enc.exchange, None) {
-                    let kexinit = KexInit::received_rekey(
+                    Some(KexInit::received_rekey(
                         exchange,
                         negotiation::Client::read_kex(buf, &self.common.config.as_ref().preferred)?,
                         &enc.session_id,
-                    );
-                    enc.rekey = Some(Kex::DhDone(kexinit.client_parse(
+                    ))
+                } else {
+                    None
+                };
+
+                if let Some(kexinit) = kexinit {
+                    let dhdone = kexinit.client_parse(
                         self.common.config.as_ref(),
                         &mut *self.common.cipher.local_to_remote,
                         buf,
                         &mut self.common.write_buffer,
-                    )?));
+                    )?;
+
+                    if !enc.kex.skip_exchange() {
+                        enc.rekey = Some(Kex::DhDone(dhdone));
+                    }
                 }
             } else {
                 unreachable!()
