@@ -270,6 +270,7 @@ pub enum KeyPair {
 impl Clone for KeyPair {
     fn clone(&self) -> Self {
         match self {
+            #[allow(clippy::expect_used)]
             Self::Ed25519(kp) => Self::Ed25519(
                 ed25519_dalek::Keypair::from_bytes(&kp.to_bytes())
                     .expect("expected to clone keypair"),
@@ -277,7 +278,7 @@ impl Clone for KeyPair {
             #[cfg(feature = "openssl")]
             Self::RSA { key, hash } => Self::RSA {
                 key: key.clone(),
-                hash: hash.clone(),
+                hash: *hash,
             },
         }
     }
