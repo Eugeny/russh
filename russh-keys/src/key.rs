@@ -267,6 +267,23 @@ pub enum KeyPair {
     },
 }
 
+impl Clone for KeyPair {
+    fn clone(&self) -> Self {
+        match self {
+            #[allow(clippy::expect_used)]
+            Self::Ed25519(kp) => Self::Ed25519(
+                ed25519_dalek::Keypair::from_bytes(&kp.to_bytes())
+                    .expect("expected to clone keypair"),
+            ),
+            #[cfg(feature = "openssl")]
+            Self::RSA { key, hash } => Self::RSA {
+                key: key.clone(),
+                hash: *hash,
+            },
+        }
+    }
+}
+
 impl std::fmt::Debug for KeyPair {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match *self {

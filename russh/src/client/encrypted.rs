@@ -39,7 +39,7 @@ impl Session {
     ) -> Result<(H, Self), H::Error> {
         #[allow(clippy::indexing_slicing)] // length checked
         {
-            debug!(
+            trace!(
                 "client_read_encrypted, buf = {:?}",
                 &buf[..buf.len().min(20)]
             );
@@ -50,25 +50,29 @@ impl Session {
             // Now, if we're encrypted:
             if let Some(ref mut enc) = self.common.encrypted {
                 // If we're not currently re-keying, but buf is a rekey request
-                if let Some(Kex::Init(kexinit)) = enc.rekey.take() {
-                    enc.rekey = Some(Kex::DhDone(kexinit.client_parse(
-                        self.common.config.as_ref(),
-                        &mut *self.common.cipher.local_to_remote,
-                        buf,
-                        &mut self.common.write_buffer,
-                    )?));
+                let kexinit = if let Some(Kex::Init(kexinit)) = enc.rekey.take() {
+                    Some(kexinit)
                 } else if let Some(exchange) = std::mem::replace(&mut enc.exchange, None) {
-                    let kexinit = KexInit::received_rekey(
+                    Some(KexInit::received_rekey(
                         exchange,
                         negotiation::Client::read_kex(buf, &self.common.config.as_ref().preferred)?,
                         &enc.session_id,
-                    );
-                    enc.rekey = Some(Kex::DhDone(kexinit.client_parse(
+                    ))
+                } else {
+                    None
+                };
+
+                if let Some(kexinit) = kexinit {
+                    let dhdone = kexinit.client_parse(
                         self.common.config.as_ref(),
                         &mut *self.common.cipher.local_to_remote,
                         buf,
                         &mut self.common.write_buffer,
-                    )?));
+                    )?;
+
+                    if !enc.kex.skip_exchange() {
+                        enc.rekey = Some(Kex::DhDone(dhdone));
+                    }
                 }
             } else {
                 unreachable!()
@@ -142,7 +146,7 @@ impl Session {
         buf: &[u8],
     ) -> Result<(H, Self), H::Error> {
         // If we've successfully read a packet.
-        debug!("process_packet buf = {:?} bytes", buf.len());
+        trace!("process_packet buf = {:?} bytes", buf.len());
         trace!("buf = {:?}", buf);
         let mut is_authenticated = false;
         if let Some(ref mut enc) = self.common.encrypted {
@@ -355,7 +359,7 @@ impl Session {
                     .await
             }
             Some(&msg::CHANNEL_DATA) => {
-                debug!("channel_data");
+                trace!("channel_data");
                 let mut r = buf.reader(1);
                 let channel_num = ChannelId(r.read_u32().map_err(crate::Error::from)?);
                 let data = r.read_string().map_err(crate::Error::from)?;

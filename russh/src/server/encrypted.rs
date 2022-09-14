@@ -37,7 +37,7 @@ impl Session {
     ) -> Result<(H, Self), H::Error> {
         #[allow(clippy::indexing_slicing)] // length checked
         {
-            debug!(
+            trace!(
                 "server_read_encrypted, buf = {:?}",
                 &buf[..buf.len().min(20)]
             );
@@ -115,7 +115,7 @@ impl Session {
                 return Ok((handler, self));
             }
             rek => {
-                debug!("rek = {:?}", rek);
+                trace!("rek = {:?}", rek);
                 enc.rekey = rek
             }
         }
@@ -561,7 +561,7 @@ impl Session {
     ) -> Result<(H, Self), H::Error> {
         #[allow(clippy::indexing_slicing)] // length checked
         {
-            debug!(
+            trace!(
                 "authenticated buf = {:?}",
                 &buf[..std::cmp::min(buf.len(), 100)]
             );
@@ -595,7 +595,7 @@ impl Session {
                 } else {
                     Some(r.read_u32().map_err(crate::Error::from)?)
                 };
-                debug!("handler.data {:?} {:?}", ext, channel_num);
+                trace!("handler.data {:?} {:?}", ext, channel_num);
                 let data = r.read_string().map_err(crate::Error::from)?;
                 let target = self.target_window_size;
 
