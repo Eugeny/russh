@@ -178,8 +178,10 @@ impl Session {
                 if resp {
                     enc.state = EncryptedState::InitCompression;
                     enc.client_compression.init_decompress(&mut enc.decompress);
+                    handler.auth_succeeded(self).await
+                } else {
+                    Ok((handler, self))
                 }
-                Ok((handler, self))
             }
             EncryptedState::InitCompression => {
                 enc.server_compression.init_compress(&mut enc.compress);
