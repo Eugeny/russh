@@ -23,9 +23,7 @@ use crate::key::PubKey;
 use crate::negotiation::{Named, Select};
 use crate::parsing::{ChannelOpenConfirmation, ChannelType, OpenChannelMessage};
 use crate::session::{Encrypted, EncryptedState, Kex, KexInit};
-use crate::{
-    auth, msg, negotiation, Channel, ChannelId, ChannelOpenFailure, ChannelParams, Sig,
-};
+use crate::{auth, msg, negotiation, Channel, ChannelId, ChannelOpenFailure, ChannelParams, Sig};
 
 thread_local! {
     static SIGNATURE_BUFFER: RefCell<CryptoVec> = RefCell::new(CryptoVec::new());
@@ -437,6 +435,25 @@ impl Session {
                             )
                             .await
                     }
+                    b"keepalive@openssh.com" => {
+                        let wants_reply = r.read_byte().map_err(crate::Error::from)?;
+                        if wants_reply == 1 {
+                            if let Some(ref mut enc) = self.common.encrypted {
+                                trace!(
+                                    "Received channel keep alive message: {:?}",
+                                    std::str::from_utf8(req),
+                                );
+                                self.common.wants_reply = false;
+                                push_packet!(enc.write, {
+                                    enc.write.push(msg::CHANNEL_SUCCESS);
+                                    enc.write.push_u32_be(channel_num.0)
+                                });
+                            }
+                        } else {
+                            warn!("Received keepalive without reply request!");
+                        }
+                        Ok((client, self))
+                    }
                     _ => {
                         let wants_reply = r.read_byte().map_err(crate::Error::from)?;
                         if wants_reply == 1 {
@@ -481,14 +498,14 @@ impl Session {
                 if let Some(ref mut enc) = self.common.encrypted {
                     if req.starts_with(b"keepalive") {
                         if wants_reply == 1 {
-                            info!(
+                            trace!(
                                 "Received keep alive message: {:?}",
                                 std::str::from_utf8(req),
                             );
                             self.common.wants_reply = false;
                             push_packet!(enc.write, enc.write.push(msg::REQUEST_SUCCESS));
                         } else {
-                            warn!("Received keepalive@openssh.com without reply request!");
+                            warn!("Received keepalive without reply request!");
                         }
                     } else {
                         warn!(
