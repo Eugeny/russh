@@ -300,6 +300,19 @@ impl Session {
         }
     }
 
+    pub fn agent_forward(&mut self, channel: ChannelId, want_reply: bool) {
+        if let Some(ref mut enc) = self.common.encrypted {
+            if let Some(channel) = enc.channels.get(&channel) {
+                push_packet!(enc.write, {
+                    enc.write.push(msg::CHANNEL_REQUEST);
+                    enc.write.push_u32_be(channel.recipient_channel);
+                    enc.write.extend_ssh_string(b"auth-agent-req@openssh.com");
+                    enc.write.push(if want_reply { 1 } else { 0 });
+                });
+            }
+        }
+    }
+
     pub fn disconnect(&mut self, reason: Disconnect, description: &str, language_tag: &str) {
         self.common.disconnect(reason, description, language_tag);
     }

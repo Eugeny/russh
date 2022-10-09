@@ -68,6 +68,10 @@ pub enum ChannelMsg {
         pix_width: u32,
         pix_height: u32,
     },
+    /// (client only)
+    AgentForward {
+        want_reply: bool,
+    },
 
     /// (server only)
     XonXoff {
@@ -243,6 +247,13 @@ impl<Send: From<(ChannelId, ChannelMsg)>> Channel<Send> {
             pix_height,
         })
         .await?;
+        Ok(())
+    }
+
+    /// Inform the server that we will accept agent forwarding channels
+    pub async fn agent_forward(&mut self, want_reply: bool) -> Result<(), Error> {
+        self.send_msg(ChannelMsg::AgentForward { want_reply })
+            .await?;
         Ok(())
     }
 
