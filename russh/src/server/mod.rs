@@ -276,7 +276,7 @@ pub trait Handler: Sized {
     #[allow(unused_variables)]
     fn channel_open_forwarded_tcpip(
         self,
-        channel: Channel<Msg>,
+        id: ChannelId,
         host_to_connect: &str,
         port_to_connect: u32,
         originator_address: &str,
