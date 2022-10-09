@@ -6,7 +6,14 @@ use crate::session::EncryptedState;
 use crate::{msg, ChannelId, Disconnect, Pty, Sig};
 
 impl Session {
-    pub fn channel_open_session(&mut self) -> Result<ChannelId, crate::Error> {
+    fn channel_open_generic<F>(
+        &mut self,
+        kind: &[u8],
+        write_suffix: F,
+    ) -> Result<ChannelId, crate::Error>
+    where
+        F: FnOnce(&mut CryptoVec),
+    {
         let result = if let Some(ref mut enc) = self.common.encrypted {
             match enc.state {
                 EncryptedState::Authenticated => {
@@ -16,7 +23,7 @@ impl Session {
                     );
                     push_packet!(enc.write, {
                         enc.write.push(msg::CHANNEL_OPEN);
-                        enc.write.extend_ssh_string(b"session");
+                        enc.write.extend_ssh_string(kind);
 
                         // sender channel id.
                         enc.write.push_u32_be(sender_channel.0);
@@ -28,6 +35,8 @@ impl Session {
                         // max packet size.
                         enc.write
                             .push_u32_be(self.common.config.as_ref().maximum_packet_size);
+
+                        write_suffix(&mut enc.write);
                     });
                     sender_channel
                 }
@@ -39,44 +48,19 @@ impl Session {
         Ok(result)
     }
 
+    pub fn channel_open_session(&mut self) -> Result<ChannelId, crate::Error> {
+        self.channel_open_generic(b"session", |_| ())
+    }
+
     pub fn channel_open_x11(
         &mut self,
         originator_address: &str,
         originator_port: u32,
     ) -> Result<ChannelId, crate::Error> {
-        let result = if let Some(ref mut enc) = self.common.encrypted {
-            match enc.state {
-                EncryptedState::Authenticated => {
-                    let sender_channel = enc.new_channel(
-                        self.common.config.window_size,
-                        self.common.config.maximum_packet_size,
-                    );
-                    push_packet!(enc.write, {
-                        enc.write.push(msg::CHANNEL_OPEN);
-                        enc.write.extend_ssh_string(b"x11");
-
-                        // sender channel id.
-                        enc.write.push_u32_be(sender_channel.0);
-
-                        // window.
-                        enc.write
-                            .push_u32_be(self.common.config.as_ref().window_size);
-
-                        // max packet size.
-                        enc.write
-                            .push_u32_be(self.common.config.as_ref().maximum_packet_size);
-
-                        enc.write.extend_ssh_string(originator_address.as_bytes());
-                        enc.write.push_u32_be(originator_port); // sender channel id.
-                    });
-                    sender_channel
-                }
-                _ => return Err(crate::Error::NotAuthenticated),
-            }
-        } else {
-            return Err(crate::Error::Inconsistent);
-        };
-        Ok(result)
+        self.channel_open_generic(b"x11", |write| {
+            write.extend_ssh_string(originator_address.as_bytes());
+            write.push_u32_be(originator_port); // sender channel id.
+        })
     }
 
     pub fn channel_open_direct_tcpip(
@@ -86,41 +70,12 @@ impl Session {
         originator_address: &str,
         originator_port: u32,
     ) -> Result<ChannelId, crate::Error> {
-        let result = if let Some(ref mut enc) = self.common.encrypted {
-            match enc.state {
-                EncryptedState::Authenticated => {
-                    let sender_channel = enc.new_channel(
-                        self.common.config.window_size,
-                        self.common.config.maximum_packet_size,
-                    );
-                    push_packet!(enc.write, {
-                        enc.write.push(msg::CHANNEL_OPEN);
-                        enc.write.extend_ssh_string(b"direct-tcpip");
-
-                        // sender channel id.
-                        enc.write.push_u32_be(sender_channel.0);
-
-                        // window.
-                        enc.write
-                            .push_u32_be(self.common.config.as_ref().window_size);
-
-                        // max packet size.
-                        enc.write
-                            .push_u32_be(self.common.config.as_ref().maximum_packet_size);
-
-                        enc.write.extend_ssh_string(host_to_connect.as_bytes());
-                        enc.write.push_u32_be(port_to_connect); // sender channel id.
-                        enc.write.extend_ssh_string(originator_address.as_bytes());
-                        enc.write.push_u32_be(originator_port); // sender channel id.
-                    });
-                    sender_channel
-                }
-                _ => return Err(crate::Error::NotAuthenticated),
-            }
-        } else {
-            return Err(crate::Error::Inconsistent);
-        };
-        Ok(result)
+        self.channel_open_generic(b"direct-tcpip", |write| {
+            write.extend_ssh_string(host_to_connect.as_bytes());
+            write.push_u32_be(port_to_connect); // sender channel id.
+            write.extend_ssh_string(originator_address.as_bytes());
+            write.push_u32_be(originator_port); // sender channel id.
+        })
     }
 
     #[allow(clippy::too_many_arguments)]
