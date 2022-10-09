@@ -240,7 +240,7 @@ pub trait Handler: Sized {
     /// Return value indicates whether the channel request should be granted.
     #[allow(unused_variables)]
     fn channel_open_session(self, channel: ChannelId, session: Session) -> Self::FutureBool {
-        self.finished_bool(true, session)
+        self.finished_bool(false, session)
     }
 
     /// Called when a new X11 channel is created.
@@ -248,12 +248,12 @@ pub trait Handler: Sized {
     #[allow(unused_variables)]
     fn channel_open_x11(
         self,
-        channel: ChannelId,
+        channel: Channel<Msg>,
         originator_address: &str,
         originator_port: u32,
         session: Session,
     ) -> Self::FutureBool {
-        self.finished_bool(true, session)
+        self.finished_bool(false, session)
     }
 
     /// Called when a new TCP/IP is created.
@@ -261,14 +261,14 @@ pub trait Handler: Sized {
     #[allow(unused_variables)]
     fn channel_open_direct_tcpip(
         self,
-        channel: ChannelId,
+        channel: Channel<Msg>,
         host_to_connect: &str,
         port_to_connect: u32,
         originator_address: &str,
         originator_port: u32,
         session: Session,
     ) -> Self::FutureBool {
-        self.finished_bool(true, session)
+        self.finished_bool(false, session)
     }
 
     /// Called when a new forwarded connection comes in.
@@ -276,14 +276,14 @@ pub trait Handler: Sized {
     #[allow(unused_variables)]
     fn channel_open_forwarded_tcpip(
         self,
-        channel: ChannelId,
+        channel: Channel<Msg>,
         host_to_connect: &str,
         port_to_connect: u32,
         originator_address: &str,
         originator_port: u32,
         session: Session,
     ) -> Self::FutureBool {
-        self.finished_bool(true, session)
+        self.finished_bool(false, session)
     }
 
     /// Called when the client confirmed our request to open a

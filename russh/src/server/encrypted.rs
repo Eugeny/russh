@@ -947,6 +947,16 @@ impl Session {
                 }
                 result
             }
+            ChannelType::AgentForward => {
+                if let Some(ref mut enc) = self.common.encrypted {
+                    msg.fail(
+                        &mut enc.write,
+                        msg::SSH_OPEN_ADMINISTRATIVELY_PROHIBITED,
+                        b"Unsupported channel type",
+                    );
+                }
+                Ok((handler, self, false))
+            }
             ChannelType::Unknown { typ } => {
                 debug!("unknown channel type: {}", String::from_utf8_lossy(typ));
                 if let Some(ref mut enc) = self.common.encrypted {

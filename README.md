@@ -35,7 +35,8 @@ This is a fork of [Thrussh](//nest.pijul.com/pijul/thrussh) by Pierre-Étienne M
   * `rsa-sha2-512`
   * `ssh-rsa` :sparkles:
 * Dependency updates
-* Handle openssh sshd keepalive channel requests :sparkles:
+* OpenSSH keepalive request handling :sparkles:
+* OpenSSH agent forwarding channels :sparkles:
 
 ## Safety
 

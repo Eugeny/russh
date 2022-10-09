@@ -34,6 +34,7 @@ impl OpenChannelMessage {
             }
             b"direct-tcpip" => ChannelType::DirectTcpip(TcpChannelInfo::new(r)?),
             b"forwarded-tcpip" => ChannelType::ForwardedTcpIp(TcpChannelInfo::new(r)?),
+            b"auth-agent@openssh.com" => ChannelType::AgentForward,
             t => ChannelType::Unknown { typ: t.to_vec() },
         };
 
@@ -92,6 +93,7 @@ pub enum ChannelType {
     },
     DirectTcpip(TcpChannelInfo),
     ForwardedTcpIp(TcpChannelInfo),
+    AgentForward,
     Unknown {
         typ: Vec<u8>,
     },

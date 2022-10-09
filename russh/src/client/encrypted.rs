@@ -605,6 +605,10 @@ impl Session {
                                 )
                                 .await?
                         }
+                        ChannelType::AgentForward => {
+                            confirm();
+                            client.server_channel_open_agent_forward(id, self).await?
+                        }
                         ChannelType::Unknown { typ } => {
                             if client.server_channel_handle_unknown(id, typ) {
                                 confirm();

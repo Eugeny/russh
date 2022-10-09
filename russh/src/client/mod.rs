@@ -796,6 +796,9 @@ impl Session {
             Msg::Channel(id, ChannelMsg::RequestSubsystem { want_reply, name }) => {
                 self.request_subsystem(want_reply, id, &name)
             }
+            Msg::Channel(id, ChannelMsg::AgentForward { want_reply }) => {
+                self.agent_forward(id, want_reply)
+            }
             msg => {
                 // should be unreachable, since the receiver only gets
                 // messages from methods implemented within russh
@@ -873,6 +876,7 @@ impl Session {
         }
     }
 }
+
 thread_local! {
     static HASH_BUFFER: RefCell<CryptoVec> = RefCell::new(CryptoVec::new());
 }
@@ -1182,7 +1186,7 @@ pub trait Handler: Sized {
         self.finished(session)
     }
 
-    /// Called when a port foward request is made on a channel.
+    /// Called when the server opens a channel for a new remote port forwarding connection
     #[allow(unused_variables)]
     fn server_channel_open_forwarded_tcpip(
         self,
@@ -1191,6 +1195,16 @@ pub trait Handler: Sized {
         connected_port: u32,
         originator_address: &str,
         originator_port: u32,
+        session: Session,
+    ) -> Self::FutureUnit {
+        self.finished(session)
+    }
+
+    /// Called when the server opens an agent forwarding channel
+    #[allow(unused_variables)]
+    fn server_channel_open_agent_forward(
+        self,
+        channel: ChannelId,
         session: Session,
     ) -> Self::FutureUnit {
         self.finished(session)
