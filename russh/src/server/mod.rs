@@ -248,7 +248,7 @@ pub trait Handler: Sized {
     #[allow(unused_variables)]
     fn channel_open_x11(
         self,
-        channel: Channel<Msg>,
+        id: ChannelId,
         originator_address: &str,
         originator_port: u32,
         session: Session,
@@ -261,7 +261,7 @@ pub trait Handler: Sized {
     #[allow(unused_variables)]
     fn channel_open_direct_tcpip(
         self,
-        channel: Channel<Msg>,
+        id: ChannelId,
         host_to_connect: &str,
         port_to_connect: u32,
         originator_address: &str,
