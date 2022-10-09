@@ -809,6 +809,11 @@ impl Session {
         })
     }
 
+    /// Opens a new agent channel on the client.
+    pub fn channel_open_agent(&mut self) -> Result<ChannelId, Error> {
+        self.channel_open_generic(b"auth-agent@openssh.com", |_| ())
+    }
+
     fn channel_open_generic<F>(&mut self, kind: &[u8], write_suffix: F) -> Result<ChannelId, Error>
     where
         F: FnOnce(&mut CryptoVec),

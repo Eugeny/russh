@@ -758,6 +758,18 @@ impl Session {
                         debug!("handler.shell_request {:?}", channel_num);
                         handler.shell_request(channel_num, self).await
                     }
+                    b"auth-agent-req@openssh.com" => {
+                        debug!("handler.agent_request {:?}", channel_num);
+                        let response;
+                        (handler, self, response) =
+                            handler.agent_request(channel_num, self).await?;
+                        if response {
+                            self.request_success()
+                        } else {
+                            self.request_failure()
+                        }
+                        Ok((handler, self))
+                    }
                     b"exec" => {
                         let req = r.read_string().map_err(crate::Error::from)?;
                         debug!("handler.exec_request {:?}", channel_num);
