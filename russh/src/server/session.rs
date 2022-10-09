@@ -230,7 +230,7 @@ impl Handle {
         self.wait_channel_confirmation(receiver).await
     }
 
-    pub async fn channel_open_x11<A: Into<String>> (
+    pub async fn channel_open_x11<A: Into<String>>(
         &self,
         originator_address: A,
         originator_port: u32,
@@ -756,38 +756,7 @@ impl Session {
 
     /// Opens a new session channel on the client.
     pub fn channel_open_session(&mut self) -> Result<ChannelId, Error> {
-        let result = if let Some(ref mut enc) = self.common.encrypted {
-            if !matches!(
-                enc.state,
-                EncryptedState::Authenticated | EncryptedState::InitCompression
-            ) {
-                return Err(Error::Inconsistent);
-            }
-
-            let sender_channel = enc.new_channel(
-                self.common.config.window_size,
-                self.common.config.maximum_packet_size,
-            );
-            push_packet!(enc.write, {
-                enc.write.push(msg::CHANNEL_OPEN);
-                enc.write.extend_ssh_string(b"session");
-
-                // sender channel id.
-                enc.write.push_u32_be(sender_channel.0);
-
-                // window.
-                enc.write
-                    .push_u32_be(self.common.config.as_ref().window_size);
-
-                // max packet size.
-                enc.write
-                    .push_u32_be(self.common.config.as_ref().maximum_packet_size);
-            });
-            sender_channel
-        } else {
-            return Err(Error::Inconsistent);
-        };
-        Ok(result)
+        self.channel_open_generic(b"session", |_| ())
     }
 
     /// Opens a direct TCP/IP channel on the client.
@@ -798,43 +767,12 @@ impl Session {
         originator_address: &str,
         originator_port: u32,
     ) -> Result<ChannelId, Error> {
-        let result = if let Some(ref mut enc) = self.common.encrypted {
-            if !matches!(
-                enc.state,
-                EncryptedState::Authenticated | EncryptedState::InitCompression
-            ) {
-                return Err(Error::Inconsistent);
-            }
-            let sender_channel = enc.new_channel(
-                self.common.config.window_size,
-                self.common.config.maximum_packet_size,
-            );
-            push_packet!(enc.write, {
-                enc.write.push(msg::CHANNEL_OPEN);
-                enc.write.extend_ssh_string(b"direct-tcpip");
-
-                // sender channel id.
-                enc.write.push_u32_be(sender_channel.0);
-
-                // window.
-                enc.write
-                    .push_u32_be(self.common.config.as_ref().window_size);
-
-                // max packet size.
-                enc.write
-                    .push_u32_be(self.common.config.as_ref().maximum_packet_size);
-
-                enc.write.extend_ssh_string(host_to_connect.as_bytes());
-                enc.write.push_u32_be(port_to_connect); // sender channel id.
-                enc.write.extend_ssh_string(originator_address.as_bytes());
-                enc.write.push_u32_be(originator_port); // sender channel id.
-            });
-            sender_channel
-        } else {
-            return Err(Error::Inconsistent);
-        };
-
-        Ok(result)
+        self.channel_open_generic(b"direct-tcpip", |write| {
+            write.extend_ssh_string(host_to_connect.as_bytes());
+            write.push_u32_be(port_to_connect); // sender channel id.
+            write.extend_ssh_string(originator_address.as_bytes());
+            write.push_u32_be(originator_port); // sender channel id.
+        })
     }
 
     /// Open a TCP/IP forwarding channel, when a connection comes to a
@@ -849,46 +787,13 @@ impl Session {
         originator_address: &str,
         originator_port: u32,
     ) -> Result<ChannelId, Error> {
-        let result = if let Some(ref mut enc) = self.common.encrypted {
-            if !matches!(
-                enc.state,
-                EncryptedState::Authenticated | EncryptedState::InitCompression
-            ) {
-                return Err(Error::Inconsistent);
-            }
-
-            debug!("sending open request");
-            let sender_channel = enc.new_channel(
-                self.common.config.window_size,
-                self.common.config.maximum_packet_size,
-            );
-            push_packet!(enc.write, {
-                enc.write.push(msg::CHANNEL_OPEN);
-                enc.write.extend_ssh_string(b"forwarded-tcpip");
-
-                // sender channel id.
-                enc.write.push_u32_be(sender_channel.0);
-
-                // window.
-                enc.write
-                    .push_u32_be(self.common.config.as_ref().window_size);
-
-                // max packet size.
-                enc.write
-                    .push_u32_be(self.common.config.as_ref().maximum_packet_size);
-
-                enc.write.extend_ssh_string(connected_address.as_bytes());
-                enc.write.push_u32_be(connected_port); // sender channel id.
-                enc.write.extend_ssh_string(originator_address.as_bytes());
-                enc.write.push_u32_be(originator_port); // sender channel id.
-            });
-            sender_channel
-        } else {
-            return Err(Error::Inconsistent);
-        };
-        Ok(result)
+        self.channel_open_generic(b"forwarded-tcpip", |write| {
+            write.extend_ssh_string(connected_address.as_bytes());
+            write.push_u32_be(connected_port); // sender channel id.
+            write.extend_ssh_string(originator_address.as_bytes());
+            write.push_u32_be(originator_port); // sender channel id.
+        })
     }
-
 
     /// Open a new X11 channel, when a connection comes to a
     /// local port. See [RFC4254](https://tools.ietf.org/html/rfc4254#section-6.3.2).
@@ -898,6 +803,16 @@ impl Session {
         originator_address: &str,
         originator_port: u32,
     ) -> Result<ChannelId, Error> {
+        self.channel_open_generic(b"x11", |write| {
+            write.extend_ssh_string(originator_address.as_bytes());
+            write.push_u32_be(originator_port);
+        })
+    }
+
+    fn channel_open_generic<F>(&mut self, kind: &[u8], write_suffix: F) -> Result<ChannelId, Error>
+    where
+        F: FnOnce(&mut CryptoVec),
+    {
         let result = if let Some(ref mut enc) = self.common.encrypted {
             if !matches!(
                 enc.state,
@@ -906,14 +821,13 @@ impl Session {
                 return Err(Error::Inconsistent);
             }
 
-            debug!("sending open request");
             let sender_channel = enc.new_channel(
                 self.common.config.window_size,
                 self.common.config.maximum_packet_size,
             );
             push_packet!(enc.write, {
                 enc.write.push(msg::CHANNEL_OPEN);
-                enc.write.extend_ssh_string(b"x11");
+                enc.write.extend_ssh_string(kind);
 
                 // sender channel id.
                 enc.write.push_u32_be(sender_channel.0);
@@ -926,8 +840,7 @@ impl Session {
                 enc.write
                     .push_u32_be(self.common.config.as_ref().maximum_packet_size);
 
-                enc.write.extend_ssh_string(originator_address.as_bytes());
-                enc.write.push_u32_be(originator_port); // sender channel id.
+                write_suffix(&mut enc.write);
             });
             sender_channel
         } else {
