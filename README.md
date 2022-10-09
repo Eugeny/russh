@@ -3,11 +3,11 @@
 [![All Contributors](https://img.shields.io/badge/all_contributors-5-orange.svg?style=flat-square)](#contributors-)
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
 
-Async (tokio) SSH2 client and server implementation.
+Low-level Tokio SSH2 client and server implementation.
 
-This is a fork of [Thrussh](//nest.pijul.com/pijul/thrussh) by Pierre-Étienne Meunier which adds:
+This is a fork of [Thrussh](//nest.pijul.com/pijul/thrussh) by Pierre-Étienne Meunier:
 
-> :sparkles: = added in this fork
+> :sparkles: = added in Russh
 
 * More safety guarantees :sparkles:
 * `forward-tcpip` (remote port forwarding) :sparkles:
