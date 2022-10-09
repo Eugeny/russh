@@ -45,7 +45,7 @@
 //! use std::sync::{Mutex, Arc};
 //! use std::str::FromStr;
 //! use russh::*;
-//! use russh::server::{Auth, Session};
+//! use russh::server::{Auth, Session, Msg};
 //! use russh_keys::*;
 //! use std::collections::HashMap;
 //! use futures::Future;
@@ -101,10 +101,10 @@
 //!     fn finished(self, s: Session) -> Self::FutureUnit {
 //!         futures::future::ready(Ok((self, s)))
 //!     }
-//!     fn channel_open_session(self, channel: ChannelId, session: Session) -> Self::FutureBool {
+//!     fn channel_open_session(self, channel: Channel<Msg>, session: Session) -> Self::FutureBool {
 //!         {
 //!             let mut clients = self.clients.lock().unwrap();
-//!             clients.insert((self.id, channel), session.handle());
+//!             clients.insert((self.id, channel.id()), session.handle());
 //!         }
 //!         self.finished_bool(true, session)
 //!     }
@@ -647,6 +647,8 @@ mod test_compress {
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
 
+    use crate::server::Msg;
+
     use super::server::{Auth, Server as _, Session};
     use super::*;
 
@@ -731,10 +733,10 @@ mod test_compress {
         fn finished(self, s: Session) -> Self::FutureUnit {
             futures::future::ready(Ok((self, s)))
         }
-        fn channel_open_session(self, channel: ChannelId, session: Session) -> Self::FutureBool {
+        fn channel_open_session(self, channel: Channel<Msg>, session: Session) -> Self::FutureBool {
             {
                 let mut clients = self.clients.lock().unwrap();
-                clients.insert((self.id, channel), session.handle());
+                clients.insert((self.id, channel.id()), session.handle());
             }
             self.finished_bool(true, session)
         }

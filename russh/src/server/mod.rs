@@ -239,7 +239,7 @@ pub trait Handler: Sized {
     /// Called when a new session channel is created.
     /// Return value indicates whether the channel request should be granted.
     #[allow(unused_variables)]
-    fn channel_open_session(self, channel: ChannelId, session: Session) -> Self::FutureBool {
+    fn channel_open_session(self, channel: Channel<Msg>, session: Session) -> Self::FutureBool {
         self.finished_bool(false, session)
     }
 
@@ -248,7 +248,7 @@ pub trait Handler: Sized {
     #[allow(unused_variables)]
     fn channel_open_x11(
         self,
-        id: ChannelId,
+        channel: Channel<Msg>,
         originator_address: &str,
         originator_port: u32,
         session: Session,
@@ -261,7 +261,7 @@ pub trait Handler: Sized {
     #[allow(unused_variables)]
     fn channel_open_direct_tcpip(
         self,
-        id: ChannelId,
+        channel: Channel<Msg>,
         host_to_connect: &str,
         port_to_connect: u32,
         originator_address: &str,
@@ -276,7 +276,7 @@ pub trait Handler: Sized {
     #[allow(unused_variables)]
     fn channel_open_forwarded_tcpip(
         self,
-        id: ChannelId,
+        channel: Channel<Msg>,
         host_to_connect: &str,
         port_to_connect: u32,
         originator_address: &str,

@@ -1,10 +1,10 @@
+use russh::server::{Auth, Session, Msg};
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
 
 use futures::FutureExt;
-use russh::server::{Auth, Session};
 use russh::*;
 use russh_keys::*;
 use tokio::sync::Mutex;
@@ -82,11 +82,11 @@ impl server::Handler for Server {
         async { Ok((self, s)) }.boxed()
     }
 
-    fn channel_open_session(self, channel: ChannelId, session: Session) -> Self::FutureBool {
+    fn channel_open_session(self, channel: Channel<Msg>, session: Session) -> Self::FutureBool {
         async move {
             {
                 let mut clients = self.clients.lock().await;
-                clients.insert((self.id, channel), session.handle());
+                clients.insert((self.id, channel.id()), session.handle());
             }
             Ok((self, session, true))
         }

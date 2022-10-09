@@ -20,6 +20,7 @@ use negotiation::Select;
 use russh_keys::encoding::{Encoding, Position, Reader};
 use russh_keys::key;
 use russh_keys::key::Verify;
+use tokio::sync::mpsc::unbounded_channel;
 use tokio::time::Instant;
 use {msg, negotiation};
 
@@ -577,6 +578,7 @@ impl Session {
                 if let Some(ref mut enc) = self.common.encrypted {
                     enc.channels.remove(&channel_num);
                 }
+                self.channels.remove(&channel_num);
                 debug!("handler.channel_close {:?}", channel_num);
                 handler.channel_close(channel_num, self).await
             }
@@ -880,7 +882,7 @@ impl Session {
         } else {
             unreachable!()
         };
-        let channel = ChannelParams {
+        let channel_params = ChannelParams {
             recipient_channel: msg.recipient_channel,
 
             // "sender" is the local end, i.e. we're the sender, the remote is the recipient.
@@ -895,11 +897,21 @@ impl Session {
             pending_data: std::collections::VecDeque::new(),
         };
 
+        let (sender, receiver) = unbounded_channel();
+        let channel = Channel {
+            id: sender_channel,
+            sender: self.sender.sender.clone(),
+            receiver,
+            max_packet_size: channel_params.recipient_maximum_packet_size,
+            window_size: channel_params.recipient_window_size,
+        };
+
         match &msg.typ {
             ChannelType::Session => {
-                let mut result = handler.channel_open_session(sender_channel, self).await;
+                let mut result = handler.channel_open_session(channel, self).await;
                 if let Ok((_, s, allowed)) = &mut result {
-                    s.finalize_channel_open(&msg, channel, *allowed);
+                    s.channels.insert(sender_channel, sender);
+                    s.finalize_channel_open(&msg, channel_params, *allowed);
                 }
                 result
             }
@@ -908,17 +920,18 @@ impl Session {
                 originator_port,
             } => {
                 let mut result = handler
-                    .channel_open_x11(sender_channel, originator_address, *originator_port, self)
+                    .channel_open_x11(channel, originator_address, *originator_port, self)
                     .await;
                 if let Ok((_, s, allowed)) = &mut result {
-                    s.finalize_channel_open(&msg, channel, *allowed);
+                    s.channels.insert(sender_channel, sender);
+                    s.finalize_channel_open(&msg, channel_params, *allowed);
                 }
                 result
             }
             ChannelType::DirectTcpip(d) => {
                 let mut result = handler
                     .channel_open_direct_tcpip(
-                        sender_channel,
+                        channel,
                         &d.host_to_connect,
                         d.port_to_connect,
                         &d.originator_address,
@@ -927,14 +940,15 @@ impl Session {
                     )
                     .await;
                 if let Ok((_, s, allowed)) = &mut result {
-                    s.finalize_channel_open(&msg, channel, *allowed);
+                    s.channels.insert(sender_channel, sender);
+                    s.finalize_channel_open(&msg, channel_params, *allowed);
                 }
                 result
             }
             ChannelType::ForwardedTcpIp(d) => {
                 let mut result = handler
                     .channel_open_forwarded_tcpip(
-                        sender_channel,
+                        channel,
                         &d.host_to_connect,
                         d.port_to_connect,
                         &d.originator_address,
@@ -943,7 +957,8 @@ impl Session {
                     )
                     .await;
                 if let Ok((_, s, allowed)) = &mut result {
-                    s.finalize_channel_open(&msg, channel, *allowed);
+                    s.channels.insert(sender_channel, sender);
+                    s.finalize_channel_open(&msg, channel_params, *allowed);
                 }
                 result
             }
