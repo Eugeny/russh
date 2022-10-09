@@ -452,6 +452,12 @@ pub trait Handler: Sized {
         self.finished(session)
     }
 
+    /// The client requests OpenSSH agent forwarding
+    #[allow(unused_variables)]
+    fn agent_request(self, channel: ChannelId, session: Session) -> Self::FutureBool {
+        self.finished_bool(false, session)
+    }
+
     /// The client is sending a signal (usually to pass to the
     /// currently running process).
     #[allow(unused_variables)]
