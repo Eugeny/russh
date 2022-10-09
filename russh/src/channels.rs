@@ -1,5 +1,14 @@
+use std::pin::Pin;
+use std::task::{Context, Poll};
+
+use async_stream::{stream, try_stream};
+use bytes::BytesMut;
+use futures::future::BoxFuture;
+use futures::{pin_mut, poll, Future, FutureExt, Stream};
 use russh_cryptovec::CryptoVec;
+use tokio::io::{AsyncRead, ReadBuf};
 use tokio::sync::mpsc::{Sender, UnboundedReceiver};
+use tokio_util::io::StreamReader;
 
 use crate::{ChannelId, Error, Pty, Sig};
 
@@ -349,3 +358,90 @@ impl<Send: From<(ChannelId, ChannelMsg)>> Channel<Send> {
             .map_err(|_| Error::SendError)
     }
 }
+
+impl<T: From<(ChannelId, ChannelMsg)> + Send + Sync> Channel<T> {
+    pub fn stream(mut self) -> impl tokio::io::AsyncRead {
+        //} + tokio::io::AsyncWrite {
+        let mut receiver = self.receiver;
+        let mut ws = self.window_size;
+        let s = try_stream! {
+            while let Some(msg) = receiver.recv().await {
+                match msg {
+                    ChannelMsg::WindowAdjusted { new_size } => {
+                        ws += new_size;
+                    }
+                    ChannelMsg::Data { data } => yield (&data[..]).into(),
+                    _ => ()
+                }
+            }
+        };
+        ChannelStream {
+            sr: Box::pin(StreamReader::new(s)),
+            fut_close: None,
+            fut_write: None,
+        }
+    }
+}
+
+pub struct ChannelStream<S: Stream<Item = Result<BytesMut, std::io::Error>>> {
+    sr: Pin<Box<StreamReader<S, BytesMut>>>,
+    fut_wait: Option<Pin<Box<dyn Future<Output=(Option<ChannelMsg>)>>>,
+    fut_close: Option<Pin<Box<tokio::task::JoinHandle<Result<(), Error>>>>>,
+    fut_write: Option<Pin<Box<tokio::task::JoinHandle<Result<(), Error>>>>>,
+}
+
+impl<S: Stream<Item = Result<BytesMut, std::io::Error>>> AsyncRead for ChannelStream<S> {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        self.sr.as_mut().poll_read(cx, buf)
+    }
+}
+
+// impl<S: Stream<Item = Result<BytesMut, std::io::Error>>> tokio::io::AsyncWrite
+//     for ChannelStream<S>
+// {
+//     fn poll_write(
+//         self: Pin<&mut Self>,
+//         cx: &mut Context<'_>,
+//         buf: &[u8],
+//     ) -> Poll<Result<usize, std::io::Error>> {
+//         Poll::Ready(Ok(0))
+//         // let f = self.fut_close.as_ref().unwrap_or_else(|| {
+//         //     let this = self.get_mut();
+//         //     let fut = Box::pin(tokio::spawn(this.eof()));
+//         //     this.fut_close = Some(fut);
+//         //     &fut
+//         // });
+//         // let poll = f.poll_unpin(cx)
+//         //     .map(|inner| inner.map_err(Error::Join))
+//         //     .map(|x| x.and_then(|r| r))
+//         //     .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e));
+
+//         // match poll {
+//         //     Poll::Ready(res) => {
+//         //         sel
+//         //     }
+//     }
+//     fn poll_shutdown(
+//         self: Pin<&mut Self>,
+//         cx: &mut Context<'_>,
+//     ) -> Poll<Result<(), std::io::Error>> {
+//         let f = self.fut_close.as_ref().unwrap_or_else(|| {
+//             let this = self.get_mut();
+//             let fut = Box::pin(tokio::spawn(this.channel.eof()));
+//             this.fut_close = Some(fut);
+//             &fut
+//         });
+//         f.poll_unpin(cx)
+//             .map(|inner| inner.map_err(Error::Join))
+//             .map(|x| x.and_then(|r| r))
+//             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+//     }
+
+//     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), std::io::Error>> {
+//         Poll::Ready(Ok(()))
+//     }
+// }
