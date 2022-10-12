@@ -7,7 +7,6 @@ homepage = "https://pijul.org/russh"
 include = [
   "Cargo.toml",
   "src/lib.rs",
-  "src/pem.rs",
   "src/agent/mod.rs",
   "src/agent/msg.rs",
   "src/agent/server.rs",
