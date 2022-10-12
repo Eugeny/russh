@@ -48,12 +48,12 @@ impl super::Cipher for SshChacha20Poly1305Cipher {
         _: &[u8],
         _: &[u8],
         _: &dyn MacAlgorithm,
-    ) -> Box<dyn super::OpeningKey + Send> {
+    ) -> Result<Box<dyn super::OpeningKey + Send>, Error> {
         let mut k1 = Key::default();
         let mut k2 = Key::default();
         k1.clone_from_slice(&k[KeyLength::to_usize()..]);
         k2.clone_from_slice(&k[..KeyLength::to_usize()]);
-        Box::new(OpeningKey { k1, k2 })
+        Ok(Box::new(OpeningKey { k1, k2 }))
     }
 
     #[allow(clippy::indexing_slicing)] // length checked
@@ -63,12 +63,12 @@ impl super::Cipher for SshChacha20Poly1305Cipher {
         _: &[u8],
         _: &[u8],
         _: &dyn MacAlgorithm,
-    ) -> Box<dyn super::SealingKey + Send> {
+    ) -> Result<Box<dyn super::SealingKey + Send>, Error> {
         let mut k1 = Key::default();
         let mut k2 = Key::default();
         k1.clone_from_slice(&k[KeyLength::to_usize()..]);
         k2.clone_from_slice(&k[..KeyLength::to_usize()]);
-        Box::new(SealingKey { k1, k2 })
+        Ok(Box::new(SealingKey { k1, k2 }))
     }
 }
 
@@ -95,11 +95,11 @@ impl super::OpeningKey for OpeningKey {
         &self,
         sequence_number: u32,
         mut encrypted_packet_length: [u8; 4],
-    ) -> [u8; 4] {
+    ) -> Result<[u8; 4], Error> {
         let nonce = make_counter(sequence_number);
         let mut cipher = ChaCha20Legacy::new(&self.k1, &nonce);
         cipher.apply_keystream(&mut encrypted_packet_length);
-        encrypted_packet_length
+        Ok(encrypted_packet_length)
     }
 
     fn tag_len(&self) -> usize {

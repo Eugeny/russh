@@ -11,27 +11,24 @@
 // limitations under the License.
 //
 
-use std::marker::PhantomData;
+use openssl::{cipher::CipherRef, cipher_ctx::CipherCtx};
 
-use aes::cipher::{IvSizeUser, KeyIvInit, KeySizeUser, StreamCipher};
-use generic_array::GenericArray;
 use rand::RngCore;
 
 use super::super::Error;
 use super::PACKET_LENGTH_LEN;
 use crate::mac::{Mac, MacAlgorithm};
 
-pub struct SshBlockCipher<C: StreamCipher + KeySizeUser + IvSizeUser>(pub PhantomData<C>);
+pub struct AesSshCipher(pub fn() -> &'static CipherRef);
 
-impl<C: StreamCipher + KeySizeUser + IvSizeUser + KeyIvInit + Send + 'static> super::Cipher
-    for SshBlockCipher<C>
-{
+#[allow(clippy::expect_used)]
+impl super::Cipher for AesSshCipher {
     fn key_len(&self) -> usize {
-        C::key_size()
+        self.0().key_length()
     }
 
     fn nonce_len(&self) -> usize {
-        C::iv_size()
+        self.0().iv_length()
     }
 
     fn needs_mac(&self) -> bool {
@@ -40,50 +37,57 @@ impl<C: StreamCipher + KeySizeUser + IvSizeUser + KeyIvInit + Send + 'static> su
 
     fn make_opening_key(
         &self,
-        k: &[u8],
-        n: &[u8],
-        m: &[u8],
+        key: &[u8],
+        iv: &[u8],
+        mac_key: &[u8],
         mac: &dyn MacAlgorithm,
     ) -> Result<Box<dyn super::OpeningKey + Send>, Error> {
-        let mut key = GenericArray::<u8, C::KeySize>::default();
-        let mut nonce = GenericArray::<u8, C::IvSize>::default();
-        key.clone_from_slice(k);
-        nonce.clone_from_slice(n);
+        let mut ctx = CipherCtx::new().expect("expected to make openssl cipher");
+        ctx.decrypt_init(Some(self.0()), Some(key), Some(iv))?;
+
         Ok(Box::new(OpeningKey {
-            cipher: C::new(&key, &nonce),
-            mac: mac.make_mac(m),
+            ctx,
+            key: key.to_vec(),
+            iv: iv.to_vec(),
+            cipher: self.0(),
+            mac: mac.make_mac(mac_key),
         }))
     }
 
     fn make_sealing_key(
         &self,
-        k: &[u8],
-        n: &[u8],
-        m: &[u8],
+        key: &[u8],
+        iv: &[u8],
+        mac_key: &[u8],
         mac: &dyn MacAlgorithm,
     ) -> Result<Box<dyn super::SealingKey + Send>, Error> {
-        let mut key = GenericArray::<u8, C::KeySize>::default();
-        let mut nonce = GenericArray::<u8, C::IvSize>::default();
-        key.clone_from_slice(k);
-        nonce.clone_from_slice(n);
+        let mut ctx = CipherCtx::new().expect("expected to make openssl cipher");
+        ctx.encrypt_init(Some(self.0()), Some(key), Some(iv))?;
+
         Ok(Box::new(SealingKey {
-            cipher: C::new(&key, &nonce),
-            mac: mac.make_mac(m),
+            ctx,
+            cipher: self.0(),
+            mac: mac.make_mac(mac_key),
         }))
     }
 }
 
-pub struct OpeningKey<C: StreamCipher + KeySizeUser + IvSizeUser> {
-    cipher: C,
+pub struct OpeningKey {
+    ctx: CipherCtx,
+    key: Vec<u8>,
+    iv: Vec<u8>,
+    cipher: &'static CipherRef,
     mac: Box<dyn Mac + Send>,
 }
 
-pub struct SealingKey<C: StreamCipher + KeySizeUser + IvSizeUser> {
-    cipher: C,
+pub struct SealingKey {
+    ctx: CipherCtx,
+    cipher: &'static CipherRef,
     mac: Box<dyn Mac + Send>,
 }
 
-impl<C: StreamCipher + KeySizeUser + IvSizeUser> super::OpeningKey for OpeningKey<C> {
+#[allow(clippy::expect_used)]
+impl super::OpeningKey for OpeningKey {
     fn decrypt_packet_length(
         &self,
         _sequence_number: u32,
@@ -92,9 +96,13 @@ impl<C: StreamCipher + KeySizeUser + IvSizeUser> super::OpeningKey for OpeningKe
         if self.mac.is_etm() {
             Ok(encrypted_packet_length)
         } else {
-            // Work around uncloneable Aes<>
-            let mut cipher: C = unsafe { std::ptr::read(&self.cipher as *const C) };
-            cipher.apply_keystream(&mut encrypted_packet_length);
+            let mut ctx = CipherCtx::new().expect("expected to make openssl cipher");
+            ctx.decrypt_init(Some(self.cipher), Some(&self.key), Some(&self.iv))?;
+
+            let input = encrypted_packet_length;
+            let n = ctx.cipher_update(&input, Some(&mut encrypted_packet_length))?;
+            #[allow(clippy::indexing_slicing)]
+            ctx.cipher_final(&mut encrypted_packet_length[n..])?;
             Ok(encrypted_packet_length)
         }
     }
@@ -109,18 +117,19 @@ impl<C: StreamCipher + KeySizeUser + IvSizeUser> super::OpeningKey for OpeningKe
         ciphertext_in_plaintext_out: &'a mut [u8],
         tag: &[u8],
     ) -> Result<&'a [u8], Error> {
+        let input = ciphertext_in_plaintext_out.to_vec();
         if self.mac.is_etm() {
-            if !self
-                .mac
-                .verify(sequence_number, ciphertext_in_plaintext_out, tag)
-            {
+            if !self.mac.verify(sequence_number, &input, tag) {
                 return Err(Error::PacketAuth);
             }
             #[allow(clippy::indexing_slicing)]
-            self.cipher
-                .apply_keystream(&mut ciphertext_in_plaintext_out[PACKET_LENGTH_LEN..]);
+            self.ctx.cipher_update(
+                &input[PACKET_LENGTH_LEN..],
+                Some(&mut ciphertext_in_plaintext_out[PACKET_LENGTH_LEN..]),
+            )?;
         } else {
-            self.cipher.apply_keystream(ciphertext_in_plaintext_out);
+            self.ctx
+                .cipher_update(&input, Some(ciphertext_in_plaintext_out))?;
 
             if !self
                 .mac
@@ -129,12 +138,15 @@ impl<C: StreamCipher + KeySizeUser + IvSizeUser> super::OpeningKey for OpeningKe
                 return Err(Error::PacketAuth);
             }
         }
+
         Ok(ciphertext_in_plaintext_out)
     }
 }
 
-impl<C: StreamCipher + KeySizeUser + IvSizeUser> super::SealingKey for SealingKey<C> {
+#[allow(clippy::expect_used)]
+impl super::SealingKey for SealingKey {
     fn padding_length(&self, payload: &[u8]) -> usize {
+        // note: the .blocksize() method reports 1 for CTR, which is not what we need...
         let block_size = 16;
 
         let pll = if self.mac.is_etm() {
@@ -171,16 +183,22 @@ impl<C: StreamCipher + KeySizeUser + IvSizeUser> super::SealingKey for SealingKe
         plaintext_in_ciphertext_out: &mut [u8],
         tag_out: &mut [u8],
     ) {
+        let plaintext = plaintext_in_ciphertext_out.to_vec();
+        #[allow(clippy::indexing_slicing)]
         if self.mac.is_etm() {
-            #[allow(clippy::indexing_slicing)]
-            self.cipher
-                .apply_keystream(&mut plaintext_in_ciphertext_out[PACKET_LENGTH_LEN..]);
+            self.ctx
+                .cipher_update(
+                    &plaintext[PACKET_LENGTH_LEN..],
+                    Some(&mut plaintext_in_ciphertext_out[PACKET_LENGTH_LEN..]),
+                )
+                .expect("cipher update should not fail");
             self.mac
                 .compute(sequence_number, plaintext_in_ciphertext_out, tag_out);
         } else {
-            self.mac
-                .compute(sequence_number, plaintext_in_ciphertext_out, tag_out);
-            self.cipher.apply_keystream(plaintext_in_ciphertext_out);
+            self.mac.compute(sequence_number, &plaintext, tag_out);
+            self.ctx
+                .cipher_update(&plaintext, Some(plaintext_in_ciphertext_out))
+                .expect("cipher update should not fail");
         }
     }
 }

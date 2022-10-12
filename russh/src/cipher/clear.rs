@@ -32,8 +32,8 @@ impl super::Cipher for Clear {
         _: &[u8],
         _: &[u8],
         _: &dyn MacAlgorithm,
-    ) -> Box<dyn super::OpeningKey + Send> {
-        Box::new(Key {})
+    ) -> Result<Box<dyn super::OpeningKey + Send>, Error> {
+        Ok(Box::new(Key {}))
     }
 
     fn make_sealing_key(
@@ -42,14 +42,14 @@ impl super::Cipher for Clear {
         _: &[u8],
         _: &[u8],
         _: &dyn MacAlgorithm,
-    ) -> Box<dyn super::SealingKey + Send> {
-        Box::new(Key {})
+    ) -> Result<Box<dyn super::SealingKey + Send>, Error> {
+        Ok(Box::new(Key {}))
     }
 }
 
 impl super::OpeningKey for Key {
-    fn decrypt_packet_length(&self, _seqn: u32, packet_length: [u8; 4]) -> [u8; 4] {
-        packet_length
+    fn decrypt_packet_length(&self, _seqn: u32, packet_length: [u8; 4]) -> Result<[u8; 4], Error> {
+        Ok(packet_length)
     }
 
     fn tag_len(&self) -> usize {

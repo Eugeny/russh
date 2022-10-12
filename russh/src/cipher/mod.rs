@@ -1,11 +1,10 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
+#[cfg(feature = "rs-crypto")]
 use std::marker::PhantomData;
 use std::num::Wrapping;
 
-use aes::{Aes128, Aes192, Aes256};
 use byteorder::{BigEndian, ByteOrder};
-use ctr::Ctr128BE;
 use once_cell::sync::Lazy;
 use tokio::io::{AsyncRead, AsyncReadExt};
 
@@ -26,13 +25,23 @@ use crate::mac::MacAlgorithm;
 use crate::sshbuffer::SSHBuffer;
 use crate::Error;
 
-pub mod block;
-pub mod chacha20poly1305;
 pub mod clear;
+
+#[cfg(feature = "openssl")]
+pub mod aes_openssh;
+#[cfg(feature = "rs-crypto")]
+pub mod block;
+#[cfg(feature = "rs-crypto")]
+pub mod chacha20poly1305;
+#[cfg(feature = "rs-crypto")]
 pub mod gcm;
+
+#[cfg(feature = "rs-crypto")]
 use block::SshBlockCipher;
+#[cfg(feature = "rs-crypto")]
 use chacha20poly1305::SshChacha20Poly1305Cipher;
 use clear::Clear;
+#[cfg(feature = "rs-crypto")]
 use gcm::GcmCipher;
 
 pub trait Cipher {
@@ -49,14 +58,14 @@ pub trait Cipher {
         nonce: &[u8],
         mac_key: &[u8],
         mac: &dyn MacAlgorithm,
-    ) -> Box<dyn OpeningKey + Send>;
+    ) -> Result<Box<dyn OpeningKey + Send>, Error>;
     fn make_sealing_key(
         &self,
         key: &[u8],
         nonce: &[u8],
         mac_key: &[u8],
         mac: &dyn MacAlgorithm,
-    ) -> Box<dyn SealingKey + Send>;
+    ) -> Result<Box<dyn SealingKey + Send>, Error>;
 }
 
 pub const CLEAR: Name = Name("clear");
@@ -68,10 +77,26 @@ pub const CHACHA20_POLY1305: Name = Name("chacha20-poly1305@openssh.com");
 pub const NONE: Name = Name("none");
 
 static _CLEAR: Clear = Clear {};
-static _AES_128_CTR: SshBlockCipher<Ctr128BE<Aes128>> = SshBlockCipher(PhantomData);
-static _AES_192_CTR: SshBlockCipher<Ctr128BE<Aes192>> = SshBlockCipher(PhantomData);
-static _AES_256_CTR: SshBlockCipher<Ctr128BE<Aes256>> = SshBlockCipher(PhantomData);
+
+#[cfg(all(feature = "openssl", not(feature = "rs-crypto")))]
+static _AES_128_CTR: aes_openssh::AesSshCipher = aes_openssh::AesSshCipher(openssl::cipher::Cipher::aes_128_ctr);
+#[cfg(feature = "rs-crypto")]
+static _AES_128_CTR: SshBlockCipher<ctr::Ctr128BE<aes::Aes128>> = SshBlockCipher(PhantomData);
+
+#[cfg(all(feature = "openssl", not(feature = "rs-crypto")))]
+static _AES_192_CTR: aes_openssh::AesSshCipher = aes_openssh::AesSshCipher(openssl::cipher::Cipher::aes_192_ctr);
+#[cfg(feature = "rs-crypto")]
+static _AES_192_CTR: SshBlockCipher<ctr::Ctr128BE<aes::Aes192>> = SshBlockCipher(PhantomData);
+
+#[cfg(all(feature = "openssl", not(feature = "rs-crypto")))]
+static _AES_256_CTR: aes_openssh::AesSshCipher = aes_openssh::AesSshCipher(openssl::cipher::Cipher::aes_256_ctr);
+#[cfg(feature = "rs-crypto")]
+static _AES_256_CTR: SshBlockCipher<ctr::Ctr128BE<aes::Aes256>> = SshBlockCipher(PhantomData);
+
+#[cfg(feature = "rs-crypto")]
 static _AES_256_GCM: GcmCipher = GcmCipher {};
+
+#[cfg(feature = "rs-crypto")]
 static _CHACHA20_POLY1305: SshChacha20Poly1305Cipher = SshChacha20Poly1305Cipher {};
 
 pub static CIPHERS: Lazy<HashMap<&'static Name, &(dyn Cipher + Send + Sync)>> = Lazy::new(|| {
@@ -81,7 +106,9 @@ pub static CIPHERS: Lazy<HashMap<&'static Name, &(dyn Cipher + Send + Sync)>> = 
     h.insert(&AES_128_CTR, &_AES_128_CTR);
     h.insert(&AES_192_CTR, &_AES_192_CTR);
     h.insert(&AES_256_CTR, &_AES_256_CTR);
+    #[cfg(feature = "rs-crypto")]
     h.insert(&AES_256_GCM, &_AES_256_GCM);
+    #[cfg(feature = "rs-crypto")]
     h.insert(&CHACHA20_POLY1305, &_CHACHA20_POLY1305);
     h
 });
@@ -106,7 +133,11 @@ impl Debug for CipherPair {
 }
 
 pub trait OpeningKey {
-    fn decrypt_packet_length(&self, seqn: u32, encrypted_packet_length: [u8; 4]) -> [u8; 4];
+    fn decrypt_packet_length(
+        &self,
+        seqn: u32,
+        encrypted_packet_length: [u8; 4],
+    ) -> Result<[u8; 4], Error>;
 
     fn tag_len(&self) -> usize;
 
@@ -178,7 +209,7 @@ pub async fn read<'a, R: AsyncRead + Unpin>(
             buffer.buffer.clear();
             buffer.buffer.extend(&len);
             debug!("reading, seqn = {:?}", seqn);
-            let len = cipher.decrypt_packet_length(seqn, len);
+            let len = cipher.decrypt_packet_length(seqn, len)?;
             buffer.len = BigEndian::read_u32(&len) as usize + cipher.tag_len();
             debug!("reading, clear len = {:?}", buffer.len);
         }

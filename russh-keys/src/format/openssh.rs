@@ -1,7 +1,3 @@
-use aes::cipher::block_padding::NoPadding;
-use aes::cipher::{BlockDecryptMut, KeyIvInit, StreamCipher};
-use bcrypt_pbkdf;
-use ctr::Ctr64LE;
 #[cfg(feature = "openssl")]
 use openssl::bn::BigNum;
 
@@ -35,21 +31,24 @@ pub fn decode_openssh(secret: &[u8], password: Option<&str>) -> Result<key::KeyP
         for _ in 0..nkeys {
             // TODO check: never really loops beyong the first key
             let key_type = position.read_string()?;
-            if key_type == KEYTYPE_ED25519 {
-                let pubkey = position.read_string()?;
-                let seckey = position.read_string()?;
-                let _comment = position.read_string()?;
-                if Some(pubkey) != seckey.get(32..) {
-                    return Err(Error::KeyIsCorrupt);
+            if key_type == KEYTYPE_ED25519 && cfg!(feature = "rs-crypto") {
+                #[cfg(feature = "rs-crypto")]
+                {
+                    let pubkey = position.read_string()?;
+                    let seckey = position.read_string()?;
+                    let _comment = position.read_string()?;
+                    if Some(pubkey) != seckey.get(32..) {
+                        return Err(Error::KeyIsCorrupt);
+                    }
+                    let secret = ed25519_dalek::SecretKey::from_bytes(
+                        seckey.get(..32).ok_or(Error::KeyIsCorrupt)?,
+                    )?;
+                    let public = (&secret).into();
+                    return Ok(key::KeyPair::Ed25519(ed25519_dalek::Keypair {
+                        secret,
+                        public,
+                    }));
                 }
-                let secret = ed25519_dalek::SecretKey::from_bytes(
-                    seckey.get(..32).ok_or(Error::KeyIsCorrupt)?,
-                )?;
-                let public = (&secret).into();
-                return Ok(key::KeyPair::Ed25519(ed25519_dalek::Keypair {
-                    secret,
-                    public,
-                }));
             } else if key_type == KEYTYPE_RSA && cfg!(feature = "openssl") {
                 #[cfg(feature = "openssl")]
                 {
@@ -91,8 +90,6 @@ pub fn decode_openssh(secret: &[u8], password: Option<&str>) -> Result<key::KeyP
     }
 }
 
-use aes::*;
-
 fn decrypt_secret_key(
     ciphername: &[u8],
     kdfname: &[u8],
@@ -130,32 +127,51 @@ fn decrypt_secret_key(
 
         let mut dec = secret_key.to_vec();
         dec.resize(dec.len() + 32, 0u8);
-        match ciphername {
-            b"aes128-cbc" => {
-                #[allow(clippy::unwrap_used)] // parameters are static
-                let cipher = cbc::Decryptor::<Aes128>::new_from_slices(key, iv).unwrap();
-                let n = cipher.decrypt_padded_mut::<NoPadding>(&mut dec)?.len();
-                dec.truncate(n)
+        #[cfg(feature = "rs-crypto")]
+        {
+            use aes::cipher::block_padding::NoPadding;
+            use aes::cipher::{BlockDecryptMut, KeyIvInit, StreamCipher};
+            use aes::*;
+            use ctr::Ctr64LE;
+
+            match ciphername {
+                b"aes128-cbc" => {
+                    #[allow(clippy::unwrap_used)] // parameters are static
+                    let cipher = cbc::Decryptor::<Aes128>::new_from_slices(key, iv).unwrap();
+                    let n = cipher.decrypt_padded_mut::<NoPadding>(&mut dec)?.len();
+                    dec.truncate(n)
+                }
+                b"aes256-cbc" => {
+                    #[allow(clippy::unwrap_used)] // parameters are static
+                    let cipher = cbc::Decryptor::<Aes256>::new_from_slices(key, iv).unwrap();
+                    let n = cipher.decrypt_padded_mut::<NoPadding>(&mut dec)?.len();
+                    dec.truncate(n)
+                }
+                b"aes128-ctr" => {
+                    #[allow(clippy::unwrap_used)] // parameters are static
+                    let mut cipher = Ctr64LE::<Aes128>::new_from_slices(key, iv).unwrap();
+                    cipher.apply_keystream(&mut dec);
+                    dec.truncate(secret_key.len())
+                }
+                b"aes256-ctr" => {
+                    #[allow(clippy::unwrap_used)] // parameters are static
+                    let mut cipher = Ctr64LE::<Aes256>::new_from_slices(key, iv).unwrap();
+                    cipher.apply_keystream(&mut dec);
+                    dec.truncate(secret_key.len())
+                }
+                _ => {}
             }
-            b"aes256-cbc" => {
-                #[allow(clippy::unwrap_used)] // parameters are static
-                let cipher = cbc::Decryptor::<Aes256>::new_from_slices(key, iv).unwrap();
-                let n = cipher.decrypt_padded_mut::<NoPadding>(&mut dec)?.len();
-                dec.truncate(n)
+        }
+        #[cfg(all(feature = "openssl", not(feature = "rs-crypto")))]
+        {
+            use openssl::symm::{decrypt, Cipher};
+            dec = match ciphername {
+                b"aes128-cbc" => decrypt(Cipher::aes_128_cbc(), key, Some(iv), &dec)?,
+                b"aes256-cbc" => decrypt(Cipher::aes_256_cbc(), key, Some(iv), &dec)?,
+                b"aes128-ctr" => decrypt(Cipher::aes_128_ctr(), key, Some(iv), &dec)?,
+                b"aes256-ctr" => decrypt(Cipher::aes_256_ctr(), key, Some(iv), &dec)?,
+                _ => dec,
             }
-            b"aes128-ctr" => {
-                #[allow(clippy::unwrap_used)] // parameters are static
-                let mut cipher = Ctr64LE::<Aes128>::new_from_slices(key, iv).unwrap();
-                cipher.apply_keystream(&mut dec);
-                dec.truncate(secret_key.len())
-            }
-            b"aes256-ctr" => {
-                #[allow(clippy::unwrap_used)] // parameters are static
-                let mut cipher = Ctr64LE::<Aes256>::new_from_slices(key, iv).unwrap();
-                cipher.apply_keystream(&mut dec);
-                dec.truncate(secret_key.len())
-            }
-            _ => {}
         }
         Ok(dec)
     } else {

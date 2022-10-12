@@ -447,9 +447,11 @@ pub enum Error {
     Utf8(#[from] std::str::Utf8Error),
 
     #[error(transparent)]
+    #[cfg(feature = "flate2")]
     Compress(#[from] flate2::CompressError),
 
     #[error(transparent)]
+    #[cfg(feature = "flate2")]
     Decompress(#[from] flate2::DecompressError),
 
     #[error(transparent)]
@@ -643,6 +645,7 @@ impl ChannelParams {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::panic)]
 mod test_compress {
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
@@ -650,18 +653,27 @@ mod test_compress {
     use super::server::{Auth, Server as _, Session};
     use super::*;
 
+    #[cfg(feature = "rs-crypto")]
+    fn geneate_keypair() -> russh_keys::key::KeyPair {
+        russh_keys::key::KeyPair::generate_ed25519().unwrap()
+    }
+
+    #[cfg(all(feature = "openssl", not(feature = "rs-crypto")))]
+    fn geneate_keypair() -> russh_keys::key::KeyPair {
+        russh_keys::key::KeyPair::generate_rsa(2048, russh_keys::key::SignatureHash::SHA2_256)
+            .unwrap()
+    }
+
     #[tokio::test]
     async fn compress_local_test() {
         let _ = env_logger::try_init();
 
-        let client_key = russh_keys::key::KeyPair::generate_ed25519().unwrap();
+        let client_key = geneate_keypair();
         let mut config = server::Config::default();
         config.preferred = Preferred::COMPRESSED;
         config.connection_timeout = None; // Some(std::time::Duration::from_secs(3));
         config.auth_rejection_time = std::time::Duration::from_secs(3);
-        config
-            .keys
-            .push(russh_keys::key::KeyPair::generate_ed25519().unwrap());
+        config.keys.push(geneate_keypair());
         let config = Arc::new(config);
         let mut sh = Server {
             clients: Arc::new(Mutex::new(HashMap::new())),
@@ -677,8 +689,10 @@ mod test_compress {
             server::run_stream(config, socket, server).await.unwrap();
         });
 
-        let mut config = client::Config::default();
-        config.preferred = Preferred::COMPRESSED;
+        let config = client::Config {
+            preferred: Preferred::COMPRESSED,
+            ..Default::default()
+        };
         let config = Arc::new(config);
 
         dbg!(&addr);
@@ -773,23 +787,36 @@ mod test_compress {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::panic)]
 mod test_server_channels {
     use std::sync::Arc;
 
     use super::server::{Auth, Server as _, Session};
     use super::*;
 
+    #[cfg(feature = "rs-crypto")]
+    fn geneate_keypair() -> russh_keys::key::KeyPair {
+        russh_keys::key::KeyPair::generate_ed25519().unwrap()
+    }
+
+    #[cfg(all(feature = "openssl", not(feature = "rs-crypto")))]
+    fn geneate_keypair() -> russh_keys::key::KeyPair {
+        russh_keys::key::KeyPair::generate_rsa(2048, russh_keys::key::SignatureHash::SHA2_256)
+            .unwrap()
+    }
+
     #[tokio::test]
     async fn test_server_channels() {
         let _ = env_logger::try_init();
 
-        let client_key = russh_keys::key::KeyPair::generate_ed25519().unwrap();
-        let mut config = server::Config::default();
-        config.connection_timeout = None;
-        config.auth_rejection_time = std::time::Duration::from_secs(3);
-        config
-            .keys
-            .push(russh_keys::key::KeyPair::generate_ed25519().unwrap());
+        let client_key = geneate_keypair();
+        let mut config = server::Config {
+            connection_timeout: None,
+            auth_rejection_time: std::time::Duration::from_secs(3),
+            keys: vec![geneate_keypair()],
+            ..Default::default()
+        };
+
         let config = Arc::new(config);
         let mut sh = Server {};
         let socket = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

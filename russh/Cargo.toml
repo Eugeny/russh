@@ -13,19 +13,28 @@ version = "0.34.0-beta.16"
 rust-version = "1.60"
 
 [features]
-default = ["flate2"]
+default = ["flate2", "rs-crypto"]
 openssl = ["russh-keys/openssl", "dep:openssl"]
 vendored-openssl = ["openssl/vendored", "russh-keys/vendored-openssl"]
+rs-crypto = [
+    "russh-keys/rs-crypto",
+    "dep:aes",
+    "dep:aes-gcm",
+    "dep:curve25519-dalek",
+    "dep:poly1305",
+    "dep:ctr",
+    "dep:chacha20",
+]
 
 [dependencies]
-aes = "0.8"
-aes-gcm = "0.10"
+aes = { version = "0.8", optional = true }
+aes-gcm = { version = "0.10", optional = true }
 bitflags = "1.2"
 byteorder = "1.3"
-chacha20 = "0.9"
-curve25519-dalek = "3.2"
-poly1305 = "0.8"
-ctr = "0.9"
+chacha20 = { version = "0.9", optional = true }
+curve25519-dalek = { version = "3.2", optional = true }
+poly1305 = { version = "0.8", optional = true }
+ctr = { version = "0.9", optional = true }
 digest = "0.10"
 flate2 = { version = "1.0", optional = true }
 futures = "0.3"
@@ -33,10 +42,10 @@ generic-array = "0.14"
 hmac = "0.12"
 log = "0.4"
 once_cell = "1.13"
-openssl = { version = "0.10", optional = true }
+openssl = { version = "^0.10.40", optional = true }
 rand = "0.8"
 russh-cryptovec = { version = "0.7.0-beta.1", path = "../cryptovec" }
-russh-keys = { version = "0.22.0-beta.3", path = "../russh-keys" }
+russh-keys = { version = "0.22.0-beta.3", path = "../russh-keys", default-features = false }
 sha1 = "0.10"
 sha2 = "0.10"
 hex-literal = "0.3"

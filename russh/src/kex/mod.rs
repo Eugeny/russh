@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
+#[cfg(feature = "rs-crypto")]
 mod curve25519;
 mod dh;
 mod none;
@@ -19,6 +20,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt::Debug;
 
+#[cfg(feature = "rs-crypto")]
 use curve25519::Curve25519KexType;
 use dh::{DhGroup14Sha1KexType, DhGroup14Sha256KexType, DhGroup1Sha1KexType};
 use digest::Digest;
@@ -85,6 +87,8 @@ pub const DH_G1_SHA1: Name = Name("diffie-hellman-group1-sha1");
 pub const DH_G14_SHA1: Name = Name("diffie-hellman-group14-sha1");
 pub const DH_G14_SHA256: Name = Name("diffie-hellman-group14-sha256");
 pub const NONE: Name = Name("none");
+
+#[cfg(feature = "rs-crypto")]
 const _CURVE25519: Curve25519KexType = Curve25519KexType {};
 const _DH_G1_SHA1: DhGroup1Sha1KexType = DhGroup1Sha1KexType {};
 const _DH_G14_SHA1: DhGroup14Sha1KexType = DhGroup14Sha1KexType {};
@@ -93,6 +97,7 @@ const _NONE: none::NoneKexType = none::NoneKexType {};
 
 pub static KEXES: Lazy<HashMap<&'static Name, &(dyn KexType + Send + Sync)>> = Lazy::new(|| {
     let mut h: HashMap<&'static Name, &(dyn KexType + Send + Sync)> = HashMap::new();
+    #[cfg(feature = "rs-crypto")]
     h.insert(&CURVE25519, &_CURVE25519);
     h.insert(&DH_G14_SHA256, &_DH_G14_SHA256);
     h.insert(&DH_G14_SHA1, &_DH_G14_SHA1);
@@ -200,7 +205,7 @@ pub(crate) fn compute_keys<D: Digest>(
                     )?;
 
                     let local_to_remote =
-                        cipher.make_sealing_key(&key, &nonce, &mac, *local_to_remote_mac);
+                        cipher.make_sealing_key(&key, &nonce, &mac, *local_to_remote_mac)?;
 
                     compute_key(remote_to_local, &mut key, cipher.key_len())?;
                     compute_key(remote_to_local_nonce, &mut nonce, cipher.nonce_len())?;
@@ -210,7 +215,7 @@ pub(crate) fn compute_keys<D: Digest>(
                         remote_to_local_mac.key_len(),
                     )?;
                     let remote_to_local =
-                        cipher.make_opening_key(&key, &nonce, &mac, *remote_to_local_mac);
+                        cipher.make_opening_key(&key, &nonce, &mac, *remote_to_local_mac)?;
 
                     Ok(super::cipher::CipherPair {
                         local_to_remote,

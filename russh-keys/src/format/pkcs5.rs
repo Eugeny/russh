@@ -1,5 +1,3 @@
-use aes::*;
-
 use super::Encryption;
 use crate::{key, Error};
 
@@ -11,8 +9,7 @@ pub fn decode_pkcs5(
     password: Option<&str>,
     enc: Encryption,
 ) -> Result<key::KeyPair, Error> {
-    use aes::cipher::{BlockDecryptMut, KeyIvInit};
-    use block_padding::Pkcs7;
+    use openssl::symm::{decrypt, Cipher};
 
     if let Some(pass) = password {
         let sec = match enc {
@@ -23,10 +20,7 @@ pub fn decode_pkcs5(
                 let md5 = c.compute();
 
                 #[allow(clippy::unwrap_used)] // AES parameters are static
-                let c = cbc::Decryptor::<Aes128>::new_from_slices(&md5.0, &iv[..]).unwrap();
-                let mut dec = secret.to_vec();
-                c.decrypt_padded_mut::<Pkcs7>(&mut dec)?;
-                dec
+                decrypt(Cipher::aes_128_cbc(), &md5.0, Some(&iv[..]), secret)?
             }
             Encryption::Aes256Cbc(_) => unimplemented!(),
         };

@@ -233,9 +233,11 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + 'stat
         constrained: bool,
         writebuf: &mut CryptoVec,
     ) -> Result<bool, Error> {
+        #[cfg(feature = "rs-crypto")]
         let pos0 = r.position;
         let t = r.read_string()?;
         let (blob, key) = match t {
+            #[cfg(feature = "rs-crypto")]
             b"ssh-ed25519" => {
                 let public_ = r.read_string()?;
                 let pos1 = r.position;

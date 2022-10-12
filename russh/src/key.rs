@@ -24,6 +24,7 @@ pub trait PubKey {
 impl PubKey for PublicKey {
     fn push_to(&self, buffer: &mut CryptoVec) {
         match self {
+            #[cfg(feature = "rs-crypto")]
             PublicKey::Ed25519(ref public) => {
                 buffer.push_u32_be((ED25519.0.len() + public.as_bytes().len() + 8) as u32);
                 buffer.extend_ssh_string(ED25519.0.as_bytes());
@@ -47,6 +48,7 @@ impl PubKey for PublicKey {
 impl PubKey for KeyPair {
     fn push_to(&self, buffer: &mut CryptoVec) {
         match self {
+            #[cfg(feature = "rs-crypto")]
             KeyPair::Ed25519(ref key) => {
                 let public = key.public.as_bytes();
                 buffer.push_u32_be((ED25519.0.len() + public.len() + 8) as u32);

@@ -45,15 +45,15 @@ impl super::Cipher for GcmCipher {
         n: &[u8],
         _: &[u8],
         _: &dyn MacAlgorithm,
-    ) -> Box<dyn super::OpeningKey + Send> {
+    ) -> Result<Box<dyn super::OpeningKey + Send>, Error> {
         let mut key = GenericArray::<u8, KeySize>::default();
         key.clone_from_slice(k);
         let mut nonce = GenericArray::<u8, NonceSize>::default();
         nonce.clone_from_slice(n);
-        Box::new(OpeningKey {
+        Ok(Box::new(OpeningKey {
             nonce,
             cipher: Aes256Gcm::new(&key),
-        })
+        }))
     }
 
     fn make_sealing_key(
@@ -62,15 +62,15 @@ impl super::Cipher for GcmCipher {
         n: &[u8],
         _: &[u8],
         _: &dyn MacAlgorithm,
-    ) -> Box<dyn super::SealingKey + Send> {
+    ) -> Result<Box<dyn super::SealingKey + Send>, Error> {
         let mut key = GenericArray::<u8, KeySize>::default();
         key.clone_from_slice(k);
         let mut nonce = GenericArray::<u8, NonceSize>::default();
         nonce.clone_from_slice(n);
-        Box::new(SealingKey {
+        Ok(Box::new(SealingKey {
             nonce,
             cipher: Aes256Gcm::new(&key),
-        })
+        }))
     }
 }
 
@@ -112,8 +112,8 @@ impl super::OpeningKey for OpeningKey {
         &self,
         _sequence_number: u32,
         encrypted_packet_length: [u8; 4],
-    ) -> [u8; 4] {
-        encrypted_packet_length
+    ) -> Result<[u8; 4], Error> {
+        Ok(encrypted_packet_length)
     }
 
     fn tag_len(&self) -> usize {

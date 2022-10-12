@@ -79,8 +79,6 @@ use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
-use aes::cipher::block_padding::UnpadError;
-use aes::cipher::inout::PadError;
 use byteorder::{BigEndian, WriteBytesExt};
 use data_encoding::BASE64_MIME;
 
@@ -103,6 +101,7 @@ pub enum Error {
     #[error("Unsupported key type")]
     UnsupportedKeyType(Vec<u8>),
     /// The type of the key is unsupported
+    #[cfg(feature = "rs-crypto")]
     #[error("Invalid Ed25519 key data")]
     Ed25519KeyError(#[from] ed25519_dalek::SignatureError),
     /// The key is encrypted (should supply a password?)
@@ -138,11 +137,13 @@ pub enum Error {
     #[error(transparent)]
     Openssl(#[from] openssl::error::ErrorStack),
 
+    #[cfg(feature = "rs-crypto")]
     #[error(transparent)]
-    Pad(#[from] PadError),
+    Pad(#[from] aes::cipher::inout::PadError),
 
+    #[cfg(feature = "rs-crypto")]
     #[error(transparent)]
-    Unpad(#[from] UnpadError),
+    Unpad(#[from] aes::cipher::block_padding::UnpadError),
 
     #[error("Base64 decoding error: {0}")]
     Decode(#[from] data_encoding::DecodeError),
@@ -215,6 +216,7 @@ impl PublicKeyBase64 for key::PublicKey {
     fn public_key_bytes(&self) -> Vec<u8> {
         let mut s = Vec::new();
         match *self {
+            #[cfg(feature = "rs-crypto")]
             key::PublicKey::Ed25519(ref publickey) => {
                 let name = b"ssh-ed25519";
                 #[allow(clippy::unwrap_used)] // Vec<>.write can't fail
@@ -250,6 +252,7 @@ impl PublicKeyBase64 for key::KeyPair {
         s.write_u32::<BigEndian>(name.len() as u32).unwrap();
         s.extend_from_slice(name);
         match *self {
+            #[cfg(feature = "rs-crypto")]
             key::KeyPair::Ed25519(ref key) => {
                 let public = key.public.as_bytes();
                 #[allow(clippy::unwrap_used)] // Vec<>.write can't fail
@@ -373,10 +376,10 @@ pub fn check_known_hosts_path<P: AsRef<Path>>(
                 debug!("{:?} {:?}", h, k);
                 let host_matches = h.split(',').any(|x| x == host_port);
                 if host_matches {
-                    if &parse_public_key_base64(k)? == pubkey {
-                        return Ok(true);
-                    } else {
-                        return Err(Error::KeyChanged { line });
+                    match parse_public_key_base64(k) {
+                        Ok(k) if &k == pubkey => return Ok(true),
+                        Ok(_) => return Err(Error::KeyChanged { line }),
+                        Err(e) => info!("host file line '{}' failed to parse: {}", k, e),
                     }
                 }
             }
@@ -437,6 +440,8 @@ pub fn check_known_hosts(host: &str, port: u16, pubkey: &key::PublicKey) -> Resu
 
 #[cfg(test)]
 mod test {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
+
     extern crate tempdir;
     use std::fs::File;
     use std::io::Write;
@@ -446,6 +451,7 @@ mod test {
 
     use super::*;
 
+    #[cfg(feature = "rs-crypto")]
     const ED25519_KEY: &str = "-----BEGIN OPENSSH PRIVATE KEY-----
 b3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jYmMAAAAGYmNyeXB0AAAAGAAAABDLGyfA39
 J2FcJygtYqi5ISAAAAEAAAAAEAAAAzAAAAC3NzaC1lZDI1NTE5AAAAIN+Wjn4+4Fcvl2Jl
@@ -485,6 +491,7 @@ QR+u0AypRPmzHnOPAAAAEXJvb3RAMTQwOTExNTQ5NDBkAQ==
 -----END OPENSSH PRIVATE KEY-----";
 
     #[test]
+    #[cfg(feature = "rs-crypto")]
     fn test_decode_ed25519_secret_key() {
         extern crate env_logger;
         env_logger::try_init().unwrap_or(());
@@ -500,8 +507,8 @@ QR+u0AypRPmzHnOPAAAAEXJvb3RAMTQwOTExNTQ5NDBkAQ==
     }
 
     #[test]
-    #[cfg(feature = "openssl")]
-    fn test_fingerprint() {
+    #[cfg(feature = "rs-crypto")]
+    fn test_fingerprint_ed25519() {
         let key = parse_public_key_base64(
             "AAAAC3NzaC1lZDI1NTE5AAAAILagOJFgwaMNhBWQINinKOXmqS4Gh5NgxgriXwdOoINJ",
         )
@@ -513,41 +520,78 @@ QR+u0AypRPmzHnOPAAAAEXJvb3RAMTQwOTExNTQ5NDBkAQ==
     }
 
     #[test]
+    #[cfg(feature = "openssl")]
+    fn test_fingerprint_rsa() {
+        let key = parse_public_key_base64(
+            "AAAAB3NzaC1yc2EAAAADAQABAAAAgQC5eB1ws6hP7GYUyz89DPqrAFf7VW3GCOQsT/m2v1BhlzSxmBb9gSs9BxRyOUN3HtDcD0B+zqRKa/RqLIkemkdhitfrPiCqeWMzdKC+GIiKwxAgeUpNq1FmyJlwetHDlKi92MrnGwaTXvKDyIoV2xDJS2OAhmRIRM3nhrXUXZeiJQ==",
+        )
+        .unwrap();
+        assert_eq!(
+            key.fingerprint(),
+            "cmZL3+aAKXnUlEb02r847o2zlHLBLkiY5I0qbG21zZo"
+        );
+    }
+
+    #[test]
     fn test_check_known_hosts() {
         env_logger::try_init().unwrap_or(());
         let dir = tempdir::TempDir::new("russh").unwrap();
         let path = dir.path().join("known_hosts");
         {
             let mut f = File::create(&path).unwrap();
-            f.write(b"[localhost]:13265 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJdD7y3aLq454yWBdwLWbieU1ebz9/cu7/QEXn9OIeZJ\n#pijul.org,37.120.161.53 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIA6rWI3G2sz07DnfFlrouTcysQlj2P+jpNSOEWD9OJ3X\npijul.org,37.120.161.53 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIA6rWI3G1sz07DnfFlrouTcysQlj2P+jpNSOEWD9OJ3X\n").unwrap();
+            f.write_all(b"[localhost]:13265 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJdD7y3aLq454yWBdwLWbieU1ebz9/cu7/QEXn9OIeZJ\n#pijul.org,37.120.161.53 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIA6rWI3G2sz07DnfFlrouTcysQlj2P+jpNSOEWD9OJ3X\npijul.org,37.120.161.53 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIA6rWI3G1sz07DnfFlrouTcysQlj2P+jpNSOEWD9OJ3X\npijul.org,37.120.161.53 ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAAAgQC5eB1ws6hP7GYUyz89DPqrAFf7VW3GCOQsT/m2v1BhlzSxmBb9gSs9BxRyOUN3HtDcD0B+zqRKa/RqLIkemkdhitfrPiCqeWMzdKC+GIiKwxAgeUpNq1FmyJlwetHDlKi92MrnGwaTXvKDyIoV2xDJS2OAhmRIRM3nhrXUXZeiJQ==").unwrap();
         }
 
-        // Valid key, non-standard port.
-        let host = "localhost";
-        let port = 13265;
-        let hostkey = parse_public_key_base64(
-            "AAAAC3NzaC1lZDI1NTE5AAAAIJdD7y3aLq454yWBdwLWbieU1ebz9/cu7/QEXn9OIeZJ",
-        )
-        .unwrap();
-        assert!(check_known_hosts_path(host, port, &hostkey, &path).unwrap());
+        #[cfg(feature = "openssl")]
+        {
+            // Valid key
+            let host = "pijul.org";
+            let port = 22;
+            let hostkey = parse_public_key_base64(
+                "AAAAB3NzaC1yc2EAAAADAQABAAAAgQC5eB1ws6hP7GYUyz89DPqrAFf7VW3GCOQsT/m2v1BhlzSxmBb9gSs9BxRyOUN3HtDcD0B+zqRKa/RqLIkemkdhitfrPiCqeWMzdKC+GIiKwxAgeUpNq1FmyJlwetHDlKi92MrnGwaTXvKDyIoV2xDJS2OAhmRIRM3nhrXUXZeiJQ==",
+            )
+            .unwrap();
+            assert!(check_known_hosts_path(host, port, &hostkey, &path).unwrap());
 
-        // Valid key, several hosts, port 22
-        let host = "pijul.org";
-        let port = 22;
-        let hostkey = parse_public_key_base64(
-            "AAAAC3NzaC1lZDI1NTE5AAAAIA6rWI3G1sz07DnfFlrouTcysQlj2P+jpNSOEWD9OJ3X",
-        )
-        .unwrap();
-        assert!(check_known_hosts_path(host, port, &hostkey, &path).unwrap());
+            // Invalid key
+            let host = "pijul.org";
+            let port = 22;
+            let hostkey = parse_public_key_base64(
+                "AAAAB3NzaC1yc2EAAAADAQABAAAAgQD4p+jQjU/ZO2i444sGs//zjcg1P4T6XyExOXWT7RZ/XmITo5aAQICYgyFKF/NTU8WrWewNbxw/OHzmHGyL6BJEvqtCRT4a4ufgf+hpAchnYNK+3Ee9dWBOHIo93jGdC/I5q+3WbzBK4gtCLkQJQWWH/2whBym7zyR2JMA0s396dQ==",
+            )
+            .unwrap();
+            assert!(check_known_hosts_path(host, port, &hostkey, &path).is_err());
+        }
 
-        // Now with the key in a comment above, check that it's not recognized
-        let host = "pijul.org";
-        let port = 22;
-        let hostkey = parse_public_key_base64(
-            "AAAAC3NzaC1lZDI1NTE5AAAAIA6rWI3G2sz07DnfFlrouTcysQlj2P+jpNSOEWD9OJ3X",
-        )
-        .unwrap();
-        assert!(check_known_hosts_path(host, port, &hostkey, &path).is_err());
+        #[cfg(feature = "rs-crypto")]
+        {
+            // Valid key, non-standard port.
+            let host = "localhost";
+            let port = 13265;
+            let hostkey = parse_public_key_base64(
+                "AAAAC3NzaC1lZDI1NTE5AAAAIJdD7y3aLq454yWBdwLWbieU1ebz9/cu7/QEXn9OIeZJ",
+            )
+            .unwrap();
+            assert!(check_known_hosts_path(host, port, &hostkey, &path).unwrap());
+
+            // Valid key, several hosts, port 22
+            let host = "pijul.org";
+            let port = 22;
+            let hostkey = parse_public_key_base64(
+                "AAAAC3NzaC1lZDI1NTE5AAAAIA6rWI3G1sz07DnfFlrouTcysQlj2P+jpNSOEWD9OJ3X",
+            )
+            .unwrap();
+            assert!(check_known_hosts_path(host, port, &hostkey, &path).unwrap());
+
+            // Now with the key in a comment above, check that it's not recognized
+            let host = "pijul.org";
+            let port = 22;
+            let hostkey = parse_public_key_base64(
+                "AAAAC3NzaC1lZDI1NTE5AAAAIA6rWI3G2sz07DnfFlrouTcysQlj2P+jpNSOEWD9OJ3X",
+            )
+            .unwrap();
+            assert!(check_known_hosts_path(host, port, &hostkey, &path).is_err());
+        }
     }
 
     #[test]
@@ -808,16 +852,16 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
             client.add_identity(&key, &[]).await?;
             client.request_identities().await?;
             let buf = russh_cryptovec::CryptoVec::from_slice(b"blabla");
-            let len = buf.len();
+            let _len = buf.len();
             let (_, buf) = client.sign_request(&public, buf).await;
-            let buf = buf?;
-            let (a, b) = buf.split_at(len);
-            match key {
-                key::KeyPair::Ed25519 { .. } => {
+            let _buf = buf?;
+            #[cfg(feature = "rs-crypto")]
+            {
+                let (a, b) = _buf.split_at(_len);
+                if let key::KeyPair::Ed25519 { .. } = key {
                     let sig = &b[b.len() - 64..];
                     assert!(public.verify_detached(a, sig));
                 }
-                _ => {}
             }
             Ok::<(), Error>(())
         })
@@ -827,6 +871,7 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
     }
 
     #[test]
+    #[cfg(feature = "rs-crypto")]
     fn test_client_agent_ed25519() {
         let key = decode_secret_key(ED25519_KEY, Some("blabla")).unwrap();
         test_client_agent(key)
@@ -888,16 +933,16 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
                 .await?;
             client.request_identities().await?;
             let buf = russh_cryptovec::CryptoVec::from_slice(b"blabla");
-            let len = buf.len();
+            let _len = buf.len();
             let (_, buf) = client.sign_request(&public, buf).await;
-            let buf = buf?;
-            let (a, b) = buf.split_at(len);
-            match key {
-                key::KeyPair::Ed25519 { .. } => {
+            let _buf = buf?;
+            #[cfg(feature = "rs-crypto")]
+            {
+                let (a, b) = _buf.split_at(_len);
+                if let key::KeyPair::Ed25519 { .. } = key {
                     let sig = &b[b.len() - 64..];
                     assert!(public.verify_detached(a, sig));
                 }
-                _ => {}
             }
             Ok::<(), Error>(())
         })

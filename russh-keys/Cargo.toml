@@ -29,25 +29,25 @@ repository = "https://nest.pijul.com/pijul/russh"
 version = "0.22.0-beta.7"
 
 [dependencies]
-aes = "0.8"
+aes = { version = "0.8", optional = true }
 bcrypt-pbkdf = "0.6"
 bit-vec = "0.6"
-cbc = "0.1"
-ctr = "0.9"
-block-padding = { version = "0.3", features = ["std"] }
+cbc = { version = "0.1", optional = true }
+ctr = { version = "0.9", optional = true }
+block-padding = { version = "0.3", features = ["std"], optional = true }
 byteorder = "1.4"
 data-encoding = "2.3"
 dirs = "3.0"
-ed25519-dalek = "1.0"
+ed25519-dalek = { version = "1.0", optional = true }
 futures = "0.3"
-hmac = "0.12"
+hmac = { version = "0.12", optional = true }
 inout = { version = "0.1", features = ["std"] }
 log = "0.4"
 md5 = "0.7"
 num-bigint = "0.4"
 num-integer = "0.1"
-openssl = { version = "0.10", optional = true }
-pbkdf2 = "0.11"
+openssl = { version = "^0.10.40", optional = true }
+pbkdf2 = { version = "0.11", optional = true }
 rand = "0.7"
 rand_core = { version = "0.5", features = ["std"] }
 russh-cryptovec = { version = "0.7.0-beta.1", path = "../cryptovec" }
@@ -65,7 +65,17 @@ tokio-stream = { version = "0.1", features = ["net"] }
 yasna = { version = "0.4.0", features = ["bit-vec", "num-bigint"] }
 
 [features]
+default = ["rs-crypto"]
 vendored-openssl = ["openssl", "openssl/vendored"]
+rs-crypto = [
+  "dep:aes",
+  "dep:cbc",
+  "dep:ctr",
+  "dep:block-padding",
+  "dep:hmac",
+  "dep:pbkdf2",
+  "dep:ed25519-dalek",
+]
 
 [dev-dependencies]
 env_logger = "0.8"
