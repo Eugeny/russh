@@ -810,7 +810,7 @@ mod test_server_channels {
         let _ = env_logger::try_init();
 
         let client_key = geneate_keypair();
-        let mut config = server::Config {
+        let config = server::Config {
             connection_timeout: None,
             auth_rejection_time: std::time::Duration::from_secs(3),
             keys: vec![geneate_keypair()],

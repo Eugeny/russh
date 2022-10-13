@@ -66,7 +66,6 @@ impl super::Cipher for AesSshCipher {
 
         Ok(Box::new(SealingKey {
             ctx,
-            cipher: self.0(),
             mac: mac.make_mac(mac_key),
         }))
     }
@@ -82,7 +81,6 @@ pub struct OpeningKey {
 
 pub struct SealingKey {
     ctx: CipherCtx,
-    cipher: &'static CipherRef,
     mac: Box<dyn Mac + Send>,
 }
 
