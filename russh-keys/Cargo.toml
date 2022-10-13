@@ -3,7 +3,7 @@ authors = ["Pierre-Étienne Meunier <pe@pijul.org>"]
 description = "Deal with SSH keys: load them, decrypt them, call an SSH agent."
 documentation = "https://docs.rs/russh-keys"
 edition = "2018"
-homepage = "https://pijul.org/russh"
+homepage = "https://github.com/warp-tech/russh"
 include = [
   "Cargo.toml",
   "src/lib.rs",
@@ -24,7 +24,7 @@ include = [
 keywords = ["ssh"]
 license = "Apache-2.0"
 name = "russh-keys"
-repository = "https://nest.pijul.com/pijul/russh"
+repository = "https://github.com/warp-tech/russh"
 version = "0.22.0-beta.7"
 
 [dependencies]
