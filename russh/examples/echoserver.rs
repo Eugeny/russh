@@ -20,7 +20,7 @@ async fn main() {
     config.auth_rejection_time = std::time::Duration::from_secs(3);
     config
         .keys
-        .push(russh_keys::key::KeyPair::generate_ed25519().unwrap());
+        .push(russh_keys::key::KeyPair::generate_rsa(2048, key::SignatureHash::SHA1).unwrap());
     let config = Arc::new(config);
     let sh = Server {
         clients: Arc::new(Mutex::new(HashMap::new())),
