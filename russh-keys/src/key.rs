@@ -236,6 +236,7 @@ impl PublicKey {
 
     #[cfg(feature = "openssl")]
     pub fn set_algorithm(&mut self, algorithm: &[u8]) {
+        #[allow(irrefutable_let_patterns)] // depending on the build flag, it may be refutable
         if let PublicKey::RSA { ref mut hash, .. } = self {
             if algorithm == b"rsa-sha2-512" {
                 *hash = SignatureHash::SHA2_512

@@ -18,9 +18,16 @@ async fn main() {
     let mut config = russh::server::Config::default();
     config.connection_timeout = Some(std::time::Duration::from_secs(3600));
     config.auth_rejection_time = std::time::Duration::from_secs(3);
+
+    // Depending on whether you use OpenSSL or not, you can generate different keys:
+    #[cfg(feature = "openssl")]
+    let keypair = russh_keys::key::KeyPair::generate_rsa(2048, key::SignatureHash::SHA1).unwrap();
+    #[cfg(not(feature = "openssl"))]
+    let keypair = russh_keys::key::KeyPair::generate_ed25519().unwrap();
+
     config
         .keys
-        .push(russh_keys::key::KeyPair::generate_rsa(2048, key::SignatureHash::SHA1).unwrap());
+        .push(keypair);
     let config = Arc::new(config);
     let sh = Server {
         clients: Arc::new(Mutex::new(HashMap::new())),

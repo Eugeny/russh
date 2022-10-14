@@ -856,6 +856,7 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
             let (_, buf) = client.sign_request(&public, buf).await;
             let _buf = buf?;
             #[cfg(feature = "rs-crypto")]
+            #[allow(irrefutable_let_patterns)]
             {
                 let (a, b) = _buf.split_at(_len);
                 if let key::KeyPair::Ed25519 { .. } = key {

@@ -320,6 +320,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AgentClient<S> {
         key_blob(public, &mut self.buf)?;
         self.buf.extend_ssh_string(data);
         debug!("public = {:?}", public);
+        #[allow(unreachable_patterns)] // may not be unreachable depending on build flags
         let hash = match public {
             #[cfg(feature = "openssl")]
             PublicKey::RSA { hash, .. } => match hash {
