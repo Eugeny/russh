@@ -113,6 +113,9 @@ pub enum Msg {
         address: String,
         port: u32,
     },
+    Close {
+        id: ChannelId,
+    },
     Disconnect {
         reason: Disconnect,
         description: String,

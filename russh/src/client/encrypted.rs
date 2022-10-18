@@ -328,6 +328,9 @@ impl Session {
                 let mut r = buf.reader(1);
                 let channel_num = ChannelId(r.read_u32().map_err(crate::Error::from)?);
                 if let Some(ref mut enc) = self.common.encrypted {
+                    // The CHANNEL_CLOSE message must be sent to the server at this point or the session
+                    // will not be released.
+                    enc.byte(channel_num, msg::CHANNEL_CLOSE);
                     enc.channels.remove(&channel_num);
                 }
                 client.channel_close(channel_num, self).await

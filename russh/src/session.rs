@@ -148,6 +148,10 @@ impl Encrypted {
         self.byte(channel, msg::CHANNEL_EOF);
     }
 
+    pub fn close(&mut self, channel: ChannelId) {
+        self.byte(channel, msg::CHANNEL_CLOSE);
+    }
+
     pub fn sender_window_size(&self, channel: ChannelId) -> usize {
         if let Some(channel) = self.channels.get(&channel) {
             channel.sender_window_size as usize
