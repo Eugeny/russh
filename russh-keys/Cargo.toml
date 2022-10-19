@@ -29,7 +29,7 @@ version = "0.22.0-beta.7"
 
 [dependencies]
 aes = "0.8"
-bcrypt-pbkdf = "0.6"
+bcrypt-pbkdf = "0.9"
 bit-vec = "0.6"
 cbc = "0.1"
 ctr = "0.9"
