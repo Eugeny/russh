@@ -1070,7 +1070,7 @@ dependencies = [
  "num-integer",
  "openssl",
  "pbkdf2",
- "rand 0.7.3",
+ "rand 0.8.4",
  "rand_core 0.5.1",
  "russh-cryptovec",
  "serde",
