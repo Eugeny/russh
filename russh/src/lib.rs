@@ -27,6 +27,11 @@
 //! `client::Handler` for clients and `server::Handler` for
 //! servers.
 //!
+//! # Crate features
+//!
+//! * RSA key support is gated behind the `openssl` feature (disabled by default).
+//! * Enabling that and disabling the `rs-crypto` feature (enabled by default) will leave you with a very basic, but pure-OpenSSL RSA+AES cipherset.
+//!
 //! # Writing servers
 //!
 //! In the specific case of servers, a server must implement
