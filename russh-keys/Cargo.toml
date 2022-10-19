@@ -61,7 +61,7 @@ tokio = { version = "1.17.0", features = [
   "net",
 ] }
 tokio-stream = { version = "0.1", features = ["net"] }
-yasna = { version = "0.4.0", features = ["bit-vec", "num-bigint"] }
+yasna = { version = "0.5.0", features = ["bit-vec", "num-bigint"] }
 
 [features]
 vendored-openssl = ["openssl", "openssl/vendored"]
