@@ -1071,7 +1071,7 @@ dependencies = [
  "openssl",
  "pbkdf2",
  "rand 0.7.3",
- "rand_core 0.5.1",
+ "rand_core 0.6.3",
  "russh-cryptovec",
  "serde",
  "serde_derive",
