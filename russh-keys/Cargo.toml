@@ -36,7 +36,7 @@ ctr = "0.9"
 block-padding = { version = "0.3", features = ["std"] }
 byteorder = "1.4"
 data-encoding = "2.3"
-dirs = "3.0"
+dirs = "4.0"
 ed25519-dalek = "1.0"
 futures = "0.3"
 hmac = "0.12"
