@@ -170,7 +170,7 @@ impl Handle {
     }
 
     /// Request a session channel (the most basic type of
-    /// channel). This function returns `Some(..)` immediately if the
+    /// channel). This function returns `Ok(..)` immediately if the
     /// connection is authenticated, but the channel only becomes
     /// usable when it's confirmed by the server, as indicated by the
     /// `confirmed` field of the corresponding `Channel`.

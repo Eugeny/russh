@@ -11,6 +11,8 @@
 // limitations under the License.
 //
 
+//!
+//! This module exports cipher names for use with [Preferred].
 use std::collections::HashMap;
 use std::marker::PhantomData;
 
@@ -28,12 +30,12 @@ mod crypto;
 mod crypto_etm;
 mod none;
 
-pub trait MacAlgorithm {
+pub(crate) trait MacAlgorithm {
     fn key_len(&self) -> usize;
     fn make_mac(&self, key: &[u8]) -> Box<dyn Mac + Send>;
 }
 
-pub trait Mac {
+pub(crate) trait Mac {
     fn mac_len(&self) -> usize;
     fn is_etm(&self) -> bool {
         false
@@ -50,12 +52,19 @@ impl AsRef<str> for Name {
     }
 }
 
+/// `none`
 pub const NONE: Name = Name("none");
+/// `hmac-sha1`
 pub const HMAC_SHA1: Name = Name("hmac-sha1");
+/// `hmac-sha2-256`
 pub const HMAC_SHA256: Name = Name("hmac-sha2-256");
+/// `hmac-sha2-512`
 pub const HMAC_SHA512: Name = Name("hmac-sha2-512");
+/// `hmac-sha1-etm@openssh.com`
 pub const HMAC_SHA1_ETM: Name = Name("hmac-sha1-etm@openssh.com");
+/// `hmac-sha2-256-etm@openssh.com`
 pub const HMAC_SHA256_ETM: Name = Name("hmac-sha2-256-etm@openssh.com");
+/// `hmac-sha2-512-etm@openssh.com`
 pub const HMAC_SHA512_ETM: Name = Name("hmac-sha2-512-etm@openssh.com");
 
 static _NONE: NoMacAlgorithm = NoMacAlgorithm {};
@@ -72,7 +81,7 @@ static _HMAC_SHA256_ETM: CryptoEtmMacAlgorithm<Hmac<Sha256>, U64> =
 static _HMAC_SHA512_ETM: CryptoEtmMacAlgorithm<Hmac<Sha512>, U64> =
     CryptoEtmMacAlgorithm(PhantomData, PhantomData);
 
-pub static MACS: Lazy<HashMap<&'static Name, &(dyn MacAlgorithm + Send + Sync)>> =
+pub(crate) static MACS: Lazy<HashMap<&'static Name, &(dyn MacAlgorithm + Send + Sync)>> =
     Lazy::new(|| {
         let mut h: HashMap<&'static Name, &(dyn MacAlgorithm + Send + Sync)> = HashMap::new();
         h.insert(&NONE, &_NONE);

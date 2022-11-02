@@ -5,6 +5,7 @@ use crate::{ChannelId, Error, Pty, Sig};
 
 #[derive(Debug)]
 #[non_exhaustive]
+/// Possible messages that [Channel::wait] can receive.
 pub enum ChannelMsg {
     Open {
         id: ChannelId,
@@ -100,6 +101,9 @@ pub enum ChannelMsg {
     Close,
 }
 
+/// A handle to a session channel.
+///
+/// Allows you to read and write from a channel without borrowing the session
 pub struct Channel<Send: From<(ChannelId, ChannelMsg)>> {
     pub(crate) id: ChannelId,
     pub(crate) sender: Sender<Send>,
