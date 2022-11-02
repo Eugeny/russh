@@ -425,7 +425,7 @@ impl Exchange {
 }
 
 #[derive(Debug)]
-pub enum Kex {
+pub(crate) enum Kex {
     /// Version number sent. `algo` and `sent` tell wether kexinit has
     /// been received, and sent, respectively.
     Init(KexInit),
@@ -442,7 +442,7 @@ pub enum Kex {
 }
 
 #[derive(Debug)]
-pub struct KexInit {
+pub(crate) struct KexInit {
     pub algo: Option<negotiation::Names>,
     pub exchange: Exchange,
     pub session_id: Option<CryptoVec>,
@@ -480,14 +480,14 @@ impl KexInit {
 }
 
 #[derive(Debug)]
-pub struct KexDh {
+pub(crate) struct KexDh {
     pub exchange: Exchange,
     pub names: negotiation::Names,
     pub key: usize,
     pub session_id: Option<CryptoVec>,
 }
 
-pub struct KexDhDone {
+pub(crate) struct KexDhDone {
     pub exchange: Exchange,
     pub kex: Box<dyn KexAlgorithm + Send>,
     pub key: usize,
@@ -532,20 +532,18 @@ impl KexDhDone {
             key: self.key,
             cipher: c,
             session_id,
-            received: false,
             sent: false,
         })
     }
 }
 
 #[derive(Debug)]
-pub struct NewKeys {
+pub(crate) struct NewKeys {
     pub exchange: Exchange,
     pub names: negotiation::Names,
     pub kex: Box<dyn KexAlgorithm + Send>,
     pub key: usize,
     pub cipher: cipher::CipherPair,
     pub session_id: CryptoVec,
-    pub received: bool,
     pub sent: bool,
 }

@@ -43,8 +43,15 @@
 //! If you want to use `await` inside `Handler` methods, you'll need to box the
 //! returned futures and use an async block inside like so:
 //!
-//! ```no_run
+//! ```no_compile
+//! use core::pin::Pin;
+//! use russh::server::Session;
+//! use futures_util::future::future::FutureExt;
+//!
+//! struct ServerHandler;
+//!
 //! impl russh::server::Handler for ServerHandler {
+//!     type Error = anyhow::Error;
 //!     type FutureUnit =
 //!         Pin<Box<dyn core::future::Future<Output = anyhow::Result<(Self, Session)>> + Send>>;
 //!
@@ -52,8 +59,7 @@
 //!
 //!     fn shell_request(self, channel: ChannelId, mut session: Session) -> Self::FutureUnit {
 //!         async move {
-//!             something.await?;
-//!             // ...
+//!             // something.await?;
 //!             Ok((self, session))
 //!         }
 //!         .boxed()
