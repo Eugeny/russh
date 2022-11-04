@@ -5,6 +5,7 @@ use crate::{ChannelId, Error, Pty, Sig};
 
 #[derive(Debug)]
 #[non_exhaustive]
+/// Possible messages that [Channel::wait] can receive.
 pub enum ChannelMsg {
     Open {
         id: ChannelId,
@@ -100,6 +101,9 @@ pub enum ChannelMsg {
     Close,
 }
 
+/// A handle to a session channel.
+///
+/// Allows you to read and write from a channel without borrowing the session
 pub struct Channel<Send: From<(ChannelId, ChannelMsg)>> {
     pub(crate) id: ChannelId,
     pub(crate) sender: Sender<Send>,
@@ -299,7 +303,15 @@ impl<Send: From<(ChannelId, ChannelMsg)>> Channel<Send> {
                 self.window_size, self.max_packet_size, total
             );
             let sendable = self.window_size.min(self.max_packet_size) as usize;
+
             debug!("sendable {:?}", sendable);
+
+            // If we can not send anymore, continue
+            // and wait for server window adjustment
+            if sendable == 0 {
+                continue;
+            }
+
             let mut c = CryptoVec::new_zeroed(sendable);
             let n = data.read(&mut c[..]).await?;
             total += n;

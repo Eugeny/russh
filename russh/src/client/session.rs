@@ -292,6 +292,14 @@ impl Session {
         }
     }
 
+    pub fn close(&mut self, channel: ChannelId) {
+        if let Some(ref mut enc) = self.common.encrypted {
+            enc.close(channel)
+        } else {
+            unreachable!()
+        }
+    }
+
     pub fn extended_data(&mut self, channel: ChannelId, ext: u32, data: CryptoVec) {
         if let Some(ref mut enc) = self.common.encrypted {
             enc.extended_data(channel, ext, data)

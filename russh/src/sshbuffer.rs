@@ -17,10 +17,10 @@ use std::num::Wrapping;
 
 use super::*;
 
-/// The SSH id buffer.
+/// The SSH client/server identification string.
 #[derive(Debug)]
 pub enum SshId {
-    /// When sending the id, append RFC standard '\r\n'. Example: `SSHId::Standard("SSH-2.0-acme")`
+    /// When sending the id, append RFC standard `\r\n`. Example: `SshId::Standard("SSH-2.0-acme")`
     Standard(String),
     /// When sending the id, use this buffer as it is and do not append additional line terminators.
     Raw(String),

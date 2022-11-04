@@ -6,8 +6,8 @@ edition = "2018"
 include = ["Cargo.toml", "src/lib.rs", "src/proxy.rs"]
 license = "Apache-2.0"
 name = "russh-config"
-repository = "https://nest.pijul.com/pijul/russh"
-version = "0.7.0-beta.1"
+repository = "https://github.com/warp-tech/russh"
+version = "0.7.0"
 
 [dependencies]
 dirs-next = "2.0"
@@ -15,4 +15,4 @@ futures = "0.3"
 log = "0.4"
 thiserror = "1.0"
 tokio = {version = "1.0", features = ["io-util", "net", "macros", "process"]}
-whoami = "1.0"
+whoami = "1.2"

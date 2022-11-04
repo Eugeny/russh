@@ -13,6 +13,84 @@
 // limitations under the License.
 //
 
+//! # Implementing clients
+//!
+//! Maybe surprisingly, the data types used by Russh to implement
+//! clients are relatively more complicated than for servers. This is
+//! mostly related to the fact that clients are generally used both in
+//! a synchronous way (in the case of SSH, we can think of sending a
+//! shell command), and asynchronously (because the server may send
+//! unsollicited messages), and hence need to handle multiple
+//! interfaces.
+//!
+//! The [Session](client::Session) is passed to the [Handler](client::Handler)
+//! when the client receives data.
+//!
+//! ```
+//! extern crate russh;
+//! extern crate russh_keys;
+//! extern crate futures;
+//! extern crate tokio;
+//! extern crate env_logger;
+//! use std::sync::Arc;
+//! use russh::*;
+//! use russh::server::{Auth, Session};
+//! use russh_keys::*;
+//! use futures::Future;
+//! use std::io::Read;
+//! use std::net::SocketAddr;
+//! use std::str::FromStr;
+//!
+//! struct Client {
+//! }
+//!
+//! impl client::Handler for Client {
+//!    type Error = anyhow::Error;
+//!    type FutureUnit = futures::future::Ready<Result<(Self, client::Session), anyhow::Error>>;
+//!    type FutureBool = futures::future::Ready<Result<(Self, bool), anyhow::Error>>;
+//!
+//!    fn finished_bool(self, b: bool) -> Self::FutureBool {
+//!        futures::future::ready(Ok((self, b)))
+//!    }
+//!    fn finished(self, session: client::Session) -> Self::FutureUnit {
+//!        futures::future::ready(Ok((self, session)))
+//!    }
+//!    fn check_server_key(self, server_public_key: &key::PublicKey) -> Self::FutureBool {
+//!        println!("check_server_key: {:?}", server_public_key);
+//!        self.finished_bool(true)
+//!    }
+//!    fn channel_open_confirmation(self, channel: ChannelId, max_packet_size: u32, window_size: u32, session: client::Session) -> Self::FutureUnit {
+//!        println!("channel_open_confirmation: {:?}", channel);
+//!        self.finished(session)
+//!    }
+//!    fn data(self, channel: ChannelId, data: &[u8], session: client::Session) -> Self::FutureUnit {
+//!        println!("data on channel {:?}: {:?}", channel, std::str::from_utf8(data));
+//!        self.finished(session)
+//!    }
+//! }
+//!
+//! #[tokio::main]
+//! async fn main() {
+//!   let config = russh::client::Config::default();
+//!   let config = Arc::new(config);
+//!   let sh = Client{};
+//!
+//!   let key = russh_keys::key::KeyPair::generate_ed25519().unwrap();
+//!   let mut agent = russh_keys::agent::client::AgentClient::connect_env().await.unwrap();
+//!   agent.add_identity(&key, &[]).await.unwrap();
+//!   let mut session = russh::client::connect(config, SocketAddr::from_str("127.0.0.1:22").unwrap(), sh).await.unwrap();
+//!   if session.authenticate_future(std::env::var("USER").unwrap(), key.clone_public_key().unwrap(), agent).await.1.unwrap() {
+//!     let mut channel = session.channel_open_session().await.unwrap();
+//!     channel.data(&b"Hello, world!"[..]).await.unwrap();
+//!     if let Some(msg) = channel.wait().await {
+//!         println!("{:?}", msg)
+//!     }
+//!   }
+//! }
+//! ```
+//!
+//! [Session]: client::Session
+
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -46,9 +124,11 @@ mod encrypted;
 mod kex;
 mod session;
 
-/// Not typically used by end users, this struct contains the actual session's
-/// state. It is in charge of multiplexing and keeping track of various channels
-/// that may get opened and closed during the lifetime of an SSH session.
+/// Actual client session's state.
+///
+/// It is in charge of multiplexing and keeping track of various channels
+/// that may get opened and closed during the lifetime of an SSH session and
+/// allows sending messages to the server.
 pub struct Session {
     common: CommonSession<Arc<Config>>,
     receiver: Receiver<Msg>,
@@ -112,6 +192,9 @@ pub enum Msg {
         want_reply: bool,
         address: String,
         port: u32,
+    },
+    Close {
+        id: ChannelId,
     },
     Disconnect {
         reason: Disconnect,

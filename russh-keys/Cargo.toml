@@ -3,11 +3,10 @@ authors = ["Pierre-Étienne Meunier <pe@pijul.org>"]
 description = "Deal with SSH keys: load them, decrypt them, call an SSH agent."
 documentation = "https://docs.rs/russh-keys"
 edition = "2018"
-homepage = "https://pijul.org/russh"
+homepage = "https://github.com/warp-tech/russh"
 include = [
   "Cargo.toml",
   "src/lib.rs",
-  "src/pem.rs",
   "src/agent/mod.rs",
   "src/agent/msg.rs",
   "src/agent/server.rs",
@@ -25,19 +24,19 @@ include = [
 keywords = ["ssh"]
 license = "Apache-2.0"
 name = "russh-keys"
-repository = "https://nest.pijul.com/pijul/russh"
-version = "0.22.0-beta.6"
+repository = "https://github.com/warp-tech/russh"
+version = "0.22.0"
 
 [dependencies]
 aes = "0.8"
-bcrypt-pbkdf = "0.6"
+bcrypt-pbkdf = "0.9"
 bit-vec = "0.6"
 cbc = "0.1"
 ctr = "0.9"
 block-padding = { version = "0.3", features = ["std"] }
 byteorder = "1.4"
 data-encoding = "2.3"
-dirs = "3.0"
+dirs = "4.0"
 ed25519-dalek = "1.0"
 futures = "0.3"
 hmac = "0.12"
@@ -62,11 +61,11 @@ tokio = { version = "1.17.0", features = [
   "net",
 ] }
 tokio-stream = { version = "0.1", features = ["net"] }
-yasna = { version = "0.4.0", features = ["bit-vec", "num-bigint"] }
+yasna = { version = "0.5.0", features = ["bit-vec", "num-bigint"] }
 
 [features]
 vendored-openssl = ["openssl", "openssl/vendored"]
 
 [dev-dependencies]
-env_logger = "0.8"
+env_logger = "0.9"
 tempdir = "0.3"

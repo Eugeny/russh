@@ -1,15 +1,3 @@
-use std::collections::HashMap;
-use std::fmt::Debug;
-use std::marker::PhantomData;
-use std::num::Wrapping;
-
-use aes::{Aes128, Aes192, Aes256};
-use byteorder::{BigEndian, ByteOrder};
-use ctr::Ctr128BE;
-use once_cell::sync::Lazy;
-use tokio::io::{AsyncRead, AsyncReadExt};
-
-use crate::mac::MacAlgorithm;
 // Copyright 2016 Pierre-Étienne Meunier
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,19 +11,33 @@ use crate::mac::MacAlgorithm;
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+//!
+//! This module exports cipher names for use with [Preferred].
+use crate::mac::MacAlgorithm;
 use crate::sshbuffer::SSHBuffer;
 use crate::Error;
 
-pub mod block;
-pub mod chacha20poly1305;
-pub mod clear;
-pub mod gcm;
+use aes::{Aes128, Aes192, Aes256};
+use byteorder::{BigEndian, ByteOrder};
+use ctr::Ctr128BE;
+use once_cell::sync::Lazy;
+use std::collections::HashMap;
+use std::fmt::Debug;
+use std::marker::PhantomData;
+use std::num::Wrapping;
+use tokio::io::{AsyncRead, AsyncReadExt};
+
+pub(crate) mod block;
+pub(crate) mod chacha20poly1305;
+pub(crate) mod clear;
+pub(crate) mod gcm;
 use block::SshBlockCipher;
 use chacha20poly1305::SshChacha20Poly1305Cipher;
 use clear::Clear;
 use gcm::GcmCipher;
 
-pub trait Cipher {
+pub(crate) trait Cipher {
     fn needs_mac(&self) -> bool {
         false
     }
@@ -59,12 +61,19 @@ pub trait Cipher {
     ) -> Box<dyn SealingKey + Send>;
 }
 
+/// `clear`
 pub const CLEAR: Name = Name("clear");
+/// `aes128-ctr`
 pub const AES_128_CTR: Name = Name("aes128-ctr");
+/// `aes192-ctr`
 pub const AES_192_CTR: Name = Name("aes192-ctr");
+/// `aes256-ctr`
 pub const AES_256_CTR: Name = Name("aes256-ctr");
+/// `aes256-gcm@openssh.com`
 pub const AES_256_GCM: Name = Name("aes256-gcm@openssh.com");
+/// `chacha20-poly1305@openssh.com`
 pub const CHACHA20_POLY1305: Name = Name("chacha20-poly1305@openssh.com");
+/// `none`
 pub const NONE: Name = Name("none");
 
 static _CLEAR: Clear = Clear {};
@@ -74,7 +83,7 @@ static _AES_256_CTR: SshBlockCipher<Ctr128BE<Aes256>> = SshBlockCipher(PhantomDa
 static _AES_256_GCM: GcmCipher = GcmCipher {};
 static _CHACHA20_POLY1305: SshChacha20Poly1305Cipher = SshChacha20Poly1305Cipher {};
 
-pub static CIPHERS: Lazy<HashMap<&'static Name, &(dyn Cipher + Send + Sync)>> = Lazy::new(|| {
+pub(crate) static CIPHERS: Lazy<HashMap<&'static Name, &(dyn Cipher + Send + Sync)>> = Lazy::new(|| {
     let mut h: HashMap<&'static Name, &(dyn Cipher + Send + Sync)> = HashMap::new();
     h.insert(&CLEAR, &_CLEAR);
     h.insert(&NONE, &_CLEAR);
@@ -94,7 +103,7 @@ impl AsRef<str> for Name {
     }
 }
 
-pub struct CipherPair {
+pub(crate) struct CipherPair {
     pub local_to_remote: Box<dyn SealingKey + Send>,
     pub remote_to_local: Box<dyn OpeningKey + Send>,
 }
@@ -105,7 +114,7 @@ impl Debug for CipherPair {
     }
 }
 
-pub trait OpeningKey {
+pub(crate) trait OpeningKey {
     fn decrypt_packet_length(&self, seqn: u32, encrypted_packet_length: [u8; 4]) -> [u8; 4];
 
     fn tag_len(&self) -> usize;
@@ -118,7 +127,7 @@ pub trait OpeningKey {
     ) -> Result<&'a [u8], Error>;
 }
 
-pub trait SealingKey {
+pub(crate) trait SealingKey {
     fn padding_length(&self, plaintext: &[u8]) -> usize;
 
     fn fill_padding(&self, padding_out: &mut [u8]);
@@ -164,7 +173,7 @@ pub trait SealingKey {
     }
 }
 
-pub async fn read<'a, R: AsyncRead + Unpin>(
+pub(crate) async fn read<'a, R: AsyncRead + Unpin>(
     stream: &'a mut R,
     buffer: &'a mut SSHBuffer,
     cipher: &'a mut (dyn OpeningKey + Send),
@@ -212,7 +221,7 @@ pub async fn read<'a, R: AsyncRead + Unpin>(
     Ok(plaintext_end + 4)
 }
 
-pub const PACKET_LENGTH_LEN: usize = 4;
+pub(crate) const PACKET_LENGTH_LEN: usize = 4;
 
 const MINIMUM_PACKET_LEN: usize = 16;
 
