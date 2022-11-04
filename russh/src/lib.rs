@@ -155,7 +155,7 @@ mod negotiation;
 mod ssh_read;
 mod sshbuffer;
 
-pub use negotiation::{Preferred};
+pub use negotiation::Preferred;
 
 mod pty;
 
@@ -179,6 +179,10 @@ macro_rules! push_packet {
 
 mod channels;
 pub use channels::{Channel, ChannelMsg};
+
+mod channel_stream;
+pub use channel_stream::ChannelStream;
+
 mod parsing;
 mod session;
 
