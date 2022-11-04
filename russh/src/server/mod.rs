@@ -347,6 +347,9 @@ pub trait Handler: Sized {
     /// Called when the client sends EOF to a channel.
     #[allow(unused_variables)]
     fn channel_eof(self, channel: ChannelId, session: Session) -> Self::FutureUnit {
+        if let Some(chan) = session.channels.get(&channel) {
+            chan.send(ChannelMsg::Eof).unwrap_or(())
+        }
         self.finished(session)
     }
 
@@ -466,11 +469,15 @@ pub trait Handler: Sized {
     fn window_adjusted(
         self,
         channel: ChannelId,
-        new_window_size: usize,
+        new_size: u32,
         mut session: Session,
     ) -> Self::FutureUnit {
         if let Some(ref mut enc) = session.common.encrypted {
             enc.flush_pending(channel);
+        }
+        if let Some(chan) = session.channels.get(&channel) {
+            chan.send(ChannelMsg::WindowAdjusted { new_size })
+                .unwrap_or(())
         }
         self.finished(session)
     }
@@ -496,6 +503,18 @@ pub trait Handler: Sized {
         modes: &[(Pty, u32)],
         session: Session,
     ) -> Self::FutureUnit {
+        if let Some(chan) = session.channels.get(&channel) {
+            chan.send(ChannelMsg::RequestPty {
+                want_reply: true,
+                term: term.into(),
+                col_width,
+                row_height,
+                pix_width,
+                pix_height,
+                terminal_modes: modes.into(),
+            })
+            .unwrap_or(())
+        }
         self.finished(session)
     }
 
@@ -510,6 +529,16 @@ pub trait Handler: Sized {
         x11_screen_number: u32,
         session: Session,
     ) -> Self::FutureUnit {
+        if let Some(chan) = session.channels.get(&channel) {
+            chan.send(ChannelMsg::RequestX11 {
+                want_reply: true,
+                single_connection,
+                x11_authentication_cookie: x11_auth_cookie.into(),
+                x11_authentication_protocol: x11_auth_protocol.into(),
+                x11_screen_number,
+            })
+            .unwrap_or(())
+        }
         self.finished(session)
     }
 
@@ -524,12 +553,24 @@ pub trait Handler: Sized {
         variable_value: &str,
         session: Session,
     ) -> Self::FutureUnit {
+        if let Some(chan) = session.channels.get(&channel) {
+            chan.send(ChannelMsg::SetEnv {
+                want_reply: true,
+                variable_name: variable_name.into(),
+                variable_value: variable_value.into(),
+            })
+            .unwrap_or(())
+        }
         self.finished(session)
     }
 
     /// The client requests a shell.
     #[allow(unused_variables)]
     fn shell_request(self, channel: ChannelId, session: Session) -> Self::FutureUnit {
+        if let Some(chan) = session.channels.get(&channel) {
+            chan.send(ChannelMsg::RequestShell { want_reply: true })
+                .unwrap_or(())
+        }
         self.finished(session)
     }
 
@@ -537,6 +578,13 @@ pub trait Handler: Sized {
     /// shell. Make sure to check the command before doing so.
     #[allow(unused_variables)]
     fn exec_request(self, channel: ChannelId, data: &[u8], session: Session) -> Self::FutureUnit {
+        if let Some(chan) = session.channels.get(&channel) {
+            chan.send(ChannelMsg::Exec {
+                want_reply: true,
+                command: data.into(),
+            })
+            .unwrap_or(())
+        }
         self.finished(session)
     }
 
@@ -549,6 +597,13 @@ pub trait Handler: Sized {
         name: &str,
         session: Session,
     ) -> Self::FutureUnit {
+        if let Some(chan) = session.channels.get(&channel) {
+            chan.send(ChannelMsg::RequestSubsystem {
+                want_reply: true,
+                name: name.into(),
+            })
+            .unwrap_or(())
+        }
         self.finished(session)
     }
 
@@ -563,19 +618,35 @@ pub trait Handler: Sized {
         pix_height: u32,
         session: Session,
     ) -> Self::FutureUnit {
+        if let Some(chan) = session.channels.get(&channel) {
+            chan.send(ChannelMsg::WindowChange {
+                col_width,
+                row_height,
+                pix_width,
+                pix_height,
+            })
+            .unwrap_or(())
+        }
         self.finished(session)
     }
 
     /// The client requests OpenSSH agent forwarding
     #[allow(unused_variables)]
     fn agent_request(self, channel: ChannelId, session: Session) -> Self::FutureBool {
+        if let Some(chan) = session.channels.get(&channel) {
+            chan.send(ChannelMsg::AgentForward { want_reply: true })
+                .unwrap_or(())
+        }
         self.finished_bool(false, session)
     }
 
     /// The client is sending a signal (usually to pass to the
     /// currently running process).
     #[allow(unused_variables)]
-    fn signal(self, channel: ChannelId, signal_name: Sig, session: Session) -> Self::FutureUnit {
+    fn signal(self, channel: ChannelId, signal: Sig, session: Session) -> Self::FutureUnit {
+        if let Some(chan) = session.channels.get(&channel) {
+            chan.send(ChannelMsg::Signal { signal }).unwrap_or(())
+        }
         self.finished(session)
     }
 

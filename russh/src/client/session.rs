@@ -181,7 +181,7 @@ impl Session {
         }
     }
 
-    pub fn exec(&mut self, channel: ChannelId, want_reply: bool, command: &str) {
+    pub fn exec(&mut self, channel: ChannelId, want_reply: bool, command: &[u8]) {
         if let Some(ref mut enc) = self.common.encrypted {
             if let Some(channel) = enc.channels.get(&channel) {
                 push_packet!(enc.write, {
@@ -190,7 +190,7 @@ impl Session {
                     enc.write.push_u32_be(channel.recipient_channel);
                     enc.write.extend_ssh_string(b"exec");
                     enc.write.push(if want_reply { 1 } else { 0 });
-                    enc.write.extend_ssh_string(command.as_bytes());
+                    enc.write.extend_ssh_string(command);
                 });
                 return;
             }

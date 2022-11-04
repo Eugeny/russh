@@ -632,7 +632,7 @@ impl Session {
                 }
                 debug!("handler.window_adjusted {:?}", channel_num);
                 handler
-                    .window_adjusted(channel_num, new_value as usize, self)
+                    .window_adjusted(channel_num, new_value, self)
                     .await
             }
 
