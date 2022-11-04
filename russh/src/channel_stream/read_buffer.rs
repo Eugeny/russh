@@ -30,11 +30,17 @@ impl ReadBuffer {
         }
 
         if target.remaining() >= bytes.len() - start {
-            target.put_slice(&bytes[start..]);
+            if start < bytes.len() {
+                #[allow(clippy::indexing_slicing)]
+                target.put_slice(&bytes[start..]);
+            }
             self.0 = None;
         } else {
             let end = start + target.remaining();
-            target.put_slice(&bytes[start..end]);
+            if start < bytes.len() && end <= bytes.len() {
+                #[allow(clippy::indexing_slicing)]
+                target.put_slice(&bytes[start..end]);
+            }
             self.0 = Some((bytes, end));
         }
 
