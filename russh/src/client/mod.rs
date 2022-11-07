@@ -564,6 +564,7 @@ where
             write_buffer,
             kex: None,
             auth_user: String::new(),
+            auth_attempts: 0,
             auth_method: None, // Client only.
             cipher: CipherPair {
                 local_to_remote: Box::new(clear::Key),

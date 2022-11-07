@@ -42,7 +42,6 @@ impl SshId {
     }
 }
 
-
 #[test]
 fn test_ssh_id() {
     let mut buffer = CryptoVec::new();
@@ -53,10 +52,15 @@ fn test_ssh_id() {
     SshId::Raw("SSH-2.0-raw\n".to_string()).write(&mut buffer);
     assert_eq!(&buffer[..], b"SSH-2.0-raw\n");
 
-    assert_eq!(SshId::Standard("SSH-2.0-acme".to_string()).as_kex_hash_bytes(), b"SSH-2.0-acme");
-    assert_eq!(SshId::Raw("SSH-2.0-raw\n".to_string()).as_kex_hash_bytes(), b"SSH-2.0-raw");
+    assert_eq!(
+        SshId::Standard("SSH-2.0-acme".to_string()).as_kex_hash_bytes(),
+        b"SSH-2.0-acme"
+    );
+    assert_eq!(
+        SshId::Raw("SSH-2.0-raw\n".to_string()).as_kex_hash_bytes(),
+        b"SSH-2.0-raw"
+    );
 }
-
 
 #[derive(Debug, Default)]
 pub struct SSHBuffer {

@@ -166,6 +166,9 @@ pub struct Config {
     /// Authentication rejections must happen in constant time for
     /// security reasons. Russh does not handle this by default.
     pub auth_rejection_time: std::time::Duration,
+    /// Authentication rejection time override for the initial "none" auth attempt.
+    /// OpenSSH clients will send an initial "none" auth to probe for authentication methods.
+    pub auth_rejection_time_initial: Option<std::time::Duration>,
     /// The server's keys. The first key pair in the client's preference order will be chosen.
     pub keys: Vec<key::KeyPair>,
     /// The bytes and time limits before key re-exchange.
@@ -193,6 +196,7 @@ impl Default for Config {
             methods: auth::MethodSet::all(),
             auth_banner: None,
             auth_rejection_time: std::time::Duration::from_secs(1),
+            auth_rejection_time_initial: None,
             keys: Vec::new(),
             window_size: 2097152,
             maximum_packet_size: 32768,
@@ -755,6 +759,7 @@ async fn read_ssh_id<R: AsyncRead + Unpin>(
         kex: Some(Kex::Init(kexinit)),
         auth_user: String::new(),
         auth_method: None, // Client only.
+        auth_attempts: 0,
         cipher,
         encrypted: None,
         config,

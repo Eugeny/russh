@@ -55,6 +55,7 @@ pub(crate) struct CommonSession<Config> {
     pub config: Config,
     pub encrypted: Option<Encrypted>,
     pub auth_method: Option<auth::Method>,
+    pub(crate) auth_attempts: usize,
     pub write_buffer: SSHBuffer,
     pub kex: Option<Kex>,
     pub cipher: cipher::CipherPair,
