@@ -20,7 +20,7 @@ use russh_keys::{encoding, key};
 use tokio::io::{AsyncRead, AsyncWrite};
 
 bitflags! {
-    /// Set of methods, represented by bit flags.
+    /// Set of authentication methods, represented by bit flags.
     pub struct MethodSet: u32 {
         /// The SSH `none` method (no authentication).
         const NONE = 1;

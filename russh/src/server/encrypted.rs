@@ -127,7 +127,19 @@ impl Session {
         mut handler: H,
         buf: &[u8],
     ) -> Result<(H, Self), H::Error> {
-        let instant = tokio::time::Instant::now() + self.common.config.auth_rejection_time;
+        let rejection_wait_until =
+            tokio::time::Instant::now() + self.common.config.auth_rejection_time;
+        let initial_none_rejection_wait_until = if self.common.auth_attempts == 0 {
+            tokio::time::Instant::now()
+                + self
+                    .common
+                    .config
+                    .auth_rejection_time_initial
+                    .unwrap_or(self.common.config.auth_rejection_time)
+        } else {
+            rejection_wait_until
+        };
+
         #[allow(clippy::unwrap_used)]
         let mut enc = self.common.encrypted.as_mut().unwrap();
         // If we've successfully read a packet.
@@ -153,8 +165,15 @@ impl Session {
                 if buf.first() == Some(&msg::USERAUTH_REQUEST) =>
             {
                 handler = enc
-                    .server_read_auth_request(instant, handler, buf, &mut self.common.auth_user)
+                    .server_read_auth_request(
+                        rejection_wait_until,
+                        initial_none_rejection_wait_until,
+                        handler,
+                        buf,
+                        &mut self.common.auth_user,
+                    )
                     .await?;
+                self.common.auth_attempts += 1;
                 if let EncryptedState::InitCompression = enc.state {
                     enc.client_compression.init_decompress(&mut enc.decompress);
                     handler.auth_succeeded(self).await
@@ -166,7 +185,7 @@ impl Session {
                 if buf.first() == Some(&msg::USERAUTH_INFO_RESPONSE) =>
             {
                 let (h, resp) = read_userauth_info_response(
-                    instant,
+                    rejection_wait_until,
                     handler,
                     &mut enc.write,
                     auth,
@@ -224,7 +243,8 @@ impl Encrypted {
     /// Returns false iff the request was rejected.
     async fn server_read_auth_request<H: Handler>(
         &mut self,
-        until: Instant,
+        mut until: Instant,
+        initial_auth_until: Instant,
         mut handler: H,
         buf: &[u8],
         auth_user: &mut String,
@@ -276,6 +296,11 @@ impl Encrypted {
                 } else {
                     unreachable!()
                 };
+
+                if method == b"none" {
+                    until = initial_auth_until
+                }
+
                 let (handler, auth) = handler.auth_none(user).await?;
                 if let Auth::Accept = auth {
                     server_auth_request_success(&mut self.write);

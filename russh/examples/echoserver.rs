@@ -15,6 +15,7 @@ async fn main() {
         .filter_level(log::LevelFilter::Debug)
         .init();
 
+<<<<<<< HEAD
     let mut config = russh::server::Config::default();
     config.connection_timeout = Some(std::time::Duration::from_secs(3600));
     config.auth_rejection_time = std::time::Duration::from_secs(3);
@@ -28,6 +29,15 @@ async fn main() {
     config
         .keys
         .push(keypair);
+=======
+    let config = russh::server::Config {
+        connection_timeout: Some(std::time::Duration::from_secs(3600)),
+        auth_rejection_time: std::time::Duration::from_secs(3),
+        auth_rejection_time_initial: Some(std::time::Duration::from_secs(0)),
+        keys: vec![russh_keys::key::KeyPair::generate_ed25519().unwrap()],
+        ..Default::default()
+    };
+>>>>>>> upstream/master
     let config = Arc::new(config);
     let sh = Server {
         clients: Arc::new(Mutex::new(HashMap::new())),
