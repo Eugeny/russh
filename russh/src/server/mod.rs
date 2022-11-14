@@ -177,6 +177,8 @@ pub struct Config {
     pub window_size: u32,
     /// The maximal size of a single packet.
     pub maximum_packet_size: u32,
+    /// Internal event buffer size
+    pub event_buffer_size: usize,
     /// Lists of preferred algorithms.
     pub preferred: Preferred,
     /// Maximal number of allowed authentication attempts.
@@ -200,6 +202,7 @@ impl Default for Config {
             keys: Vec::new(),
             window_size: 2097152,
             maximum_packet_size: 32768,
+            event_buffer_size: 10,
             limits: Limits::default(),
             preferred: Default::default(),
             max_auth_attempts: 10,
@@ -705,7 +708,7 @@ where
     // Reading SSH id and allocating a session.
     let mut stream = SshRead::new(stream);
     let common = read_ssh_id(config, &mut stream).await?;
-    let (sender, receiver) = tokio::sync::mpsc::channel(10);
+    let (sender, receiver) = tokio::sync::mpsc::channel(config.event_buffer_size);
     let handle = server::session::Handle { sender };
     let session = Session {
         session_id: get_session_id(),
