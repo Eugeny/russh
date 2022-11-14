@@ -5,38 +5,38 @@
 
 Low-level Tokio SSH2 client and server implementation.
 
-This is a fork of [Thrussh](//nest.pijul.com/pijul/thrussh) by Pierre-Étienne Meunier:
+This is a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Étienne Meunier:
 
-> :sparkles: = added in Russh
+> ✨ = added in Russh
 
-* More safety guarantees :sparkles:
-* `forward-tcpip` (remote port forwarding) :sparkles:
+* More safety guarantees ✨
+* `forward-tcpip` (remote port forwarding) ✨
 * Ciphers:
   * `chacha20-poly1305@openssh.com`
-  * `aes256-gcm@openssh.com` :sparkles:
-  * `aes256-ctr` :sparkles:
-  * `aes192-ctr` :sparkles:
-  * `aes128-ctr` :sparkles:
+  * `aes256-gcm@openssh.com` ✨
+  * `aes256-ctr` ✨
+  * `aes192-ctr` ✨
+  * `aes128-ctr` ✨
 * Key exchanges:
   * `curve25519-sha256@libssh.org`
-  * `diffie-hellman-group1-sha1` :sparkles:
-  * `diffie-hellman-group14-sha1` :sparkles:
-  * `diffie-hellman-group14-sha256` :sparkles:
+  * `diffie-hellman-group1-sha1` ✨
+  * `diffie-hellman-group14-sha1` ✨
+  * `diffie-hellman-group14-sha256` ✨
 * MACs:
-  * `hmac-sha1` :sparkles:
-  * `hmac-sha2-256` :sparkles:
-  * `hmac-sha2-512` :sparkles:
-  * `hmac-sha1-etm@openssh.com` :sparkles:
-  * `hmac-sha2-256-etm@openssh.com` :sparkles:
-  * `hmac-sha2-512-etm@openssh.com` :sparkles:
+  * `hmac-sha1` ✨
+  * `hmac-sha2-256` ✨
+  * `hmac-sha2-512` ✨
+  * `hmac-sha1-etm@openssh.com` ✨
+  * `hmac-sha2-256-etm@openssh.com` ✨
+  * `hmac-sha2-512-etm@openssh.com` ✨
 * Host keys:
   * `ssh-ed25519`
   * `rsa-sha2-256`
   * `rsa-sha2-512`
-  * `ssh-rsa` :sparkles:
+  * `ssh-rsa` ✨
 * Dependency updates
-* OpenSSH keepalive request handling :sparkles:
-* OpenSSH agent forwarding channels :sparkles:
+* OpenSSH keepalive request handling ✨
+* OpenSSH agent forwarding channels ✨
 
 ## Safety
 
