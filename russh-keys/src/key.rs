@@ -422,6 +422,7 @@ impl KeyPair {
     }
 
     /// Create a copy of an RSA key with a specified hash algorithm.
+    #[cfg(feature = "openssl")]
     pub fn with_signature_hash(&self, hash: SignatureHash) -> Option<Self> {
         match self {
             KeyPair::Ed25519(_) => None,
