@@ -848,10 +848,18 @@ impl Session {
                                 .map_err(crate::Error::from)?;
                         let port = r.read_u32().map_err(crate::Error::from)?;
                         debug!("handler.tcpip_forward {:?} {:?}", address, port);
-                        let (h, mut s, result) = handler.tcpip_forward(address, port, self).await?;
+                        let mut returned_port = port;
+                        let (h, mut s, result) = handler
+                            .tcpip_forward(address, &mut returned_port, self)
+                            .await?;
                         if let Some(ref mut enc) = s.common.encrypted {
                             if result {
-                                push_packet!(enc.write, enc.write.push(msg::REQUEST_SUCCESS))
+                                push_packet!(enc.write, {
+                                    enc.write.push(msg::REQUEST_SUCCESS);
+                                    if s.common.wants_reply && port == 0 && returned_port != 0 {
+                                        enc.write.push_u32_be(returned_port);
+                                    }
+                                })
                             } else {
                                 push_packet!(enc.write, enc.write.push(msg::REQUEST_FAILURE))
                             }

@@ -591,8 +591,9 @@ pub trait Handler: Sized {
 
     /// Used for reverse-forwarding ports, see
     /// [RFC4254](https://tools.ietf.org/html/rfc4254#section-7).
+    /// If `port` is 0, you should set it to the allocated port number.
     #[allow(unused_variables)]
-    fn tcpip_forward(self, address: &str, port: u32, session: Session) -> Self::FutureBool {
+    fn tcpip_forward(self, address: &str, port: &mut u32, session: Session) -> Self::FutureBool {
         self.finished_bool(false, session)
     }
     /// Used to stop the reverse-forwarding of a port, see
