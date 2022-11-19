@@ -357,6 +357,9 @@ impl<H: Handler> Handle<H> {
                         window_size,
                     });
                 }
+                Some(ChannelMsg::OpenFailure(reason)) => {
+                    return Err(crate::Error::ChannelOpenFailure(reason));
+                }
                 None => {
                     return Err(crate::Error::Disconnect);
                 }
@@ -1265,7 +1268,9 @@ pub trait Handler: Sized {
         language: &str,
         mut session: Session,
     ) -> Self::FutureUnit {
-        session.channels.remove(&channel);
+        if let Some(sender) = session.channels.remove(&channel) {
+            let _ = sender.send(ChannelMsg::OpenFailure(reason));
+        }
         session.sender.send(Reply::ChannelOpenFailure).unwrap_or(());
         self.finished(session)
     }

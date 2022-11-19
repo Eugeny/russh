@@ -1,7 +1,7 @@
 use russh_cryptovec::CryptoVec;
 use tokio::sync::mpsc::{Sender, UnboundedReceiver};
 
-use crate::{ChannelId, Error, Pty, Sig};
+use crate::{ChannelId, ChannelOpenFailure, Error, Pty, Sig};
 
 #[derive(Debug)]
 #[non_exhaustive]
@@ -99,6 +99,7 @@ pub enum ChannelMsg {
     Failure,
     /// (server only)
     Close,
+    OpenFailure(ChannelOpenFailure),
 }
 
 /// A handle to a session channel.

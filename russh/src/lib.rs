@@ -262,6 +262,10 @@ pub enum Error {
     #[error("Channel not open")]
     WrongChannel,
 
+    /// Server refused to open a channel.
+    #[error("Failed to open channel ({0:?})")]
+    ChannelOpenFailure(ChannelOpenFailure),
+
     /// Disconnected
     #[error("Disconnected")]
     Disconnect,
