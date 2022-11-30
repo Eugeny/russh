@@ -91,7 +91,7 @@ impl Encoding for Vec<u8> {
     #[allow(clippy::indexing_slicing)] // length is known
     fn extend_list<A: Bytes, I: Iterator<Item = A>>(&mut self, list: I) {
         let len0 = self.len();
-        self.extend(&[0, 0, 0, 0]);
+        self.extend([0, 0, 0, 0]);
         let mut first = true;
         for i in list {
             if !first {
@@ -107,7 +107,7 @@ impl Encoding for Vec<u8> {
     }
 
     fn write_empty_list(&mut self) {
-        self.extend(&[0, 0, 0, 0]);
+        self.extend([0, 0, 0, 0]);
     }
 }
 

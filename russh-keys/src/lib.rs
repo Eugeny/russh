@@ -817,6 +817,7 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
                     let sig = &b[b.len() - 64..];
                     assert!(public.verify_detached(a, sig));
                 }
+                #[cfg(feature = "openssl")]
                 _ => {}
             }
             Ok::<(), Error>(())
