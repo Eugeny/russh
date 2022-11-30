@@ -54,7 +54,7 @@
 //!     };
 //!     tokio::time::timeout(
 //!        std::time::Duration::from_secs(1),
-//!        russh::server::run(config, &std::net::SocketAddr::from_str("0.0.0.0:2222").unwrap(), sh)
+//!        russh::server::run(config, ("0.0.0.0", 2222), sh)
 //!     ).await.unwrap_or(Ok(()));
 //! }
 //!
@@ -130,7 +130,6 @@
 
 use std;
 use std::collections::HashMap;
-use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -138,7 +137,7 @@ use std::task::{Context, Poll};
 use futures::future::Future;
 use russh_keys::key;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, ToSocketAddrs};
 use tokio::pin;
 use tokio::task::JoinHandle;
 
@@ -615,12 +614,12 @@ pub trait Server {
 /// Run a server.
 /// Create a new `Connection` from the server's configuration, a
 /// stream and a [`Handler`](trait.Handler.html).
-pub async fn run<H: Server + Send + 'static>(
+pub async fn run<H: Server + Send + 'static, A: ToSocketAddrs>(
     config: Arc<Config>,
-    addr: &SocketAddr,
+    addrs: A,
     mut server: H,
 ) -> Result<(), std::io::Error> {
-    let socket = TcpListener::bind(addr).await?;
+    let socket = TcpListener::bind(addrs).await?;
     if config.maximum_packet_size > 65535 {
         error!(
             "Maximum packet size ({:?}) should not larger than a TCP packet (65535)",
