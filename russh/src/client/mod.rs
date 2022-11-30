@@ -93,7 +93,6 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -106,7 +105,7 @@ use russh_keys::key::SignatureHash;
 use russh_keys::key::{self, parse_public_key};
 use tokio;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
-use tokio::net::TcpStream;
+use tokio::net::{TcpStream, ToSocketAddrs};
 use tokio::pin;
 use tokio::sync::mpsc::{
     channel, unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender,
@@ -520,12 +519,14 @@ impl<H: Handler> Future for Handle<H> {
 /// commands, etc. The future will resolve to an error if the connection fails.
 /// This function creates a connection to the `addr` specified using a
 /// [`tokio::net::TcpStream`] and then calls [`connect_stream`] under the hood.
-pub async fn connect<H: Handler + Send + 'static>(
+pub async fn connect<H: Handler + Send + 'static, A: ToSocketAddrs>(
     config: Arc<Config>,
-    addr: SocketAddr,
+    addrs: A,
     handler: H,
 ) -> Result<Handle<H>, H::Error> {
-    let socket = TcpStream::connect(addr).await.map_err(crate::Error::from)?;
+    let socket = TcpStream::connect(addrs)
+        .await
+        .map_err(crate::Error::from)?;
     connect_stream(config, socket, handler).await
 }
 
