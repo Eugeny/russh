@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::pin::Pin;
-use std::str::FromStr;
 use std::sync::Arc;
 
 use futures::FutureExt;
@@ -27,13 +26,9 @@ async fn main() {
         clients: Arc::new(Mutex::new(HashMap::new())),
         id: 0,
     };
-    russh::server::run(
-        config,
-        &std::net::SocketAddr::from_str("0.0.0.0:2222").unwrap(),
-        sh,
-    )
-    .await
-    .unwrap();
+    russh::server::run(config, ("0.0.0.0", 2222), sh)
+        .await
+        .unwrap();
 }
 
 #[derive(Clone)]
