@@ -16,6 +16,8 @@ jobs:
     steps:
     - uses: actions/checkout@v2
 
+    - uses: actions-rs/toolchain@v1
+
     - name: Build (no features enabled)
       run: cargo build --verbose
 
@@ -33,6 +35,8 @@ jobs:
     steps:
     - uses: actions/checkout@v2
 
+    - uses: actions-rs/toolchain@v1
+
     - name: Clippy (no features enabled)
       run: cargo clippy -- -D warnings
 
@@ -44,6 +48,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
+
+    - uses: actions-rs/toolchain@v1
 
     - name: Test (no features enabled)
       run: |
