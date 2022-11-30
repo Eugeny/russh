@@ -16,8 +16,6 @@ jobs:
     steps:
     - uses: actions/checkout@v2
 
-    - uses: dtolnay/rust-toolchain@v1
-
     - name: Build (no features enabled)
       run: cargo build --verbose
 
@@ -35,7 +33,8 @@ jobs:
     steps:
     - uses: actions/checkout@v2
 
-    - uses: dtolnay/rust-toolchain@v1
+    - name: Install Clippy
+      run: rustup component add clippy
 
     - name: Clippy (no features enabled)
       run: cargo clippy -- -D warnings
@@ -48,8 +47,6 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
-
-    - uses: dtolnay/rust-toolchain@v1
 
     - name: Test (no features enabled)
       run: |
