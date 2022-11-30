@@ -495,7 +495,7 @@ async fn reject_auth_request(
     push_packet!(write, {
         write.push(msg::USERAUTH_FAILURE);
         write.extend_list(auth_request.methods);
-        write.push(if auth_request.partial_success { 1 } else { 0 });
+        write.push(auth_request.partial_success as u8);
     });
     auth_request.current = None;
     auth_request.rejection_count += 1;
@@ -569,7 +569,7 @@ async fn reply_userauth_info_response(
                 write.push_u32_be(prompts.len() as u32);
                 for &(ref a, b) in prompts.iter() {
                     write.extend_ssh_string(a.as_bytes());
-                    write.push(if b { 1 } else { 0 });
+                    write.push(b as u8);
                 }
             });
             Ok(false)

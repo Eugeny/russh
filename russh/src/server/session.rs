@@ -704,7 +704,7 @@ impl Session {
                     enc.write.push_u32_be(channel.recipient_channel);
                     enc.write.extend_ssh_string(b"xon-xoff");
                     enc.write.push(0);
-                    enc.write.push(if client_can_do { 1 } else { 0 });
+                    enc.write.push(client_can_do as u8);
                 })
             }
         }
@@ -746,7 +746,7 @@ impl Session {
                     enc.write.extend_ssh_string(b"exit-signal");
                     enc.write.push(0);
                     enc.write.extend_ssh_string(signal.name().as_bytes());
-                    enc.write.push(if core_dumped { 1 } else { 0 });
+                    enc.write.push(core_dumped as u8);
                     enc.write.extend_ssh_string(error_message.as_bytes());
                     enc.write.extend_ssh_string(language_tag.as_bytes());
                 })

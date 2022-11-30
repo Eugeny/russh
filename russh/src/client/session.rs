@@ -97,7 +97,7 @@ impl Session {
 
                     enc.write.push_u32_be(channel.recipient_channel);
                     enc.write.extend_ssh_string(b"pty-req");
-                    enc.write.push(if want_reply { 1 } else { 0 });
+                    enc.write.push(want_reply as u8);
 
                     enc.write.extend_ssh_string(term.as_bytes());
                     enc.write.push_u32_be(col_width);
@@ -133,8 +133,8 @@ impl Session {
 
                     enc.write.push_u32_be(channel.recipient_channel);
                     enc.write.extend_ssh_string(b"x11-req");
-                    enc.write.push(if want_reply { 1 } else { 0 });
-                    enc.write.push(if single_connection { 1 } else { 0 });
+                    enc.write.push(want_reply as u8);
+                    enc.write.push(single_connection as u8);
                     enc.write
                         .extend_ssh_string(x11_authentication_protocol.as_bytes());
                     enc.write
@@ -159,7 +159,7 @@ impl Session {
 
                     enc.write.push_u32_be(channel.recipient_channel);
                     enc.write.extend_ssh_string(b"env");
-                    enc.write.push(if want_reply { 1 } else { 0 });
+                    enc.write.push(want_reply as u8);
                     enc.write.extend_ssh_string(variable_name.as_bytes());
                     enc.write.extend_ssh_string(variable_value.as_bytes());
                 });
@@ -175,7 +175,7 @@ impl Session {
 
                     enc.write.push_u32_be(channel.recipient_channel);
                     enc.write.extend_ssh_string(b"shell");
-                    enc.write.push(if want_reply { 1 } else { 0 });
+                    enc.write.push(want_reply as u8);
                 });
             }
         }
@@ -189,7 +189,7 @@ impl Session {
 
                     enc.write.push_u32_be(channel.recipient_channel);
                     enc.write.extend_ssh_string(b"exec");
-                    enc.write.push(if want_reply { 1 } else { 0 });
+                    enc.write.push(want_reply as u8);
                     enc.write.extend_ssh_string(command.as_bytes());
                 });
                 return;
@@ -220,7 +220,7 @@ impl Session {
 
                     enc.write.push_u32_be(channel.recipient_channel);
                     enc.write.extend_ssh_string(b"subsystem");
-                    enc.write.push(if want_reply { 1 } else { 0 });
+                    enc.write.push(want_reply as u8);
                     enc.write.extend_ssh_string(name.as_bytes());
                 });
             }
@@ -257,7 +257,7 @@ impl Session {
             push_packet!(enc.write, {
                 enc.write.push(msg::GLOBAL_REQUEST);
                 enc.write.extend_ssh_string(b"tcpip-forward");
-                enc.write.push(if want_reply { 1 } else { 0 });
+                enc.write.push(want_reply as u8);
                 enc.write.extend_ssh_string(address.as_bytes());
                 enc.write.push_u32_be(port);
             });
@@ -269,7 +269,7 @@ impl Session {
             push_packet!(enc.write, {
                 enc.write.push(msg::GLOBAL_REQUEST);
                 enc.write.extend_ssh_string(b"cancel-tcpip-forward");
-                enc.write.push(if want_reply { 1 } else { 0 });
+                enc.write.push(want_reply as u8);
                 enc.write.extend_ssh_string(address.as_bytes());
                 enc.write.push_u32_be(port);
             });
@@ -315,7 +315,7 @@ impl Session {
                     enc.write.push(msg::CHANNEL_REQUEST);
                     enc.write.push_u32_be(channel.recipient_channel);
                     enc.write.extend_ssh_string(b"auth-agent-req@openssh.com");
-                    enc.write.push(if want_reply { 1 } else { 0 });
+                    enc.write.push(want_reply as u8);
                 });
             }
         }
