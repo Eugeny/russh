@@ -881,4 +881,20 @@ impl Session {
             });
         }
     }
+
+    pub(crate) fn maybe_send_ext_info(&mut self) {
+        if let Some(ref mut enc) = self.common.encrypted {
+            push_packet!(enc.write, {
+                enc.write.push(msg::EXT_INFO);
+                enc.write.push_u32_be(1);
+                enc.write.extend_ssh_string(b"server-sig-algs");
+                if cfg!(feature = "openssl") {
+                    enc.write
+                        .extend_ssh_string(b"ssh-rsa,ssh-ed25519,rsa-sha2-256,rsa-sha2-512");
+                } else {
+                    enc.write.extend_ssh_string(b"ssh-ed25519");
+                }
+            });
+        }
+    }
 }

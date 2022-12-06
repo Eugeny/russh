@@ -817,6 +817,7 @@ async fn reply<H: Handler>(
                     },
                     newkeys,
                 );
+                session.maybe_send_ext_info();
                 return Ok((handler, session));
             }
             Some(kex) => {
