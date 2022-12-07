@@ -850,6 +850,7 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
     }
 
     #[test]
+    #[cfg(unix)]
     #[cfg(feature = "openssl")]
     fn test_agent() {
         env_logger::try_init().unwrap_or(());
