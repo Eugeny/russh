@@ -1,7 +1,7 @@
 use russh_cryptovec::CryptoVec;
 use tokio::sync::mpsc::{Sender, UnboundedReceiver};
 
-use crate::{ChannelId, ChannelOpenFailure, Error, Pty, Sig};
+use crate::{ChannelId, ChannelOpenFailure, ChannelStream, Error, Pty, Sig};
 
 #[derive(Debug)]
 #[non_exhaustive]
@@ -119,7 +119,7 @@ impl<T: From<(ChannelId, ChannelMsg)>> std::fmt::Debug for Channel<T> {
     }
 }
 
-impl<Send: From<(ChannelId, ChannelMsg)>> Channel<Send> {
+impl<S: From<(ChannelId, ChannelMsg)> + Send + 'static> Channel<S> {
     pub fn id(&self) -> ChannelId {
         self.id
     }
@@ -360,5 +360,37 @@ impl<Send: From<(ChannelId, ChannelMsg)>> Channel<Send> {
             .send((self.id, msg).into())
             .await
             .map_err(|_| Error::SendError)
+    }
+
+    pub fn into_stream(mut self) -> ChannelStream {
+        let (stream, mut r_rx, w_tx) = ChannelStream::new();
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    data = r_rx.recv() => {
+                        match data {
+                            Some(data) => self.data(&data[..]).await?,
+                            None => break
+                        }
+                    },
+                    msg = self.wait() => {
+                        match msg {
+                            Some(ChannelMsg::Data { data }) => {
+                                w_tx.send(data[..].into()).map_err(|_| crate::Error::SendError)?;
+                            }
+                            Some(ChannelMsg::Eof) => {
+                                // Send a 0-length chunk to indicate EOF.
+                                w_tx.send("".into()).map_err(|_| crate::Error::SendError)?;
+                                break
+                            }
+                            None => break,
+                            _ => (),
+                        }
+                    }
+                }
+            }
+            Ok::<_, crate::Error>(())
+        });
+        stream
     }
 }
