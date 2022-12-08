@@ -62,7 +62,7 @@ pub trait Verify {
     fn verify_server_auth(&self, buffer: &[u8], sig: &[u8]) -> bool;
 }
 
-/// The hash function used for hashing buffers.
+/// The hash function used for signing with RSA keys.
 #[derive(Eq, PartialEq, Clone, Copy, Debug, Hash, Serialize, Deserialize)]
 #[allow(non_camel_case_types)]
 pub enum SignatureHash {
@@ -419,6 +419,19 @@ impl KeyPair {
             }
         }
         Ok(())
+    }
+
+    /// Create a copy of an RSA key with a specified hash algorithm.
+    #[cfg(feature = "openssl")]
+    pub fn with_signature_hash(&self, hash: SignatureHash) -> Option<Self> {
+        match self {
+            KeyPair::Ed25519(_) => None,
+            #[cfg(feature = "openssl")]
+            KeyPair::RSA { key, .. } => Some(KeyPair::RSA {
+                key: key.clone(),
+                hash,
+            }),
+        }
     }
 }
 

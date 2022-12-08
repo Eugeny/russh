@@ -1,7 +1,5 @@
 use std::io::Write;
-use std::net::SocketAddr;
 use std::path::Path;
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -9,6 +7,7 @@ use anyhow::Result;
 use log::info;
 use russh::*;
 use russh_keys::*;
+use tokio::net::ToSocketAddrs;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -28,7 +27,7 @@ async fn main() -> Result<()> {
     info!("Connecting to {host}");
     info!("Key path: {key}");
 
-    let mut ssh = Session::connect(key, "root", SocketAddr::from_str(host).unwrap()).await?;
+    let mut ssh = Session::connect(key, "root", host).await?;
     let r = ssh.call("whoami").await?;
     assert!(r.success());
     println!("Result: {}", r.output());
@@ -59,10 +58,10 @@ pub struct Session {
 }
 
 impl Session {
-    async fn connect<P: AsRef<Path>>(
+    async fn connect<P: AsRef<Path>, A: ToSocketAddrs>(
         key_path: P,
         user: impl Into<String>,
-        addr: SocketAddr,
+        addrs: A,
     ) -> Result<Self> {
         let key_pair = load_secret_key(key_path, None)?;
         let config = client::Config {
@@ -71,7 +70,7 @@ impl Session {
         };
         let config = Arc::new(config);
         let sh = Client {};
-        let mut session = client::connect(config, addr, sh).await?;
+        let mut session = client::connect(config, addrs, sh).await?;
         let _auth_res = session
             .authenticate_publickey(user, Arc::new(key_pair))
             .await?;

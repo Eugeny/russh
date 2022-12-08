@@ -14,19 +14,20 @@
 
 //!
 //! This module exports cipher names for use with [Preferred].
-use crate::mac::MacAlgorithm;
-use crate::sshbuffer::SSHBuffer;
-use crate::Error;
+use std::collections::HashMap;
+use std::fmt::Debug;
+use std::marker::PhantomData;
+use std::num::Wrapping;
 
 use aes::{Aes128, Aes192, Aes256};
 use byteorder::{BigEndian, ByteOrder};
 use ctr::Ctr128BE;
 use once_cell::sync::Lazy;
-use std::collections::HashMap;
-use std::fmt::Debug;
-use std::marker::PhantomData;
-use std::num::Wrapping;
 use tokio::io::{AsyncRead, AsyncReadExt};
+
+use crate::mac::MacAlgorithm;
+use crate::sshbuffer::SSHBuffer;
+use crate::Error;
 
 pub(crate) mod block;
 pub(crate) mod chacha20poly1305;
@@ -83,17 +84,18 @@ static _AES_256_CTR: SshBlockCipher<Ctr128BE<Aes256>> = SshBlockCipher(PhantomDa
 static _AES_256_GCM: GcmCipher = GcmCipher {};
 static _CHACHA20_POLY1305: SshChacha20Poly1305Cipher = SshChacha20Poly1305Cipher {};
 
-pub(crate) static CIPHERS: Lazy<HashMap<&'static Name, &(dyn Cipher + Send + Sync)>> = Lazy::new(|| {
-    let mut h: HashMap<&'static Name, &(dyn Cipher + Send + Sync)> = HashMap::new();
-    h.insert(&CLEAR, &_CLEAR);
-    h.insert(&NONE, &_CLEAR);
-    h.insert(&AES_128_CTR, &_AES_128_CTR);
-    h.insert(&AES_192_CTR, &_AES_192_CTR);
-    h.insert(&AES_256_CTR, &_AES_256_CTR);
-    h.insert(&AES_256_GCM, &_AES_256_GCM);
-    h.insert(&CHACHA20_POLY1305, &_CHACHA20_POLY1305);
-    h
-});
+pub(crate) static CIPHERS: Lazy<HashMap<&'static Name, &(dyn Cipher + Send + Sync)>> =
+    Lazy::new(|| {
+        let mut h: HashMap<&'static Name, &(dyn Cipher + Send + Sync)> = HashMap::new();
+        h.insert(&CLEAR, &_CLEAR);
+        h.insert(&NONE, &_CLEAR);
+        h.insert(&AES_128_CTR, &_AES_128_CTR);
+        h.insert(&AES_192_CTR, &_AES_192_CTR);
+        h.insert(&AES_256_CTR, &_AES_256_CTR);
+        h.insert(&AES_256_GCM, &_AES_256_GCM);
+        h.insert(&CHACHA20_POLY1305, &_CHACHA20_POLY1305);
+        h
+    });
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone, Hash)]
 pub struct Name(&'static str);

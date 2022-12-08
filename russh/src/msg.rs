@@ -23,6 +23,7 @@ pub const DEBUG: u8 = 4;
 
 pub const SERVICE_REQUEST: u8 = 5;
 pub const SERVICE_ACCEPT: u8 = 6;
+pub const EXT_INFO: u8 = 7;
 pub const KEXINIT: u8 = 20;
 pub const NEWKEYS: u8 = 21;
 

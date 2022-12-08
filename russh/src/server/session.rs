@@ -704,7 +704,7 @@ impl Session {
                     enc.write.push_u32_be(channel.recipient_channel);
                     enc.write.extend_ssh_string(b"xon-xoff");
                     enc.write.push(0);
-                    enc.write.push(if client_can_do { 1 } else { 0 });
+                    enc.write.push(client_can_do as u8);
                 })
             }
         }
@@ -746,7 +746,7 @@ impl Session {
                     enc.write.extend_ssh_string(b"exit-signal");
                     enc.write.push(0);
                     enc.write.extend_ssh_string(signal.name().as_bytes());
-                    enc.write.push(if core_dumped { 1 } else { 0 });
+                    enc.write.push(core_dumped as u8);
                     enc.write.extend_ssh_string(error_message.as_bytes());
                     enc.write.extend_ssh_string(language_tag.as_bytes());
                 })
@@ -878,6 +878,22 @@ impl Session {
                 enc.write.push(0);
                 enc.write.extend_ssh_string(address.as_bytes());
                 enc.write.push_u32_be(port);
+            });
+        }
+    }
+
+    pub(crate) fn maybe_send_ext_info(&mut self) {
+        if let Some(ref mut enc) = self.common.encrypted {
+            push_packet!(enc.write, {
+                enc.write.push(msg::EXT_INFO);
+                enc.write.push_u32_be(1);
+                enc.write.extend_ssh_string(b"server-sig-algs");
+                if cfg!(feature = "openssl") {
+                    enc.write
+                        .extend_ssh_string(b"ssh-rsa,ssh-ed25519,rsa-sha2-256,rsa-sha2-512");
+                } else {
+                    enc.write.extend_ssh_string(b"ssh-ed25519");
+                }
             });
         }
     }

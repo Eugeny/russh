@@ -786,6 +786,7 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
         decode_secret_key(PKCS8_ENCRYPTED, Some("blabla")).unwrap();
     }
 
+    #[cfg(unix)]
     fn test_client_agent(key: key::KeyPair) {
         env_logger::try_init().unwrap_or(());
         use std::process::{Command, Stdio};
@@ -817,6 +818,7 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
                     let sig = &b[b.len() - 64..];
                     assert!(public.verify_detached(a, sig));
                 }
+                #[cfg(feature = "openssl")]
                 _ => {}
             }
             Ok::<(), Error>(())
@@ -827,6 +829,7 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
     }
 
     #[test]
+    #[cfg(unix)]
     fn test_client_agent_ed25519() {
         let key = decode_secret_key(ED25519_KEY, Some("blabla")).unwrap();
         test_client_agent(key)
@@ -847,6 +850,7 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
     }
 
     #[test]
+    #[cfg(unix)]
     #[cfg(feature = "openssl")]
     fn test_agent() {
         env_logger::try_init().unwrap_or(());
@@ -904,9 +908,12 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
         .unwrap()
     }
 
+    #[cfg(unix)]
     struct Incoming<'a> {
         listener: &'a mut tokio::net::UnixListener,
     }
+
+    #[cfg(unix)]
     impl futures::stream::Stream for Incoming<'_> {
         type Item = Result<tokio::net::UnixStream, std::io::Error>;
 

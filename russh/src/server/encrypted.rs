@@ -128,7 +128,19 @@ impl Session {
         mut handler: H,
         buf: &[u8],
     ) -> Result<(H, Self), H::Error> {
-        let instant = tokio::time::Instant::now() + self.common.config.auth_rejection_time;
+        let rejection_wait_until =
+            tokio::time::Instant::now() + self.common.config.auth_rejection_time;
+        let initial_none_rejection_wait_until = if self.common.auth_attempts == 0 {
+            tokio::time::Instant::now()
+                + self
+                    .common
+                    .config
+                    .auth_rejection_time_initial
+                    .unwrap_or(self.common.config.auth_rejection_time)
+        } else {
+            rejection_wait_until
+        };
+
         #[allow(clippy::unwrap_used)]
         let mut enc = self.common.encrypted.as_mut().unwrap();
         // If we've successfully read a packet.
@@ -154,8 +166,15 @@ impl Session {
                 if buf.first() == Some(&msg::USERAUTH_REQUEST) =>
             {
                 handler = enc
-                    .server_read_auth_request(instant, handler, buf, &mut self.common.auth_user)
+                    .server_read_auth_request(
+                        rejection_wait_until,
+                        initial_none_rejection_wait_until,
+                        handler,
+                        buf,
+                        &mut self.common.auth_user,
+                    )
                     .await?;
+                self.common.auth_attempts += 1;
                 if let EncryptedState::InitCompression = enc.state {
                     enc.client_compression.init_decompress(&mut enc.decompress);
                     handler.auth_succeeded(self).await
@@ -167,7 +186,7 @@ impl Session {
                 if buf.first() == Some(&msg::USERAUTH_INFO_RESPONSE) =>
             {
                 let (h, resp) = read_userauth_info_response(
-                    instant,
+                    rejection_wait_until,
                     handler,
                     &mut enc.write,
                     auth,
@@ -225,7 +244,8 @@ impl Encrypted {
     /// Returns false iff the request was rejected.
     async fn server_read_auth_request<H: Handler>(
         &mut self,
-        until: Instant,
+        mut until: Instant,
+        initial_auth_until: Instant,
         mut handler: H,
         buf: &[u8],
         auth_user: &mut String,
@@ -277,6 +297,11 @@ impl Encrypted {
                 } else {
                     unreachable!()
                 };
+
+                if method == b"none" {
+                    until = initial_auth_until
+                }
+
                 let (handler, auth) = handler.auth_none(user).await?;
                 if let Auth::Accept = auth {
                     server_auth_request_success(&mut self.write);
@@ -471,7 +496,7 @@ async fn reject_auth_request(
     push_packet!(write, {
         write.push(msg::USERAUTH_FAILURE);
         write.extend_list(auth_request.methods);
-        write.push(if auth_request.partial_success { 1 } else { 0 });
+        write.push(auth_request.partial_success as u8);
     });
     auth_request.current = None;
     auth_request.rejection_count += 1;
@@ -545,7 +570,7 @@ async fn reply_userauth_info_response(
                 write.push_u32_be(prompts.len() as u32);
                 for &(ref a, b) in prompts.iter() {
                     write.extend_ssh_string(a.as_bytes());
-                    write.push(if b { 1 } else { 0 });
+                    write.push(b as u8);
                 }
             });
             Ok(false)
@@ -825,10 +850,18 @@ impl Session {
                                 .map_err(crate::Error::from)?;
                         let port = r.read_u32().map_err(crate::Error::from)?;
                         debug!("handler.tcpip_forward {:?} {:?}", address, port);
-                        let (h, mut s, result) = handler.tcpip_forward(address, port, self).await?;
+                        let mut returned_port = port;
+                        let (h, mut s, result) = handler
+                            .tcpip_forward(address, &mut returned_port, self)
+                            .await?;
                         if let Some(ref mut enc) = s.common.encrypted {
                             if result {
-                                push_packet!(enc.write, enc.write.push(msg::REQUEST_SUCCESS))
+                                push_packet!(enc.write, {
+                                    enc.write.push(msg::REQUEST_SUCCESS);
+                                    if s.common.wants_reply && port == 0 && returned_port != 0 {
+                                        enc.write.push_u32_be(returned_port);
+                                    }
+                                })
                             } else {
                                 push_packet!(enc.write, enc.write.push(msg::REQUEST_FAILURE))
                             }

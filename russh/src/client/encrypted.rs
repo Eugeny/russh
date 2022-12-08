@@ -178,6 +178,8 @@ impl Session {
                                 debug!("no auth method")
                             }
                         }
+                    } else if buf.first() == Some(&msg::EXT_INFO) {
+                        return self.handle_ext_info(client, buf);
                     } else {
                         debug!("unknown message: {:?}", buf);
                         return Err(crate::Error::Inconsistent.into());
@@ -275,6 +277,8 @@ impl Session {
                             }
                             _ => {}
                         }
+                    } else if buf.first() == Some(&msg::EXT_INFO) {
+                        return self.handle_ext_info(client, buf);
                     } else {
                         debug!("unknown message: {:?}", buf);
                         return Err(crate::Error::Inconsistent.into());
@@ -289,6 +293,11 @@ impl Session {
         } else {
             Ok((client, self))
         }
+    }
+
+    fn handle_ext_info<H: Handler>(self, client: H, buf: &[u8]) -> Result<(H, Self), H::Error> {
+        debug!("Received EXT_INFO: {:?}", buf);
+        Ok((client, self))
     }
 
     async fn client_read_authenticated<H: Handler>(
@@ -328,11 +337,10 @@ impl Session {
                 let mut r = buf.reader(1);
                 let channel_num = ChannelId(r.read_u32().map_err(crate::Error::from)?);
                 if let Some(ref mut enc) = self.common.encrypted {
-                    if enc.channels.remove(&channel_num).is_some() {
-                        // The CHANNEL_CLOSE message must be sent to the server at this point or the session
-                        // will not be released.
-                        enc.byte(channel_num, msg::CHANNEL_CLOSE);
-                    }
+                    // The CHANNEL_CLOSE message must be sent to the server at this point or the session
+                    // will not be released.
+                    enc.byte(channel_num, msg::CHANNEL_CLOSE);
+                    enc.channels.remove(&channel_num);
                 }
                 client.channel_close(channel_num, self).await
             }

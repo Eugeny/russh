@@ -54,7 +54,7 @@
 //!     };
 //!     tokio::time::timeout(
 //!        std::time::Duration::from_secs(1),
-//!        russh::server::run(config, &std::net::SocketAddr::from_str("0.0.0.0:2222").unwrap(), sh)
+//!        russh::server::run(config, ("0.0.0.0", 2222), sh)
 //!     ).await.unwrap_or(Ok(()));
 //! }
 //!
@@ -127,7 +127,6 @@
 
 use std;
 use std::collections::HashMap;
-use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -135,7 +134,7 @@ use std::task::{Context, Poll};
 use futures::future::Future;
 use russh_keys::key;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, ToSocketAddrs};
 use tokio::pin;
 use tokio::task::JoinHandle;
 
@@ -163,6 +162,9 @@ pub struct Config {
     /// Authentication rejections must happen in constant time for
     /// security reasons. Russh does not handle this by default.
     pub auth_rejection_time: std::time::Duration,
+    /// Authentication rejection time override for the initial "none" auth attempt.
+    /// OpenSSH clients will send an initial "none" auth to probe for authentication methods.
+    pub auth_rejection_time_initial: Option<std::time::Duration>,
     /// The server's keys. The first key pair in the client's preference order will be chosen.
     pub keys: Vec<key::KeyPair>,
     /// The bytes and time limits before key re-exchange.
@@ -171,6 +173,8 @@ pub struct Config {
     pub window_size: u32,
     /// The maximal size of a single packet.
     pub maximum_packet_size: u32,
+    /// Internal event buffer size
+    pub event_buffer_size: usize,
     /// Lists of preferred algorithms.
     pub preferred: Preferred,
     /// Maximal number of allowed authentication attempts.
@@ -190,9 +194,11 @@ impl Default for Config {
             methods: auth::MethodSet::all(),
             auth_banner: None,
             auth_rejection_time: std::time::Duration::from_secs(1),
+            auth_rejection_time_initial: None,
             keys: Vec::new(),
             window_size: 2097152,
             maximum_packet_size: 32768,
+            event_buffer_size: 10,
             limits: Limits::default(),
             preferred: Default::default(),
             max_auth_attempts: 10,
@@ -652,8 +658,9 @@ pub trait Handler: Sized {
 
     /// Used for reverse-forwarding ports, see
     /// [RFC4254](https://tools.ietf.org/html/rfc4254#section-7).
+    /// If `port` is 0, you should set it to the allocated port number.
     #[allow(unused_variables)]
-    fn tcpip_forward(self, address: &str, port: u32, session: Session) -> Self::FutureBool {
+    fn tcpip_forward(self, address: &str, port: &mut u32, session: Session) -> Self::FutureBool {
         self.finished_bool(false, session)
     }
     /// Used to stop the reverse-forwarding of a port, see
@@ -675,12 +682,12 @@ pub trait Server {
 /// Run a server.
 /// Create a new `Connection` from the server's configuration, a
 /// stream and a [`Handler`](trait.Handler.html).
-pub async fn run<H: Server + Send + 'static>(
+pub async fn run<H: Server + Send + 'static, A: ToSocketAddrs>(
     config: Arc<Config>,
-    addr: &SocketAddr,
+    addrs: A,
     mut server: H,
 ) -> Result<(), std::io::Error> {
-    let socket = TcpListener::bind(addr).await?;
+    let socket = TcpListener::bind(addrs).await?;
     if config.maximum_packet_size > 65535 {
         error!(
             "Maximum packet size ({:?}) should not larger than a TCP packet (65535)",
@@ -768,8 +775,8 @@ where
 
     // Reading SSH id and allocating a session.
     let mut stream = SshRead::new(stream);
+    let (sender, receiver) = tokio::sync::mpsc::channel(config.event_buffer_size);
     let common = read_ssh_id(config, &mut stream).await?;
-    let (sender, receiver) = tokio::sync::mpsc::channel(10);
     let handle = server::session::Handle { sender };
     let session = Session {
         session_id: get_session_id(),
@@ -823,6 +830,7 @@ async fn read_ssh_id<R: AsyncRead + Unpin>(
         kex: Some(Kex::Init(kexinit)),
         auth_user: String::new(),
         auth_method: None, // Client only.
+        auth_attempts: 0,
         cipher,
         encrypted: None,
         config,
@@ -877,6 +885,7 @@ async fn reply<H: Handler>(
                     },
                     newkeys,
                 );
+                session.maybe_send_ext_info();
                 return Ok((handler, session));
             }
             Some(kex) => {

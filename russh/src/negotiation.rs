@@ -56,6 +56,8 @@ const KEX_ORDER: &[kex::Name] = &[
     kex::DH_G14_SHA256,
     kex::DH_G14_SHA1,
     kex::DH_G1_SHA1,
+    kex::EXTENSION_SUPPORT_AS_CLIENT,
+    kex::EXTENSION_SUPPORT_AS_SERVER,
 ];
 
 const CIPHER_ORDER: &[cipher::Name] = &[
@@ -282,7 +284,7 @@ impl Select for Client {
     }
 }
 
-pub fn write_kex(prefs: &Preferred, buf: &mut CryptoVec) -> Result<(), Error> {
+pub fn write_kex(prefs: &Preferred, buf: &mut CryptoVec, as_server: bool) -> Result<(), Error> {
     // buf.clear();
     buf.push(msg::KEXINIT);
 
@@ -290,7 +292,13 @@ pub fn write_kex(prefs: &Preferred, buf: &mut CryptoVec) -> Result<(), Error> {
     rand::thread_rng().fill_bytes(&mut cookie);
 
     buf.extend(&cookie); // cookie
-    buf.extend_list(prefs.kex.iter()); // kex algo
+    buf.extend_list(prefs.kex.iter().filter(|k| {
+        **k != if as_server {
+            crate::kex::EXTENSION_SUPPORT_AS_CLIENT
+        } else {
+            crate::kex::EXTENSION_SUPPORT_AS_SERVER
+        }
+    })); // kex algo
 
     buf.extend_list(prefs.key.iter());
 

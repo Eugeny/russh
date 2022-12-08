@@ -1,7 +1,6 @@
 use russh::server::{Auth, Session, Msg};
 use std::collections::HashMap;
 use std::pin::Pin;
-use std::str::FromStr;
 use std::sync::Arc;
 
 use futures::FutureExt;
@@ -15,24 +14,21 @@ async fn main() {
         .filter_level(log::LevelFilter::Debug)
         .init();
 
-    let mut config = russh::server::Config::default();
-    config.connection_timeout = Some(std::time::Duration::from_secs(3600));
-    config.auth_rejection_time = std::time::Duration::from_secs(3);
-    config
-        .keys
-        .push(russh_keys::key::KeyPair::generate_ed25519().unwrap());
+    let config = russh::server::Config {
+        connection_timeout: Some(std::time::Duration::from_secs(3600)),
+        auth_rejection_time: std::time::Duration::from_secs(3),
+        auth_rejection_time_initial: Some(std::time::Duration::from_secs(0)),
+        keys: vec![russh_keys::key::KeyPair::generate_ed25519().unwrap()],
+        ..Default::default()
+    };
     let config = Arc::new(config);
     let sh = Server {
         clients: Arc::new(Mutex::new(HashMap::new())),
         id: 0,
     };
-    russh::server::run(
-        config,
-        &std::net::SocketAddr::from_str("0.0.0.0:2222").unwrap(),
-        sh,
-    )
-    .await
-    .unwrap();
+    russh::server::run(config, ("0.0.0.0", 2222), sh)
+        .await
+        .unwrap();
 }
 
 #[derive(Clone)]
@@ -109,9 +105,10 @@ impl server::Handler for Server {
         .boxed()
     }
 
-    fn tcpip_forward(self, address: &str, port: u32, session: Session) -> Self::FutureBool {
+    fn tcpip_forward(self, address: &str, port: &mut u32, session: Session) -> Self::FutureBool {
         let handle = session.handle();
         let address = address.to_string();
+        let port = *port;
         tokio::spawn(async move {
             let mut channel = handle
                 .channel_open_forwarded_tcpip(address, port, "1.2.3.4", 1234)

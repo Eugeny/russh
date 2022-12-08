@@ -22,19 +22,18 @@ impl ReadBuffer {
         bytes: Vec<u8>,
         start: usize,
     ) -> Poll<std::io::Result<()>> {
-        if bytes.is_empty() {
-            self.0 = None;
-            // should not return Ok(), since if nothing is written to the target
-            // it signals EOF. Instead wait for more data from the source.
-            return Poll::Pending;
-        }
-
         if target.remaining() >= bytes.len() - start {
-            target.put_slice(&bytes[start..]);
+            if start < bytes.len() {
+                #[allow(clippy::indexing_slicing)]
+                target.put_slice(&bytes[start..]);
+            }
             self.0 = None;
         } else {
             let end = start + target.remaining();
-            target.put_slice(&bytes[start..end]);
+            if start < bytes.len() && end <= bytes.len() {
+                #[allow(clippy::indexing_slicing)]
+                target.put_slice(&bytes[start..end]);
+            }
             self.0 = Some((bytes, end));
         }
 
