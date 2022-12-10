@@ -549,7 +549,10 @@ mod test_compress {
         dbg!(&addr);
         let mut session = client::connect(config, addr, Client {}).await.unwrap();
         let authenticated = session
-            .authenticate_publickey(std::env::var("USER").unwrap(), Arc::new(client_key))
+            .authenticate_publickey(
+                std::env::var("USER").unwrap_or("user".to_owned()),
+                Arc::new(client_key),
+            )
             .await
             .unwrap();
         assert!(authenticated);
@@ -690,7 +693,10 @@ async fn test_session<RC, RS, CH, SH, F1, F2>(
             .map_err(|_| ())
             .unwrap();
         let authenticated = session
-            .authenticate_publickey(std::env::var("USER").unwrap(), Arc::new(client_key))
+            .authenticate_publickey(
+                std::env::var("USER").unwrap_or("user".to_owned()),
+                Arc::new(client_key),
+            )
             .await
             .unwrap();
         assert!(authenticated);
@@ -698,12 +704,10 @@ async fn test_session<RC, RS, CH, SH, F1, F2>(
     });
 
     let (server_session, client_session) = tokio::join!(server_join, client_join);
-    let client_session = tokio::spawn(run_client(client_session.unwrap()))
-        .await
-        .unwrap();
-    let server_session = tokio::spawn(run_server(server_session.unwrap().handle()))
-        .await
-        .unwrap();
+    let client_handle = tokio::spawn(run_client(client_session.unwrap()));
+    let server_handle = tokio::spawn(run_server(server_session.unwrap().handle()));
+
+    let (server_session, client_session) = tokio::join!(server_handle, client_handle);
     drop(client_session);
     drop(server_session);
 }
@@ -815,11 +819,10 @@ mod test_server_channels {
 
 #[cfg(test)]
 mod test_channel_streams {
-    use russh_cryptovec::CryptoVec;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     use crate::server::Auth;
-    use crate::{client, server, test_session, ChannelId, Channel};
+    use crate::{client, server, test_session, Channel};
 
     #[tokio::test]
     async fn test_channel_streams() {
@@ -846,9 +849,19 @@ mod test_channel_streams {
             }
         }
 
-        struct ServerHandle {}
+        struct ServerHandle {
+            channel: Option<tokio::sync::oneshot::Sender<Channel<server::Msg>>>,
+        }
 
-        impl ServerHandle {}
+        impl ServerHandle {
+            fn get_channel_waiter(
+                &mut self,
+            ) -> tokio::sync::oneshot::Receiver<Channel<server::Msg>> {
+                let (tx, rx) = tokio::sync::oneshot::channel::<Channel<server::Msg>>();
+                self.channel = Some(tx);
+                rx
+            }
+        }
 
         impl server::Handler for ServerHandle {
             type Error = crate::Error;
@@ -871,43 +884,54 @@ mod test_channel_streams {
             }
 
             fn channel_open_session(
-                self,
-                _: Channel<server::Msg>,
+                mut self,
+                channel: Channel<server::Msg>,
                 session: server::Session,
             ) -> Self::FutureBool {
+                if let Some(a) = self.channel.take() {
+                    println!("channel open session {:?}", a);
+                    a.send(channel).unwrap();
+                }
                 self.finished_bool(true, session)
-            }
-
-            fn data(
-                self,
-                channel: ChannelId,
-                data: &[u8],
-                mut session: server::Session,
-            ) -> Self::FutureUnit {
-                session.data(channel, CryptoVec::from_slice(data));
-                self.finished(session)
             }
         }
 
+        let mut sh = ServerHandle { channel: None };
+        let scw = sh.get_channel_waiter();
+
         test_session(
             Client {},
-            ServerHandle {},
-            |mut c| async move {
-                let ch = c.channel_open_session().await.unwrap();
+            sh,
+            |mut client| async move {
+                let ch = client.channel_open_session().await.unwrap();
                 let mut stream = ch.into_stream();
+                stream.write_all(&b"request"[..]).await.unwrap();
 
-                let msg1 = b"hello world!";
-                let msg2 = b"sup!";
-                let mut buf = [0; 1024];
+                let mut buf = Vec::new();
+                stream.read_buf(&mut buf).await.unwrap();
+                assert_eq!(&buf, &b"response"[..]);
 
-                for msg in [&msg1[..], &msg2[..]] {
-                    stream.write_all(msg).await.unwrap();
-                    stream.read_exact(&mut buf[..msg.len()]).await.unwrap();
-                    assert_eq!(&buf[..msg.len()], msg);
-                }
-                c
+                stream.write_all(&b"reply"[..]).await.unwrap();
+
+                client
             },
-            |s| async move { s },
+            |server| async move {
+                let channel = scw.await.unwrap();
+                let mut stream = channel.into_stream();
+
+                let mut buf = Vec::new();
+                stream.read_buf(&mut buf).await.unwrap();
+                assert_eq!(&buf, &b"request"[..]);
+
+                stream.write_all(&b"response"[..]).await.unwrap();
+
+                buf.clear();
+                
+                stream.read_buf(&mut buf).await.unwrap();
+                assert_eq!(&buf, &b"reply"[..]);
+
+                server
+            },
         )
         .await;
     }
