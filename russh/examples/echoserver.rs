@@ -1,4 +1,4 @@
-use russh::server::{Auth, Session, Msg};
+use russh::server::{Auth, Msg, Session};
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;

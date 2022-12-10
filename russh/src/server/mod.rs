@@ -31,7 +31,6 @@
 //! extern crate futures;
 //! extern crate tokio;
 //! use std::sync::{Mutex, Arc};
-//! use std::str::FromStr;
 //! use russh::*;
 //! use russh::server::{Auth, Session, Msg};
 //! use russh_keys::*;

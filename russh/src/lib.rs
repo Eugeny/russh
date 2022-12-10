@@ -549,7 +549,7 @@ mod test_compress {
         dbg!(&addr);
         let mut session = client::connect(config, addr, Client {}).await.unwrap();
         let authenticated = session
-            .authenticate_publickey(std::env::var("USER").unwrap(), Arc::new(client_key))
+            .authenticate_publickey(whoami::username(), Arc::new(client_key))
             .await
             .unwrap();
         assert!(authenticated);
@@ -682,7 +682,7 @@ mod test_server_channels {
         let config = Arc::new(client::Config::default());
         let mut session = client::connect(config, addr, Client {}).await.unwrap();
         let authenticated = session
-            .authenticate_publickey(std::env::var("USER").unwrap(), Arc::new(client_key))
+            .authenticate_publickey(whoami::username(), Arc::new(client_key))
             .await
             .unwrap();
 
@@ -770,6 +770,164 @@ mod test_server_channels {
             assert_eq!(data, &b"hello world!"[..]);
             session.data(channel, CryptoVec::from_slice(&b"hey there!"[..]));
             self.finished(session)
+        }
+    }
+}
+
+#[cfg(test)]
+mod test_server_channelstream {
+    use std::sync::Arc;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    use crate::server::Msg;
+
+    use super::server::{Auth, Server as _, Session};
+    use super::*;
+
+    #[tokio::test]
+    async fn test_server_channelstream() {
+        let _ = env_logger::try_init();
+
+        let client_key = russh_keys::key::KeyPair::generate_ed25519().unwrap();
+        let mut config = server::Config::default();
+        config.connection_timeout = None;
+        config.auth_rejection_time = std::time::Duration::from_secs(3);
+        config
+            .keys
+            .push(russh_keys::key::KeyPair::generate_ed25519().unwrap());
+        let config = Arc::new(config);
+        let mut sh = Server {};
+        let socket = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = socket.local_addr().unwrap();
+
+        let join = tokio::spawn(async move {
+            let (socket, _) = socket.accept().await.unwrap();
+            let mut server = sh.new_client(socket.peer_addr().ok());
+            let auth_waiter = server.get_auth_waiter();
+            let channel_waiter = server.get_channel_waiter();
+            server::run_stream(config, socket, server).await.unwrap();
+
+            auth_waiter.await.unwrap();
+
+            let channel = channel_waiter.await.unwrap();
+            let mut stream = channel.into_stream();
+
+            stream.write(&b"hello world!"[..]).await.unwrap();
+
+            let mut buffer = Vec::with_capacity(10);
+            stream.read_buf(&mut buffer).await.unwrap();
+            assert_eq!(&buffer, &b"hey there!"[..]);
+        });
+
+        let config = Arc::new(client::Config::default());
+        let mut session = client::connect(config, addr, Client {}).await.unwrap();
+        let authenticated = session
+            .authenticate_publickey(whoami::username(), Arc::new(client_key))
+            .await
+            .unwrap();
+
+        assert!(authenticated);
+
+        let channel = session.channel_open_session().await.unwrap();
+        let mut stream = channel.into_stream();
+
+        let mut buffer = Vec::with_capacity(12);
+        stream.read_buf(&mut buffer).await.unwrap();
+        assert_eq!(&buffer, &b"hello world!"[..]);
+
+        stream.write(&b"hey there!"[..]).await.unwrap();
+
+        join.await.unwrap();
+
+        drop(session);
+    }
+
+    #[derive(Clone)]
+    struct Server {}
+
+    impl server::Server for Server {
+        type Handler = ServerHandle;
+        fn new_client(&mut self, _: Option<std::net::SocketAddr>) -> ServerHandle {
+            ServerHandle {
+                did_auth: None,
+                channel: None,
+            }
+        }
+    }
+
+    struct ServerHandle {
+        did_auth: Option<tokio::sync::oneshot::Sender<()>>,
+        channel: Option<tokio::sync::oneshot::Sender<Channel<Msg>>>,
+    }
+
+    impl ServerHandle {
+        fn get_auth_waiter(&mut self) -> tokio::sync::oneshot::Receiver<()> {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            self.did_auth = Some(tx);
+            rx
+        }
+
+        fn get_channel_waiter(&mut self) -> tokio::sync::oneshot::Receiver<Channel<Msg>> {
+            let (tx, rx) = tokio::sync::oneshot::channel::<Channel<Msg>>();
+            self.channel = Some(tx);
+            rx
+        }
+    }
+
+    impl server::Handler for ServerHandle {
+        type Error = super::Error;
+        type FutureAuth = futures::future::Ready<Result<(Self, server::Auth), Self::Error>>;
+        type FutureUnit = futures::future::Ready<Result<(Self, Session), Self::Error>>;
+        type FutureBool = futures::future::Ready<Result<(Self, Session, bool), Self::Error>>;
+
+        fn finished_auth(self, auth: Auth) -> Self::FutureAuth {
+            futures::future::ready(Ok((self, auth)))
+        }
+        fn finished_bool(self, b: bool, s: Session) -> Self::FutureBool {
+            futures::future::ready(Ok((self, s, b)))
+        }
+        fn finished(self, s: Session) -> Self::FutureUnit {
+            futures::future::ready(Ok((self, s)))
+        }
+        fn auth_publickey(self, _: &str, _: &russh_keys::key::PublicKey) -> Self::FutureAuth {
+            self.finished_auth(server::Auth::Accept)
+        }
+        fn auth_succeeded(mut self, session: Session) -> Self::FutureUnit {
+            if let Some(a) = self.did_auth.take() {
+                a.send(()).unwrap();
+            }
+            self.finished(session)
+        }
+        fn channel_open_session(
+            mut self,
+            channel: Channel<Msg>,
+            session: Session,
+        ) -> Self::FutureBool {
+            if let Some(a) = self.channel.take() {
+                a.send(channel).unwrap();
+            }
+            self.finished_bool(true, session)
+        }
+    }
+
+    struct Client {}
+
+    impl client::Handler for Client {
+        type Error = super::Error;
+        type FutureUnit = futures::future::Ready<Result<(Self, client::Session), Self::Error>>;
+        type FutureBool = futures::future::Ready<Result<(Self, bool), Self::Error>>;
+
+        fn finished_bool(self, b: bool) -> Self::FutureBool {
+            futures::future::ready(Ok((self, b)))
+        }
+        fn finished(self, session: client::Session) -> Self::FutureUnit {
+            futures::future::ready(Ok((self, session)))
+        }
+        fn check_server_key(
+            self,
+            _server_public_key: &russh_keys::key::PublicKey,
+        ) -> Self::FutureBool {
+            self.finished_bool(true)
         }
     }
 }

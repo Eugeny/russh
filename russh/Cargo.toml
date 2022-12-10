@@ -65,3 +65,4 @@ tokio = { version = "1.17.0", features = [
     "sync",
     "macros",
 ] }
+whoami = "1.2"
