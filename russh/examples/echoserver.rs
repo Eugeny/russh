@@ -1,9 +1,8 @@
-use russh::server::{Auth, Session, Msg};
+use async_trait::async_trait;
+use russh::server::{Msg, Session};
 use std::collections::HashMap;
-use std::pin::Pin;
 use std::sync::Arc;
 
-use futures::FutureExt;
 use russh::*;
 use russh_keys::*;
 use tokio::sync::Mutex;
@@ -57,55 +56,48 @@ impl server::Server for Server {
     }
 }
 
+#[async_trait]
 impl server::Handler for Server {
     type Error = anyhow::Error;
-    type FutureAuth =
-        Pin<Box<dyn core::future::Future<Output = anyhow::Result<(Self, Auth)>> + Send>>;
-    type FutureUnit =
-        Pin<Box<dyn core::future::Future<Output = anyhow::Result<(Self, Session)>> + Send>>;
-    type FutureBool =
-        Pin<Box<dyn core::future::Future<Output = anyhow::Result<(Self, Session, bool)>> + Send>>;
 
-    fn finished_auth(self, auth: Auth) -> Self::FutureAuth {
-        async { Ok((self, auth)) }.boxed()
-    }
-
-    fn finished_bool(self, b: bool, s: Session) -> Self::FutureBool {
-        async move { Ok((self, s, b)) }.boxed()
-    }
-
-    fn finished(self, s: Session) -> Self::FutureUnit {
-        async { Ok((self, s)) }.boxed()
-    }
-
-    fn channel_open_session(self, channel: Channel<Msg>, session: Session) -> Self::FutureBool {
-        async move {
-            {
-                let mut clients = self.clients.lock().await;
-                clients.insert((self.id, channel.id()), session.handle());
-            }
-            Ok((self, session, true))
+    async fn channel_open_session(
+        self,
+        channel: Channel<Msg>,
+        session: Session,
+    ) -> Result<(Self, bool, Session), Self::Error> {
+        {
+            let mut clients = self.clients.lock().await;
+            clients.insert((self.id, channel.id()), session.handle());
         }
-        .boxed()
+        Ok((self, true, session))
     }
 
-    fn auth_publickey(self, _: &str, _: &key::PublicKey) -> Self::FutureAuth {
-        self.finished_auth(server::Auth::Accept)
+    async fn auth_publickey(
+        self,
+        _: &str,
+        _: &key::PublicKey,
+    ) -> Result<(Self, server::Auth), Self::Error> {
+        Ok((self, server::Auth::Accept))
     }
 
-    fn data(mut self, channel: ChannelId, data: &[u8], mut session: Session) -> Self::FutureUnit {
+    async fn data(
+        mut self,
+        channel: ChannelId,
+        data: &[u8],
+        mut session: Session,
+    ) -> Result<(Self, Session), Self::Error> {
         let data = CryptoVec::from(format!("Got data: {}\r\n", String::from_utf8_lossy(data)));
-        async move {
-            {
-                self.post(data.clone()).await;
-            }
-            session.data(channel, data);
-            Ok((self, session))
-        }
-        .boxed()
+        self.post(data.clone()).await;
+        session.data(channel, data);
+        Ok((self, session))
     }
 
-    fn tcpip_forward(self, address: &str, port: &mut u32, session: Session) -> Self::FutureBool {
+    async fn tcpip_forward(
+        self,
+        address: &str,
+        port: &mut u32,
+        session: Session,
+    ) -> Result<(Self, bool, Session), Self::Error> {
         let handle = session.handle();
         let address = address.to_string();
         let port = *port;
@@ -117,6 +109,6 @@ impl server::Handler for Server {
             let _ = channel.data(&b"Hello from a forwarded port"[..]).await;
             let _ = channel.eof().await;
         });
-        self.finished_bool(true, session)
+        Ok((self, true, session))
     }
 }

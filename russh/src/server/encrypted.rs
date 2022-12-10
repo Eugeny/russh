@@ -31,7 +31,7 @@ use crate::parsing::{ChannelOpenConfirmation, ChannelType, OpenChannelMessage};
 
 impl Session {
     /// Returns false iff a request was rejected.
-    pub(crate) async fn server_read_encrypted<H: Handler>(
+    pub(crate) async fn server_read_encrypted<H: Handler + Send>(
         mut self,
         mut handler: H,
         buf: &[u8],
@@ -123,7 +123,7 @@ impl Session {
         self.process_packet(handler, buf).await
     }
 
-    async fn process_packet<H: Handler>(
+    async fn process_packet<H: Handler + Send>(
         mut self,
         mut handler: H,
         buf: &[u8],
@@ -242,7 +242,7 @@ fn server_accept_service(
 
 impl Encrypted {
     /// Returns false iff the request was rejected.
-    async fn server_read_auth_request<H: Handler>(
+    async fn server_read_auth_request<H: Handler + Send>(
         &mut self,
         mut until: Instant,
         initial_auth_until: Instant,
@@ -360,7 +360,7 @@ thread_local! {
 }
 
 impl Encrypted {
-    async fn server_read_auth_request_pk<H: Handler>(
+    async fn server_read_auth_request_pk<H: Handler + Send>(
         &mut self,
         until: Instant,
         mut handler: H,
@@ -510,7 +510,7 @@ fn server_auth_request_success(buffer: &mut CryptoVec) {
     })
 }
 
-async fn read_userauth_info_response<H: Handler>(
+async fn read_userauth_info_response<H: Handler + Send>(
     until: Instant,
     mut handler: H,
     write: &mut CryptoVec,
@@ -580,7 +580,7 @@ async fn reply_userauth_info_response(
 }
 
 impl Session {
-    async fn server_read_authenticated<H: Handler>(
+    async fn server_read_authenticated<H: Handler + Send>(
         mut self,
         mut handler: H,
         buf: &[u8],
@@ -596,7 +596,7 @@ impl Session {
             Some(&msg::CHANNEL_OPEN) => self
                 .server_handle_channel_open(handler, buf)
                 .await
-                .map(|(h, s, _)| (h, s)),
+                .map(|(h, _, s)| (h, s)),
             Some(&msg::CHANNEL_CLOSE) => {
                 let mut r = buf.reader(1);
                 let channel_num = ChannelId(r.read_u32().map_err(crate::Error::from)?);
@@ -788,7 +788,7 @@ impl Session {
                     b"auth-agent-req@openssh.com" => {
                         debug!("handler.agent_request {:?}", channel_num);
                         let response;
-                        (handler, self, response) =
+                        (handler, response, self) =
                             handler.agent_request(channel_num, self).await?;
                         if response {
                             self.request_success()
@@ -851,7 +851,7 @@ impl Session {
                         let port = r.read_u32().map_err(crate::Error::from)?;
                         debug!("handler.tcpip_forward {:?} {:?}", address, port);
                         let mut returned_port = port;
-                        let (h, mut s, result) = handler
+                        let (h, result, mut s) = handler
                             .tcpip_forward(address, &mut returned_port, self)
                             .await?;
                         if let Some(ref mut enc) = s.common.encrypted {
@@ -874,7 +874,7 @@ impl Session {
                                 .map_err(crate::Error::from)?;
                         let port = r.read_u32().map_err(crate::Error::from)?;
                         debug!("handler.cancel_tcpip_forward {:?} {:?}", address, port);
-                        let (h, mut s, result) =
+                        let (h, result, mut s) =
                             handler.cancel_tcpip_forward(address, port, self).await?;
                         if let Some(ref mut enc) = s.common.encrypted {
                             if result {
@@ -902,11 +902,11 @@ impl Session {
         }
     }
 
-    async fn server_handle_channel_open<H: Handler>(
+    async fn server_handle_channel_open<H: Handler + Send>(
         mut self,
         handler: H,
         buf: &[u8],
-    ) -> Result<(H, Self, bool), H::Error> {
+    ) -> Result<(H, bool, Self), H::Error> {
         let mut r = buf.reader(1);
         let msg = OpenChannelMessage::parse(&mut r)?;
 
@@ -942,7 +942,7 @@ impl Session {
         match &msg.typ {
             ChannelType::Session => {
                 let mut result = handler.channel_open_session(channel, self).await;
-                if let Ok((_, s, allowed)) = &mut result {
+                if let Ok((_, allowed, s)) = &mut result {
                     s.channels.insert(sender_channel, sender);
                     s.finalize_channel_open(&msg, channel_params, *allowed);
                 }
@@ -955,7 +955,7 @@ impl Session {
                 let mut result = handler
                     .channel_open_x11(channel, originator_address, *originator_port, self)
                     .await;
-                if let Ok((_, s, allowed)) = &mut result {
+                if let Ok((_, allowed, s)) = &mut result {
                     s.channels.insert(sender_channel, sender);
                     s.finalize_channel_open(&msg, channel_params, *allowed);
                 }
@@ -972,7 +972,7 @@ impl Session {
                         self,
                     )
                     .await;
-                if let Ok((_, s, allowed)) = &mut result {
+                if let Ok((_, allowed, s)) = &mut result {
                     s.channels.insert(sender_channel, sender);
                     s.finalize_channel_open(&msg, channel_params, *allowed);
                 }
@@ -989,7 +989,7 @@ impl Session {
                         self,
                     )
                     .await;
-                if let Ok((_, s, allowed)) = &mut result {
+                if let Ok((_, allowed, s)) = &mut result {
                     s.channels.insert(sender_channel, sender);
                     s.finalize_channel_open(&msg, channel_params, *allowed);
                 }
@@ -1003,14 +1003,14 @@ impl Session {
                         b"Unsupported channel type",
                     );
                 }
-                Ok((handler, self, false))
+                Ok((handler, false, self))
             }
             ChannelType::Unknown { typ } => {
                 debug!("unknown channel type: {}", String::from_utf8_lossy(typ));
                 if let Some(ref mut enc) = self.common.encrypted {
                     msg.unknown_type(&mut enc.write);
                 }
-                Ok((handler, self, false))
+                Ok((handler, false, self))
             }
         }
     }

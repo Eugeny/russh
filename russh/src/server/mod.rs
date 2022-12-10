@@ -30,6 +30,7 @@
 //! extern crate russh_keys;
 //! extern crate futures;
 //! extern crate tokio;
+//! use async_trait::async_trait;
 //! use std::sync::{Mutex, Arc};
 //! use russh::*;
 //! use russh::server::{Auth, Session, Msg};
@@ -73,39 +74,28 @@
 //!     }
 //! }
 //!
+//! #[async_trait]
 //! impl server::Handler for Server {
 //!     type Error = anyhow::Error;
-//!     type FutureAuth = futures::future::Ready<Result<(Self, server::Auth), anyhow::Error>>;
-//!     type FutureUnit = futures::future::Ready<Result<(Self, Session), anyhow::Error>>;
-//!     type FutureBool = futures::future::Ready<Result<(Self, Session, bool), anyhow::Error>>;
 //!
-//!     fn finished_auth(mut self, auth: Auth) -> Self::FutureAuth {
-//!         futures::future::ready(Ok((self, auth)))
-//!     }
-//!     fn finished_bool(self, b: bool, s: Session) -> Self::FutureBool {
-//!         futures::future::ready(Ok((self, s, b)))
-//!     }
-//!     fn finished(self, s: Session) -> Self::FutureUnit {
-//!         futures::future::ready(Ok((self, s)))
-//!     }
-//!     fn channel_open_session(self, channel: Channel<Msg>, session: Session) -> Self::FutureBool {
+//!     async fn channel_open_session(self, channel: Channel<Msg>, session: Session) -> Result<(Self, bool, Session), Self::Error> {
 //!         {
 //!             let mut clients = self.clients.lock().unwrap();
 //!             clients.insert((self.id, channel.id()), channel);
 //!         }
-//!         self.finished_bool(true, session)
+//!         Ok((self, true, session))
 //!     }
-//!     fn auth_publickey(self, _: &str, _: &key::PublicKey) -> Self::FutureAuth {
-//!         self.finished_auth(server::Auth::Accept)
+//!     async fn auth_publickey(self, _: &str, _: &key::PublicKey) -> Result<(Self, Auth), Self::Error> {
+//!         Ok((self, server::Auth::Accept))
 //!     }
-//!     fn data(self, channel: ChannelId, data: &[u8], mut session: Session) -> Self::FutureUnit {
+//!     async fn data(self, channel: ChannelId, data: &[u8], mut session: Session) -> Result<(Self, Session), Self::Error> {
 //!         {
 //!             let mut clients = self.clients.lock().unwrap();
 //!             for ((id, _channel_id), ref mut channel) in clients.iter_mut() {
 //!                 channel.data(data);
 //!             }
 //!         }
-//!         self.finished(session)
+//!         Ok((self, session))
 //!     }
 //! }
 //! ```
@@ -130,6 +120,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
+use async_trait::async_trait;
 use futures::future::Future;
 use russh_keys::key;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
@@ -256,44 +247,24 @@ pub enum Auth {
 }
 
 /// Server handler. Each client will have their own handler.
+#[async_trait]
 pub trait Handler: Sized {
     type Error: From<crate::Error> + Send;
-    /// The type of authentications, which can be a future ultimately
-    /// resolving to
-    type FutureAuth: Future<Output = Result<(Self, Auth), Self::Error>> + Send;
-
-    /// The type of units returned by some parts of this handler.
-    type FutureUnit: Future<Output = Result<(Self, Session), Self::Error>> + Send;
-
-    /// The type of future bools returned by some parts of this handler.
-    type FutureBool: Future<Output = Result<(Self, Session, bool), Self::Error>> + Send;
-
-    /// Convert an `Auth` to `Self::FutureAuth`. This is used to
-    /// produce the default handlers.
-    fn finished_auth(self, auth: Auth) -> Self::FutureAuth;
-
-    /// Convert a `bool` to `Self::FutureBool`. This is used to
-    /// produce the default handlers.
-    fn finished_bool(self, b: bool, session: Session) -> Self::FutureBool;
-
-    /// Produce a `Self::FutureUnit`. This is used to produce the
-    /// default handlers.
-    fn finished(self, session: Session) -> Self::FutureUnit;
 
     /// Called when a session disconnects.
     #[allow(unused_variables)]
-    fn disconnected(self, session: Session) -> Self::FutureUnit {
-        self.finished(session)
+    async fn disconnected(self, session: Session) -> Result<(Self, Session), Self::Error> {
+        Ok((self, session))
     }
 
     /// Check authentication using the "none" method. Russh makes
     /// sure rejection happens in time `config.auth_rejection_time`,
     /// except if this method takes more than that.
     #[allow(unused_variables)]
-    fn auth_none(self, user: &str) -> Self::FutureAuth {
-        self.finished_auth(Auth::Reject {
+    async fn auth_none(self, user: &str) -> Result<(Self, Auth), Self::Error> {
+        Ok((self, Auth::Reject {
             proceed_with_methods: None,
-        })
+        }))
     }
 
     /// Check authentication using the "password" method. Russh
@@ -301,10 +272,10 @@ pub trait Handler: Sized {
     /// `config.auth_rejection_time`, except if this method takes more
     /// than that.
     #[allow(unused_variables)]
-    fn auth_password(self, user: &str, password: &str) -> Self::FutureAuth {
-        self.finished_auth(Auth::Reject {
+    async fn auth_password(self, user: &str, password: &str) -> Result<(Self, Auth), Self::Error> {
+        Ok((self, Auth::Reject {
             proceed_with_methods: None,
-        })
+        }))
     }
 
     /// Check authentication using the "publickey" method. This method
@@ -315,10 +286,10 @@ pub trait Handler: Sized {
     /// `config.auth_rejection_time`, except if this method takes more
     /// time than that.
     #[allow(unused_variables)]
-    fn auth_publickey(self, user: &str, public_key: &key::PublicKey) -> Self::FutureAuth {
-        self.finished_auth(Auth::Reject {
+    async fn auth_publickey(self, user: &str, public_key: &key::PublicKey) -> Result<(Self, Auth), Self::Error> {
+        Ok((self, Auth::Reject {
             proceed_with_methods: None,
-        })
+        }))
     }
 
     /// Check authentication using the "keyboard-interactive"
@@ -326,62 +297,62 @@ pub trait Handler: Sized {
     /// `config.auth_rejection_time`, except if this method takes more
     /// than that.
     #[allow(unused_variables)]
-    fn auth_keyboard_interactive(
+    async fn auth_keyboard_interactive(
         self,
         user: &str,
         submethods: &str,
-        response: Option<Response>,
-    ) -> Self::FutureAuth {
-        self.finished_auth(Auth::Reject {
+        response: Option<Response<'async_trait>>,
+    ) -> Result<(Self, Auth), Self::Error> {
+        Ok((self, Auth::Reject {
             proceed_with_methods: None,
-        })
+        }))
     }
 
     /// Called when authentication succeeds for a session.
     #[allow(unused_variables)]
-    fn auth_succeeded(self, session: Session) -> Self::FutureUnit {
-        self.finished(session)
+    async fn auth_succeeded(self, session: Session) -> Result<(Self, Session), Self::Error> {
+        Ok((self, session))
     }
 
     /// Called when the client closes a channel.
     #[allow(unused_variables)]
-    fn channel_close(self, channel: ChannelId, session: Session) -> Self::FutureUnit {
-        self.finished(session)
+    async fn channel_close(self, channel: ChannelId, session: Session) -> Result<(Self, Session), Self::Error> {
+        Ok((self, session))
     }
 
     /// Called when the client sends EOF to a channel.
     #[allow(unused_variables)]
-    fn channel_eof(self, channel: ChannelId, session: Session) -> Self::FutureUnit {
+    async fn channel_eof(self, channel: ChannelId, session: Session) -> Result<(Self, Session), Self::Error> {
         if let Some(chan) = session.channels.get(&channel) {
             chan.send(ChannelMsg::Eof).unwrap_or(())
         }
-        self.finished(session)
+        Ok((self, session))
     }
 
     /// Called when a new session channel is created.
     /// Return value indicates whether the channel request should be granted.
     #[allow(unused_variables)]
-    fn channel_open_session(self, channel: Channel<Msg>, session: Session) -> Self::FutureBool {
-        self.finished_bool(false, session)
+    async fn channel_open_session(self, channel: Channel<Msg>, session: Session) -> Result<(Self, bool, Session), Self::Error> {
+        Ok((self, false, session))
     }
 
     /// Called when a new X11 channel is created.
     /// Return value indicates whether the channel request should be granted.
     #[allow(unused_variables)]
-    fn channel_open_x11(
+    async fn channel_open_x11(
         self,
         channel: Channel<Msg>,
         originator_address: &str,
         originator_port: u32,
         session: Session,
-    ) -> Self::FutureBool {
-        self.finished_bool(false, session)
+    ) -> Result<(Self, bool, Session), Self::Error> {
+        Ok((self, false, session))
     }
 
     /// Called when a new TCP/IP is created.
     /// Return value indicates whether the channel request should be granted.
     #[allow(unused_variables)]
-    fn channel_open_direct_tcpip(
+    async fn channel_open_direct_tcpip(
         self,
         channel: Channel<Msg>,
         host_to_connect: &str,
@@ -389,14 +360,14 @@ pub trait Handler: Sized {
         originator_address: &str,
         originator_port: u32,
         session: Session,
-    ) -> Self::FutureBool {
-        self.finished_bool(false, session)
+    ) -> Result<(Self, bool, Session), Self::Error> {
+        Ok((self, false, session))
     }
 
     /// Called when a new forwarded connection comes in.
     /// <https://www.rfc-editor.org/rfc/rfc4254#section-7>
     #[allow(unused_variables)]
-    fn channel_open_forwarded_tcpip(
+    async fn channel_open_forwarded_tcpip(
         self,
         channel: Channel<Msg>,
         host_to_connect: &str,
@@ -404,21 +375,21 @@ pub trait Handler: Sized {
         originator_address: &str,
         originator_port: u32,
         session: Session,
-    ) -> Self::FutureBool {
-        self.finished_bool(false, session)
+    ) -> Result<(Self, bool, Session), Self::Error> {
+        Ok((self, false, session))
     }
 
     /// Called when the client confirmed our request to open a
     /// channel. A channel can only be written to after receiving this
     /// message (this library panics otherwise).
     #[allow(unused_variables)]
-    fn channel_open_confirmation(
+    async fn channel_open_confirmation(
         self,
         id: ChannelId,
         max_packet_size: u32,
         window_size: u32,
         session: Session,
-    ) -> Self::FutureUnit {
+    ) -> Result<(Self, Session), Self::Error> {
         if let Some(channel) = session.channels.get(&id) {
             channel
                 .send(ChannelMsg::Open {
@@ -430,20 +401,20 @@ pub trait Handler: Sized {
         } else {
             error!("no channel for id {:?}", id);
         }
-        self.finished(session)
+        Ok((self, session))
     }
 
     /// Called when a data packet is received. A response can be
     /// written to the `response` argument.
     #[allow(unused_variables)]
-    fn data(self, channel: ChannelId, data: &[u8], session: Session) -> Self::FutureUnit {
+    async fn data(self, channel: ChannelId, data: &[u8], session: Session) -> Result<(Self, Session), Self::Error> {
         if let Some(chan) = session.channels.get(&channel) {
             chan.send(ChannelMsg::Data {
                 data: CryptoVec::from_slice(data),
             })
             .unwrap_or(())
         }
-        self.finished(session)
+        Ok((self, session))
     }
 
     /// Called when an extended data packet is received. Code 1 means
@@ -451,13 +422,13 @@ pub trait Handler: Sized {
     /// defined (see
     /// [RFC4254](https://tools.ietf.org/html/rfc4254#section-5.2)).
     #[allow(unused_variables)]
-    fn extended_data(
+    async fn extended_data(
         self,
         channel: ChannelId,
         code: u32,
         data: &[u8],
         session: Session,
-    ) -> Self::FutureUnit {
+    ) -> Result<(Self, Session), Self::Error> {
         if let Some(chan) = session.channels.get(&channel) {
             chan.send(ChannelMsg::ExtendedData {
                 ext: code,
@@ -465,18 +436,18 @@ pub trait Handler: Sized {
             })
             .unwrap_or(())
         }
-        self.finished(session)
+        Ok((self, session))
     }
 
     /// Called when the network window is adjusted, meaning that we
     /// can send more bytes.
     #[allow(unused_variables)]
-    fn window_adjusted(
+    async fn window_adjusted(
         self,
         channel: ChannelId,
         new_size: u32,
         mut session: Session,
-    ) -> Self::FutureUnit {
+    ) -> Result<(Self, Session), Self::Error> {
         if let Some(ref mut enc) = session.common.encrypted {
             enc.flush_pending(channel);
         }
@@ -484,7 +455,7 @@ pub trait Handler: Sized {
             chan.send(ChannelMsg::WindowAdjusted { new_size })
                 .unwrap_or(())
         }
-        self.finished(session)
+        Ok((self, session))
     }
 
     /// Called when this server adjusts the network window. Return the
@@ -497,7 +468,7 @@ pub trait Handler: Sized {
     /// The client requests a pseudo-terminal with the given
     /// specifications.
     #[allow(unused_variables, clippy::too_many_arguments)]
-    fn pty_request(
+    async fn pty_request(
         self,
         channel: ChannelId,
         term: &str,
@@ -507,7 +478,7 @@ pub trait Handler: Sized {
         pix_height: u32,
         modes: &[(Pty, u32)],
         session: Session,
-    ) -> Self::FutureUnit {
+    ) -> Result<(Self, Session), Self::Error> {
         if let Some(chan) = session.channels.get(&channel) {
             chan.send(ChannelMsg::RequestPty {
                 want_reply: true,
@@ -520,12 +491,12 @@ pub trait Handler: Sized {
             })
             .unwrap_or(())
         }
-        self.finished(session)
+        Ok((self, session))
     }
 
     /// The client requests an X11 connection.
     #[allow(unused_variables)]
-    fn x11_request(
+    async fn x11_request(
         self,
         channel: ChannelId,
         single_connection: bool,
@@ -533,7 +504,7 @@ pub trait Handler: Sized {
         x11_auth_cookie: &str,
         x11_screen_number: u32,
         session: Session,
-    ) -> Self::FutureUnit {
+    ) -> Result<(Self, Session), Self::Error> {
         if let Some(chan) = session.channels.get(&channel) {
             chan.send(ChannelMsg::RequestX11 {
                 want_reply: true,
@@ -544,20 +515,20 @@ pub trait Handler: Sized {
             })
             .unwrap_or(())
         }
-        self.finished(session)
+        Ok((self, session))
     }
 
     /// The client wants to set the given environment variable. Check
     /// these carefully, as it is dangerous to allow any variable
     /// environment to be set.
     #[allow(unused_variables)]
-    fn env_request(
+    async fn env_request(
         self,
         channel: ChannelId,
         variable_name: &str,
         variable_value: &str,
         session: Session,
-    ) -> Self::FutureUnit {
+    ) -> Result<(Self, Session), Self::Error> {
         if let Some(chan) = session.channels.get(&channel) {
             chan.send(ChannelMsg::SetEnv {
                 want_reply: true,
@@ -566,23 +537,23 @@ pub trait Handler: Sized {
             })
             .unwrap_or(())
         }
-        self.finished(session)
+        Ok((self, session))
     }
 
     /// The client requests a shell.
     #[allow(unused_variables)]
-    fn shell_request(self, channel: ChannelId, session: Session) -> Self::FutureUnit {
+    async fn shell_request(self, channel: ChannelId, session: Session) -> Result<(Self, Session), Self::Error> {
         if let Some(chan) = session.channels.get(&channel) {
             chan.send(ChannelMsg::RequestShell { want_reply: true })
                 .unwrap_or(())
         }
-        self.finished(session)
+        Ok((self, session))
     }
 
     /// The client sends a command to execute, to be passed to a
     /// shell. Make sure to check the command before doing so.
     #[allow(unused_variables)]
-    fn exec_request(self, channel: ChannelId, data: &[u8], session: Session) -> Self::FutureUnit {
+    async fn exec_request(self, channel: ChannelId, data: &[u8], session: Session) -> Result<(Self, Session), Self::Error> {
         if let Some(chan) = session.channels.get(&channel) {
             chan.send(ChannelMsg::Exec {
                 want_reply: true,
@@ -590,18 +561,18 @@ pub trait Handler: Sized {
             })
             .unwrap_or(())
         }
-        self.finished(session)
+        Ok((self, session))
     }
 
     /// The client asks to start the subsystem with the given name
     /// (such as sftp).
     #[allow(unused_variables)]
-    fn subsystem_request(
+    async fn subsystem_request(
         self,
         channel: ChannelId,
         name: &str,
         session: Session,
-    ) -> Self::FutureUnit {
+    ) -> Result<(Self, Session), Self::Error> {
         if let Some(chan) = session.channels.get(&channel) {
             chan.send(ChannelMsg::RequestSubsystem {
                 want_reply: true,
@@ -609,12 +580,12 @@ pub trait Handler: Sized {
             })
             .unwrap_or(())
         }
-        self.finished(session)
+        Ok((self, session))
     }
 
     /// The client's pseudo-terminal window size has changed.
     #[allow(unused_variables)]
-    fn window_change_request(
+    async fn window_change_request(
         self,
         channel: ChannelId,
         col_width: u32,
@@ -622,7 +593,7 @@ pub trait Handler: Sized {
         pix_width: u32,
         pix_height: u32,
         session: Session,
-    ) -> Self::FutureUnit {
+    ) -> Result<(Self, Session), Self::Error> {
         if let Some(chan) = session.channels.get(&channel) {
             chan.send(ChannelMsg::WindowChange {
                 col_width,
@@ -632,41 +603,41 @@ pub trait Handler: Sized {
             })
             .unwrap_or(())
         }
-        self.finished(session)
+        Ok((self, session))
     }
 
     /// The client requests OpenSSH agent forwarding
     #[allow(unused_variables)]
-    fn agent_request(self, channel: ChannelId, session: Session) -> Self::FutureBool {
+    async fn agent_request(self, channel: ChannelId, session: Session) -> Result<(Self, bool, Session), Self::Error> {
         if let Some(chan) = session.channels.get(&channel) {
             chan.send(ChannelMsg::AgentForward { want_reply: true })
                 .unwrap_or(())
         }
-        self.finished_bool(false, session)
+        Ok((self, false, session))
     }
 
     /// The client is sending a signal (usually to pass to the
     /// currently running process).
     #[allow(unused_variables)]
-    fn signal(self, channel: ChannelId, signal: Sig, session: Session) -> Self::FutureUnit {
+    async fn signal(self, channel: ChannelId, signal: Sig, session: Session) -> Result<(Self, Session),  Self::Error> {
         if let Some(chan) = session.channels.get(&channel) {
             chan.send(ChannelMsg::Signal { signal }).unwrap_or(())
         }
-        self.finished(session)
+        Ok((self, session))
     }
 
     /// Used for reverse-forwarding ports, see
     /// [RFC4254](https://tools.ietf.org/html/rfc4254#section-7).
     /// If `port` is 0, you should set it to the allocated port number.
     #[allow(unused_variables)]
-    fn tcpip_forward(self, address: &str, port: &mut u32, session: Session) -> Self::FutureBool {
-        self.finished_bool(false, session)
+    async fn tcpip_forward(self, address: &str, port: &mut u32, session: Session) -> Result<(Self, bool, Session), Self::Error> {
+        Ok((self, false, session))
     }
     /// Used to stop the reverse-forwarding of a port, see
     /// [RFC4254](https://tools.ietf.org/html/rfc4254#section-7).
     #[allow(unused_variables)]
-    fn cancel_tcpip_forward(self, address: &str, port: u32, session: Session) -> Self::FutureBool {
-        self.finished_bool(false, session)
+    async fn cancel_tcpip_forward(self, address: &str, port: u32, session: Session) -> Result<(Self, bool, Session), Self::Error> {
+        Ok((self, false, session))
     }
 }
 
@@ -839,7 +810,7 @@ async fn read_ssh_id<R: AsyncRead + Unpin>(
     })
 }
 
-async fn reply<H: Handler>(
+async fn reply<H: Handler + Send>(
     mut session: Session,
     handler: H,
     buf: &[u8],

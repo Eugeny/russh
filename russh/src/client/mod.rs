@@ -32,6 +32,7 @@
 //! extern crate futures;
 //! extern crate tokio;
 //! extern crate env_logger;
+//! use async_trait::async_trait;
 //! use std::sync::Arc;
 //! use russh::*;
 //! use russh::server::{Auth, Session};
@@ -42,28 +43,22 @@
 //! struct Client {
 //! }
 //!
+//! #[async_trait]
 //! impl client::Handler for Client {
 //!    type Error = anyhow::Error;
-//!    type FutureUnit = futures::future::Ready<Result<(Self, client::Session), anyhow::Error>>;
-//!    type FutureBool = futures::future::Ready<Result<(Self, bool), anyhow::Error>>;
 //!
-//!    fn finished_bool(self, b: bool) -> Self::FutureBool {
-//!        futures::future::ready(Ok((self, b)))
-//!    }
-//!    fn finished(self, session: client::Session) -> Self::FutureUnit {
-//!        futures::future::ready(Ok((self, session)))
-//!    }
-//!    fn check_server_key(self, server_public_key: &key::PublicKey) -> Self::FutureBool {
+//!    async fn check_server_key(self, server_public_key: &key::PublicKey) -> Result<(Self, bool), Self::Error> {
 //!        println!("check_server_key: {:?}", server_public_key);
-//!        self.finished_bool(true)
+//!        Ok((self, true))
 //!    }
-//!    fn channel_open_confirmation(self, channel: ChannelId, max_packet_size: u32, window_size: u32, session: client::Session) -> Self::FutureUnit {
+//!    async fn channel_open_confirmation(self, channel: ChannelId, max_packet_size: u32, window_size: u32, session: client::Session) -> Result<(Self, client::Session), Self::Error> {
+//!
 //!        println!("channel_open_confirmation: {:?}", channel);
-//!        self.finished(session)
+//!        Ok((self, session))
 //!    }
-//!    fn data(self, channel: ChannelId, data: &[u8], session: client::Session) -> Self::FutureUnit {
+//!    async fn data(self, channel: ChannelId, data: &[u8], session: client::Session) -> Result<(Self, client::Session), Self::Error> {
 //!        println!("data on channel {:?}: {:?}", channel, std::str::from_utf8(data));
-//!        self.finished(session)
+//!        Ok((self, session))
 //!    }
 //! }
 //!
@@ -94,6 +89,7 @@ use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use futures::task::{Context, Poll};
 use futures::Future;
 use russh_cryptovec::CryptoVec;
@@ -1161,23 +1157,9 @@ impl Default for Config {
 
 /// A client handler. Note that messages can be received from the
 /// server at any time during a session.
-pub trait Handler: Sized {
+#[async_trait]
+pub trait Handler: Sized + Send {
     type Error: From<crate::Error> + Send;
-    /// A future ultimately resolving into a boolean, which can be
-    /// returned by some parts of this handler.
-    type FutureBool: Future<Output = Result<(Self, bool), Self::Error>> + Send;
-
-    /// A future ultimately resolving into unit, which can be
-    /// returned by some parts of this handler.
-    type FutureUnit: Future<Output = Result<(Self, Session), Self::Error>> + Send;
-
-    /// Convert a `bool` to `Self::FutureBool`. This is used to
-    /// produce the default handlers.
-    fn finished_bool(self, b: bool) -> Self::FutureBool;
-
-    /// Produce a `Self::FutureUnit`. This is used to produce the
-    /// default handlers.
-    fn finished(self, session: Session) -> Self::FutureUnit;
 
     /// Called when the server sends us an authentication banner. This
     /// is usually meant to be shown to the user, see
@@ -1186,29 +1168,32 @@ pub trait Handler: Sized {
     ///
     /// The returned Boolean is ignored.
     #[allow(unused_variables)]
-    fn auth_banner(self, banner: &str, session: Session) -> Self::FutureUnit {
-        self.finished(session)
+    async fn auth_banner(self, banner: &str, session: Session) -> Result<(Self, Session), Self::Error> {
+        Ok((self, session))
     }
 
     /// Called to check the server's public key. This is a very important
     /// step to help prevent man-in-the-middle attacks. The default
     /// implementation rejects all keys.
     #[allow(unused_variables)]
-    fn check_server_key(self, server_public_key: &key::PublicKey) -> Self::FutureBool {
-        self.finished_bool(false)
+    async fn check_server_key(
+        self,
+        server_public_key: &key::PublicKey,
+    ) -> Result<(Self, bool), Self::Error> {
+        Ok((self, false))
     }
 
     /// Called when the server confirmed our request to open a
     /// channel. A channel can only be written to after receiving this
     /// message (this library panics otherwise).
     #[allow(unused_variables)]
-    fn channel_open_confirmation(
+    async fn channel_open_confirmation(
         self,
         id: ChannelId,
         max_packet_size: u32,
         window_size: u32,
         session: Session,
-    ) -> Self::FutureUnit {
+    ) -> Result<(Self, Session), Self::Error> {
         if let Some(channel) = session.channels.get(&id) {
             channel
                 .send(ChannelMsg::Open {
@@ -1220,63 +1205,63 @@ pub trait Handler: Sized {
         } else {
             error!("no channel for id {:?}", id);
         }
-        self.finished(session)
+        Ok((self, session))
     }
 
     /// Called when the server signals success.
     #[allow(unused_variables)]
-    fn channel_success(self, channel: ChannelId, session: Session) -> Self::FutureUnit {
+    async fn channel_success(self, channel: ChannelId, session: Session) -> Result<(Self, Session), Self::Error> {
         if let Some(chan) = session.channels.get(&channel) {
             chan.send(ChannelMsg::Success).unwrap_or(())
         }
-        self.finished(session)
+        Ok((self, session))
     }
 
     /// Called when the server signals failure.
     #[allow(unused_variables)]
-    fn channel_failure(self, channel: ChannelId, session: Session) -> Self::FutureUnit {
+    async fn channel_failure(self, channel: ChannelId, session: Session) -> Result<(Self, Session), Self::Error> {
         if let Some(chan) = session.channels.get(&channel) {
             chan.send(ChannelMsg::Failure).unwrap_or(())
         }
-        self.finished(session)
+        Ok((self, session))
     }
 
     /// Called when the server closes a channel.
     #[allow(unused_variables)]
-    fn channel_close(self, channel: ChannelId, mut session: Session) -> Self::FutureUnit {
+    async fn channel_close(self, channel: ChannelId, mut session: Session) -> Result<(Self, Session), Self::Error> {
         session.channels.remove(&channel);
-        self.finished(session)
+        Ok((self, session))
     }
 
     /// Called when the server sends EOF to a channel.
     #[allow(unused_variables)]
-    fn channel_eof(self, channel: ChannelId, session: Session) -> Self::FutureUnit {
+    async fn channel_eof(self, channel: ChannelId, session: Session) -> Result<(Self, Session), Self::Error> {
         if let Some(chan) = session.channels.get(&channel) {
             chan.send(ChannelMsg::Eof).unwrap_or(())
         }
-        self.finished(session)
+        Ok((self, session))
     }
 
     /// Called when the server rejected our request to open a channel.
     #[allow(unused_variables)]
-    fn channel_open_failure(
+    async fn channel_open_failure(
         self,
         channel: ChannelId,
         reason: ChannelOpenFailure,
         description: &str,
         language: &str,
         mut session: Session,
-    ) -> Self::FutureUnit {
+    ) -> Result<(Self, Session), Self::Error> {
         if let Some(sender) = session.channels.remove(&channel) {
             let _ = sender.send(ChannelMsg::OpenFailure(reason));
         }
         session.sender.send(Reply::ChannelOpenFailure).unwrap_or(());
-        self.finished(session)
+        Ok((self, session))
     }
 
     /// Called when the server opens a channel for a new remote port forwarding connection
     #[allow(unused_variables)]
-    fn server_channel_open_forwarded_tcpip(
+    async fn server_channel_open_forwarded_tcpip(
         self,
         channel: Channel<Msg>,
         connected_address: &str,
@@ -1284,18 +1269,18 @@ pub trait Handler: Sized {
         originator_address: &str,
         originator_port: u32,
         session: Session,
-    ) -> Self::FutureUnit {
-        self.finished(session)
+    ) -> Result<(Self, Session), Self::Error> {
+        Ok((self, session))
     }
 
     /// Called when the server opens an agent forwarding channel
     #[allow(unused_variables)]
-    fn server_channel_open_agent_forward(
+    async fn server_channel_open_agent_forward(
         self,
         channel: ChannelId,
         session: Session,
-    ) -> Self::FutureUnit {
-        self.finished(session)
+    ) -> Result<(Self, Session), Self::Error> {
+        Ok((self, session))
     }
 
     /// Called when the server gets an unknown channel. It may return `true`,
@@ -1308,13 +1293,17 @@ pub trait Handler: Sized {
 
     /// Called when the server opens a session channel.
     #[allow(unused_variables)]
-    fn server_channel_open_session(self, channel: ChannelId, session: Session) -> Self::FutureUnit {
-        self.finished(session)
+    async fn server_channel_open_session(
+        self,
+        channel: ChannelId,
+        session: Session,
+    ) -> Result<(Self, Session), Self::Error> {
+        Ok((self, session))
     }
 
     /// Called when the server opens a direct tcp/ip channel.
     #[allow(unused_variables)]
-    fn server_channel_open_direct_tcpip(
+    async fn server_channel_open_direct_tcpip(
         self,
         channel: ChannelId,
         host_to_connect: &str,
@@ -1322,20 +1311,20 @@ pub trait Handler: Sized {
         originator_address: &str,
         originator_port: u32,
         session: Session,
-    ) -> Self::FutureUnit {
-        self.finished(session)
+    ) -> Result<(Self, Session), Self::Error> {
+        Ok((self, session))
     }
 
     /// Called when the server opens an X11 channel.
     #[allow(unused_variables)]
-    fn server_channel_open_x11(
+    async fn server_channel_open_x11(
         self,
         channel: Channel<Msg>,
         originator_address: &str,
         originator_port: u32,
         session: Session,
-    ) -> Self::FutureUnit {
-        self.finished(session)
+    ) -> Result<(Self, Session), Self::Error> {
+        Ok((self, session))
     }
 
     /// Called when the server sends us data. The `extended_code`
@@ -1343,14 +1332,14 @@ pub trait Handler: Sized {
     /// standard output, and `Some(1)` is the standard error. See
     /// [RFC4254](https://tools.ietf.org/html/rfc4254#section-5.2).
     #[allow(unused_variables)]
-    fn data(self, channel: ChannelId, data: &[u8], session: Session) -> Self::FutureUnit {
+    async fn data(self, channel: ChannelId, data: &[u8], session: Session) -> Result<(Self, Session), Self::Error> {
         if let Some(chan) = session.channels.get(&channel) {
             chan.send(ChannelMsg::Data {
                 data: CryptoVec::from_slice(data),
             })
             .unwrap_or(())
         }
-        self.finished(session)
+        Ok((self, session))
     }
 
     /// Called when the server sends us data. The `extended_code`
@@ -1358,13 +1347,13 @@ pub trait Handler: Sized {
     /// standard output, and `Some(1)` is the standard error. See
     /// [RFC4254](https://tools.ietf.org/html/rfc4254#section-5.2).
     #[allow(unused_variables)]
-    fn extended_data(
+    async fn extended_data(
         self,
         channel: ChannelId,
         ext: u32,
         data: &[u8],
         session: Session,
-    ) -> Self::FutureUnit {
+    ) -> Result<(Self, Session), Self::Error> {
         if let Some(chan) = session.channels.get(&channel) {
             chan.send(ChannelMsg::ExtendedData {
                 ext,
@@ -1372,44 +1361,44 @@ pub trait Handler: Sized {
             })
             .unwrap_or(())
         }
-        self.finished(session)
+        Ok((self, session))
     }
 
     /// The server informs this client of whether the client may
     /// perform control-S/control-Q flow control. See
     /// [RFC4254](https://tools.ietf.org/html/rfc4254#section-6.8).
     #[allow(unused_variables)]
-    fn xon_xoff(
+    async fn xon_xoff(
         self,
         channel: ChannelId,
         client_can_do: bool,
         session: Session,
-    ) -> Self::FutureUnit {
+    ) -> Result<(Self, Session), Self::Error> {
         if let Some(chan) = session.channels.get(&channel) {
             chan.send(ChannelMsg::XonXoff { client_can_do })
                 .unwrap_or(())
         }
-        self.finished(session)
+        Ok((self, session))
     }
 
     /// The remote process has exited, with the given exit status.
     #[allow(unused_variables)]
-    fn exit_status(
+    async fn exit_status(
         self,
         channel: ChannelId,
         exit_status: u32,
         session: Session,
-    ) -> Self::FutureUnit {
+    ) -> Result<(Self, Session), Self::Error> {
         if let Some(chan) = session.channels.get(&channel) {
             chan.send(ChannelMsg::ExitStatus { exit_status })
                 .unwrap_or(())
         }
-        self.finished(session)
+        Ok((self, session))
     }
 
     /// The remote process exited upon receiving a signal.
     #[allow(unused_variables)]
-    fn exit_signal(
+    async fn exit_signal(
         self,
         channel: ChannelId,
         signal_name: Sig,
@@ -1417,7 +1406,7 @@ pub trait Handler: Sized {
         error_message: &str,
         lang_tag: &str,
         session: Session,
-    ) -> Self::FutureUnit {
+    ) -> Result<(Self, Session), Self::Error> {
         if let Some(chan) = session.channels.get(&channel) {
             chan.send(ChannelMsg::ExitSignal {
                 signal_name,
@@ -1427,7 +1416,7 @@ pub trait Handler: Sized {
             })
             .unwrap_or(())
         }
-        self.finished(session)
+        Ok((self, session))
     }
 
     /// Called when the network window is adjusted, meaning that we
@@ -1436,12 +1425,12 @@ pub trait Handler: Sized {
     /// `Session::data` before, and it returned less than the
     /// full amount of data.
     #[allow(unused_variables)]
-    fn window_adjusted(
+    async fn window_adjusted(
         self,
         channel: ChannelId,
         mut new_size: u32,
         mut session: Session,
-    ) -> Self::FutureUnit {
+    ) -> Result<(Self, Session), Self::Error> {
         if let Some(ref mut enc) = session.common.encrypted {
             new_size -= enc.flush_pending(channel) as u32;
         }
@@ -1449,13 +1438,13 @@ pub trait Handler: Sized {
             chan.send(ChannelMsg::WindowAdjusted { new_size })
                 .unwrap_or(())
         }
-        self.finished(session)
+        Ok((self, session))
     }
 
     /// Called when this client adjusts the network window. Return the
     /// next target window and maximum packet size.
     #[allow(unused_variables)]
-    fn adjust_window(&mut self, channel: ChannelId, window: u32) -> u32 {
+    async fn adjust_window(&mut self, channel: ChannelId, window: u32) -> u32 {
         window
     }
 }
