@@ -688,7 +688,7 @@ async fn test_session<RC, RS, CH, SH, F1, F2>(
             .map_err(|_| ())
             .unwrap();
         let authenticated = session
-            .authenticate_publickey(std::env::var("USER").unwrap(), Arc::new(client_key))
+            .authenticate_publickey(std::env::var("USER").unwrap_or("user".to_owned()), Arc::new(client_key))
             .await
             .unwrap();
         assert!(authenticated);
