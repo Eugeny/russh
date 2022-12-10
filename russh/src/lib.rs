@@ -510,10 +510,9 @@ mod test_compress {
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
 
-    use crate::server::Msg;
-
     use super::server::{Auth, Server as _, Session};
     use super::*;
+    use crate::server::Msg;
 
     #[tokio::test]
     async fn compress_local_test() {
@@ -822,7 +821,7 @@ mod test_channel_streams {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     use crate::server::Auth;
-    use crate::{client, server, test_session, Channel, ChannelId};
+    use crate::{client, server, test_session, Channel};
 
     #[tokio::test]
     async fn test_channel_streams() {
@@ -926,7 +925,7 @@ mod test_channel_streams {
                 stream.write_all(&b"response"[..]).await.unwrap();
 
                 buf.clear();
-                
+
                 stream.read_buf(&mut buf).await.unwrap();
                 assert_eq!(&buf, &b"reply"[..]);
 
