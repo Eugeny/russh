@@ -37,7 +37,7 @@ pub enum ChannelMsg {
     /// (client only)
     Exec {
         want_reply: bool,
-        command: String,
+        command: Vec<u8>,
     },
     /// (client only)
     Signal {
@@ -165,7 +165,7 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + 'static> Channel<S> {
     /// Execute a remote program (will be passed to a shell). This can
     /// be used to implement scp (by calling a remote scp and
     /// tunneling to its standard input).
-    pub async fn exec<A: Into<String>>(
+    pub async fn exec<A: Into<Vec<u8>>>(
         &mut self,
         want_reply: bool,
         command: A,
