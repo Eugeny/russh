@@ -822,7 +822,7 @@ mod test_channel_streams {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     use crate::server::Auth;
-    use crate::{client, server, test_session, Channel};
+    use crate::{client, server, test_session, Channel, ChannelId};
 
     #[tokio::test]
     async fn test_channel_streams() {
