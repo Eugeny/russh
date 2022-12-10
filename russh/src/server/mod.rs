@@ -247,6 +247,8 @@ pub enum Auth {
 }
 
 /// Server handler. Each client will have their own handler.
+///
+/// Note: this is an `async_trait`. Click `[source]` on the right to see actual async function definitions.
 #[async_trait]
 pub trait Handler: Sized {
     type Error: From<crate::Error> + Send;
@@ -262,9 +264,12 @@ pub trait Handler: Sized {
     /// except if this method takes more than that.
     #[allow(unused_variables)]
     async fn auth_none(self, user: &str) -> Result<(Self, Auth), Self::Error> {
-        Ok((self, Auth::Reject {
-            proceed_with_methods: None,
-        }))
+        Ok((
+            self,
+            Auth::Reject {
+                proceed_with_methods: None,
+            },
+        ))
     }
 
     /// Check authentication using the "password" method. Russh
@@ -273,9 +278,12 @@ pub trait Handler: Sized {
     /// than that.
     #[allow(unused_variables)]
     async fn auth_password(self, user: &str, password: &str) -> Result<(Self, Auth), Self::Error> {
-        Ok((self, Auth::Reject {
-            proceed_with_methods: None,
-        }))
+        Ok((
+            self,
+            Auth::Reject {
+                proceed_with_methods: None,
+            },
+        ))
     }
 
     /// Check authentication using the "publickey" method. This method
@@ -286,10 +294,17 @@ pub trait Handler: Sized {
     /// `config.auth_rejection_time`, except if this method takes more
     /// time than that.
     #[allow(unused_variables)]
-    async fn auth_publickey(self, user: &str, public_key: &key::PublicKey) -> Result<(Self, Auth), Self::Error> {
-        Ok((self, Auth::Reject {
-            proceed_with_methods: None,
-        }))
+    async fn auth_publickey(
+        self,
+        user: &str,
+        public_key: &key::PublicKey,
+    ) -> Result<(Self, Auth), Self::Error> {
+        Ok((
+            self,
+            Auth::Reject {
+                proceed_with_methods: None,
+            },
+        ))
     }
 
     /// Check authentication using the "keyboard-interactive"
@@ -303,9 +318,12 @@ pub trait Handler: Sized {
         submethods: &str,
         response: Option<Response<'async_trait>>,
     ) -> Result<(Self, Auth), Self::Error> {
-        Ok((self, Auth::Reject {
-            proceed_with_methods: None,
-        }))
+        Ok((
+            self,
+            Auth::Reject {
+                proceed_with_methods: None,
+            },
+        ))
     }
 
     /// Called when authentication succeeds for a session.
@@ -316,13 +334,21 @@ pub trait Handler: Sized {
 
     /// Called when the client closes a channel.
     #[allow(unused_variables)]
-    async fn channel_close(self, channel: ChannelId, session: Session) -> Result<(Self, Session), Self::Error> {
+    async fn channel_close(
+        self,
+        channel: ChannelId,
+        session: Session,
+    ) -> Result<(Self, Session), Self::Error> {
         Ok((self, session))
     }
 
     /// Called when the client sends EOF to a channel.
     #[allow(unused_variables)]
-    async fn channel_eof(self, channel: ChannelId, session: Session) -> Result<(Self, Session), Self::Error> {
+    async fn channel_eof(
+        self,
+        channel: ChannelId,
+        session: Session,
+    ) -> Result<(Self, Session), Self::Error> {
         if let Some(chan) = session.channels.get(&channel) {
             chan.send(ChannelMsg::Eof).unwrap_or(())
         }
@@ -332,7 +358,11 @@ pub trait Handler: Sized {
     /// Called when a new session channel is created.
     /// Return value indicates whether the channel request should be granted.
     #[allow(unused_variables)]
-    async fn channel_open_session(self, channel: Channel<Msg>, session: Session) -> Result<(Self, bool, Session), Self::Error> {
+    async fn channel_open_session(
+        self,
+        channel: Channel<Msg>,
+        session: Session,
+    ) -> Result<(Self, bool, Session), Self::Error> {
         Ok((self, false, session))
     }
 
@@ -407,7 +437,12 @@ pub trait Handler: Sized {
     /// Called when a data packet is received. A response can be
     /// written to the `response` argument.
     #[allow(unused_variables)]
-    async fn data(self, channel: ChannelId, data: &[u8], session: Session) -> Result<(Self, Session), Self::Error> {
+    async fn data(
+        self,
+        channel: ChannelId,
+        data: &[u8],
+        session: Session,
+    ) -> Result<(Self, Session), Self::Error> {
         if let Some(chan) = session.channels.get(&channel) {
             chan.send(ChannelMsg::Data {
                 data: CryptoVec::from_slice(data),
@@ -542,7 +577,11 @@ pub trait Handler: Sized {
 
     /// The client requests a shell.
     #[allow(unused_variables)]
-    async fn shell_request(self, channel: ChannelId, session: Session) -> Result<(Self, Session), Self::Error> {
+    async fn shell_request(
+        self,
+        channel: ChannelId,
+        session: Session,
+    ) -> Result<(Self, Session), Self::Error> {
         if let Some(chan) = session.channels.get(&channel) {
             chan.send(ChannelMsg::RequestShell { want_reply: true })
                 .unwrap_or(())
@@ -553,7 +592,12 @@ pub trait Handler: Sized {
     /// The client sends a command to execute, to be passed to a
     /// shell. Make sure to check the command before doing so.
     #[allow(unused_variables)]
-    async fn exec_request(self, channel: ChannelId, data: &[u8], session: Session) -> Result<(Self, Session), Self::Error> {
+    async fn exec_request(
+        self,
+        channel: ChannelId,
+        data: &[u8],
+        session: Session,
+    ) -> Result<(Self, Session), Self::Error> {
         if let Some(chan) = session.channels.get(&channel) {
             chan.send(ChannelMsg::Exec {
                 want_reply: true,
@@ -608,7 +652,11 @@ pub trait Handler: Sized {
 
     /// The client requests OpenSSH agent forwarding
     #[allow(unused_variables)]
-    async fn agent_request(self, channel: ChannelId, session: Session) -> Result<(Self, bool, Session), Self::Error> {
+    async fn agent_request(
+        self,
+        channel: ChannelId,
+        session: Session,
+    ) -> Result<(Self, bool, Session), Self::Error> {
         if let Some(chan) = session.channels.get(&channel) {
             chan.send(ChannelMsg::AgentForward { want_reply: true })
                 .unwrap_or(())
@@ -619,7 +667,12 @@ pub trait Handler: Sized {
     /// The client is sending a signal (usually to pass to the
     /// currently running process).
     #[allow(unused_variables)]
-    async fn signal(self, channel: ChannelId, signal: Sig, session: Session) -> Result<(Self, Session),  Self::Error> {
+    async fn signal(
+        self,
+        channel: ChannelId,
+        signal: Sig,
+        session: Session,
+    ) -> Result<(Self, Session), Self::Error> {
         if let Some(chan) = session.channels.get(&channel) {
             chan.send(ChannelMsg::Signal { signal }).unwrap_or(())
         }
@@ -630,13 +683,23 @@ pub trait Handler: Sized {
     /// [RFC4254](https://tools.ietf.org/html/rfc4254#section-7).
     /// If `port` is 0, you should set it to the allocated port number.
     #[allow(unused_variables)]
-    async fn tcpip_forward(self, address: &str, port: &mut u32, session: Session) -> Result<(Self, bool, Session), Self::Error> {
+    async fn tcpip_forward(
+        self,
+        address: &str,
+        port: &mut u32,
+        session: Session,
+    ) -> Result<(Self, bool, Session), Self::Error> {
         Ok((self, false, session))
     }
     /// Used to stop the reverse-forwarding of a port, see
     /// [RFC4254](https://tools.ietf.org/html/rfc4254#section-7).
     #[allow(unused_variables)]
-    async fn cancel_tcpip_forward(self, address: &str, port: u32, session: Session) -> Result<(Self, bool, Session), Self::Error> {
+    async fn cancel_tcpip_forward(
+        self,
+        address: &str,
+        port: u32,
+        session: Session,
+    ) -> Result<(Self, bool, Session), Self::Error> {
         Ok((self, false, session))
     }
 }
