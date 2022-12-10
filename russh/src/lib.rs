@@ -35,40 +35,6 @@
 //! * RSA key support is gated behind the `openssl` feature (disabled by default).
 //! * Enabling that and disabling the `rs-crypto` feature (enabled by default) will leave you with a very basic, but pure-OpenSSL RSA+AES cipherset.
 //!
-//! # Async woes
-//!
-//! Both [client::Handler] and [server::Handler] methods support futures, but
-//! due to Rust limitations, trait methods cannot be declared async.
-//!
-//! If you want to use `await` inside `Handler` methods, you'll need to box the
-//! returned futures and use an async block inside like so:
-//!
-//! ```no_compile
-//! use core::pin::Pin;
-//! use russh::server::Session;
-//! use futures_util::future::future::FutureExt;
-//!
-//! struct ServerHandler;
-//!
-//! impl russh::server::Handler for ServerHandler {
-//!     type Error = anyhow::Error;
-//!     type FutureUnit =
-//!         Pin<Box<dyn core::future::Future<Output = anyhow::Result<(Self, Session)>> + Send>>;
-//!
-//!     // ...
-//!
-//!     fn shell_request(self, channel: ChannelId, mut session: Session) -> Self::FutureUnit {
-//!         async move {
-//!             // something.await?;
-//!             Ok((self, session))
-//!         }
-//!         .boxed()
-//!     }
-//! }
-//! ```
-//!
-//! We're looking into incorporating `async_trait` in the future releases and pull requests are welcome.
-//!
 //! # Using non-socket IO / writing tunnels
 //!
 //! The easy way to implement SSH tunnels, like `ProxyCommand` for
@@ -510,7 +476,9 @@ mod test_compress {
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
 
-    use super::server::{Auth, Server as _, Session};
+    use async_trait::async_trait;
+
+    use super::server::{Server as _, Session};
     use super::*;
     use crate::server::Msg;
 
@@ -583,58 +551,53 @@ mod test_compress {
         }
     }
 
+    #[async_trait]
     impl server::Handler for Server {
         type Error = super::Error;
-        type FutureAuth = futures::future::Ready<Result<(Self, server::Auth), Self::Error>>;
-        type FutureUnit = futures::future::Ready<Result<(Self, Session), Self::Error>>;
-        type FutureBool = futures::future::Ready<Result<(Self, Session, bool), Self::Error>>;
 
-        fn finished_auth(self, auth: Auth) -> Self::FutureAuth {
-            futures::future::ready(Ok((self, auth)))
-        }
-        fn finished_bool(self, b: bool, s: Session) -> Self::FutureBool {
-            futures::future::ready(Ok((self, s, b)))
-        }
-        fn finished(self, s: Session) -> Self::FutureUnit {
-            futures::future::ready(Ok((self, s)))
-        }
-        fn channel_open_session(self, channel: Channel<Msg>, session: Session) -> Self::FutureBool {
+        async fn channel_open_session(
+            self,
+            channel: Channel<Msg>,
+            session: Session,
+        ) -> Result<(Self, bool, Session), Self::Error> {
             {
                 let mut clients = self.clients.lock().unwrap();
                 clients.insert((self.id, channel.id()), session.handle());
             }
-            self.finished_bool(true, session)
+            Ok((self, true, session))
         }
-        fn auth_publickey(self, _: &str, _: &russh_keys::key::PublicKey) -> Self::FutureAuth {
+        async fn auth_publickey(
+            self,
+            _: &str,
+            _: &russh_keys::key::PublicKey,
+        ) -> Result<(Self, server::Auth), Self::Error> {
             debug!("auth_publickey");
-            self.finished_auth(server::Auth::Accept)
+            Ok((self, server::Auth::Accept))
         }
-        fn data(self, channel: ChannelId, data: &[u8], mut session: Session) -> Self::FutureUnit {
+        async fn data(
+            self,
+            channel: ChannelId,
+            data: &[u8],
+            mut session: Session,
+        ) -> Result<(Self, Session), Self::Error> {
             debug!("server data = {:?}", std::str::from_utf8(data));
             session.data(channel, CryptoVec::from_slice(data));
-            self.finished(session)
+            Ok((self, session))
         }
     }
 
     struct Client {}
 
+    #[async_trait]
     impl client::Handler for Client {
         type Error = super::Error;
-        type FutureUnit = futures::future::Ready<Result<(Self, client::Session), Self::Error>>;
-        type FutureBool = futures::future::Ready<Result<(Self, bool), Self::Error>>;
 
-        fn finished_bool(self, b: bool) -> Self::FutureBool {
-            futures::future::ready(Ok((self, b)))
-        }
-        fn finished(self, session: client::Session) -> Self::FutureUnit {
-            futures::future::ready(Ok((self, session)))
-        }
-        fn check_server_key(
+        async fn check_server_key(
             self,
             _server_public_key: &russh_keys::key::PublicKey,
-        ) -> Self::FutureBool {
+        ) -> Result<(Self, bool), Self::Error> {
             // println!("check_server_key: {:?}", server_public_key);
-            self.finished_bool(true)
+            Ok((self, true))
         }
     }
 }
@@ -713,10 +676,11 @@ async fn test_session<RC, RS, CH, SH, F1, F2>(
 
 #[cfg(test)]
 mod test_channels {
+    use async_trait::async_trait;
     use russh_cryptovec::CryptoVec;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-    use crate::server::{Auth, Session};
+    use crate::server::Session;
     use crate::{client, server, test_session, Channel, ChannelId, ChannelMsg};
 
     #[tokio::test]
@@ -724,34 +688,26 @@ mod test_channels {
         #[derive(Debug)]
         struct Client {}
 
+        #[async_trait]
         impl client::Handler for Client {
             type Error = crate::Error;
-            type FutureUnit = futures::future::Ready<Result<(Self, client::Session), Self::Error>>;
-            type FutureBool = futures::future::Ready<Result<(Self, bool), Self::Error>>;
 
-            fn finished_bool(self, b: bool) -> Self::FutureBool {
-                futures::future::ready(Ok((self, b)))
-            }
-            fn finished(self, session: client::Session) -> Self::FutureUnit {
-                futures::future::ready(Ok((self, session)))
-            }
-
-            fn check_server_key(
+            async fn check_server_key(
                 self,
                 _server_public_key: &russh_keys::key::PublicKey,
-            ) -> Self::FutureBool {
-                self.finished_bool(true)
+            ) -> Result<(Self, bool), Self::Error> {
+                Ok((self, true))
             }
 
-            fn data(
+            async fn data(
                 self,
                 channel: ChannelId,
                 data: &[u8],
                 mut session: client::Session,
-            ) -> Self::FutureUnit {
+            ) -> Result<(Self, client::Session), Self::Error> {
                 assert_eq!(data, &b"hello world!"[..]);
                 session.data(channel, CryptoVec::from_slice(&b"hey there!"[..]));
-                self.finished(session)
+                Ok((self, session))
             }
         }
 
@@ -767,29 +723,25 @@ mod test_channels {
             }
         }
 
+        #[async_trait]
         impl server::Handler for ServerHandle {
             type Error = crate::Error;
-            type FutureAuth = futures::future::Ready<Result<(Self, server::Auth), Self::Error>>;
-            type FutureUnit = futures::future::Ready<Result<(Self, Session), Self::Error>>;
-            type FutureBool = futures::future::Ready<Result<(Self, Session, bool), Self::Error>>;
 
-            fn finished_auth(self, auth: Auth) -> Self::FutureAuth {
-                futures::future::ready(Ok((self, auth)))
+            async fn auth_publickey(
+                self,
+                _: &str,
+                _: &russh_keys::key::PublicKey,
+            ) -> Result<(Self, server::Auth), Self::Error> {
+                Ok((self, server::Auth::Accept))
             }
-            fn finished_bool(self, b: bool, s: Session) -> Self::FutureBool {
-                futures::future::ready(Ok((self, s, b)))
-            }
-            fn finished(self, s: Session) -> Self::FutureUnit {
-                futures::future::ready(Ok((self, s)))
-            }
-            fn auth_publickey(self, _: &str, _: &russh_keys::key::PublicKey) -> Self::FutureAuth {
-                self.finished_auth(server::Auth::Accept)
-            }
-            fn auth_succeeded(mut self, session: Session) -> Self::FutureUnit {
+            async fn auth_succeeded(
+                mut self,
+                session: Session,
+            ) -> Result<(Self, Session), Self::Error> {
                 if let Some(a) = self.did_auth.take() {
                     a.send(()).unwrap();
                 }
-                self.finished(session)
+                Ok((self, session))
             }
         }
 
@@ -821,23 +773,15 @@ mod test_channels {
         #[derive(Debug)]
         struct Client {}
 
+        #[async_trait]
         impl client::Handler for Client {
             type Error = crate::Error;
-            type FutureUnit = futures::future::Ready<Result<(Self, client::Session), Self::Error>>;
-            type FutureBool = futures::future::Ready<Result<(Self, bool), Self::Error>>;
 
-            fn finished_bool(self, b: bool) -> Self::FutureBool {
-                futures::future::ready(Ok((self, b)))
-            }
-            fn finished(self, session: client::Session) -> Self::FutureUnit {
-                futures::future::ready(Ok((self, session)))
-            }
-
-            fn check_server_key(
+            async fn check_server_key(
                 self,
                 _server_public_key: &russh_keys::key::PublicKey,
-            ) -> Self::FutureBool {
-                self.finished_bool(true)
+            ) -> Result<(Self, bool), Self::Error> {
+                Ok((self, true))
             }
         }
 
@@ -855,36 +799,28 @@ mod test_channels {
             }
         }
 
+        #[async_trait]
         impl server::Handler for ServerHandle {
             type Error = crate::Error;
-            type FutureAuth = futures::future::Ready<Result<(Self, server::Auth), Self::Error>>;
-            type FutureUnit = futures::future::Ready<Result<(Self, server::Session), Self::Error>>;
-            type FutureBool =
-                futures::future::Ready<Result<(Self, server::Session, bool), Self::Error>>;
 
-            fn finished_auth(self, auth: Auth) -> Self::FutureAuth {
-                futures::future::ready(Ok((self, auth)))
-            }
-            fn finished_bool(self, b: bool, s: server::Session) -> Self::FutureBool {
-                futures::future::ready(Ok((self, s, b)))
-            }
-            fn finished(self, s: server::Session) -> Self::FutureUnit {
-                futures::future::ready(Ok((self, s)))
-            }
-            fn auth_publickey(self, _: &str, _: &russh_keys::key::PublicKey) -> Self::FutureAuth {
-                self.finished_auth(server::Auth::Accept)
+            async fn auth_publickey(
+                self,
+                _: &str,
+                _: &russh_keys::key::PublicKey,
+            ) -> Result<(Self, server::Auth), Self::Error> {
+                Ok((self, server::Auth::Accept))
             }
 
-            fn channel_open_session(
+            async fn channel_open_session(
                 mut self,
                 channel: Channel<server::Msg>,
                 session: server::Session,
-            ) -> Self::FutureBool {
+            ) -> Result<(Self, bool, Session), Self::Error> {
                 if let Some(a) = self.channel.take() {
                     println!("channel open session {:?}", a);
                     a.send(channel).unwrap();
                 }
-                self.finished_bool(true, session)
+                Ok((self, true, session))
             }
         }
 
@@ -933,23 +869,15 @@ mod test_channels {
         #[derive(Debug)]
         struct Client {}
 
+        #[async_trait]
         impl client::Handler for Client {
             type Error = crate::Error;
-            type FutureUnit = futures::future::Ready<Result<(Self, client::Session), Self::Error>>;
-            type FutureBool = futures::future::Ready<Result<(Self, bool), Self::Error>>;
 
-            fn finished_bool(self, b: bool) -> Self::FutureBool {
-                futures::future::ready(Ok((self, b)))
-            }
-            fn finished(self, session: client::Session) -> Self::FutureUnit {
-                futures::future::ready(Ok((self, session)))
-            }
-
-            fn check_server_key(
+            async fn check_server_key(
                 self,
                 _server_public_key: &russh_keys::key::PublicKey,
-            ) -> Self::FutureBool {
-                self.finished_bool(true)
+            ) -> Result<(Self, bool), Self::Error> {
+                Ok((self, true))
             }
         }
 
@@ -957,29 +885,23 @@ mod test_channels {
 
         impl ServerHandle {}
 
+        #[async_trait]
         impl server::Handler for ServerHandle {
             type Error = crate::Error;
-            type FutureAuth = futures::future::Ready<Result<(Self, server::Auth), Self::Error>>;
-            type FutureUnit = futures::future::Ready<Result<(Self, Session), Self::Error>>;
-            type FutureBool = futures::future::Ready<Result<(Self, Session, bool), Self::Error>>;
 
-            fn finished_auth(self, auth: Auth) -> Self::FutureAuth {
-                futures::future::ready(Ok((self, auth)))
+            async fn auth_publickey(
+                self,
+                _: &str,
+                _: &russh_keys::key::PublicKey,
+            ) -> Result<(Self, server::Auth), Self::Error> {
+                Ok((self, server::Auth::Accept))
             }
-            fn finished_bool(self, b: bool, s: Session) -> Self::FutureBool {
-                futures::future::ready(Ok((self, s, b)))
-            }
-            fn finished(self, s: Session) -> Self::FutureUnit {
-                futures::future::ready(Ok((self, s)))
-            }
-            fn auth_publickey(self, _: &str, _: &russh_keys::key::PublicKey) -> Self::FutureAuth {
-                self.finished_auth(server::Auth::Accept)
-            }
-            fn channel_open_session(
+
+            async fn channel_open_session(
                 self,
                 mut channel: Channel<server::Msg>,
                 session: Session,
-            ) -> Self::FutureBool {
+            ) -> Result<(Self, bool, Session), Self::Error> {
                 tokio::spawn(async move {
                     while let Some(msg) = channel.wait().await {
                         match msg {
@@ -990,7 +912,7 @@ mod test_channels {
                         }
                     }
                 });
-                self.finished_bool(true, session)
+                Ok((self, true, session))
             }
         }
 

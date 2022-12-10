@@ -377,7 +377,7 @@ impl Session {
                 if let Some(ref mut enc) = self.common.encrypted {
                     if enc.adjust_window_size(channel_num, data, target) {
                         let next_window =
-                            client.adjust_window(channel_num, self.target_window_size);
+                            client.adjust_window(channel_num, self.target_window_size).await;
                         if next_window > 0 {
                             self.target_window_size = next_window
                         }
@@ -395,7 +395,7 @@ impl Session {
                 if let Some(ref mut enc) = self.common.encrypted {
                     if enc.adjust_window_size(channel_num, data, target) {
                         let next_window =
-                            client.adjust_window(channel_num, self.target_window_size);
+                            client.adjust_window(channel_num, self.target_window_size).await;
                         if next_window > 0 {
                             self.target_window_size = next_window
                         }
