@@ -819,7 +819,7 @@ mod test_channel_streams {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     use crate::server::Auth;
-    use crate::{client, server, test_session, ChannelId, Channel};
+    use crate::{client, server, test_session, Channel, ChannelId};
 
     #[tokio::test]
     async fn test_channel_streams() {
@@ -872,20 +872,20 @@ mod test_channel_streams {
 
             fn channel_open_session(
                 self,
-                _: Channel<server::Msg>,
+                ch: Channel<server::Msg>,
                 session: server::Session,
             ) -> Self::FutureBool {
+                tokio::spawn(async move {
+                    let mut stream = ch.into_stream();
+                    let mut buf = [0; 1024];
+                    while let Ok(n) = stream.read(&mut buf[..]).await {
+                        if n == 0 {
+                            break;
+                        }
+                        stream.write_all(&buf[..n]).await.unwrap();
+                    }
+                });
                 self.finished_bool(true, session)
-            }
-
-            fn data(
-                self,
-                channel: ChannelId,
-                data: &[u8],
-                mut session: server::Session,
-            ) -> Self::FutureUnit {
-                session.data(channel, CryptoVec::from_slice(data));
-                self.finished(session)
             }
         }
 
