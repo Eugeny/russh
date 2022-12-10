@@ -1157,6 +1157,8 @@ impl Default for Config {
 
 /// A client handler. Note that messages can be received from the
 /// server at any time during a session.
+///
+/// Note: this is an `async_trait`. Click `[source]` on the right to see actual async function definitions.
 #[async_trait]
 pub trait Handler: Sized + Send {
     type Error: From<crate::Error> + Send;
@@ -1168,7 +1170,11 @@ pub trait Handler: Sized + Send {
     ///
     /// The returned Boolean is ignored.
     #[allow(unused_variables)]
-    async fn auth_banner(self, banner: &str, session: Session) -> Result<(Self, Session), Self::Error> {
+    async fn auth_banner(
+        self,
+        banner: &str,
+        session: Session,
+    ) -> Result<(Self, Session), Self::Error> {
         Ok((self, session))
     }
 
@@ -1210,7 +1216,11 @@ pub trait Handler: Sized + Send {
 
     /// Called when the server signals success.
     #[allow(unused_variables)]
-    async fn channel_success(self, channel: ChannelId, session: Session) -> Result<(Self, Session), Self::Error> {
+    async fn channel_success(
+        self,
+        channel: ChannelId,
+        session: Session,
+    ) -> Result<(Self, Session), Self::Error> {
         if let Some(chan) = session.channels.get(&channel) {
             chan.send(ChannelMsg::Success).unwrap_or(())
         }
@@ -1219,7 +1229,11 @@ pub trait Handler: Sized + Send {
 
     /// Called when the server signals failure.
     #[allow(unused_variables)]
-    async fn channel_failure(self, channel: ChannelId, session: Session) -> Result<(Self, Session), Self::Error> {
+    async fn channel_failure(
+        self,
+        channel: ChannelId,
+        session: Session,
+    ) -> Result<(Self, Session), Self::Error> {
         if let Some(chan) = session.channels.get(&channel) {
             chan.send(ChannelMsg::Failure).unwrap_or(())
         }
@@ -1228,14 +1242,22 @@ pub trait Handler: Sized + Send {
 
     /// Called when the server closes a channel.
     #[allow(unused_variables)]
-    async fn channel_close(self, channel: ChannelId, mut session: Session) -> Result<(Self, Session), Self::Error> {
+    async fn channel_close(
+        self,
+        channel: ChannelId,
+        mut session: Session,
+    ) -> Result<(Self, Session), Self::Error> {
         session.channels.remove(&channel);
         Ok((self, session))
     }
 
     /// Called when the server sends EOF to a channel.
     #[allow(unused_variables)]
-    async fn channel_eof(self, channel: ChannelId, session: Session) -> Result<(Self, Session), Self::Error> {
+    async fn channel_eof(
+        self,
+        channel: ChannelId,
+        session: Session,
+    ) -> Result<(Self, Session), Self::Error> {
         if let Some(chan) = session.channels.get(&channel) {
             chan.send(ChannelMsg::Eof).unwrap_or(())
         }
@@ -1332,7 +1354,12 @@ pub trait Handler: Sized + Send {
     /// standard output, and `Some(1)` is the standard error. See
     /// [RFC4254](https://tools.ietf.org/html/rfc4254#section-5.2).
     #[allow(unused_variables)]
-    async fn data(self, channel: ChannelId, data: &[u8], session: Session) -> Result<(Self, Session), Self::Error> {
+    async fn data(
+        self,
+        channel: ChannelId,
+        data: &[u8],
+        session: Session,
+    ) -> Result<(Self, Session), Self::Error> {
         if let Some(chan) = session.channels.get(&channel) {
             chan.send(ChannelMsg::Data {
                 data: CryptoVec::from_slice(data),
@@ -1444,7 +1471,7 @@ pub trait Handler: Sized + Send {
     /// Called when this client adjusts the network window. Return the
     /// next target window and maximum packet size.
     #[allow(unused_variables)]
-    async fn adjust_window(&mut self, channel: ChannelId, window: u32) -> u32 {
+    fn adjust_window(&mut self, channel: ChannelId, window: u32) -> u32 {
         window
     }
 }

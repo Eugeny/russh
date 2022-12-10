@@ -4,11 +4,12 @@ extern crate russh;
 extern crate russh_keys;
 extern crate tokio;
 
+use std::sync::Arc;
+
 use anyhow::Context;
 use async_trait::async_trait;
 use russh::*;
 use russh_keys::*;
-use std::sync::Arc;
 
 struct Client {}
 
