@@ -819,7 +819,7 @@ mod test_channel_streams {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     use crate::server::Auth;
-    use crate::{client, server, test_session, ChannelId};
+    use crate::{client, server, test_session, ChannelId, Channel};
 
     #[tokio::test]
     async fn test_channel_streams() {
@@ -872,7 +872,7 @@ mod test_channel_streams {
 
             fn channel_open_session(
                 self,
-                _: ChannelId,
+                _: Channel<server::Msg>,
                 session: server::Session,
             ) -> Self::FutureBool {
                 self.finished_bool(true, session)
