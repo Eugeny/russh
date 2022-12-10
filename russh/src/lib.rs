@@ -712,11 +712,12 @@ async fn test_session<RC, RS, CH, SH, F1, F2>(
 }
 
 #[cfg(test)]
-mod test_server_channels {
+mod test_channels {
     use russh_cryptovec::CryptoVec;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     use crate::server::{Auth, Session};
-    use crate::{client, server, test_session, ChannelId, ChannelMsg};
+    use crate::{client, server, test_session, Channel, ChannelId, ChannelMsg};
 
     #[tokio::test]
     async fn test_server_channels() {
@@ -814,14 +815,6 @@ mod test_server_channels {
         )
         .await;
     }
-}
-
-#[cfg(test)]
-mod test_channel_streams {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
-    use crate::server::Auth;
-    use crate::{client, server, test_session, Channel};
 
     #[tokio::test]
     async fn test_channel_streams() {
@@ -931,6 +924,93 @@ mod test_channel_streams {
 
                 server
             },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_channel_objects() {
+        #[derive(Debug)]
+        struct Client {}
+
+        impl client::Handler for Client {
+            type Error = crate::Error;
+            type FutureUnit = futures::future::Ready<Result<(Self, client::Session), Self::Error>>;
+            type FutureBool = futures::future::Ready<Result<(Self, bool), Self::Error>>;
+
+            fn finished_bool(self, b: bool) -> Self::FutureBool {
+                futures::future::ready(Ok((self, b)))
+            }
+            fn finished(self, session: client::Session) -> Self::FutureUnit {
+                futures::future::ready(Ok((self, session)))
+            }
+
+            fn check_server_key(
+                self,
+                _server_public_key: &russh_keys::key::PublicKey,
+            ) -> Self::FutureBool {
+                self.finished_bool(true)
+            }
+        }
+
+        struct ServerHandle {}
+
+        impl ServerHandle {}
+
+        impl server::Handler for ServerHandle {
+            type Error = crate::Error;
+            type FutureAuth = futures::future::Ready<Result<(Self, server::Auth), Self::Error>>;
+            type FutureUnit = futures::future::Ready<Result<(Self, Session), Self::Error>>;
+            type FutureBool = futures::future::Ready<Result<(Self, Session, bool), Self::Error>>;
+
+            fn finished_auth(self, auth: Auth) -> Self::FutureAuth {
+                futures::future::ready(Ok((self, auth)))
+            }
+            fn finished_bool(self, b: bool, s: Session) -> Self::FutureBool {
+                futures::future::ready(Ok((self, s, b)))
+            }
+            fn finished(self, s: Session) -> Self::FutureUnit {
+                futures::future::ready(Ok((self, s)))
+            }
+            fn auth_publickey(self, _: &str, _: &russh_keys::key::PublicKey) -> Self::FutureAuth {
+                self.finished_auth(server::Auth::Accept)
+            }
+            fn channel_open_session(
+                self,
+                mut channel: Channel<server::Msg>,
+                session: Session,
+            ) -> Self::FutureBool {
+                tokio::spawn(async move {
+                    while let Some(msg) = channel.wait().await {
+                        match msg {
+                            ChannelMsg::Data { data } => {
+                                channel.data(&data[..]).await.unwrap();
+                            }
+                            _ => {}
+                        }
+                    }
+                });
+                self.finished_bool(true, session)
+            }
+        }
+
+        let sh = ServerHandle {};
+        test_session(
+            Client {},
+            sh,
+            |mut c| async move {
+                let mut ch = c.channel_open_session().await.unwrap();
+                ch.data(&b"hello world!"[..]).await.unwrap();
+
+                let msg = ch.wait().await.unwrap();
+                if let ChannelMsg::Data { data } = msg {
+                    assert_eq!(data.as_ref(), &b"hey there!"[..]);
+                } else {
+                    panic!("Unexpected message {:?}", msg);
+                }
+                c
+            },
+            |s| async move { s },
         )
         .await;
     }
