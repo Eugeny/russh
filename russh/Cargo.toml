@@ -66,3 +66,4 @@ tokio = { version = "1.17.0", features = [
     "sync",
     "macros",
 ] }
+russh-sftp = "1.1"
