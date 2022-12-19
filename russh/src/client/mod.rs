@@ -51,11 +51,7 @@
 //!        println!("check_server_key: {:?}", server_public_key);
 //!        Ok((self, true))
 //!    }
-//!    async fn channel_open_confirmation(self, channel: ChannelId, max_packet_size: u32, window_size: u32, session: client::Session) -> Result<(Self, client::Session), Self::Error> {
 //!
-//!        println!("channel_open_confirmation: {:?}", channel);
-//!        Ok((self, session))
-//!    }
 //!    async fn data(self, channel: ChannelId, data: &[u8], session: client::Session) -> Result<(Self, client::Session), Self::Error> {
 //!        println!("data on channel {:?}: {:?}", channel, std::str::from_utf8(data));
 //!        Ok((self, session))
