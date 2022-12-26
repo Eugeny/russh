@@ -347,7 +347,7 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + 'static> Channel<S> {
     pub async fn wait(&mut self) -> Option<ChannelMsg> {
         match self.receiver.recv().await {
             Some(ChannelMsg::WindowAdjusted { new_size }) => {
-                self.window_size += new_size;
+                self.window_size = new_size;
                 Some(ChannelMsg::WindowAdjusted { new_size })
             }
             Some(msg) => Some(msg),
