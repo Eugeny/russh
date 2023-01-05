@@ -281,6 +281,8 @@ impl Encrypted {
             if buf_len < buf0.len() {
                 channel.pending_data.push_back((buf0, None, buf_len))
             }
+        } else {
+            debug!("{:?} not saved for this session", channel);
         }
     }
 

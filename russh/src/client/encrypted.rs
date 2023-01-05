@@ -650,7 +650,7 @@ impl Session {
         let (sender, receiver) = unbounded_channel();
         self.channels.insert(id, sender);
         Channel {
-            id: ChannelId(msg.recipient_channel),
+            id,
             sender: self.inbound_channel_sender.clone(),
             receiver,
             max_packet_size: msg.recipient_maximum_packet_size,
