@@ -342,6 +342,7 @@ impl Session {
                     enc.byte(channel_num, msg::CHANNEL_CLOSE);
                     enc.channels.remove(&channel_num);
                 }
+                self.channels.remove(&channel_num);
                 client.channel_close(channel_num, self).await
             }
             Some(&msg::CHANNEL_EOF) => {
