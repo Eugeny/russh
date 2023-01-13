@@ -907,6 +907,8 @@ mod test_channels {
                         match msg {
                             ChannelMsg::Data { data } => {
                                 channel.data(&data[..]).await.unwrap();
+                                channel.close().await.unwrap();
+                                break
                             }
                             _ => {}
                         }
@@ -930,6 +932,13 @@ mod test_channels {
                 } else {
                     panic!("Unexpected message {:?}", msg);
                 }
+
+                let msg = ch.wait().await.unwrap();
+                let ChannelMsg::Close = msg else {
+                    panic!("Unexpected message {:?}", msg);
+                };
+
+                ch.close().await.unwrap();
                 c
             },
             |s| async move { s },

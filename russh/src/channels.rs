@@ -362,6 +362,12 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + 'static> Channel<S> {
             .map_err(|_| Error::SendError)
     }
 
+    /// Request that the channel be closed.
+    pub async fn close(self) -> Result<(), Error> {
+        self.send_msg(ChannelMsg::Close).await?;
+        Ok(())
+    }
+
     pub fn into_stream(mut self) -> ChannelStream {
         let (stream, mut r_rx, w_tx) = ChannelStream::new();
         tokio::spawn(async move {
@@ -370,7 +376,10 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + 'static> Channel<S> {
                     data = r_rx.recv() => {
                         match data {
                             Some(data) => self.data(&data[..]).await?,
-                            None => break
+                            None => {
+                                self.close().await?;
+                                break
+                            }
                         }
                     },
                     msg = self.wait() => {

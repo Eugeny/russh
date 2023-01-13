@@ -877,6 +877,9 @@ impl Session {
             Msg::Channel(id, ChannelMsg::AgentForward { want_reply }) => {
                 self.agent_forward(id, want_reply)
             }
+            Msg::Channel(id, ChannelMsg::Close) => {
+                self.close(id)
+            }
             msg => {
                 // should be unreachable, since the receiver only gets
                 // messages from methods implemented within russh
