@@ -16,6 +16,7 @@ use std::cell::RefCell;
 
 use russh_cryptovec::CryptoVec;
 use russh_keys::encoding::{Encoding, Reader};
+use russh_keys::key::parse_public_key;
 use tokio::sync::mpsc::unbounded_channel;
 
 use crate::client::{Handler, Msg, Reply, Session};
@@ -520,6 +521,34 @@ impl Session {
                         } else {
                             warn!("Received keepalive without reply request!");
                         }
+                    } else if req == b"hostkeys-00@openssh.com" {
+                        let mut keys = vec![];
+                        loop {
+                            match r.read_string() {
+                                Ok(key) => {
+                                    let key2 = key.clone();
+                                    #[cfg(not(feature = "openssl"))]
+                                    let key = parse_public_key(key).map_err(crate::Error::from);
+                                    #[cfg(feature = "openssl")]
+                                    let key =
+                                        parse_public_key(key, None).map_err(crate::Error::from);
+                                    match key {
+                                        Ok(key) => keys.push(key),
+                                        Err(err) => {
+                                            debug!(
+                                                "failed to parse announced host key {:?}: {:?}",
+                                                key2, err
+                                            )
+                                        }
+                                    }
+                                }
+                                Err(russh_keys::Error::IndexOutOfBounds) => break,
+                                x => {
+                                    x.map_err(crate::Error::from)?;
+                                }
+                            }
+                        }
+                        return client.openssh_ext_host_keys_announced(keys, self).await;
                     } else {
                         warn!(
                             "Unhandled global request: {:?} {:?}",

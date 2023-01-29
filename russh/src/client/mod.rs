@@ -92,7 +92,7 @@ use russh_cryptovec::CryptoVec;
 use russh_keys::encoding::Reader;
 #[cfg(feature = "openssl")]
 use russh_keys::key::SignatureHash;
-use russh_keys::key::{self, parse_public_key};
+use russh_keys::key::{self, parse_public_key, PublicKey};
 use tokio;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpStream, ToSocketAddrs};
@@ -1472,5 +1472,16 @@ pub trait Handler: Sized + Send {
     #[allow(unused_variables)]
     fn adjust_window(&mut self, channel: ChannelId, window: u32) -> u32 {
         window
+    }
+
+    /// Called when the server signals success.
+    #[allow(unused_variables)]
+    async fn openssh_ext_host_keys_announced(
+        self,
+        keys: Vec<PublicKey>,
+        session: Session,
+    ) -> Result<(Self, Session), Self::Error> {
+        debug!("openssh_ext_hostkeys_announced: {:?}", keys);
+        Ok((self, session))
     }
 }
