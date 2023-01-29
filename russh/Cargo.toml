@@ -9,7 +9,7 @@ license = "Apache-2.0"
 name = "russh"
 readme = "../README.md"
 repository = "https://github.com/warp-tech/russh"
-version = "0.35.0-beta.9"
+version = "0.36.0"
 rust-version = "1.60"
 
 [features]
@@ -36,8 +36,8 @@ log = "0.4"
 once_cell = "1.13"
 openssl = { version = "0.10", optional = true }
 rand = "0.8"
-russh-cryptovec = { version = "0.7.0-beta.1", path = "../cryptovec" }
-russh-keys = { version = "0.23.0-beta.1", path = "../russh-keys" }
+russh-cryptovec = { version = "0.7.0", path = "../cryptovec" }
+russh-keys = { version = "0.24", path = "../russh-keys" }
 sha1 = "0.10"
 sha2 = "0.10"
 hex-literal = "0.3"
