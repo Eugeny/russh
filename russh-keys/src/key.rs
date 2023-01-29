@@ -105,7 +105,7 @@ impl SignatureHash {
 }
 
 /// Public key
-#[derive(Eq, PartialEq, Debug, Clone)]
+#[derive(Eq, Debug, Clone)]
 pub enum PublicKey {
     #[doc(hidden)]
     Ed25519(ed25519_dalek::PublicKey),
@@ -115,6 +115,18 @@ pub enum PublicKey {
         key: OpenSSLPKey,
         hash: SignatureHash,
     },
+}
+
+impl PartialEq for PublicKey {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            #[cfg(feature = "openssl")]
+            (Self::RSA { key: a, .. }, Self::RSA { key: b, .. }) => a == b,
+            (Self::Ed25519(a), Self::Ed25519(b)) => a == b,
+            #[cfg(feature = "openssl")]
+            _ => false,
+        }
+    }
 }
 
 /// A public key from OpenSSL.
