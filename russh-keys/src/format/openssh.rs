@@ -120,7 +120,10 @@ fn decrypt_secret_key(
                 let rounds = kdfopts.read_u32()?;
                 #[allow(clippy::unwrap_used)] // parameters are static
                 #[allow(clippy::indexing_slicing)] // output length is static
-                bcrypt_pbkdf::bcrypt_pbkdf(password, salt, rounds, &mut key[..n]).unwrap();
+                match bcrypt_pbkdf::bcrypt_pbkdf(password, salt, rounds, &mut key[..n]) {
+                    Err(bcrypt_pbkdf::Error::InvalidParamLen) => return Err(Error::KeyIsEncrypted),
+                    e => e.unwrap()
+                }
             }
             _kdfname => {
                 return Err(Error::CouldNotReadKey);
