@@ -1,6 +1,6 @@
 # Russh
 [![Rust](https://github.com/warp-tech/russh/actions/workflows/rust.yml/badge.svg)](https://github.com/warp-tech/russh/actions/workflows/rust.yml)  <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
-[![All Contributors](https://img.shields.io/badge/all_contributors-8-orange.svg?style=flat-square)](#contributors-)
+[![All Contributors](https://img.shields.io/badge/all_contributors-9-orange.svg?style=flat-square)](#contributors-)
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
 
 Low-level Tokio SSH2 client and server implementation.
@@ -79,6 +79,7 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
     </tr>
     <tr>
       <td align="center" valign="top" width="14.28%"><a href="https://0io.eu"><img src="https://avatars.githubusercontent.com/u/203575?v=4?s=100" width="100px;" alt="Simão Mata"/><br /><sub><b>Simão Mata</b></sub></a><br /><a href="https://github.com/warp-tech/russh/commits?author=simao" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://mariotaku.org"><img src="https://avatars.githubusercontent.com/u/830358?v=4?s=100" width="100px;" alt="Mariotaku"/><br /><sub><b>Mariotaku</b></sub></a><br /><a href="https://github.com/warp-tech/russh/commits?author=mariotaku" title="Code">💻</a></td>
     </tr>
   </tbody>
 </table>
