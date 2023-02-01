@@ -340,9 +340,7 @@ impl Session {
                 if let Some(ref mut enc) = self.common.encrypted {
                     // The CHANNEL_CLOSE message must be sent to the server at this point or the session
                     // will not be released.
-                    if enc.channels.remove(&channel_num).is_some() {
-                        enc.byte(channel_num, msg::CHANNEL_CLOSE);
-                    }
+                    enc.close(channel_num);
                 }
                 client.channel_close(channel_num, self).await
             }
