@@ -151,6 +151,7 @@ impl Encrypted {
 
     pub fn close(&mut self, channel: ChannelId) {
         self.byte(channel, msg::CHANNEL_CLOSE);
+        self.channels.remove(&channel);
     }
 
     pub fn sender_window_size(&self, channel: ChannelId) -> usize {

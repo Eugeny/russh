@@ -76,6 +76,24 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "mariotaku",
+      "name": "Mariotaku",
+      "avatar_url": "https://avatars.githubusercontent.com/u/830358?v=4",
+      "profile": "https://mariotaku.org",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "yorkz1994",
+      "name": "yorkz1994",
+      "avatar_url": "https://avatars.githubusercontent.com/u/16678950?v=4",
+      "profile": "https://github.com/yorkz1994",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,
