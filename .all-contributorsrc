@@ -94,6 +94,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "cipriancraciun",
+      "name": "Ciprian Dorin Craciun",
+      "avatar_url": "https://avatars.githubusercontent.com/u/29785?v=4",
+      "profile": "https://volution.ro/",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,
