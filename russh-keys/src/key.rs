@@ -172,6 +172,7 @@ impl PublicKey {
             b"ssh-rsa" | b"rsa-sha2-256" | b"rsa-sha2-512" if cfg!(feature = "openssl") => {
                 #[cfg(feature = "openssl")]
                 {
+                    use log::debug;
                     let mut p = pubkey.reader(0);
                     let key_algo = p.read_string()?;
                     debug!("{:?}", std::str::from_utf8(key_algo));
