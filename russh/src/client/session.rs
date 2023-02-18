@@ -78,7 +78,7 @@ impl Session {
         })
     }
 
-    pub fn channel_open_direct_stream(
+    pub fn channel_open_direct_streamlocal(
         &mut self,
         socket_path: &str
     ) -> Result<ChannelId, crate::Error> {

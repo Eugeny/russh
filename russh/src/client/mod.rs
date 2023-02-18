@@ -172,7 +172,7 @@ pub enum Msg {
         originator_port: u32,
         sender: UnboundedSender<ChannelMsg>,
     },
-    ChannelOpenDirectStream {
+    ChannelOpenDirectStreamLocal {
         socket_path: String,
         sender: UnboundedSender<ChannelMsg>,
     },
@@ -424,13 +424,13 @@ impl<H: Handler> Handle<H> {
         self.wait_channel_confirmation(receiver).await
     }
 
-    pub async fn channel_open_direct_stream<S: Into<String>>(
+    pub async fn channel_open_direct_streamlocal<S: Into<String>>(
         &self,
         socket_path: S,
     ) -> Result<Channel<Msg>, crate::Error> {
         let (sender, receiver) = unbounded_channel();
         self.sender
-            .send(Msg::ChannelOpenDirectStream {
+            .send(Msg::ChannelOpenDirectStreamLocal {
                 socket_path: socket_path.into(),
                 sender,
             })
@@ -802,11 +802,11 @@ impl Session {
                 )?;
                 self.channels.insert(id, sender);
             }
-            Msg::ChannelOpenDirectStream {
+            Msg::ChannelOpenDirectStreamLocal {
                 socket_path,
                 sender,
             } => {
-                let id = self.channel_open_direct_stream(
+                let id = self.channel_open_direct_streamlocal(
                     &socket_path,
                 )?;
                 self.channels.insert(id, sender);
