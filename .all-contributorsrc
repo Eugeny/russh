@@ -103,6 +103,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "mllken",
+      "name": "Eric Milliken",
+      "avatar_url": "https://avatars.githubusercontent.com/u/11590808?v=4",
+      "profile": "https://github.com/mllken",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,
