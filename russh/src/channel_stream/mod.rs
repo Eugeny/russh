@@ -90,6 +90,7 @@ impl AsyncWrite for ChannelStream {
             }
             Poll::Ready(Err(_)) => {
                 self.is_write_fut_valid = false;
+                debug!("ChannelStream AsyncWrite EOF");
                 Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, "EOF")))
             }
         }
@@ -99,6 +100,10 @@ impl AsyncWrite for ChannelStream {
         self: Pin<&mut Self>,
         _cx: &mut std::task::Context<'_>,
     ) -> Poll<Result<(), io::Error>> {
+        if let Err(err) = self.outgoing.send("".into()) {
+            let err = format!("{err:?}");
+            return Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, err)))
+        }
         Poll::Ready(Ok(()))
     }
 }
@@ -116,7 +121,7 @@ impl AsyncRead for ChannelStream {
         let x = self.incoming.poll_recv(cx);
         match x {
             Poll::Ready(Some(msg)) => self.readbuf.put_data(buf, msg, 0),
-            Poll::Ready(None) => Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, "EOF"))),
+            Poll::Ready(None) => Poll::Ready(Ok(())),
             Poll::Pending => Poll::Pending,
         }
     }
