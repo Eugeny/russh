@@ -363,19 +363,26 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + 'static> Channel<S> {
     }
 
     /// Request that the channel be closed.
-    pub async fn close(self) -> Result<(), Error> {
+    pub async fn close(&self) -> Result<(), Error> {
         self.send_msg(ChannelMsg::Close).await?;
         Ok(())
     }
 
     pub fn into_stream(mut self) -> ChannelStream {
         let (stream, mut r_rx, w_tx) = ChannelStream::new();
+
         tokio::spawn(async move {
             loop {
                 tokio::select! {
                     data = r_rx.recv() => {
                         match data {
-                            Some(data) => self.data(&data[..]).await?,
+                            Some(data) if !data.is_empty() => self.data(&data[..]).await?,
+                            Some(_) => {
+                                log::debug!("closing chan {:?}, received empty data", &self.id);
+                                self.eof().await?;
+                                self.close().await?;
+                                break;
+                            },
                             None => {
                                 self.close().await?;
                                 break
