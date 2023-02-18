@@ -5,6 +5,7 @@ use std::sync::Arc;
 use russh_keys::encoding::Encoding;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc::{unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender};
+use log::debug;
 
 use super::*;
 use crate::channels::{Channel, ChannelMsg};

@@ -24,6 +24,7 @@ use byteorder::{BigEndian, ByteOrder};
 use ctr::Ctr128BE;
 use once_cell::sync::Lazy;
 use tokio::io::{AsyncRead, AsyncReadExt};
+use log::debug;
 
 use crate::mac::MacAlgorithm;
 use crate::sshbuffer::SSHBuffer;

@@ -26,10 +26,6 @@
 //! to all other clients:
 //!
 //! ```
-//! extern crate russh;
-//! extern crate russh_keys;
-//! extern crate futures;
-//! extern crate tokio;
 //! use async_trait::async_trait;
 //! use std::sync::{Mutex, Arc};
 //! use russh::*;
@@ -120,6 +116,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
+use log::error;
 use async_trait::async_trait;
 use futures::future::Future;
 use russh_keys::key;

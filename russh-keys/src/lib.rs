@@ -63,17 +63,6 @@
 //!
 //! ```
 
-#![recursion_limit = "128"]
-#[macro_use]
-extern crate serde_derive;
-#[macro_use]
-extern crate thiserror;
-#[macro_use]
-extern crate log;
-
-#[cfg(test)]
-extern crate env_logger;
-
 use std::borrow::Cow;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
@@ -83,6 +72,8 @@ use aes::cipher::block_padding::UnpadError;
 use aes::cipher::inout::PadError;
 use byteorder::{BigEndian, WriteBytesExt};
 use data_encoding::BASE64_MIME;
+use thiserror::Error;
+use log::debug;
 
 pub mod encoding;
 pub mod key;
@@ -437,7 +428,6 @@ pub fn check_known_hosts(host: &str, port: u16, pubkey: &key::PublicKey) -> Resu
 
 #[cfg(test)]
 mod test {
-    extern crate tempdir;
     use std::fs::File;
     use std::io::Write;
 
@@ -486,7 +476,6 @@ QR+u0AypRPmzHnOPAAAAEXJvb3RAMTQwOTExNTQ5NDBkAQ==
 
     #[test]
     fn test_decode_ed25519_secret_key() {
-        extern crate env_logger;
         env_logger::try_init().unwrap_or(());
         decode_secret_key(ED25519_KEY, Some("blabla")).unwrap();
     }
@@ -494,7 +483,6 @@ QR+u0AypRPmzHnOPAAAAEXJvb3RAMTQwOTExNTQ5NDBkAQ==
     #[test]
     #[cfg(feature = "openssl")]
     fn test_decode_rsa_secret_key() {
-        extern crate env_logger;
         env_logger::try_init().unwrap_or(());
         decode_secret_key(RSA_KEY, None).unwrap();
     }
