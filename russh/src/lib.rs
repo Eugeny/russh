@@ -93,15 +93,10 @@
 //! starts again. In the special case of the server, unsollicited
 //! messages sent through a `server::Handle` are processed when there
 //! is no incoming packet to read.
-#[macro_use]
-extern crate bitflags;
-#[macro_use]
-extern crate log;
-#[macro_use]
-extern crate thiserror;
 
 use std::fmt::{Debug, Display, Formatter};
 
+use thiserror::Error;
 use parsing::ChannelOpenConfirmation;
 pub use russh_cryptovec::CryptoVec;
 
@@ -477,7 +472,8 @@ mod test_compress {
     use std::sync::{Arc, Mutex};
 
     use async_trait::async_trait;
-
+    use log::debug;
+    
     use super::server::{Server as _, Session};
     use super::*;
     use crate::server::Msg;

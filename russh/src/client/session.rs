@@ -1,5 +1,6 @@
 use russh_cryptovec::CryptoVec;
 use russh_keys::encoding::Encoding;
+use log::error;
 
 use crate::client::Session;
 use crate::session::EncryptedState;

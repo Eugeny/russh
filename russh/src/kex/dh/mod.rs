@@ -2,6 +2,7 @@ mod groups;
 use std::marker::PhantomData;
 
 use byteorder::{BigEndian, ByteOrder};
+use log::debug;
 use digest::Digest;
 use groups::DH;
 use num_bigint::BigUint;

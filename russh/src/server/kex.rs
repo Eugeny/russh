@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 
 use russh_keys::encoding::{Encoding, Reader};
+use log::debug;
 
 use super::*;
 use crate::cipher::SealingKey;

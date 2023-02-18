@@ -18,6 +18,7 @@ use russh_cryptovec::CryptoVec;
 use russh_keys::encoding::{Encoding, Reader};
 use russh_keys::key::parse_public_key;
 use tokio::sync::mpsc::unbounded_channel;
+use log::{debug, error, info, trace, warn};
 
 use crate::client::{Handler, Msg, Reply, Session};
 use crate::key::PubKey;

@@ -18,6 +18,7 @@ use std::fmt::{Debug, Formatter};
 use std::num::Wrapping;
 
 use byteorder::{BigEndian, ByteOrder};
+use log::{debug, trace};
 use russh_cryptovec::CryptoVec;
 use russh_keys::encoding::Encoding;
 

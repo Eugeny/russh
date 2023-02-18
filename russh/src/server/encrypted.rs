@@ -16,6 +16,7 @@ use std::cell::RefCell;
 
 use auth::*;
 use byteorder::{BigEndian, ByteOrder};
+use log::{debug, error, info, trace, warn};
 use negotiation::Select;
 use russh_keys::encoding::{Encoding, Position, Reader};
 use russh_keys::key;

@@ -27,11 +27,6 @@
 //! when the client receives data.
 //!
 //! ```no_run
-//! extern crate russh;
-//! extern crate russh_keys;
-//! extern crate futures;
-//! extern crate tokio;
-//! extern crate env_logger;
 //! use async_trait::async_trait;
 //! use std::sync::Arc;
 //! use russh::*;
@@ -100,6 +95,7 @@ use tokio::pin;
 use tokio::sync::mpsc::{
     channel, unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender,
 };
+use log::{debug, error, info, trace};
 
 use crate::channels::{Channel, ChannelMsg};
 use crate::cipher::{self, clear, CipherPair, OpeningKey};

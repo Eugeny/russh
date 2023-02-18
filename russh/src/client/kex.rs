@@ -1,3 +1,5 @@
+use log::{debug, trace};
+
 use crate::cipher::SealingKey;
 use crate::client::Config;
 use crate::kex::KEXES;
