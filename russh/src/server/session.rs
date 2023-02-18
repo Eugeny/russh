@@ -463,7 +463,10 @@ impl Session {
                 .map_err(crate::Error::from)?;
             self.common.write_buffer.buffer.clear();
         }
+
         debug!("disconnected");
+        handler.disconnected(self).await?;
+
         // Shutdown
         stream_write.shutdown().await.map_err(crate::Error::from)?;
         loop {
