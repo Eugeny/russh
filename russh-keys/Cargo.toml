@@ -50,8 +50,7 @@ pbkdf2 = "0.11"
 rand = "0.7"
 rand_core = { version = "0.5", features = ["std"] }
 russh-cryptovec = { version = "0.7.0", path = "../cryptovec" }
-serde = "1.0"
-serde_derive = "1.0"
+serde = { version = "1.0", features = ["derive"] }
 sha2 = "0.10"
 thiserror = "1.0"
 tokio = { version = "1.17.0", features = [
