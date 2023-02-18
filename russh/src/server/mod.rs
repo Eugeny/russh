@@ -250,12 +250,6 @@ pub enum Auth {
 pub trait Handler: Sized {
     type Error: From<crate::Error> + Send;
 
-    /// Called when a session disconnects.
-    #[allow(unused_variables)]
-    async fn disconnected(self, session: Session) -> Result<(Self, Session), Self::Error> {
-        Ok((self, session))
-    }
-
     /// Check authentication using the "none" method. Russh makes
     /// sure rejection happens in time `config.auth_rejection_time`,
     /// except if this method takes more than that.
