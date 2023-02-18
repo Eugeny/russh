@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-use serde_derive::{Serialize, Deserialize};
+use serde::{Serialize, Deserialize};
 use ed25519_dalek::ed25519::signature::Signature as EdSignature;
 use ed25519_dalek::{Signer, Verifier};
 #[cfg(feature = "openssl")]

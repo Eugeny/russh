@@ -5,7 +5,6 @@ use serde;
 use serde::de::{SeqAccess, Visitor};
 use serde::ser::SerializeTuple;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use serde_derive::{Serialize, Deserialize};
 
 use crate::key::SignatureHash;
 use crate::Error;
