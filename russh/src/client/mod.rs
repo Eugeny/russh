@@ -168,6 +168,10 @@ pub enum Msg {
         originator_port: u32,
         sender: UnboundedSender<ChannelMsg>,
     },
+    ChannelOpenDirectStream {
+        socket_path: String,
+        sender: UnboundedSender<ChannelMsg>,
+    },
     TcpIpForward {
         want_reply: bool,
         address: String,
@@ -409,6 +413,21 @@ impl<H: Handler> Handle<H> {
                 port_to_connect,
                 originator_address: originator_address.into(),
                 originator_port,
+                sender,
+            })
+            .await
+            .map_err(|_| crate::Error::SendError)?;
+        self.wait_channel_confirmation(receiver).await
+    }
+
+    pub async fn channel_open_direct_stream<S: Into<String>>(
+        &self,
+        socket_path: S,
+    ) -> Result<Channel<Msg>, crate::Error> {
+        let (sender, receiver) = unbounded_channel();
+        self.sender
+            .send(Msg::ChannelOpenDirectStream {
+                socket_path: socket_path.into(),
                 sender,
             })
             .await
@@ -776,6 +795,15 @@ impl Session {
                     port_to_connect,
                     &originator_address,
                     originator_port,
+                )?;
+                self.channels.insert(id, sender);
+            }
+            Msg::ChannelOpenDirectStream {
+                socket_path,
+                sender,
+            } => {
+                let id = self.channel_open_direct_stream(
+                    &socket_path,
                 )?;
                 self.channels.insert(id, sender);
             }

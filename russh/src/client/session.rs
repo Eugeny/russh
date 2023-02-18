@@ -79,6 +79,17 @@ impl Session {
         })
     }
 
+    pub fn channel_open_direct_stream(
+        &mut self,
+        socket_path: &str
+    ) -> Result<ChannelId, crate::Error> {
+        self.channel_open_generic(b"direct-streamlocal@openssh.com", |write| {
+            write.extend_ssh_string(socket_path.as_bytes());
+            write.extend_ssh_string("".as_bytes()); // reserved
+            write.push_u32_be(0); // reserved
+        })
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn request_pty(
         &mut self,
