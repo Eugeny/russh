@@ -364,7 +364,7 @@ impl<H: Handler> Handle<H> {
     /// connection is authenticated, but the channel only becomes
     /// usable when it's confirmed by the server, as indicated by the
     /// `confirmed` field of the corresponding `Channel`.
-    pub async fn channel_open_session(&mut self) -> Result<Channel<Msg>, crate::Error> {
+    pub async fn channel_open_session(&self) -> Result<Channel<Msg>, crate::Error> {
         let (sender, receiver) = unbounded_channel();
         self.sender
             .send(Msg::ChannelOpenSession { sender })
@@ -375,7 +375,7 @@ impl<H: Handler> Handle<H> {
 
     /// Request an X11 channel, on which the X11 protocol may be tunneled.
     pub async fn channel_open_x11<A: Into<String>>(
-        &mut self,
+        &self,
         originator_address: A,
         originator_port: u32,
     ) -> Result<Channel<Msg>, crate::Error> {
@@ -400,7 +400,7 @@ impl<H: Handler> Handle<H> {
     /// indicate that no more data will be sent, or you may see hangs when
     /// writing large streams.
     pub async fn channel_open_direct_tcpip<A: Into<String>, B: Into<String>>(
-        &mut self,
+        &self,
         host_to_connect: A,
         port_to_connect: u32,
         originator_address: B,
@@ -440,7 +440,7 @@ impl<H: Handler> Handle<H> {
     }
 
     pub async fn cancel_tcpip_forward<A: Into<String>>(
-        &mut self,
+        &self,
         address: A,
         port: u32,
     ) -> Result<bool, crate::Error> {
