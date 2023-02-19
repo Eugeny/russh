@@ -445,6 +445,16 @@ e+JpiSq66Z6GIt0801skPh20jxOO3F52SoX1IeO5D5PXfZrfSZlw6S8c7bwyp2FHxDewRx
 7/wNsnDM0T7nLv/Q==
 -----END OPENSSH PRIVATE KEY-----";
 
+    // password is 'test'
+    const ED25519_AESCTR_KEY: &str = "-----BEGIN OPENSSH PRIVATE KEY-----
+b3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jdHIAAAAGYmNyeXB0AAAAGAAAABD1phlku5
+A2G7Q9iP+DcOc9AAAAEAAAAAEAAAAzAAAAC3NzaC1lZDI1NTE5AAAAIHeLC1lWiCYrXsf/
+85O/pkbUFZ6OGIt49PX3nw8iRoXEAAAAkKRF0st5ZI7xxo9g6A4m4l6NarkQre3mycqNXQ
+dP3jryYgvsCIBAA5jMWSjrmnOTXhidqcOy4xYCrAttzSnZ/cUadfBenL+DQq6neffw7j8r
+0tbCxVGp6yCQlKrgSZf6c0Hy7dNEIU2bJFGxLe6/kWChcUAt/5Ll5rI7DVQPJdLgehLzvv
+sJWR7W+cGvJ/vLsw==
+-----END OPENSSH PRIVATE KEY-----";
+
     #[cfg(feature = "openssl")]
     const RSA_KEY: &str = "-----BEGIN OPENSSH PRIVATE KEY-----
 b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAABFwAAAAdzc2gtcn
@@ -478,6 +488,12 @@ QR+u0AypRPmzHnOPAAAAEXJvb3RAMTQwOTExNTQ5NDBkAQ==
     fn test_decode_ed25519_secret_key() {
         env_logger::try_init().unwrap_or(());
         decode_secret_key(ED25519_KEY, Some("blabla")).unwrap();
+    }
+
+    #[test]
+    fn test_decode_ed25519_aesctr_secret_key() {
+        env_logger::try_init().unwrap_or(());
+        decode_secret_key(ED25519_AESCTR_KEY, Some("test")).unwrap();
     }
 
     #[test]
