@@ -473,7 +473,7 @@ mod test_compress {
 
     use async_trait::async_trait;
     use log::debug;
-    
+
     use super::server::{Server as _, Session};
     use super::*;
     use crate::server::Msg;
@@ -826,7 +826,7 @@ mod test_channels {
         test_session(
             Client {},
             sh,
-            |mut client| async move {
+            |client| async move {
                 let ch = client.channel_open_session().await.unwrap();
                 let mut stream = ch.into_stream();
                 stream.write_all(&b"request"[..]).await.unwrap();
@@ -918,7 +918,7 @@ mod test_channels {
         test_session(
             Client {},
             sh,
-            |mut c| async move {
+            |c| async move {
                 let mut ch = c.channel_open_session().await.unwrap();
                 ch.data(&b"hello world!"[..]).await.unwrap();
 

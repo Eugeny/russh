@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use russh_keys::encoding::Encoding;
@@ -11,15 +10,8 @@ use super::*;
 use crate::channels::{Channel, ChannelMsg};
 use crate::msg;
 
-static SESSION_COUNTER: AtomicUsize = AtomicUsize::new(0);
-
-pub(crate) fn get_session_id() -> usize {
-    SESSION_COUNTER.fetch_add(1, Ordering::SeqCst)
-}
-
 /// A connected server session. This type is unique to a client.
 pub struct Session {
-    pub(crate) session_id: usize,
     pub(crate) common: CommonSession<Arc<Config>>,
     pub(crate) sender: Handle,
     pub(crate) receiver: Receiver<Msg>,
@@ -479,12 +471,6 @@ impl Session {
         }
 
         Ok(())
-    }
-
-    /// Application-unqiue session ID. Can be used for identifying the session
-    /// across method calls.
-    pub fn id(&self) -> usize {
-        self.session_id
     }
 
     /// Get a handle to this session.
