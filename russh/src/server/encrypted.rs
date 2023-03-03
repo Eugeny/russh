@@ -894,6 +894,23 @@ impl Session {
                     }
                 }
             }
+            Some(&msg::CHANNEL_OPEN_FAILURE) => {
+                debug!("Channel open failed.");
+                let mut buf_pos = buf.reader(1);
+                let channel_num = ChannelId(buf_pos.read_u32().map_err(crate::Error::from)?);
+                let reason =
+                    ChannelOpenFailure::from_u32(buf_pos.read_u32().map_err(crate::Error::from)?)
+                        .unwrap_or(ChannelOpenFailure::Unknown);
+                let description =
+                    std::str::from_utf8(buf_pos.read_string().map_err(crate::Error::from)?)
+                        .map_err(crate::Error::from)?;
+                let language_tag =
+                    std::str::from_utf8(buf_pos.read_string().map_err(crate::Error::from)?)
+                        .map_err(crate::Error::from)?;
+
+                self.channel_open_failure(channel_num, reason, description, language_tag);
+                Ok((handler, self))
+            }
             m => {
                 debug!("unknown message received: {:?}", m);
                 Ok((handler, self))
