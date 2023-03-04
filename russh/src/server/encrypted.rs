@@ -895,7 +895,7 @@ impl Session {
                 }
             }
             Some(&msg::CHANNEL_OPEN_FAILURE) => {
-                debug!("Channel open failed.");
+                debug!("channel_open_failure");
                 let mut buf_pos = buf.reader(1);
                 let channel_num = ChannelId(buf_pos.read_u32().map_err(crate::Error::from)?);
                 let reason =
@@ -908,7 +908,19 @@ impl Session {
                     std::str::from_utf8(buf_pos.read_string().map_err(crate::Error::from)?)
                         .map_err(crate::Error::from)?;
 
-                self.channel_open_failure(channel_num, reason, description, language_tag);
+                trace!("Channel open failure description: {description}");
+                trace!("Channel open failure language tag: {language_tag}");
+
+                if let Some(ref mut enc) = self.common.encrypted {
+                    enc.channels.remove(&channel_num);
+                }
+
+                if let Some(channel_sender) = self.channels.remove(&channel_num) {
+                    channel_sender
+                        .send(ChannelMsg::OpenFailure(reason))
+                        .map_err(|_| crate::Error::SendError)?;
+                }
+
                 Ok((handler, self))
             }
             m => {
