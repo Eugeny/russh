@@ -259,6 +259,9 @@ impl Handle {
                         window_size,
                     });
                 }
+                Some(ChannelMsg::OpenFailure(reason)) => {
+                    return Err(Error::ChannelOpenFailure(reason))
+                }
                 None => {
                     return Err(Error::Disconnect);
                 }
