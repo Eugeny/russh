@@ -42,6 +42,9 @@ pub const USERAUTH_PK_OK: u8 = 60;
 pub const USERAUTH_INFO_REQUEST: u8 = 60;
 pub const USERAUTH_INFO_RESPONSE: u8 = 61;
 
+// some numbers have same meaning
+pub const USERAUTH_INFO_REQUEST_OR_USERAUTH_PK_OK: u8 = 60;
+
 // https://tools.ietf.org/html/rfc4254#section-9
 pub const GLOBAL_REQUEST: u8 = 80;
 pub const REQUEST_SUCCESS: u8 = 81;
