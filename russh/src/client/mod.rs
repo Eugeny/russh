@@ -109,6 +109,15 @@ mod encrypted;
 mod kex;
 mod session;
 
+#[derive(Debug)]
+pub struct Prompt {
+    pub prompt: String,
+    pub echo: bool,
+}
+pub trait KeyboardInteractiveChallenge {
+    fn prompt(&mut self, name: String, instructions: String, prompts: Vec<Prompt>) -> Vec<String>;
+}
+
 /// Actual client session's state.
 ///
 /// It is in charge of multiplexing and keeping track of various channels
@@ -132,6 +141,7 @@ impl Drop for Session {
     }
 }
 
+
 #[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
 enum Reply {
@@ -142,6 +152,11 @@ enum Reply {
         key: key::PublicKey,
         data: CryptoVec,
     },
+    AuthInfoRequest {
+        name: String,
+        instructions: String,
+        prompts: Vec<Prompt>,
+    }
 }
 
 #[derive(Debug)]
@@ -149,6 +164,9 @@ pub enum Msg {
     Authenticate {
         user: String,
         method: auth::Method,
+    },
+    AuthInfoResponse {
+        responses: Vec<String>,
     },
     Signed {
         data: CryptoVec,
@@ -252,6 +270,46 @@ impl<H: Handler> Handle<H> {
             .await
             .map_err(|_| crate::Error::SendError)?;
         self.wait_recv_reply().await
+    }
+
+    /// Perform keyboard-interactive-based SSH authentication.
+    ///
+    /// * `submethods` - Hnts to the server the preffered methods to be used for authentication
+    pub async fn authenticate_keyboard_interactive<U: Into<String>, S: Into<Option<String>>, K: KeyboardInteractiveChallenge>(
+        &mut self,
+        user: U,
+        handler: K,
+        submethods: S,
+    ) -> Result<bool, crate::Error> {
+        let user = user.into();
+        self.sender
+            .send(Msg::Authenticate {
+                user: user.clone(),
+                method: auth::Method::KeyboardInteractive {
+                    submethods: submethods.into().unwrap_or("".to_owned())
+                },
+            })
+            .await
+            .map_err(|_| crate::Error::SendError)?;
+        self.wait_recv_keyboard_interactive_reply(handler, user).await
+    }
+
+    async fn wait_recv_keyboard_interactive_reply<K: KeyboardInteractiveChallenge>(&mut self, mut challenge_handler: K, user: String) -> Result<bool, crate::Error> {
+        loop {
+            match self.receiver.recv().await {
+                Some(Reply::AuthSuccess) => return Ok(true),
+                Some(Reply::AuthFailure) => return Ok(false),
+                Some(Reply::AuthInfoRequest { name, instructions, prompts }) => {
+                    let responses = challenge_handler.prompt(name, instructions, prompts);
+                    self.sender
+                        .send(Msg::AuthInfoResponse { responses })
+                        .await
+                        .map_err(|_| crate::Error::SendError)?;
+                }
+                None => return Ok(false),
+                _ => {}
+            }
+        }
     }
 
     async fn wait_recv_reply(&mut self) -> Result<bool, crate::Error> {
