@@ -13,6 +13,7 @@
 // limitations under the License.
 //
 use std::cell::RefCell;
+use std::convert::TryInto;
 
 use russh_cryptovec::CryptoVec;
 use russh_keys::encoding::{Encoding, Reader};
@@ -20,7 +21,7 @@ use russh_keys::key::parse_public_key;
 use tokio::sync::mpsc::unbounded_channel;
 use log::{debug, error, info, trace, warn};
 
-use crate::client::{Handler, Msg, Reply, Session};
+use crate::client::{Handler, Msg, Reply, Session, Prompt};
 use crate::key::PubKey;
 use crate::negotiation::{Named, Select};
 use crate::parsing::{ChannelOpenConfirmation, ChannelType, OpenChannelMessage};
@@ -230,13 +231,51 @@ impl Session {
                         if no_more_methods {
                             return Err(crate::Error::NoAuthMethod.into());
                         }
-                    } else if buf.first() == Some(&msg::USERAUTH_PK_OK) {
+
+                    } else if buf.first() == Some(&msg::USERAUTH_INFO_REQUEST) {
+                        let mut r = buf.reader(1);
+
+                        // read fields
+                        let name = String::from_utf8_lossy(r.read_string().map_err(crate::Error::from)?).to_string();
+                        let instructions = String::from_utf8_lossy(r.read_string().map_err(crate::Error::from)?).to_string();
+                        let _lang = r.read_string().map_err(crate::Error::from)?;
+                        let n_prompts = r.read_u32().map_err(crate::Error::from)?;
+
+                        // read prompts
+                        let mut prompts = Vec::with_capacity(n_prompts.try_into().unwrap_or(0));
+                        for _i in 0..n_prompts {
+                            let prompt = String::from_utf8_lossy(r.read_string().map_err(crate::Error::from)?);
+                            let echo = r.read_byte().map_err(crate::Error::from)? != 0;
+                            prompts.push(Prompt{prompt: prompt.to_string(), echo});
+                        }
+
+                        // send challenges to call handler
+                        self.sender
+                            .send(Reply::AuthInfoRequest { name, instructions, prompts })
+                            .map_err(|_| crate::Error::SendError)?;
+
+                        // wait for response from handler
+                        let responses = loop {
+                            match self.receiver.recv().await {
+                                Some(Msg::AuthInfoResponse{ responses }) => break responses,
+                                _ => {}
+                            }
+                        };
+                        // write responses 
+                        enc.client_send_auth_response(&responses)?;
+
+                        return Ok((client, self));
+                    } else if buf.first() == Some(&msg::USERAUTH_INFO_REQUEST_OR_USERAUTH_PK_OK) {
                         debug!("userauth_pk_ok");
                         if let Some(auth::CurrentRequest::PublicKey {
                             ref mut sent_pk_ok, ..
                         }) = auth_request.current
                         {
                             *sent_pk_ok = true;
+                        } else if let Some(auth::CurrentRequest::KeyboardInteractive { ref submethods }) = auth_request.current {
+
+                        } else {
+                            unreachable!()
                         }
 
                         match self.common.auth_method.take() {
@@ -766,6 +805,15 @@ impl Encrypted {
                     key.push_to(&mut self.write);
                     true
                 }
+                auth::Method::KeyboardInteractive{ ref submethods } => {
+                    debug!("KEYBOARD INTERACTIVE");
+                    self.write.extend_ssh_string(user.as_bytes());
+                    self.write.extend_ssh_string(b"ssh-connection");
+                    self.write.extend_ssh_string(b"keyboard-interactive");
+                    self.write.extend_ssh_string(b""); // lang tag is deprecated. Should be empty
+                    self.write.extend_ssh_string(submethods.as_bytes());
+                    true
+                }
             }
         })
     }
@@ -808,6 +856,21 @@ impl Encrypted {
             }
             _ => {}
         }
+        Ok(())
+    }
+
+    //TODO
+    fn client_send_auth_response(
+        &mut self,
+        responses: &[String]
+    ) -> Result<(), crate::Error> {
+        push_packet!(self.write, {
+            self.write.push(msg::USERAUTH_INFO_RESPONSE);
+            self.write.push(responses.len().try_into().unwrap_or(0)); // number of responses
+            for r in responses {
+                self.write.extend_ssh_string(r.as_bytes()); // write the reponses
+            }
+        });
         Ok(())
     }
 }

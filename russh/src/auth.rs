@@ -100,6 +100,7 @@ pub enum Method {
     Password { password: String },
     PublicKey { key: Arc<key::KeyPair> },
     FuturePublicKey { key: key::PublicKey },
+    KeyboardInteractive { submethods: String },
     // Hostbased,
 }
 
@@ -150,3 +151,4 @@ pub enum CurrentRequest {
         submethods: String,
     },
 }
+
