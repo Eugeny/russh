@@ -266,6 +266,9 @@ pub enum Error {
     #[error("Failed to decrypt a packet")]
     DecryptionError,
 
+    #[error("Global request failed")]
+    GlobalRequestFailure,
+
     #[error(transparent)]
     Keys(#[from] russh_keys::Error),
 

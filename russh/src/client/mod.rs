@@ -141,6 +141,9 @@ impl Drop for Session {
 enum Reply {
     AuthSuccess,
     AuthFailure,
+    // TODO GlobalRequestSuccess its data depends on the type of request send. for now only support an u32 because thats what's needed for tcp-ip-forward.
+    GlobalRequestSuccess(u32),
+    GlobalRequestFailure,
     ChannelOpenFailure,
     SignRequest {
         key: key::PublicKey,
@@ -424,19 +427,29 @@ impl<H: Handler> Handle<H> {
         &mut self,
         address: A,
         port: u32,
-    ) -> Result<bool, crate::Error> {
+    ) -> Result<u32, crate::Error> {
         self.sender
             .send(Msg::TcpIpForward {
-                want_reply: true,
+                want_reply: port == 0,
                 address: address.into(),
                 port,
             })
             .await
             .map_err(|_| crate::Error::SendError)?;
         if port == 0 {
-            self.wait_recv_reply().await?;
+            loop {
+                match self.receiver.recv().await {
+                    Some(Reply::GlobalRequestSuccess(port)) => return Ok(port),
+                    Some(Reply::GlobalRequestFailure) => {
+                        return Err(crate::Error::GlobalRequestFailure)
+                    }
+                    None => return Err(crate::Error::GlobalRequestFailure),
+                    _ => {}
+                }
+            }
+        } else {
+            Ok(port)
         }
-        Ok(true)
     }
 
     pub async fn cancel_tcpip_forward<A: Into<String>>(
