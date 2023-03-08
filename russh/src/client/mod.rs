@@ -109,14 +109,6 @@ mod encrypted;
 mod kex;
 mod session;
 
-#[derive(Debug)]
-pub struct Prompt {
-    pub prompt: String,
-    pub echo: bool,
-}
-pub trait KeyboardInteractiveChallenge {
-    fn prompt(&mut self, name: String, instructions: String, prompts: Vec<Prompt>) -> Vec<String>;
-}
 
 /// Actual client session's state.
 ///
@@ -217,6 +209,25 @@ impl From<(ChannelId, ChannelMsg)> for Msg {
     }
 }
 
+#[derive(Debug)]
+pub enum KeyboardInteractiveAuthResponse {
+    Success,
+    Failure,
+    InfoRequest {
+        name: String,
+        instructions: String,
+        prompts: Vec<Prompt>,
+    },
+}
+
+
+#[derive(Debug)]
+pub struct Prompt {
+    pub prompt: String,
+    pub echo: bool,
+}
+
+
 /// Handle to a session, used to send messages to a client outside of
 /// the request/response cycle.
 pub struct Handle<H: Handler> {
@@ -272,42 +283,48 @@ impl<H: Handler> Handle<H> {
         self.wait_recv_reply().await
     }
 
+
+
     /// Perform keyboard-interactive-based SSH authentication.
     ///
     /// * `submethods` - Hnts to the server the preffered methods to be used for authentication
-    pub async fn authenticate_keyboard_interactive<U: Into<String>, S: Into<Option<String>>, K: KeyboardInteractiveChallenge>(
+    pub async fn authenticate_keyboard_interactive_start<U: Into<String>, S: Into<Option<String>>>(
         &mut self,
         user: U,
-        handler: K,
         submethods: S,
-    ) -> Result<bool, crate::Error> {
-        let user = user.into();
+    ) -> Result<KeyboardInteractiveAuthResponse, crate::Error> {
         self.sender
             .send(Msg::Authenticate {
-                user: user.clone(),
+                user: user.into(),
                 method: auth::Method::KeyboardInteractive {
                     submethods: submethods.into().unwrap_or("".to_owned())
                 },
             })
             .await
             .map_err(|_| crate::Error::SendError)?;
-        self.wait_recv_keyboard_interactive_reply(handler, user).await
+        self.wait_recv_keyboard_interactive_reply().await
     }
 
-    async fn wait_recv_keyboard_interactive_reply<K: KeyboardInteractiveChallenge>(&mut self, mut challenge_handler: K, user: String) -> Result<bool, crate::Error> {
+    pub async fn authenticate_keyboard_interactive_respond(
+        &mut self,
+        responses: Vec<String>
+    ) -> Result<KeyboardInteractiveAuthResponse, crate::Error> {
+        self.sender
+            .send(Msg::AuthInfoResponse { responses })
+            .await
+            .map_err(|_| crate::Error::SendError)?;
+        self.wait_recv_keyboard_interactive_reply().await
+    }
+
+    async fn wait_recv_keyboard_interactive_reply(&mut self) -> Result<KeyboardInteractiveAuthResponse, crate::Error> {
         loop {
             match self.receiver.recv().await {
-                Some(Reply::AuthSuccess) => return Ok(true),
-                Some(Reply::AuthFailure) => return Ok(false),
+                Some(Reply::AuthSuccess) => return Ok(KeyboardInteractiveAuthResponse::Success),
+                Some(Reply::AuthFailure) => return Ok(KeyboardInteractiveAuthResponse::Failure),
                 Some(Reply::AuthInfoRequest { name, instructions, prompts }) => {
-                    let responses = challenge_handler.prompt(name, instructions, prompts);
-                    self.sender
-                        .send(Msg::AuthInfoResponse { responses })
-                        .await
-                        .map_err(|_| crate::Error::SendError)?;
-                }
-                None => return Ok(false),
-                _ => {}
+                    return Ok(KeyboardInteractiveAuthResponse::InfoRequest { name, instructions, prompts });
+                },
+                _ => {},
             }
         }
     }
@@ -1240,6 +1257,7 @@ impl Default for Config {
 /// server at any time during a session.
 ///
 /// Note: this is an `async_trait`. Click `[source]` on the right to see actual async function definitions.
+
 #[async_trait]
 pub trait Handler: Sized + Send {
     type Error: From<crate::Error> + Send;

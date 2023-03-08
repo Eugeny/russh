@@ -264,7 +264,6 @@ impl Session {
                         // write responses 
                         enc.client_send_auth_response(&responses)?;
 
-                        return Ok((client, self));
                     } else if buf.first() == Some(&msg::USERAUTH_INFO_REQUEST_OR_USERAUTH_PK_OK) {
                         debug!("userauth_pk_ok");
                         if let Some(auth::CurrentRequest::PublicKey {
@@ -866,7 +865,7 @@ impl Encrypted {
     ) -> Result<(), crate::Error> {
         push_packet!(self.write, {
             self.write.push(msg::USERAUTH_INFO_RESPONSE);
-            self.write.push(responses.len().try_into().unwrap_or(0)); // number of responses
+            self.write.push_u32_be(responses.len().try_into().unwrap_or(0)); // number of responses
             for r in responses {
                 self.write.extend_ssh_string(r.as_bytes()); // write the reponses
             }
