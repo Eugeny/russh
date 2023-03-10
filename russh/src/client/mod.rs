@@ -282,9 +282,9 @@ impl<H: Handler> Handle<H> {
         self.wait_recv_reply().await
     }
 
-    /// Perform keyboard-interactive-based SSH authentication.
+    /// Initiate Keyboard-Interactive based SSH authentication.
     ///
-    /// * `submethods` - Hnts to the server the preffered methods to be used for authentication
+    /// * `submethods` - Hnts to the server the preferred methods to be used for authentication
     pub async fn authenticate_keyboard_interactive_start<
         U: Into<String>,
         S: Into<Option<String>>,
@@ -305,6 +305,12 @@ impl<H: Handler> Handle<H> {
         self.wait_recv_keyboard_interactive_reply().await
     }
 
+    /// Respond to AuthInfoRequests from the server. A server can send any number of these Requests
+    /// including empty requests. You may have to call this function multple times in order to 
+    /// complete Keyboard-Interactive based SSH authentication.
+    ///
+    /// * `responses` - The responses to each prompt. The number of responses must match the number
+    /// of prompts. If a prompt has an empty string, then the response should be an empty string.
     pub async fn authenticate_keyboard_interactive_respond(
         &mut self,
         responses: Vec<String>,
