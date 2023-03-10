@@ -148,7 +148,7 @@ enum Reply {
         name: String,
         instructions: String,
         prompts: Vec<Prompt>,
-    }
+    },
 }
 
 #[derive(Debug)]
@@ -227,7 +227,6 @@ pub struct Prompt {
     pub echo: bool,
 }
 
-
 /// Handle to a session, used to send messages to a client outside of
 /// the request/response cycle.
 pub struct Handle<H: Handler> {
@@ -283,12 +282,13 @@ impl<H: Handler> Handle<H> {
         self.wait_recv_reply().await
     }
 
-
-
     /// Perform keyboard-interactive-based SSH authentication.
     ///
     /// * `submethods` - Hnts to the server the preffered methods to be used for authentication
-    pub async fn authenticate_keyboard_interactive_start<U: Into<String>, S: Into<Option<String>>>(
+    pub async fn authenticate_keyboard_interactive_start<
+        U: Into<String>,
+        S: Into<Option<String>>,
+    >(
         &mut self,
         user: U,
         submethods: S,
@@ -297,7 +297,7 @@ impl<H: Handler> Handle<H> {
             .send(Msg::Authenticate {
                 user: user.into(),
                 method: auth::Method::KeyboardInteractive {
-                    submethods: submethods.into().unwrap_or("".to_owned())
+                    submethods: submethods.into().unwrap_or_else(|| "".to_owned()),
                 },
             })
             .await
@@ -307,7 +307,7 @@ impl<H: Handler> Handle<H> {
 
     pub async fn authenticate_keyboard_interactive_respond(
         &mut self,
-        responses: Vec<String>
+        responses: Vec<String>,
     ) -> Result<KeyboardInteractiveAuthResponse, crate::Error> {
         self.sender
             .send(Msg::AuthInfoResponse { responses })
@@ -316,13 +316,23 @@ impl<H: Handler> Handle<H> {
         self.wait_recv_keyboard_interactive_reply().await
     }
 
-    async fn wait_recv_keyboard_interactive_reply(&mut self) -> Result<KeyboardInteractiveAuthResponse, crate::Error> {
+    async fn wait_recv_keyboard_interactive_reply(
+        &mut self,
+    ) -> Result<KeyboardInteractiveAuthResponse, crate::Error> {
         loop {
             match self.receiver.recv().await {
                 Some(Reply::AuthSuccess) => return Ok(KeyboardInteractiveAuthResponse::Success),
                 Some(Reply::AuthFailure) => return Ok(KeyboardInteractiveAuthResponse::Failure),
-                Some(Reply::AuthInfoRequest { name, instructions, prompts }) => {
-                    return Ok(KeyboardInteractiveAuthResponse::InfoRequest { name, instructions, prompts });
+                Some(Reply::AuthInfoRequest {
+                    name,
+                    instructions,
+                    prompts,
+                }) => {
+                    return Ok(KeyboardInteractiveAuthResponse::InfoRequest {
+                        name,
+                        instructions,
+                        prompts,
+                    });
                 },
                 _ => {},
             }
@@ -846,6 +856,7 @@ impl Session {
                 self.write_auth_request_if_needed(&user, method);
             }
             Msg::Signed { .. } => {}
+            Msg::AuthInfoResponse { .. } => {}
             Msg::ChannelOpenSession { sender } => {
                 let id = self.channel_open_session()?;
                 self.channels.insert(id, sender);
