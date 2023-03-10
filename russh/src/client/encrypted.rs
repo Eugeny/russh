@@ -307,9 +307,7 @@ impl Session {
                             // write responses
                             enc.client_send_auth_response(&responses)?;
                             return Ok((client, self));
-                        } else {
-                            unreachable!()
-                        }
+                        } else {}
 
                         // continue with userauth_pk_ok
                         match self.common.auth_method.take() {
