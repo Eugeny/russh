@@ -121,6 +121,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "joshbenz",
+      "name": "Joshua Benz",
+      "avatar_url": "https://avatars.githubusercontent.com/u/94999261?v=4",
+      "profile": "https://github.com/joshbenz",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,
