@@ -1,6 +1,6 @@
 # Russh
 [![Rust](https://github.com/warp-tech/russh/actions/workflows/rust.yml/badge.svg)](https://github.com/warp-tech/russh/actions/workflows/rust.yml)  <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
-[![All Contributors](https://img.shields.io/badge/all_contributors-13-orange.svg?style=flat-square)](#contributors-)
+[![All Contributors](https://img.shields.io/badge/all_contributors-14-orange.svg?style=flat-square)](#contributors-)
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
 
 Low-level Tokio SSH2 client and server implementation.
@@ -84,6 +84,7 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
       <td align="center" valign="top" width="14.28%"><a href="https://volution.ro/"><img src="https://avatars.githubusercontent.com/u/29785?v=4?s=100" width="100px;" alt="Ciprian Dorin Craciun"/><br /><sub><b>Ciprian Dorin Craciun</b></sub></a><br /><a href="https://github.com/warp-tech/russh/commits?author=cipriancraciun" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/mllken"><img src="https://avatars.githubusercontent.com/u/11590808?v=4?s=100" width="100px;" alt="Eric Milliken"/><br /><sub><b>Eric Milliken</b></sub></a><br /><a href="https://github.com/warp-tech/russh/commits?author=mllken" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/Swelio"><img src="https://avatars.githubusercontent.com/u/24651896?v=4?s=100" width="100px;" alt="Swelio"/><br /><sub><b>Swelio</b></sub></a><br /><a href="https://github.com/warp-tech/russh/commits?author=Swelio" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/joshbenz"><img src="https://avatars.githubusercontent.com/u/94999261?v=4?s=100" width="100px;" alt="Joshua Benz"/><br /><sub><b>Joshua Benz</b></sub></a><br /><a href="https://github.com/warp-tech/russh/commits?author=joshbenz" title="Code">💻</a></td>
     </tr>
   </tbody>
 </table>
