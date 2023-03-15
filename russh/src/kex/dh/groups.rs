@@ -1,5 +1,3 @@
-use std::ops::Shl;
-
 use hex_literal::hex;
 use num_bigint::{BigUint, RandBigInt};
 use rand;
@@ -69,9 +67,17 @@ impl DH {
         }
     }
 
-    pub fn generate_private_key(&mut self) -> BigUint {
+    pub fn generate_private_key(&mut self, is_server: bool) -> BigUint {
+        let q = (&self.prime_num - &BigUint::from(1u8)) / &BigUint::from(2u8);
         let mut rng = rand::thread_rng();
-        self.private_key = rng.gen_biguint((self.exp_size * 8) - 2u64).shl(1);
+        self.private_key = rng.gen_biguint_range(
+            &if is_server {
+                1u8.into()
+            } else {
+                2u8.into()
+            },
+            &q,
+        );
         self.private_key.clone()
     }
 
@@ -85,7 +91,21 @@ impl DH {
         self.shared_secret.clone()
     }
 
+    pub fn validate_shared_secret(&self, shared_secret: &BigUint) -> bool {
+        let one = BigUint::from(1u8);
+        let prime_minus_one = &self.prime_num - &one;
+
+        shared_secret > &one && shared_secret < &prime_minus_one
+    }
+
     pub fn decode_public_key(buffer: &[u8]) -> BigUint {
         BigUint::from_bytes_be(buffer)
+    }
+
+    pub fn validate_public_key(&self, public_key: &BigUint) -> bool {
+        let one = BigUint::from(1u8);
+        let prime_minus_one = &self.prime_num - &one;
+
+        public_key > &one && public_key < &prime_minus_one
     }
 }
