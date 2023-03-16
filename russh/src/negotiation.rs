@@ -82,7 +82,7 @@ const HMAC_ORDER: &[mac::Name] = &[
 impl Preferred {
     #[cfg(feature = "openssl")]
     pub const DEFAULT: Preferred = Preferred {
-        kex: KEX_ORDER,
+        kex: &[kex::CURVE25519, kex::DH_G14_SHA256],
         key: &[key::ED25519, key::RSA_SHA2_256, key::RSA_SHA2_512],
         cipher: CIPHER_ORDER,
         mac: HMAC_ORDER,
