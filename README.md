@@ -5,12 +5,15 @@
 
 Low-level Tokio SSH2 client and server implementation.
 
-This is a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Étienne Meunier:
+This is a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Étienne Meunier.
 
 > ✨ = added in Russh
 
 * More safety guarantees ✨
+* `async_trait` support ✨
+* `direct-tcpip` (local port forwarding)
 * `forward-tcpip` (remote port forwarding) ✨
+* `direct-streamlocal` (local UNIX socket forwarding, client only) ✨
 * Ciphers:
   * `chacha20-poly1305@openssh.com`
   * `aes256-gcm@openssh.com` ✨
@@ -37,6 +40,7 @@ This is a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Éti
 * Dependency updates
 * OpenSSH keepalive request handling ✨
 * OpenSSH agent forwarding channels ✨
+* OpenSSH `server-sig-algs` extension ✨
 
 ## Safety
 
