@@ -130,6 +130,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "Holzhaus",
+      "name": "Jan Holthuis",
+      "avatar_url": "https://avatars.githubusercontent.com/u/1834516?v=4",
+      "profile": "http://homepage.ruhr-uni-bochum.de/Jan.Holthuis/",
+      "contributions": [
+        "security"
+      ]
     }
   ],
   "contributorsPerLine": 7,
