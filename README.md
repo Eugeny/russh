@@ -9,7 +9,7 @@ This is a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Éti
 
 > ✨ = added in Russh
 
-* More safety guarantees ✨
+* [More panic safety](https://github.com/warp-tech/russh#safety) ✨
 * `async_trait` support ✨
 * `direct-tcpip` (local port forwarding)
 * `forward-tcpip` (remote port forwarding) ✨
