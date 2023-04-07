@@ -1,13 +1,14 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use russh_keys::encoding::Encoding;
+use russh_keys::encoding::{Encoding, Reader};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc::{unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender};
 use log::debug;
 
 use super::*;
 use crate::channels::{Channel, ChannelMsg};
+use crate::kex::EXTENSION_SUPPORT_AS_CLIENT;
 use crate::msg;
 
 /// A connected server session. This type is unique to a client.
@@ -874,6 +875,24 @@ impl Session {
 
     pub(crate) fn maybe_send_ext_info(&mut self) {
         if let Some(ref mut enc) = self.common.encrypted {
+            // If client sent a ext-info-c message in the kex list, it supports RFC 8308 extension negotiation.
+            let mut key_extension_client = false;
+            if let Some(e) = &enc.exchange {
+                let mut r = e.client_kex_init.as_ref().reader(17);
+                if let Ok(kex_string) = r.read_string() {
+                    use super::negotiation::Select;
+                    key_extension_client = super::negotiation::Server::select(
+                        &[EXTENSION_SUPPORT_AS_CLIENT],
+                        kex_string,
+                    ).is_some();
+                }
+            }
+
+            if !key_extension_client {
+                debug!("RFC 8308 Extension Negotiation not supported by client");
+                return;
+            }
+
             push_packet!(enc.write, {
                 enc.write.push(msg::EXT_INFO);
                 enc.write.push_u32_be(1);
