@@ -1,32 +1,22 @@
-extern crate env_logger;
-extern crate futures;
-extern crate russh;
-extern crate russh_keys;
-extern crate tokio;
-use std::net::SocketAddr;
-use std::str::FromStr;
 use std::sync::Arc;
 
 use anyhow::Context;
+use async_trait::async_trait;
 use russh::*;
 use russh_keys::*;
 
 struct Client {}
 
+#[async_trait]
 impl client::Handler for Client {
     type Error = russh::Error;
-    type FutureUnit = futures::future::Ready<Result<(Self, client::Session), Self::Error>>;
-    type FutureBool = futures::future::Ready<Result<(Self, bool), Self::Error>>;
 
-    fn finished_bool(self, b: bool) -> Self::FutureBool {
-        futures::future::ready(Ok((self, b)))
-    }
-    fn finished(self, session: client::Session) -> Self::FutureUnit {
-        futures::future::ready(Ok((self, session)))
-    }
-    fn check_server_key(self, server_public_key: &key::PublicKey) -> Self::FutureBool {
+    async fn check_server_key(
+        self,
+        server_public_key: &key::PublicKey,
+    ) -> Result<(Self, bool), Self::Error> {
         println!("check_server_key: {:?}", server_public_key);
-        self.finished_bool(true)
+        Ok((self, true))
     }
 }
 
@@ -41,10 +31,9 @@ async fn main() {
         .await
         .unwrap();
     let mut identities = agent.request_identities().await.unwrap();
-    let mut session =
-        russh::client::connect(config, SocketAddr::from_str("127.0.0.1:2200").unwrap(), sh)
-            .await
-            .unwrap();
+    let mut session = russh::client::connect(config, ("127.0.0.1", 2200), sh)
+        .await
+        .unwrap();
     let (_, auth_res) = session
         .authenticate_future("pe", identities.pop().unwrap(), agent)
         .await;

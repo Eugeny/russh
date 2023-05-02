@@ -18,6 +18,7 @@ use std::fmt::{Debug, Formatter};
 use std::num::Wrapping;
 
 use byteorder::{BigEndian, ByteOrder};
+use log::{debug, trace};
 use russh_cryptovec::CryptoVec;
 use russh_keys::encoding::Encoding;
 
@@ -151,6 +152,7 @@ impl Encrypted {
 
     pub fn close(&mut self, channel: ChannelId) {
         self.byte(channel, msg::CHANNEL_CLOSE);
+        self.channels.remove(&channel);
     }
 
     pub fn sender_window_size(&self, channel: ChannelId) -> usize {
@@ -281,6 +283,8 @@ impl Encrypted {
             if buf_len < buf0.len() {
                 channel.pending_data.push_back((buf0, None, buf_len))
             }
+        } else {
+            debug!("{:?} not saved for this session", channel);
         }
     }
 

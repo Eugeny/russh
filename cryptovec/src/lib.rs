@@ -18,8 +18,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-extern crate libc;
-extern crate winapi;
 use std::ops::{Deref, DerefMut, Index, IndexMut, Range, RangeFrom, RangeFull, RangeTo};
 
 use libc::c_void;

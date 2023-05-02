@@ -18,6 +18,8 @@ use std::sync::Arc;
 use russh_cryptovec::CryptoVec;
 use russh_keys::{encoding, key};
 use tokio::io::{AsyncRead, AsyncWrite};
+use bitflags::bitflags;
+use thiserror::Error;
 
 bitflags! {
     /// Set of authentication methods, represented by bit flags.
@@ -98,6 +100,7 @@ pub enum Method {
     Password { password: String },
     PublicKey { key: Arc<key::KeyPair> },
     FuturePublicKey { key: key::PublicKey },
+    KeyboardInteractive { submethods: String },
     // Hostbased,
 }
 
@@ -148,3 +151,4 @@ pub enum CurrentRequest {
         submethods: String,
     },
 }
+

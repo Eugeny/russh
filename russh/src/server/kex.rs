@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 
 use russh_keys::encoding::{Encoding, Reader};
+use log::debug;
 
 use super::*;
 use crate::cipher::SealingKey;
@@ -59,7 +60,7 @@ impl KexInit {
         write_buffer: &mut SSHBuffer,
     ) -> Result<(), Error> {
         self.exchange.server_kex_init.clear();
-        negotiation::write_kex(&config.preferred, &mut self.exchange.server_kex_init)?;
+        negotiation::write_kex(&config.preferred, &mut self.exchange.server_kex_init, true)?;
         debug!("server kex init: {:?}", &self.exchange.server_kex_init[..]);
         self.sent = true;
         cipher.write(&self.exchange.server_kex_init, write_buffer);

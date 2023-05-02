@@ -2,6 +2,7 @@ use byteorder::{BigEndian, ByteOrder};
 use russh_cryptovec::CryptoVec;
 use tokio;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use log::{debug, info};
 
 use super::{msg, Constraint};
 use crate::encoding::{Encoding, Reader};
@@ -405,6 +406,10 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AgentClient<S> {
                     let sig = resp.read_string()?;
                     use crate::signature::Signature;
                     match typ {
+                        b"ssh-rsa" => Ok(Signature::RSA {
+                            bytes: sig.to_vec(),
+                            hash: SignatureHash::SHA1,
+                        }),
                         b"rsa-sha2-256" => Ok(Signature::RSA {
                             bytes: sig.to_vec(),
                             hash: SignatureHash::SHA2_256,

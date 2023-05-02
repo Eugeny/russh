@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
+use serde::{Serialize, Deserialize};
 #[cfg(feature = "openssl")]
 use openssl::pkey::{Private, Public};
 use russh_cryptovec::CryptoVec;
@@ -59,7 +60,7 @@ pub trait Verify {
     fn verify_server_auth(&self, buffer: &[u8], sig: &[u8]) -> bool;
 }
 
-/// The hash function used for hashing buffers.
+/// The hash function used for signing with RSA keys.
 #[derive(Eq, PartialEq, Clone, Copy, Debug, Hash, Serialize, Deserialize)]
 #[allow(non_camel_case_types)]
 pub enum SignatureHash {
@@ -102,7 +103,7 @@ impl SignatureHash {
 }
 
 /// Public key
-#[derive(Eq, PartialEq, Debug, Clone)]
+#[derive(Eq, Debug, Clone)]
 pub enum PublicKey {
     #[doc(hidden)]
     #[cfg(feature = "rs-crypto")]
@@ -113,6 +114,17 @@ pub enum PublicKey {
         key: OpenSSLPKey,
         hash: SignatureHash,
     },
+}
+
+impl PartialEq for PublicKey {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            #[cfg(feature = "openssl")]
+            (Self::RSA { key: a, .. }, Self::RSA { key: b, .. }) => a == b,
+            #[cfg(feature = "rs-crypto")]
+            (Self::Ed25519(a), Self::Ed25519(b)) => a == b,
+        }
+    }
 }
 
 /// A public key from OpenSSL.
@@ -157,6 +169,7 @@ impl PublicKey {
             b"ssh-rsa" | b"rsa-sha2-256" | b"rsa-sha2-512" if cfg!(feature = "openssl") => {
                 #[cfg(feature = "openssl")]
                 {
+                    use log::debug;
                     let mut p = pubkey.reader(0);
                     let key_algo = p.read_string()?;
                     debug!("{:?}", std::str::from_utf8(key_algo));
@@ -443,6 +456,20 @@ impl KeyPair {
             }
         }
         Ok(())
+    }
+
+    /// Create a copy of an RSA key with a specified hash algorithm.
+    #[cfg(feature = "openssl")]
+    pub fn with_signature_hash(&self, hash: SignatureHash) -> Option<Self> {
+        match self {
+            #[cfg(feature = "rs-crypto")]
+            KeyPair::Ed25519(_) => None,
+            #[cfg(feature = "openssl")]
+            KeyPair::RSA { key, .. } => Some(KeyPair::RSA {
+                key: key.clone(),
+                hash,
+            }),
+        }
     }
 }
 

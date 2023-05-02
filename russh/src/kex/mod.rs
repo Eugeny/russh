@@ -95,6 +95,10 @@ pub const DH_G14_SHA1: Name = Name("diffie-hellman-group14-sha1");
 pub const DH_G14_SHA256: Name = Name("diffie-hellman-group14-sha256");
 /// `none`
 pub const NONE: Name = Name("none");
+/// `ext-info-c`
+pub const EXTENSION_SUPPORT_AS_CLIENT: Name = Name("ext-info-c");
+/// `ext-info-s`
+pub const EXTENSION_SUPPORT_AS_SERVER: Name = Name("ext-info-s");
 
 #[cfg(feature = "rs-crypto")]
 const _CURVE25519: Curve25519KexType = Curve25519KexType {};

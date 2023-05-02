@@ -30,7 +30,7 @@
 //!
 //! const PKCS8_ENCRYPTED: &'static str = "-----BEGIN ENCRYPTED PRIVATE KEY-----\nMIIFLTBXBgkqhkiG9w0BBQ0wSjApBgkqhkiG9w0BBQwwHAQITo1O0b8YrS0CAggA\nMAwGCCqGSIb3DQIJBQAwHQYJYIZIAWUDBAEqBBBtLH4T1KOfo1GGr7salhR8BIIE\n0KN9ednYwcTGSX3hg7fROhTw7JAJ1D4IdT1fsoGeNu2BFuIgF3cthGHe6S5zceI2\nMpkfwvHbsOlDFWMUIAb/VY8/iYxhNmd5J6NStMYRC9NC0fVzOmrJqE1wITqxtORx\nIkzqkgFUbaaiFFQPepsh5CvQfAgGEWV329SsTOKIgyTj97RxfZIKA+TR5J5g2dJY\nj346SvHhSxJ4Jc0asccgMb0HGh9UUDzDSql0OIdbnZW5KzYJPOx+aDqnpbz7UzY/\nP8N0w/pEiGmkdkNyvGsdttcjFpOWlLnLDhtLx8dDwi/sbEYHtpMzsYC9jPn3hnds\nTcotqjoSZ31O6rJD4z18FOQb4iZs3MohwEdDd9XKblTfYKM62aQJWH6cVQcg+1C7\njX9l2wmyK26Tkkl5Qg/qSfzrCveke5muZgZkFwL0GCcgPJ8RixSB4GOdSMa/hAMU\nkvFAtoV2GluIgmSe1pG5cNMhurxM1dPPf4WnD+9hkFFSsMkTAuxDZIdDk3FA8zof\nYhv0ZTfvT6V+vgH3Hv7Tqcxomy5Qr3tj5vvAqqDU6k7fC4FvkxDh2mG5ovWvc4Nb\nXv8sed0LGpYitIOMldu6650LoZAqJVv5N4cAA2Edqldf7S2Iz1QnA/usXkQd4tLa\nZ80+sDNv9eCVkfaJ6kOVLk/ghLdXWJYRLenfQZtVUXrPkaPpNXgD0dlaTN8KuvML\nUw/UGa+4ybnPsdVflI0YkJKbxouhp4iB4S5ACAwqHVmsH5GRnujf10qLoS7RjDAl\no/wSHxdT9BECp7TT8ID65u2mlJvH13iJbktPczGXt07nBiBse6OxsClfBtHkRLzE\nQF6UMEXsJnIIMRfrZQnduC8FUOkfPOSXc8r9SeZ3GhfbV/DmWZvFPCpjzKYPsM5+\nN8Bw/iZ7NIH4xzNOgwdp5BzjH9hRtCt4sUKVVlWfEDtTnkHNOusQGKu7HkBF87YZ\nRN/Nd3gvHob668JOcGchcOzcsqsgzhGMD8+G9T9oZkFCYtwUXQU2XjMN0R4VtQgZ\nrAxWyQau9xXMGyDC67gQ5xSn+oqMK0HmoW8jh2LG/cUowHFAkUxdzGadnjGhMOI2\nzwNJPIjF93eDF/+zW5E1l0iGdiYyHkJbWSvcCuvTwma9FIDB45vOh5mSR+YjjSM5\nnq3THSWNi7Cxqz12Q1+i9pz92T2myYKBBtu1WDh+2KOn5DUkfEadY5SsIu/Rb7ub\n5FBihk2RN3y/iZk+36I69HgGg1OElYjps3D+A9AjVby10zxxLAz8U28YqJZm4wA/\nT0HLxBiVw+rsHmLP79KvsT2+b4Diqih+VTXouPWC/W+lELYKSlqnJCat77IxgM9e\nYIhzD47OgWl33GJ/R10+RDoDvY4koYE+V5NLglEhbwjloo9Ryv5ywBJNS7mfXMsK\n/uf+l2AscZTZ1mhtL38efTQCIRjyFHc3V31DI0UdETADi+/Omz+bXu0D5VvX+7c6\nb1iVZKpJw8KUjzeUV8yOZhvGu3LrQbhkTPVYL555iP1KN0Eya88ra+FUKMwLgjYr\nJkUx4iad4dTsGPodwEP/Y9oX/Qk3ZQr+REZ8lg6IBoKKqqrQeBJ9gkm1jfKE6Xkc\nCog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux\n-----END ENCRYPTED PRIVATE KEY-----\n";
 //!
-//! #[cfg(feature = "openssl")]
+//! #[cfg(all(unix, feature = "openssl"))]
 //! fn main() {
 //!    env_logger::try_init().unwrap_or(());
 //!    let dir = tempdir::TempDir::new("russh").unwrap();
@@ -58,21 +58,10 @@
 //!    }).unwrap()
 //! }
 //!
-//! #[cfg(not(feature = "openssl"))]
+//! #[cfg(any(not(unix), not(feature = "openssl")))]
 //! fn main() {}
 //!
 //! ```
-
-#![recursion_limit = "128"]
-#[macro_use]
-extern crate serde_derive;
-#[macro_use]
-extern crate thiserror;
-#[macro_use]
-extern crate log;
-
-#[cfg(test)]
-extern crate env_logger;
 
 use std::borrow::Cow;
 use std::fs::{File, OpenOptions};
@@ -81,6 +70,8 @@ use std::path::Path;
 
 use byteorder::{BigEndian, WriteBytesExt};
 use data_encoding::BASE64_MIME;
+use thiserror::Error;
+use log::{debug, info};
 
 pub mod encoding;
 pub mod key;
@@ -440,9 +431,6 @@ pub fn check_known_hosts(host: &str, port: u16, pubkey: &key::PublicKey) -> Resu
 
 #[cfg(test)]
 mod test {
-    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
-
-    extern crate tempdir;
     use std::fs::File;
     use std::io::Write;
 
@@ -459,6 +447,16 @@ KpggT+wCRxpSvtqqpVrQrKN1/A22AAAAkOHDLnYZvYS6H9Q3S3Nk4ri3R2jAZlQlBbUos5
 FkHpYgNw65KCWCTXtP7ye2czMC3zjn2r98pJLobsLYQgRiHIv/CUdAdsqbvMPECB+wl/UQ
 e+JpiSq66Z6GIt0801skPh20jxOO3F52SoX1IeO5D5PXfZrfSZlw6S8c7bwyp2FHxDewRx
 7/wNsnDM0T7nLv/Q==
+-----END OPENSSH PRIVATE KEY-----";
+
+    // password is 'test'
+    const ED25519_AESCTR_KEY: &str = "-----BEGIN OPENSSH PRIVATE KEY-----
+b3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jdHIAAAAGYmNyeXB0AAAAGAAAABD1phlku5
+A2G7Q9iP+DcOc9AAAAEAAAAAEAAAAzAAAAC3NzaC1lZDI1NTE5AAAAIHeLC1lWiCYrXsf/
+85O/pkbUFZ6OGIt49PX3nw8iRoXEAAAAkKRF0st5ZI7xxo9g6A4m4l6NarkQre3mycqNXQ
+dP3jryYgvsCIBAA5jMWSjrmnOTXhidqcOy4xYCrAttzSnZ/cUadfBenL+DQq6neffw7j8r
+0tbCxVGp6yCQlKrgSZf6c0Hy7dNEIU2bJFGxLe6/kWChcUAt/5Ll5rI7DVQPJdLgehLzvv
+sJWR7W+cGvJ/vLsw==
 -----END OPENSSH PRIVATE KEY-----";
 
     #[cfg(feature = "openssl")]
@@ -493,15 +491,19 @@ QR+u0AypRPmzHnOPAAAAEXJvb3RAMTQwOTExNTQ5NDBkAQ==
     #[test]
     #[cfg(feature = "rs-crypto")]
     fn test_decode_ed25519_secret_key() {
-        extern crate env_logger;
         env_logger::try_init().unwrap_or(());
         decode_secret_key(ED25519_KEY, Some("blabla")).unwrap();
     }
 
     #[test]
+    fn test_decode_ed25519_aesctr_secret_key() {
+        env_logger::try_init().unwrap_or(());
+        decode_secret_key(ED25519_AESCTR_KEY, Some("test")).unwrap();
+    }
+
+    #[test]
     #[cfg(feature = "openssl")]
     fn test_decode_rsa_secret_key() {
-        extern crate env_logger;
         env_logger::try_init().unwrap_or(());
         decode_secret_key(RSA_KEY, None).unwrap();
     }
@@ -830,6 +832,7 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
         decode_secret_key(PKCS8_ENCRYPTED, Some("blabla")).unwrap();
     }
 
+    #[cfg(unix)]
     fn test_client_agent(key: key::KeyPair) {
         env_logger::try_init().unwrap_or(());
         use std::process::{Command, Stdio};
@@ -873,6 +876,7 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
 
     #[test]
     #[cfg(feature = "rs-crypto")]
+    #[cfg(unix)]
     fn test_client_agent_ed25519() {
         let key = decode_secret_key(ED25519_KEY, Some("blabla")).unwrap();
         test_client_agent(key)
@@ -893,6 +897,7 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
     }
 
     #[test]
+    #[cfg(unix)]
     #[cfg(feature = "openssl")]
     fn test_agent() {
         env_logger::try_init().unwrap_or(());
@@ -950,9 +955,12 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
         .unwrap()
     }
 
+    #[cfg(unix)]
     struct Incoming<'a> {
         listener: &'a mut tokio::net::UnixListener,
     }
+
+    #[cfg(unix)]
     impl futures::stream::Stream for Incoming<'_> {
         type Item = Result<tokio::net::UnixStream, std::io::Error>;
 

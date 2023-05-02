@@ -13,12 +13,15 @@
 // limitations under the License.
 //
 use std::cell::RefCell;
+use std::convert::TryInto;
 
 use russh_cryptovec::CryptoVec;
 use russh_keys::encoding::{Encoding, Reader};
+use russh_keys::key::parse_public_key;
 use tokio::sync::mpsc::unbounded_channel;
+use log::{debug, error, info, trace, warn};
 
-use crate::client::{Handler, Msg, Reply, Session};
+use crate::client::{Handler, Msg, Prompt, Reply, Session};
 use crate::key::PubKey;
 use crate::negotiation::{Named, Select};
 use crate::parsing::{ChannelOpenConfirmation, ChannelType, OpenChannelMessage};
@@ -162,11 +165,26 @@ impl Session {
                         if r.read_string().map_err(crate::Error::from)? == b"ssh-userauth" {
                             *accepted = true;
                             if let Some(ref meth) = self.common.auth_method {
-                                let auth_request = auth::AuthRequest {
-                                    methods: auth::MethodSet::all(),
-                                    partial_success: false,
-                                    current: None,
-                                    rejection_count: 0,
+                                let auth_request = match meth {
+                                    crate::auth::Method::KeyboardInteractive { submethods } => {
+                                        auth::AuthRequest {
+                                            methods: auth::MethodSet::all(),
+                                            partial_success: false,
+                                            current: Some(
+                                                auth::CurrentRequest::KeyboardInteractive {
+                                                    submethods: submethods.to_string(),
+                                                },
+                                            ),
+                                            rejection_count: 0,
+                                        }
+                                    }
+                                    _ => auth::AuthRequest {
+                                        methods: auth::MethodSet::all(),
+                                        partial_success: false,
+                                        current: None,
+                                        rejection_count: 0,
+                                    },
+
                                 };
                                 let len = enc.write.len();
                                 #[allow(clippy::indexing_slicing)] // length checked
@@ -178,6 +196,8 @@ impl Session {
                                 debug!("no auth method")
                             }
                         }
+                    } else if buf.first() == Some(&msg::EXT_INFO) {
+                        return self.handle_ext_info(client, buf);
                     } else {
                         debug!("unknown message: {:?}", buf);
                         return Err(crate::Error::Inconsistent.into());
@@ -226,15 +246,70 @@ impl Session {
                         if no_more_methods {
                             return Err(crate::Error::NoAuthMethod.into());
                         }
-                    } else if buf.first() == Some(&msg::USERAUTH_PK_OK) {
-                        debug!("userauth_pk_ok");
+
+                    } else if buf.first() == Some(&msg::USERAUTH_INFO_REQUEST_OR_USERAUTH_PK_OK) {
                         if let Some(auth::CurrentRequest::PublicKey {
                             ref mut sent_pk_ok, ..
                         }) = auth_request.current
                         {
+                            debug!("userauth_pk_ok");
                             *sent_pk_ok = true;
-                        }
+                        } else if let Some(auth::CurrentRequest::KeyboardInteractive { .. }) = 
+                            auth_request.current
+                        {
+                            debug!("keyboard_interactive");
+                            let mut r = buf.reader(1);
 
+                            // read fields
+                            let name = String::from_utf8_lossy(
+                                r.read_string().map_err(crate::Error::from)?,
+                            )
+                            .to_string();
+
+                            let instructions = String::from_utf8_lossy(
+                                r.read_string().map_err(crate::Error::from)?,
+                            )
+                            .to_string();
+
+                            let _lang = r.read_string().map_err(crate::Error::from)?;
+                            let n_prompts = r.read_u32().map_err(crate::Error::from)?;
+
+                            // read prompts
+                            let mut prompts = Vec::with_capacity(n_prompts.try_into().unwrap_or(0));
+                            for _i in 0..n_prompts {
+                                let prompt = String::from_utf8_lossy(
+                                    r.read_string().map_err(crate::Error::from)?,
+                                );
+
+                                let echo = r.read_byte().map_err(crate::Error::from)? != 0;
+                                prompts.push(Prompt {
+                                    prompt: prompt.to_string(),
+                                    echo,
+                                });
+                            }
+
+                            // send challenges to caller
+                            self.sender
+                                .send(Reply::AuthInfoRequest {
+                                    name,
+                                    instructions,
+                                    prompts,
+                                })
+                                .map_err(|_| crate::Error::SendError)?;
+
+                            // wait for response from handler
+                            let responses = loop {
+                                match self.receiver.recv().await {
+                                    Some(Msg::AuthInfoResponse { responses }) => break responses,
+                                    _ => {}
+                                }
+                            };
+                            // write responses
+                            enc.client_send_auth_response(&responses)?;
+                            return Ok((client, self));
+                        } else {}
+
+                        // continue with userauth_pk_ok
                         match self.common.auth_method.take() {
                             Some(auth_method @ auth::Method::PublicKey { .. }) => {
                                 self.common.buffer.clear();
@@ -275,6 +350,8 @@ impl Session {
                             }
                             _ => {}
                         }
+                    } else if buf.first() == Some(&msg::EXT_INFO) {
+                        return self.handle_ext_info(client, buf);
                     } else {
                         debug!("unknown message: {:?}", buf);
                         return Err(crate::Error::Inconsistent.into());
@@ -289,6 +366,11 @@ impl Session {
         } else {
             Ok((client, self))
         }
+    }
+
+    fn handle_ext_info<H: Handler>(self, client: H, buf: &[u8]) -> Result<(H, Self), H::Error> {
+        debug!("Received EXT_INFO: {:?}", buf);
+        Ok((client, self))
     }
 
     async fn client_read_authenticated<H: Handler>(
@@ -328,11 +410,9 @@ impl Session {
                 let mut r = buf.reader(1);
                 let channel_num = ChannelId(r.read_u32().map_err(crate::Error::from)?);
                 if let Some(ref mut enc) = self.common.encrypted {
-                    if enc.channels.remove(&channel_num).is_some() {
-                        // The CHANNEL_CLOSE message must be sent to the server at this point or the session
-                        // will not be released.
-                        enc.byte(channel_num, msg::CHANNEL_CLOSE);
-                    }
+                    // The CHANNEL_CLOSE message must be sent to the server at this point or the session
+                    // will not be released.
+                    enc.close(channel_num);
                 }
                 client.channel_close(channel_num, self).await
             }
@@ -511,6 +591,34 @@ impl Session {
                         } else {
                             warn!("Received keepalive without reply request!");
                         }
+                    } else if req == b"hostkeys-00@openssh.com" {
+                        let mut keys = vec![];
+                        loop {
+                            match r.read_string() {
+                                Ok(key) => {
+                                    let key2 = <&[u8]>::clone(&key);
+                                    #[cfg(not(feature = "openssl"))]
+                                    let key = parse_public_key(key).map_err(crate::Error::from);
+                                    #[cfg(feature = "openssl")]
+                                    let key =
+                                        parse_public_key(key, None).map_err(crate::Error::from);
+                                    match key {
+                                        Ok(key) => keys.push(key),
+                                        Err(err) => {
+                                            debug!(
+                                                "failed to parse announced host key {:?}: {:?}",
+                                                key2, err
+                                            )
+                                        }
+                                    }
+                                }
+                                Err(russh_keys::Error::IndexOutOfBounds) => break,
+                                x => {
+                                    x.map_err(crate::Error::from)?;
+                                }
+                            }
+                        }
+                        return client.openssh_ext_host_keys_announced(keys, self).await;
                     } else {
                         warn!(
                             "Unhandled global request: {:?} {:?}",
@@ -642,7 +750,7 @@ impl Session {
         let (sender, receiver) = unbounded_channel();
         self.channels.insert(id, sender);
         Channel {
-            id: ChannelId(msg.recipient_channel),
+            id,
             sender: self.inbound_channel_sender.clone(),
             receiver,
             max_packet_size: msg.recipient_maximum_packet_size,
@@ -729,6 +837,15 @@ impl Encrypted {
                     key.push_to(&mut self.write);
                     true
                 }
+                auth::Method::KeyboardInteractive { ref submethods } => {
+                    debug!("Keyboard Iinteractive");
+                    self.write.extend_ssh_string(user.as_bytes());
+                    self.write.extend_ssh_string(b"ssh-connection");
+                    self.write.extend_ssh_string(b"keyboard-interactive");
+                    self.write.extend_ssh_string(b""); // lang tag is deprecated. Should be empty
+                    self.write.extend_ssh_string(submethods.as_bytes());
+                    true
+                }
             }
         })
     }
@@ -771,6 +888,22 @@ impl Encrypted {
             }
             _ => {}
         }
+        Ok(())
+    }
+
+    fn client_send_auth_response(
+        &mut self,
+        responses: &[String]
+    ) -> Result<(), crate::Error> {
+        push_packet!(self.write, {
+            self.write.push(msg::USERAUTH_INFO_RESPONSE);
+            self.write
+                .push_u32_be(responses.len().try_into().unwrap_or(0)); // number of responses
+
+            for r in responses {
+                self.write.extend_ssh_string(r.as_bytes()); // write the reponses
+            }
+        });
         Ok(())
     }
 }

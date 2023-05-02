@@ -3,6 +3,7 @@ use std::pin::Pin;
 use futures::task::*;
 use russh_cryptovec::CryptoVec;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, ReadBuf};
+use log::debug;
 
 use crate::Error;
 

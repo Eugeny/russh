@@ -25,11 +25,19 @@ jobs:
     - name: Build (all features enabled)
       run: cargo build --verbose --all-features
 
+    - name: Check semver compatibility (russh)
+      uses: obi1kenobi/cargo-semver-checks-action@v1
+      with:
+        crate-name: russh
+
   Clippy:
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v2
+
+    - name: Install Clippy
+      run: rustup component add clippy
 
     - name: Clippy (no features enabled)
       run: cargo clippy -- -D warnings

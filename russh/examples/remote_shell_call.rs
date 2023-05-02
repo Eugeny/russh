@@ -1,14 +1,14 @@
 use std::io::Write;
-use std::net::SocketAddr;
 use std::path::Path;
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
+use async_trait::async_trait;
 use log::info;
 use russh::*;
 use russh_keys::*;
+use tokio::net::ToSocketAddrs;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -28,7 +28,7 @@ async fn main() -> Result<()> {
     info!("Connecting to {host}");
     info!("Key path: {key}");
 
-    let mut ssh = Session::connect(key, "root", SocketAddr::from_str(host).unwrap()).await?;
+    let mut ssh = Session::connect(key, "root", host).await?;
     let r = ssh.call("whoami").await?;
     assert!(r.success());
     println!("Result: {}", r.output());
@@ -38,19 +38,15 @@ async fn main() -> Result<()> {
 
 struct Client {}
 
+#[async_trait]
 impl client::Handler for Client {
     type Error = russh::Error;
-    type FutureUnit = futures::future::Ready<Result<(Self, client::Session), Self::Error>>;
-    type FutureBool = futures::future::Ready<Result<(Self, bool), Self::Error>>;
 
-    fn finished_bool(self, b: bool) -> Self::FutureBool {
-        futures::future::ready(Ok((self, b)))
-    }
-    fn finished(self, session: client::Session) -> Self::FutureUnit {
-        futures::future::ready(Ok((self, session)))
-    }
-    fn check_server_key(self, _server_public_key: &key::PublicKey) -> Self::FutureBool {
-        self.finished_bool(true)
+    async fn check_server_key(
+        self,
+        _server_public_key: &key::PublicKey,
+    ) -> Result<(Self, bool), Self::Error> {
+        Ok((self, true))
     }
 }
 
@@ -59,10 +55,10 @@ pub struct Session {
 }
 
 impl Session {
-    async fn connect<P: AsRef<Path>>(
+    async fn connect<P: AsRef<Path>, A: ToSocketAddrs>(
         key_path: P,
         user: impl Into<String>,
-        addr: SocketAddr,
+        addrs: A,
     ) -> Result<Self> {
         let key_pair = load_secret_key(key_path, None)?;
         let config = client::Config {
@@ -71,7 +67,7 @@ impl Session {
         };
         let config = Arc::new(config);
         let sh = Client {};
-        let mut session = client::connect(config, addr, sh).await?;
+        let mut session = client::connect(config, addrs, sh).await?;
         let _auth_res = session
             .authenticate_publickey(user, Arc::new(key_pair))
             .await?;

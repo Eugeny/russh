@@ -15,6 +15,7 @@
 use std::str::from_utf8;
 
 use rand::RngCore;
+use log::debug;
 use russh_cryptovec::CryptoVec;
 use russh_keys::encoding::{Encoding, Reader};
 use russh_keys::key;
@@ -57,6 +58,8 @@ const KEX_ORDER: &[kex::Name] = &[
     kex::DH_G14_SHA256,
     kex::DH_G14_SHA1,
     kex::DH_G1_SHA1,
+    kex::EXTENSION_SUPPORT_AS_CLIENT,
+    kex::EXTENSION_SUPPORT_AS_SERVER,
 ];
 
 const CIPHER_ORDER: &[cipher::Name] = &[
@@ -82,13 +85,17 @@ const HMAC_ORDER: &[mac::Name] = &[
 impl Preferred {
     #[cfg(feature = "openssl")]
     pub const DEFAULT: Preferred = Preferred {
-        kex: KEX_ORDER,
+        kex: &[
+            #[cfg(feature = "rs-crypto")]
+            kex::CURVE25519,
+            kex::DH_G14_SHA256,
+            ],
         key: &[
             #[cfg(feature = "rs-crypto")]
             key::ED25519,
             key::RSA_SHA2_256,
             key::RSA_SHA2_512,
-        ],
+            ],
         cipher: CIPHER_ORDER,
         mac: HMAC_ORDER,
         compression: &["none", "zlib", "zlib@openssh.com"],
@@ -297,7 +304,7 @@ impl Select for Client {
     }
 }
 
-pub fn write_kex(prefs: &Preferred, buf: &mut CryptoVec) -> Result<(), Error> {
+pub fn write_kex(prefs: &Preferred, buf: &mut CryptoVec, as_server: bool) -> Result<(), Error> {
     // buf.clear();
     buf.push(msg::KEXINIT);
 
@@ -305,7 +312,13 @@ pub fn write_kex(prefs: &Preferred, buf: &mut CryptoVec) -> Result<(), Error> {
     rand::thread_rng().fill_bytes(&mut cookie);
 
     buf.extend(&cookie); // cookie
-    buf.extend_list(prefs.kex.iter()); // kex algo
+    buf.extend_list(prefs.kex.iter().filter(|k| {
+        **k != if as_server {
+            crate::kex::EXTENSION_SUPPORT_AS_CLIENT
+        } else {
+            crate::kex::EXTENSION_SUPPORT_AS_SERVER
+        }
+    })); // kex algo
 
     buf.extend_list(prefs.key.iter());
 

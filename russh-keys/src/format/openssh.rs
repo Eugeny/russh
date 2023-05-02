@@ -117,7 +117,10 @@ fn decrypt_secret_key(
                 let rounds = kdfopts.read_u32()?;
                 #[allow(clippy::unwrap_used)] // parameters are static
                 #[allow(clippy::indexing_slicing)] // output length is static
-                bcrypt_pbkdf::bcrypt_pbkdf(password, salt, rounds, &mut key[..n]).unwrap();
+                match bcrypt_pbkdf::bcrypt_pbkdf(password, salt, rounds, &mut key[..n]) {
+                    Err(bcrypt_pbkdf::Error::InvalidParamLen) => return Err(Error::KeyIsEncrypted),
+                    e => e.unwrap()
+                }
             }
             _kdfname => {
                 return Err(Error::CouldNotReadKey);
@@ -132,7 +135,7 @@ fn decrypt_secret_key(
             use aes::cipher::block_padding::NoPadding;
             use aes::cipher::{BlockDecryptMut, KeyIvInit, StreamCipher};
             use aes::*;
-            use ctr::Ctr64LE;
+            use ctr::Ctr64BE;
 
             match ciphername {
                 b"aes128-cbc" => {
@@ -149,13 +152,13 @@ fn decrypt_secret_key(
                 }
                 b"aes128-ctr" => {
                     #[allow(clippy::unwrap_used)] // parameters are static
-                    let mut cipher = Ctr64LE::<Aes128>::new_from_slices(key, iv).unwrap();
+                    let mut cipher = Ctr64BE::<Aes128>::new_from_slices(key, iv).unwrap();
                     cipher.apply_keystream(&mut dec);
                     dec.truncate(secret_key.len())
                 }
                 b"aes256-ctr" => {
                     #[allow(clippy::unwrap_used)] // parameters are static
-                    let mut cipher = Ctr64LE::<Aes256>::new_from_slices(key, iv).unwrap();
+                    let mut cipher = Ctr64BE::<Aes256>::new_from_slices(key, iv).unwrap();
                     cipher.apply_keystream(&mut dec);
                     dec.truncate(secret_key.len())
                 }

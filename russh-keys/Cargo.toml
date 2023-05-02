@@ -25,7 +25,7 @@ keywords = ["ssh"]
 license = "Apache-2.0"
 name = "russh-keys"
 repository = "https://github.com/warp-tech/russh"
-version = "0.22.0"
+version = "0.37.1"
 
 [dependencies]
 aes = { version = "0.8", optional = true }
@@ -49,9 +49,8 @@ openssl = { version = "^0.10.40", optional = true }
 pbkdf2 = { version = "0.11", optional = true }
 rand = "0.7"
 rand_core = { version = "0.5", features = ["std"] }
-russh-cryptovec = { version = "0.7.0-beta.1", path = "../cryptovec" }
-serde = "1.0"
-serde_derive = "1.0"
+russh-cryptovec = { version = "0.7.0", path = "../cryptovec" }
+serde = { version = "1.0", features = ["derive"] }
 sha2 = "0.10"
 thiserror = "1.0"
 tokio = { version = "1.17.0", features = [

@@ -9,7 +9,7 @@ license = "Apache-2.0"
 name = "russh"
 readme = "../README.md"
 repository = "https://github.com/warp-tech/russh"
-version = "0.34.0"
+version = "0.37.1"
 rust-version = "1.60"
 
 [features]
@@ -29,6 +29,7 @@ rs-crypto = [
 [dependencies]
 aes = { version = "0.8", optional = true }
 aes-gcm = { version = "0.10", optional = true }
+async-trait = "0.1"
 bitflags = "1.2"
 byteorder = "1.3"
 chacha20 = { version = "0.9", optional = true }
@@ -44,8 +45,8 @@ log = "0.4"
 once_cell = "1.13"
 openssl = { version = "^0.10.40", optional = true }
 rand = "0.8"
-russh-cryptovec = { version = "0.7.0-beta.1", path = "../cryptovec" }
-russh-keys = { version = "0.22.0-beta.3", path = "../russh-keys", default-features = false }
+russh-cryptovec = { version = "0.7.0", path = "../cryptovec" }
+russh-keys = { version = "0.37.1", path = "../russh-keys", default-features = false }
 sha1 = "0.10"
 sha2 = "0.10"
 hex-literal = "0.3"
@@ -74,3 +75,4 @@ tokio = { version = "1.17.0", features = [
     "sync",
     "macros",
 ] }
+russh-sftp = "1.1"

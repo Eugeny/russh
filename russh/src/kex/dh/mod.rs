@@ -4,6 +4,7 @@ use std::marker::PhantomData;
 use byteorder::{BigEndian, ByteOrder};
 use digest::Digest;
 use groups::DH;
+use log::debug;
 use num_bigint::BigUint;
 use russh_cryptovec::CryptoVec;
 use russh_keys::encoding::Encoding;
@@ -104,16 +105,27 @@ impl<D: Digest> KexAlgorithm for DhGroupKex<D> {
 
         debug!("client_pubkey: {:?}", client_pubkey);
 
-        self.dh.generate_private_key();
-        let server_pubkey = biguint_to_mpint(&self.dh.generate_public_key());
+        self.dh.generate_private_key(true);
+        let server_pubkey = &self.dh.generate_public_key();
+        if !self.dh.validate_public_key(server_pubkey) {
+            return Err(crate::Error::Inconsistent);
+        }
+
+        let encoded_server_pubkey = biguint_to_mpint(server_pubkey);
 
         // fill exchange.
         exchange.server_ephemeral.clear();
-        exchange.server_ephemeral.extend(&server_pubkey);
+        exchange.server_ephemeral.extend(&encoded_server_pubkey);
 
-        let shared = self
-            .dh
-            .compute_shared_secret(DH::decode_public_key(client_pubkey));
+        let decoded_client_pubkey = DH::decode_public_key(client_pubkey);
+        if !self.dh.validate_public_key(&decoded_client_pubkey) {
+            return Err(crate::Error::Inconsistent);
+        }
+
+        let shared = self.dh.compute_shared_secret(decoded_client_pubkey);
+        if !self.dh.validate_shared_secret(&shared) {
+            return Err(crate::Error::Inconsistent);
+        }
         self.shared_secret = Some(biguint_to_mpint(&shared));
         Ok(())
     }
@@ -124,22 +136,35 @@ impl<D: Digest> KexAlgorithm for DhGroupKex<D> {
         client_ephemeral: &mut CryptoVec,
         buf: &mut CryptoVec,
     ) -> Result<(), crate::Error> {
-        self.dh.generate_private_key();
-        let client_pubkey = biguint_to_mpint(&self.dh.generate_public_key());
+        self.dh.generate_private_key(false);
+        let client_pubkey = &self.dh.generate_public_key();
+
+        if !self.dh.validate_public_key(client_pubkey) {
+            return Err(crate::Error::Inconsistent);
+        }
 
         // fill exchange.
+        let encoded_pubkey = biguint_to_mpint(client_pubkey);
         client_ephemeral.clear();
-        client_ephemeral.extend(&client_pubkey);
+        client_ephemeral.extend(&encoded_pubkey);
 
         buf.push(msg::KEX_ECDH_INIT);
-        buf.extend_ssh_string(&client_pubkey);
+        buf.extend_ssh_string(&encoded_pubkey);
 
         Ok(())
     }
 
     fn compute_shared_secret(&mut self, remote_pubkey_: &[u8]) -> Result<(), crate::Error> {
         let remote_pubkey = DH::decode_public_key(remote_pubkey_);
+
+        if !self.dh.validate_public_key(&remote_pubkey) {
+            return Err(crate::Error::Inconsistent);
+        }
+
         let shared = self.dh.compute_shared_secret(remote_pubkey);
+        if !self.dh.validate_shared_secret(&shared) {
+            return Err(crate::Error::Inconsistent);
+        }
         self.shared_secret = Some(biguint_to_mpint(&shared));
         Ok(())
     }
