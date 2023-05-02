@@ -116,7 +116,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
-use log::error;
+use log::{error, info};
 use async_trait::async_trait;
 use futures::future::Future;
 use russh_keys::key;
@@ -796,11 +796,12 @@ where
         .write_all(&write_buffer.buffer[..])
         .await
         .map_err(crate::Error::from)?;
-
+    info!("wrote id");
     // Reading SSH id and allocating a session.
     let mut stream = SshRead::new(stream);
     let (sender, receiver) = tokio::sync::mpsc::channel(config.event_buffer_size);
     let common = read_ssh_id(config, &mut stream).await?;
+    info!("read other id");
     let handle = server::session::Handle { sender };
     let session = Session {
         target_window_size: common.config.window_size,
@@ -814,6 +815,7 @@ where
 
     let join = tokio::spawn(session.run(stream, handler));
 
+    info!("session is running");
     Ok(RunningSession { handle, join })
 }
 

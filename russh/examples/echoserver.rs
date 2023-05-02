@@ -17,7 +17,7 @@ async fn main() {
         connection_timeout: Some(std::time::Duration::from_secs(3600)),
         auth_rejection_time: std::time::Duration::from_secs(3),
         auth_rejection_time_initial: Some(std::time::Duration::from_secs(0)),
-        keys: vec![russh_keys::key::KeyPair::generate_ed25519().unwrap()],
+        keys: vec![generate_keypair()],
         ..Default::default()
     };
     let config = Arc::new(config);
@@ -111,4 +111,14 @@ impl server::Handler for Server {
         });
         Ok((self, true, session))
     }
+}
+
+#[cfg(feature = "rs-crypto")]
+fn generate_keypair() -> russh_keys::key::KeyPair {
+    russh_keys::key::KeyPair::generate_ed25519().unwrap()
+}
+
+#[cfg(not(feature = "rs-crypto"))]
+fn generate_keypair() -> russh_keys::key::KeyPair {
+    russh_keys::key::KeyPair::generate_rsa(1024, russh_keys::key::SignatureHash::SHA2_512).unwrap()
 }

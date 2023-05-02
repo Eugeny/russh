@@ -123,6 +123,8 @@ impl PartialEq for PublicKey {
             (Self::RSA { key: a, .. }, Self::RSA { key: b, .. }) => a == b,
             #[cfg(feature = "rs-crypto")]
             (Self::Ed25519(a), Self::Ed25519(b)) => a == b,
+            #[allow(unreachable_patterns)]
+            _ => false,
         }
     }
 }

@@ -359,7 +359,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + 'stat
         let key = {
             let blob = r.read_string()?;
             let k = self.keys.0.read().or(Err(Error::AgentFailure))?;
-            if let Some(&(ref key, _, ref constraints)) = k.get(blob) {
+            if let Some((key, _, constraints)) = k.get(blob) {
                 if constraints.iter().any(|c| *c == Constraint::Confirm) {
                     needs_confirm = true;
                 }

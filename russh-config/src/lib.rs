@@ -94,18 +94,16 @@ pub fn parse_path<P: AsRef<Path>>(path: P, host: &str) -> Result<Config, Error> 
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum AddKeysToAgent {
     Yes,
     Confirm,
     Ask,
+    #[default]
     No,
 }
 
-impl Default for AddKeysToAgent {
-    fn default() -> Self {
-        AddKeysToAgent::No
-    }
-}
+
 
 pub fn parse(file: &str, host: &str) -> Result<Config, Error> {
     let mut config: Option<Config> = None;

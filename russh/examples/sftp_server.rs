@@ -90,18 +90,10 @@ impl russh::server::Handler for SshSession {
     }
 }
 
+#[derive(Default)]
 struct SftpSession {
     version: Option<u32>,
     root_dir_read_done: bool,
-}
-
-impl Default for SftpSession {
-    fn default() -> Self {
-        Self {
-            version: None,
-            root_dir_read_done: false,
-        }
-    }
 }
 
 #[async_trait]
@@ -184,7 +176,7 @@ async fn main() {
     let config = russh::server::Config {
         auth_rejection_time: Duration::from_secs(3),
         auth_rejection_time_initial: Some(Duration::from_secs(0)),
-        keys: vec![KeyPair::generate_ed25519().unwrap()],
+        keys: vec![generate_keypair()],
         connection_timeout: Some(Duration::from_secs(3600)),
         ..Default::default()
     };
@@ -204,4 +196,14 @@ async fn main() {
     )
     .await
     .unwrap();
+}
+
+#[cfg(feature = "rs-crypto")]
+fn generate_keypair() -> KeyPair {
+    KeyPair::generate_ed25519().unwrap()
+}
+
+#[cfg(not(feature = "rs-crypto"))]
+fn generate_keypair() -> KeyPair {
+    KeyPair::generate_rsa(1024, russh_keys::key::SignatureHash::SHA2_512).unwrap()
 }
