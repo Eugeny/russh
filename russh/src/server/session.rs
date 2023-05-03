@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use log::debug;
 use russh_keys::encoding::{Encoding, Reader};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc::{unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender};
-use log::debug;
 
 use super::*;
 use crate::channels::{Channel, ChannelMsg};
@@ -884,7 +884,8 @@ impl Session {
                     key_extension_client = super::negotiation::Server::select(
                         &[EXTENSION_SUPPORT_AS_CLIENT],
                         kex_string,
-                    ).is_some();
+                    )
+                    .is_some();
                 }
             }
 
@@ -897,12 +898,8 @@ impl Session {
                 enc.write.push(msg::EXT_INFO);
                 enc.write.push_u32_be(1);
                 enc.write.extend_ssh_string(b"server-sig-algs");
-                if cfg!(feature = "openssl") {
-                    enc.write
-                        .extend_ssh_string(b"ssh-rsa,ssh-ed25519,rsa-sha2-256,rsa-sha2-512");
-                } else {
-                    enc.write.extend_ssh_string(b"ssh-ed25519");
-                }
+                enc.write
+                    .extend_list(self.common.config.preferred.key.iter());
             });
         }
     }
