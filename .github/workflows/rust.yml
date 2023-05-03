@@ -23,9 +23,9 @@ jobs:
       run: cargo build --verbose --all-features
 
     - name: Check semver compatibility (russh)
-      uses: obi1kenobi/cargo-semver-checks-action@v1
+      uses: obi1kenobi/cargo-semver-checks-action@v2
       with:
-        crate-name: russh
+        package: russh
 
   Clippy:
     runs-on: ubuntu-latest
