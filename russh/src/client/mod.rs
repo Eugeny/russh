@@ -83,6 +83,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::task::{Context, Poll};
 use futures::Future;
+use log::{debug, error, info, trace};
 use russh_cryptovec::CryptoVec;
 use russh_keys::encoding::Reader;
 #[cfg(feature = "openssl")]
@@ -95,7 +96,6 @@ use tokio::pin;
 use tokio::sync::mpsc::{
     channel, unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender,
 };
-use log::{debug, error, info, trace};
 
 use crate::channels::{Channel, ChannelMsg};
 use crate::cipher::{self, clear, CipherPair, OpeningKey};
@@ -108,7 +108,6 @@ use crate::{auth, msg, negotiation, ChannelId, ChannelOpenFailure, Disconnect, L
 mod encrypted;
 mod kex;
 mod session;
-
 
 /// Actual client session's state.
 ///
@@ -132,7 +131,6 @@ impl Drop for Session {
         debug!("drop session")
     }
 }
-
 
 #[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
@@ -220,7 +218,6 @@ pub enum KeyboardInteractiveAuthResponse {
     },
 }
 
-
 #[derive(Debug)]
 pub struct Prompt {
     pub prompt: String,
@@ -306,7 +303,7 @@ impl<H: Handler> Handle<H> {
     }
 
     /// Respond to AuthInfoRequests from the server. A server can send any number of these Requests
-    /// including empty requests. You may have to call this function multple times in order to 
+    /// including empty requests. You may have to call this function multple times in order to
     /// complete Keyboard-Interactive based SSH authentication.
     ///
     /// * `responses` - The responses to each prompt. The number of responses must match the number
@@ -339,8 +336,8 @@ impl<H: Handler> Handle<H> {
                         instructions,
                         prompts,
                     });
-                },
-                _ => {},
+                }
+                _ => {}
             }
         }
     }
@@ -894,9 +891,7 @@ impl Session {
                 socket_path,
                 sender,
             } => {
-                let id = self.channel_open_direct_streamlocal(
-                    &socket_path,
-                )?;
+                let id = self.channel_open_direct_streamlocal(&socket_path)?;
                 self.channels.insert(id, sender);
             }
             Msg::TcpIpForward {
@@ -993,9 +988,7 @@ impl Session {
             Msg::Channel(id, ChannelMsg::AgentForward { want_reply }) => {
                 self.agent_forward(id, want_reply)
             }
-            Msg::Channel(id, ChannelMsg::Close) => {
-                self.close(id)
-            }
+            Msg::Channel(id, ChannelMsg::Close) => self.close(id),
             msg => {
                 // should be unreachable, since the receiver only gets
                 // messages from methods implemented within russh
@@ -1316,17 +1309,6 @@ pub trait Handler: Sized + Send {
         window_size: u32,
         session: Session,
     ) -> Result<(Self, Session), Self::Error> {
-        if let Some(channel) = session.channels.get(&id) {
-            channel
-                .send(ChannelMsg::Open {
-                    id,
-                    max_packet_size,
-                    window_size,
-                })
-                .unwrap_or(());
-        } else {
-            error!("no channel for id {:?}", id);
-        }
         Ok((self, session))
     }
 
@@ -1337,9 +1319,6 @@ pub trait Handler: Sized + Send {
         channel: ChannelId,
         session: Session,
     ) -> Result<(Self, Session), Self::Error> {
-        if let Some(chan) = session.channels.get(&channel) {
-            chan.send(ChannelMsg::Success).unwrap_or(())
-        }
         Ok((self, session))
     }
 
@@ -1350,9 +1329,6 @@ pub trait Handler: Sized + Send {
         channel: ChannelId,
         session: Session,
     ) -> Result<(Self, Session), Self::Error> {
-        if let Some(chan) = session.channels.get(&channel) {
-            chan.send(ChannelMsg::Failure).unwrap_or(())
-        }
         Ok((self, session))
     }
 
@@ -1363,7 +1339,6 @@ pub trait Handler: Sized + Send {
         channel: ChannelId,
         mut session: Session,
     ) -> Result<(Self, Session), Self::Error> {
-        session.channels.remove(&channel);
         Ok((self, session))
     }
 
@@ -1374,9 +1349,6 @@ pub trait Handler: Sized + Send {
         channel: ChannelId,
         session: Session,
     ) -> Result<(Self, Session), Self::Error> {
-        if let Some(chan) = session.channels.get(&channel) {
-            chan.send(ChannelMsg::Eof).unwrap_or(())
-        }
         Ok((self, session))
     }
 
@@ -1390,10 +1362,6 @@ pub trait Handler: Sized + Send {
         language: &str,
         mut session: Session,
     ) -> Result<(Self, Session), Self::Error> {
-        if let Some(sender) = session.channels.remove(&channel) {
-            let _ = sender.send(ChannelMsg::OpenFailure(reason));
-        }
-        session.sender.send(Reply::ChannelOpenFailure).unwrap_or(());
         Ok((self, session))
     }
 
@@ -1476,12 +1444,6 @@ pub trait Handler: Sized + Send {
         data: &[u8],
         session: Session,
     ) -> Result<(Self, Session), Self::Error> {
-        if let Some(chan) = session.channels.get(&channel) {
-            chan.send(ChannelMsg::Data {
-                data: CryptoVec::from_slice(data),
-            })
-            .unwrap_or(())
-        }
         Ok((self, session))
     }
 
@@ -1497,13 +1459,6 @@ pub trait Handler: Sized + Send {
         data: &[u8],
         session: Session,
     ) -> Result<(Self, Session), Self::Error> {
-        if let Some(chan) = session.channels.get(&channel) {
-            chan.send(ChannelMsg::ExtendedData {
-                ext,
-                data: CryptoVec::from_slice(data),
-            })
-            .unwrap_or(())
-        }
         Ok((self, session))
     }
 
@@ -1517,10 +1472,6 @@ pub trait Handler: Sized + Send {
         client_can_do: bool,
         session: Session,
     ) -> Result<(Self, Session), Self::Error> {
-        if let Some(chan) = session.channels.get(&channel) {
-            chan.send(ChannelMsg::XonXoff { client_can_do })
-                .unwrap_or(())
-        }
         Ok((self, session))
     }
 
@@ -1532,10 +1483,6 @@ pub trait Handler: Sized + Send {
         exit_status: u32,
         session: Session,
     ) -> Result<(Self, Session), Self::Error> {
-        if let Some(chan) = session.channels.get(&channel) {
-            chan.send(ChannelMsg::ExitStatus { exit_status })
-                .unwrap_or(())
-        }
         Ok((self, session))
     }
 
@@ -1550,15 +1497,6 @@ pub trait Handler: Sized + Send {
         lang_tag: &str,
         session: Session,
     ) -> Result<(Self, Session), Self::Error> {
-        if let Some(chan) = session.channels.get(&channel) {
-            chan.send(ChannelMsg::ExitSignal {
-                signal_name,
-                core_dumped,
-                error_message: error_message.to_string(),
-                lang_tag: lang_tag.to_string(),
-            })
-            .unwrap_or(())
-        }
         Ok((self, session))
     }
 
@@ -1571,16 +1509,9 @@ pub trait Handler: Sized + Send {
     async fn window_adjusted(
         self,
         channel: ChannelId,
-        mut new_size: u32,
-        mut session: Session,
+        new_size: u32,
+        session: Session,
     ) -> Result<(Self, Session), Self::Error> {
-        if let Some(ref mut enc) = session.common.encrypted {
-            new_size -= enc.flush_pending(channel) as u32;
-        }
-        if let Some(chan) = session.channels.get(&channel) {
-            chan.send(ChannelMsg::WindowAdjusted { new_size })
-                .unwrap_or(())
-        }
         Ok((self, session))
     }
 

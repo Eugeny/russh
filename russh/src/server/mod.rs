@@ -340,9 +340,6 @@ pub trait Handler: Sized {
         channel: ChannelId,
         session: Session,
     ) -> Result<(Self, Session), Self::Error> {
-        if let Some(chan) = session.channels.get(&channel) {
-            chan.send(ChannelMsg::Eof).unwrap_or(())
-        }
         Ok((self, session))
     }
 
@@ -411,17 +408,6 @@ pub trait Handler: Sized {
         window_size: u32,
         session: Session,
     ) -> Result<(Self, Session), Self::Error> {
-        if let Some(channel) = session.channels.get(&id) {
-            channel
-                .send(ChannelMsg::Open {
-                    id,
-                    max_packet_size,
-                    window_size,
-                })
-                .unwrap_or(());
-        } else {
-            error!("no channel for id {:?}", id);
-        }
         Ok((self, session))
     }
 
@@ -434,12 +420,6 @@ pub trait Handler: Sized {
         data: &[u8],
         session: Session,
     ) -> Result<(Self, Session), Self::Error> {
-        if let Some(chan) = session.channels.get(&channel) {
-            chan.send(ChannelMsg::Data {
-                data: CryptoVec::from_slice(data),
-            })
-            .unwrap_or(())
-        }
         Ok((self, session))
     }
 
@@ -455,13 +435,6 @@ pub trait Handler: Sized {
         data: &[u8],
         session: Session,
     ) -> Result<(Self, Session), Self::Error> {
-        if let Some(chan) = session.channels.get(&channel) {
-            chan.send(ChannelMsg::ExtendedData {
-                ext: code,
-                data: CryptoVec::from_slice(data),
-            })
-            .unwrap_or(())
-        }
         Ok((self, session))
     }
 
@@ -472,15 +445,8 @@ pub trait Handler: Sized {
         self,
         channel: ChannelId,
         new_size: u32,
-        mut session: Session,
+        session: Session,
     ) -> Result<(Self, Session), Self::Error> {
-        if let Some(ref mut enc) = session.common.encrypted {
-            enc.flush_pending(channel);
-        }
-        if let Some(chan) = session.channels.get(&channel) {
-            chan.send(ChannelMsg::WindowAdjusted { new_size })
-                .unwrap_or(())
-        }
         Ok((self, session))
     }
 
@@ -505,18 +471,6 @@ pub trait Handler: Sized {
         modes: &[(Pty, u32)],
         session: Session,
     ) -> Result<(Self, Session), Self::Error> {
-        if let Some(chan) = session.channels.get(&channel) {
-            chan.send(ChannelMsg::RequestPty {
-                want_reply: true,
-                term: term.into(),
-                col_width,
-                row_height,
-                pix_width,
-                pix_height,
-                terminal_modes: modes.into(),
-            })
-            .unwrap_or(())
-        }
         Ok((self, session))
     }
 
@@ -531,16 +485,6 @@ pub trait Handler: Sized {
         x11_screen_number: u32,
         session: Session,
     ) -> Result<(Self, Session), Self::Error> {
-        if let Some(chan) = session.channels.get(&channel) {
-            chan.send(ChannelMsg::RequestX11 {
-                want_reply: true,
-                single_connection,
-                x11_authentication_cookie: x11_auth_cookie.into(),
-                x11_authentication_protocol: x11_auth_protocol.into(),
-                x11_screen_number,
-            })
-            .unwrap_or(())
-        }
         Ok((self, session))
     }
 
@@ -555,14 +499,6 @@ pub trait Handler: Sized {
         variable_value: &str,
         session: Session,
     ) -> Result<(Self, Session), Self::Error> {
-        if let Some(chan) = session.channels.get(&channel) {
-            chan.send(ChannelMsg::SetEnv {
-                want_reply: true,
-                variable_name: variable_name.into(),
-                variable_value: variable_value.into(),
-            })
-            .unwrap_or(())
-        }
         Ok((self, session))
     }
 
@@ -573,10 +509,6 @@ pub trait Handler: Sized {
         channel: ChannelId,
         session: Session,
     ) -> Result<(Self, Session), Self::Error> {
-        if let Some(chan) = session.channels.get(&channel) {
-            chan.send(ChannelMsg::RequestShell { want_reply: true })
-                .unwrap_or(())
-        }
         Ok((self, session))
     }
 
@@ -589,13 +521,6 @@ pub trait Handler: Sized {
         data: &[u8],
         session: Session,
     ) -> Result<(Self, Session), Self::Error> {
-        if let Some(chan) = session.channels.get(&channel) {
-            chan.send(ChannelMsg::Exec {
-                want_reply: true,
-                command: data.into(),
-            })
-            .unwrap_or(())
-        }
         Ok((self, session))
     }
 
@@ -608,13 +533,6 @@ pub trait Handler: Sized {
         name: &str,
         session: Session,
     ) -> Result<(Self, Session), Self::Error> {
-        if let Some(chan) = session.channels.get(&channel) {
-            chan.send(ChannelMsg::RequestSubsystem {
-                want_reply: true,
-                name: name.into(),
-            })
-            .unwrap_or(())
-        }
         Ok((self, session))
     }
 
@@ -629,15 +547,6 @@ pub trait Handler: Sized {
         pix_height: u32,
         session: Session,
     ) -> Result<(Self, Session), Self::Error> {
-        if let Some(chan) = session.channels.get(&channel) {
-            chan.send(ChannelMsg::WindowChange {
-                col_width,
-                row_height,
-                pix_width,
-                pix_height,
-            })
-            .unwrap_or(())
-        }
         Ok((self, session))
     }
 
@@ -648,10 +557,6 @@ pub trait Handler: Sized {
         channel: ChannelId,
         session: Session,
     ) -> Result<(Self, bool, Session), Self::Error> {
-        if let Some(chan) = session.channels.get(&channel) {
-            chan.send(ChannelMsg::AgentForward { want_reply: true })
-                .unwrap_or(())
-        }
         Ok((self, false, session))
     }
 
@@ -664,9 +569,6 @@ pub trait Handler: Sized {
         signal: Sig,
         session: Session,
     ) -> Result<(Self, Session), Self::Error> {
-        if let Some(chan) = session.channels.get(&channel) {
-            chan.send(ChannelMsg::Signal { signal }).unwrap_or(())
-        }
         Ok((self, session))
     }
 
@@ -682,6 +584,7 @@ pub trait Handler: Sized {
     ) -> Result<(Self, bool, Session), Self::Error> {
         Ok((self, false, session))
     }
+
     /// Used to stop the reverse-forwarding of a port, see
     /// [RFC4254](https://tools.ietf.org/html/rfc4254#section-7).
     #[allow(unused_variables)]
