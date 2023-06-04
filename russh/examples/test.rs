@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use env_logger;
+
 use log::debug;
 use russh::server::{Auth, Msg, Session};
 use russh::*;

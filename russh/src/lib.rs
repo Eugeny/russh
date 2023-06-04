@@ -637,11 +637,11 @@ async fn test_session<RC, RS, CH, SH, F1, F2>(
 
     let server_join = tokio::spawn(async move {
         let (socket, _) = socket.accept().await.unwrap();
-        let session = server::run_stream(config, socket, server_handler)
+        
+        server::run_stream(config, socket, server_handler)
             .await
             .map_err(|_| ())
-            .unwrap();
-        session
+            .unwrap()
     });
 
     let client_join = tokio::spawn(async move {

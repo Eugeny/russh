@@ -1337,7 +1337,7 @@ pub trait Handler: Sized + Send {
     async fn channel_close(
         self,
         channel: ChannelId,
-        mut session: Session,
+        session: Session,
     ) -> Result<(Self, Session), Self::Error> {
         Ok((self, session))
     }
@@ -1360,7 +1360,7 @@ pub trait Handler: Sized + Send {
         reason: ChannelOpenFailure,
         description: &str,
         language: &str,
-        mut session: Session,
+        session: Session,
     ) -> Result<(Self, Session), Self::Error> {
         Ok((self, session))
     }
