@@ -1240,7 +1240,7 @@ pub struct Config {
     /// Lists of preferred algorithms.
     pub preferred: negotiation::Preferred,
     /// Time after which the connection is garbage-collected.
-    pub connection_timeout: Option<std::time::Duration>,
+    pub inactivity_timeout: Option<std::time::Duration>,
     /// Whether to expect and wait for an authentication call.
     pub anonymous: bool,
 }
@@ -1257,7 +1257,7 @@ impl Default for Config {
             window_size: 2097152,
             maximum_packet_size: 32768,
             preferred: Default::default(),
-            connection_timeout: None,
+            inactivity_timeout: None,
             anonymous: false,
         }
     }

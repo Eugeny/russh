@@ -485,7 +485,7 @@ mod test_compress {
         let client_key = russh_keys::key::KeyPair::generate_ed25519().unwrap();
         let mut config = server::Config::default();
         config.preferred = Preferred::COMPRESSED;
-        config.connection_timeout = None; // Some(std::time::Duration::from_secs(3));
+        config.inactivity_timeout = None; // Some(std::time::Duration::from_secs(3));
         config.auth_rejection_time = std::time::Duration::from_secs(3);
         config
             .keys
@@ -623,7 +623,7 @@ async fn test_session<RC, RS, CH, SH, F1, F2>(
 
     let client_key = russh_keys::key::KeyPair::generate_ed25519().unwrap();
     let mut config = server::Config::default();
-    config.connection_timeout = None;
+    config.inactivity_timeout = None;
     config.auth_rejection_time = std::time::Duration::from_secs(3);
     config
         .keys
@@ -637,7 +637,7 @@ async fn test_session<RC, RS, CH, SH, F1, F2>(
 
     let server_join = tokio::spawn(async move {
         let (socket, _) = socket.accept().await.unwrap();
-        
+
         server::run_stream(config, socket, server_handler)
             .await
             .map_err(|_| ())

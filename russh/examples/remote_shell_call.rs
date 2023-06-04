@@ -62,7 +62,7 @@ impl Session {
     ) -> Result<Self> {
         let key_pair = load_secret_key(key_path, None)?;
         let config = client::Config {
-            connection_timeout: Some(Duration::from_secs(5)),
+            inactivity_timeout: Some(Duration::from_secs(5)),
             ..<_>::default()
         };
         let config = Arc::new(config);

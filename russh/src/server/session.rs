@@ -333,7 +333,7 @@ impl Session {
         pin!(reading);
         let mut is_reading = None;
         let mut decomp = CryptoVec::new();
-        let delay = self.common.config.connection_timeout;
+        let delay = self.common.config.inactivity_timeout;
 
         #[allow(clippy::panic)] // false positive in macro
         while !self.common.disconnected {

@@ -39,7 +39,7 @@
 //!     let client_key = russh_keys::key::KeyPair::generate_ed25519().unwrap();
 //!     let client_pubkey = Arc::new(client_key.clone_public_key().unwrap());
 //!     let mut config = russh::server::Config::default();
-//!     config.connection_timeout = Some(std::time::Duration::from_secs(3));
+//!     config.inactivity_timeout = Some(std::time::Duration::from_secs(3));
 //!     config.auth_rejection_time = std::time::Duration::from_secs(3);
 //!     config.keys.push(russh_keys::key::KeyPair::generate_ed25519().unwrap());
 //!     let config = Arc::new(config);
@@ -167,7 +167,7 @@ pub struct Config {
     /// Maximal number of allowed authentication attempts.
     pub max_auth_attempts: usize,
     /// Time after which the connection is garbage-collected.
-    pub connection_timeout: Option<std::time::Duration>,
+    pub inactivity_timeout: Option<std::time::Duration>,
 }
 
 impl Default for Config {
@@ -189,7 +189,7 @@ impl Default for Config {
             limits: Limits::default(),
             preferred: Default::default(),
             max_auth_attempts: 10,
-            connection_timeout: Some(std::time::Duration::from_secs(600)),
+            inactivity_timeout: Some(std::time::Duration::from_secs(600)),
         }
     }
 }
@@ -724,7 +724,7 @@ async fn read_ssh_id<R: AsyncRead + Unpin>(
     config: Arc<Config>,
     read: &mut SshRead<R>,
 ) -> Result<CommonSession<Arc<Config>>, Error> {
-    let sshid = if let Some(t) = config.connection_timeout {
+    let sshid = if let Some(t) = config.inactivity_timeout {
         tokio::time::timeout(t, read.read_ssh_id()).await??
     } else {
         read.read_ssh_id().await?
