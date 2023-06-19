@@ -33,7 +33,7 @@ pub fn decode_openssh(secret: &[u8], password: Option<&str>) -> Result<key::KeyP
         let _check1 = position.read_u32()?;
         #[allow(clippy::never_loop)]
         for _ in 0..nkeys {
-            // TODO check: never really loops beyong the first key
+            // TODO check: never really loops beyond the first key
             let key_type = position.read_string()?;
             if key_type == KEYTYPE_ED25519 {
                 let pubkey = position.read_string()?;
@@ -82,7 +82,11 @@ pub fn decode_openssh(secret: &[u8], password: Option<&str>) -> Result<key::KeyP
                     });
                 }
             } else {
-                return Err(Error::UnsupportedKeyType(key_type.to_vec()));
+                return Err(Error::UnsupportedKeyType {
+                    key_type_string: String::from_utf8(key_type.to_vec())
+                        .unwrap_or_else(|_| format!("{key_type:?}")),
+                    key_type_raw: key_type.to_vec(),
+                });
             }
         }
         Err(Error::CouldNotReadKey)
@@ -122,7 +126,7 @@ fn decrypt_secret_key(
                 #[allow(clippy::indexing_slicing)] // output length is static
                 match bcrypt_pbkdf::bcrypt_pbkdf(password, salt, rounds, &mut key[..n]) {
                     Err(bcrypt_pbkdf::Error::InvalidParamLen) => return Err(Error::KeyIsEncrypted),
-                    e => e.unwrap()
+                    e => e.unwrap(),
                 }
             }
             _kdfname => {

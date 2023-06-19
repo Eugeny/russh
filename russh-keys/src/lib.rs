@@ -72,8 +72,8 @@ use aes::cipher::block_padding::UnpadError;
 use aes::cipher::inout::PadError;
 use byteorder::{BigEndian, WriteBytesExt};
 use data_encoding::BASE64_MIME;
-use thiserror::Error;
 use log::debug;
+use thiserror::Error;
 
 pub mod encoding;
 pub mod key;
@@ -91,8 +91,11 @@ pub enum Error {
     #[error("Could not read key")]
     CouldNotReadKey,
     /// The type of the key is unsupported
-    #[error("Unsupported key type")]
-    UnsupportedKeyType(Vec<u8>),
+    #[error("Unsupported key type {}", key_type_string)]
+    UnsupportedKeyType {
+        key_type_string: String,
+        key_type_raw: Vec<u8>,
+    },
     /// The type of the key is unsupported
     #[error("Invalid Ed25519 key data")]
     Ed25519KeyError(#[from] ed25519_dalek::SignatureError),
