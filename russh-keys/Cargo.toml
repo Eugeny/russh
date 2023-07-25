@@ -29,6 +29,7 @@ version = "0.37.1"
 
 [dependencies]
 aes = "0.8"
+async-trait = "0.1.72"
 bcrypt-pbkdf = "0.9"
 bit-vec = "0.6"
 cbc = "0.1"

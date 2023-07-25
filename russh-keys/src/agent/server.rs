@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime};
 
+use async_trait::async_trait;
 use byteorder::{BigEndian, ByteOrder};
 use futures::future::Future;
 use futures::stream::{Stream, StreamExt};
@@ -30,12 +31,17 @@ pub enum ServerError<E> {
     Error(Error),
 }
 
+#[async_trait]
 pub trait Agent: Clone + Send + 'static {
     fn confirm(
         self,
         _pk: Arc<key::KeyPair>,
     ) -> Box<dyn Future<Output = (Self, bool)> + Unpin + Send> {
         Box::new(futures::future::ready((self, true)))
+    }
+
+    async fn confirm_request(&self) -> bool {
+        true
     }
 }
 
