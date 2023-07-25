@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
+use std::marker::Sync;
 use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
@@ -31,6 +32,16 @@ pub enum ServerError<E> {
     Error(Error),
 }
 
+pub enum MessageType {
+    RequestKeys,
+    AddKeys,
+    RemoveKeys,
+    RemoveAllKeys,
+    Sign,
+    Lock,
+    Unlock,
+}
+
 #[async_trait]
 pub trait Agent: Clone + Send + 'static {
     fn confirm(
@@ -40,7 +51,7 @@ pub trait Agent: Clone + Send + 'static {
         Box::new(futures::future::ready((self, true)))
     }
 
-    async fn confirm_request(&self) -> bool {
+    async fn confirm_request(&self, _msg: MessageType) -> bool {
         true
     }
 }
@@ -87,7 +98,7 @@ struct Connection<S: AsyncRead + AsyncWrite + Send + 'static, A: Agent> {
     buf: CryptoVec,
 }
 
-impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + 'static>
+impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync + 'static>
     Connection<S, A>
 {
     async fn run(mut self) -> Result<(), Error> {
@@ -120,8 +131,9 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + 'stat
         };
         writebuf.extend(&[0, 0, 0, 0]);
         let mut r = self.buf.reader(0);
+        let agentref = self.agent.as_ref().expect("");
         match r.read_byte() {
-            Ok(11) if !is_locked => {
+            Ok(11) if !is_locked && agentref.confirm_request(MessageType::RequestKeys).await => {
                 // request identities
                 if let Ok(keys) = self.keys.0.read() {
                     writebuf.push(msg::IDENTITIES_ANSWER);
@@ -134,7 +146,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + 'stat
                     writebuf.push(msg::FAILURE)
                 }
             }
-            Ok(13) if !is_locked => {
+            Ok(13) if !is_locked && agentref.confirm_request(MessageType::Sign).await => {
                 // sign request
                 let agent = self.agent.take().ok_or(Error::AgentFailure)?;
                 let (agent, signed) = self.try_sign(agent, r, writebuf).await?;
@@ -146,14 +158,14 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + 'stat
                     writebuf.push(msg::FAILURE)
                 }
             }
-            Ok(17) if !is_locked => {
+            Ok(17) if !is_locked && agentref.confirm_request(MessageType::AddKeys).await => {
                 // add identity
                 if let Ok(true) = self.add_key(r, false, writebuf).await {
                 } else {
                     writebuf.push(msg::FAILURE)
                 }
             }
-            Ok(18) if !is_locked => {
+            Ok(18) if !is_locked && agentref.confirm_request(MessageType::RemoveKeys).await => {
                 // remove identity
                 if let Ok(true) = self.remove_identity(r) {
                     writebuf.push(msg::SUCCESS)
@@ -161,7 +173,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + 'stat
                     writebuf.push(msg::FAILURE)
                 }
             }
-            Ok(19) if !is_locked => {
+            Ok(19) if !is_locked && agentref.confirm_request(MessageType::RemoveAllKeys).await => {
                 // remove all identities
                 if let Ok(mut keys) = self.keys.0.write() {
                     keys.clear();
@@ -170,7 +182,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + 'stat
                     writebuf.push(msg::FAILURE)
                 }
             }
-            Ok(22) if !is_locked => {
+            Ok(22) if !is_locked && agentref.confirm_request(MessageType::Lock).await => {
                 // lock
                 if let Ok(()) = self.lock(r) {
                     writebuf.push(msg::SUCCESS)
@@ -178,7 +190,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + 'stat
                     writebuf.push(msg::FAILURE)
                 }
             }
-            Ok(23) if is_locked => {
+            Ok(23) if is_locked && agentref.confirm_request(MessageType::Unlock).await => {
                 // unlock
                 if let Ok(true) = self.unlock(r) {
                     writebuf.push(msg::SUCCESS)
@@ -186,7 +198,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + 'stat
                     writebuf.push(msg::FAILURE)
                 }
             }
-            Ok(25) if !is_locked => {
+            Ok(25) if !is_locked && agentref.confirm_request(MessageType::AddKeys).await => {
                 // add identity constrained
                 if let Ok(true) = self.add_key(r, true, writebuf).await {
                 } else {
