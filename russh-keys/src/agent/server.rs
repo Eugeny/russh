@@ -131,88 +131,87 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
         };
         writebuf.extend(&[0, 0, 0, 0]);
         let mut r = self.buf.reader(0);
-        if let Some(agentref) = self.agent.as_ref() {
-            match r.read_byte() {
-                Ok(11) if !is_locked && agentref.confirm_request(MessageType::RequestKeys).await => {
-                    // request identities
-                    if let Ok(keys) = self.keys.0.read() {
-                        writebuf.push(msg::IDENTITIES_ANSWER);
-                        writebuf.push_u32_be(keys.len() as u32);
-                        for (k, _) in keys.iter() {
-                            writebuf.extend_ssh_string(k);
-                            writebuf.extend_ssh_string(b"");
-                        }
-                    } else {
-                        writebuf.push(msg::FAILURE)
+        let agentref = self.agent.as_ref().ok_or(Error::AgentFailure)?;
+        match r.read_byte() {
+            Ok(11) if !is_locked && agentref.confirm_request(MessageType::RequestKeys).await => {
+                // request identities
+                if let Ok(keys) = self.keys.0.read() {
+                    writebuf.push(msg::IDENTITIES_ANSWER);
+                    writebuf.push_u32_be(keys.len() as u32);
+                    for (k, _) in keys.iter() {
+                        writebuf.extend_ssh_string(k);
+                        writebuf.extend_ssh_string(b"");
                     }
-                }
-                Ok(13) if !is_locked && agentref.confirm_request(MessageType::Sign).await => {
-                    // sign request
-                    let agent = self.agent.take().ok_or(Error::AgentFailure)?;
-                    let (agent, signed) = self.try_sign(agent, r, writebuf).await?;
-                    self.agent = Some(agent);
-                    if signed {
-                        return Ok(());
-                    } else {
-                        writebuf.resize(4);
-                        writebuf.push(msg::FAILURE)
-                    }
-                }
-                Ok(17) if !is_locked && agentref.confirm_request(MessageType::AddKeys).await => {
-                    // add identity
-                    if let Ok(true) = self.add_key(r, false, writebuf).await {
-                    } else {
-                        writebuf.push(msg::FAILURE)
-                    }
-                }
-                Ok(18) if !is_locked && agentref.confirm_request(MessageType::RemoveKeys).await => {
-                    // remove identity
-                    if let Ok(true) = self.remove_identity(r) {
-                        writebuf.push(msg::SUCCESS)
-                    } else {
-                        writebuf.push(msg::FAILURE)
-                    }
-                }
-                Ok(19) if !is_locked && agentref.confirm_request(MessageType::RemoveAllKeys).await => {
-                    // remove all identities
-                    if let Ok(mut keys) = self.keys.0.write() {
-                        keys.clear();
-                        writebuf.push(msg::SUCCESS)
-                    } else {
-                        writebuf.push(msg::FAILURE)
-                    }
-                }
-                Ok(22) if !is_locked && agentref.confirm_request(MessageType::Lock).await => {
-                    // lock
-                    if let Ok(()) = self.lock(r) {
-                        writebuf.push(msg::SUCCESS)
-                    } else {
-                        writebuf.push(msg::FAILURE)
-                    }
-                }
-                Ok(23) if is_locked && agentref.confirm_request(MessageType::Unlock).await => {
-                    // unlock
-                    if let Ok(true) = self.unlock(r) {
-                        writebuf.push(msg::SUCCESS)
-                    } else {
-                        writebuf.push(msg::FAILURE)
-                    }
-                }
-                Ok(25) if !is_locked && agentref.confirm_request(MessageType::AddKeys).await => {
-                    // add identity constrained
-                    if let Ok(true) = self.add_key(r, true, writebuf).await {
-                    } else {
-                        writebuf.push(msg::FAILURE)
-                    }
-                }
-                _ => {
-                    // Message not understood
+                } else {
                     writebuf.push(msg::FAILURE)
                 }
             }
-            let len = writebuf.len() - 4;
-            BigEndian::write_u32(&mut writebuf[..], len as u32);
+            Ok(13) if !is_locked && agentref.confirm_request(MessageType::Sign).await => {
+                // sign request
+                let agent = self.agent.take().ok_or(Error::AgentFailure)?;
+                let (agent, signed) = self.try_sign(agent, r, writebuf).await?;
+                self.agent = Some(agent);
+                if signed {
+                    return Ok(());
+                } else {
+                    writebuf.resize(4);
+                    writebuf.push(msg::FAILURE)
+                }
+            }
+            Ok(17) if !is_locked && agentref.confirm_request(MessageType::AddKeys).await => {
+                // add identity
+                if let Ok(true) = self.add_key(r, false, writebuf).await {
+                } else {
+                    writebuf.push(msg::FAILURE)
+                }
+            }
+            Ok(18) if !is_locked && agentref.confirm_request(MessageType::RemoveKeys).await => {
+                // remove identity
+                if let Ok(true) = self.remove_identity(r) {
+                    writebuf.push(msg::SUCCESS)
+                } else {
+                    writebuf.push(msg::FAILURE)
+                }
+            }
+            Ok(19) if !is_locked && agentref.confirm_request(MessageType::RemoveAllKeys).await => {
+                // remove all identities
+                if let Ok(mut keys) = self.keys.0.write() {
+                    keys.clear();
+                    writebuf.push(msg::SUCCESS)
+                } else {
+                    writebuf.push(msg::FAILURE)
+                }
+            }
+            Ok(22) if !is_locked && agentref.confirm_request(MessageType::Lock).await => {
+                // lock
+                if let Ok(()) = self.lock(r) {
+                    writebuf.push(msg::SUCCESS)
+                } else {
+                    writebuf.push(msg::FAILURE)
+                }
+            }
+            Ok(23) if is_locked && agentref.confirm_request(MessageType::Unlock).await => {
+                // unlock
+                if let Ok(true) = self.unlock(r) {
+                    writebuf.push(msg::SUCCESS)
+                } else {
+                    writebuf.push(msg::FAILURE)
+                }
+            }
+            Ok(25) if !is_locked && agentref.confirm_request(MessageType::AddKeys).await => {
+                // add identity constrained
+                if let Ok(true) = self.add_key(r, true, writebuf).await {
+                } else {
+                    writebuf.push(msg::FAILURE)
+                }
+            }
+            _ => {
+                // Message not understood
+                writebuf.push(msg::FAILURE)
+            }
         }
+        let len = writebuf.len() - 4;
+            BigEndian::write_u32(&mut writebuf[..], len as u32);
         Ok(())
     }
 
