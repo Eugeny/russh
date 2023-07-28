@@ -148,6 +148,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "gotlougit",
+      "name": "Saksham Mittal",
+      "avatar_url": "https://avatars.githubusercontent.com/u/23006870?v=4",
+      "profile": "https://gotlou.srht.site",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,
@@ -156,5 +165,6 @@
   "repoType": "github",
   "repoHost": "https://github.com",
   "skipCi": true,
-  "commitConvention": "none"
+  "commitConvention": "none",
+  "commitType": "docs"
 }
