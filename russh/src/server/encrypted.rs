@@ -496,7 +496,7 @@ async fn reject_auth_request(
     debug!("rejecting {:?}", auth_request);
     push_packet!(write, {
         write.push(msg::USERAUTH_FAILURE);
-        write.extend_list(auth_request.methods);
+        write.extend_list(auth_request.methods.into_iter());
         write.push(auth_request.partial_success as u8);
     });
     auth_request.current = None;
