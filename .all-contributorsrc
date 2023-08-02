@@ -157,6 +157,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "rukai",
+      "name": "Lucas Kent",
+      "avatar_url": "https://avatars.githubusercontent.com/u/5120858?v=4",
+      "profile": "http://canoncollision.com",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,
