@@ -15,14 +15,15 @@
 
 use std::sync::Arc;
 
+use bitflags::bitflags;
 use russh_cryptovec::CryptoVec;
 use russh_keys::{encoding, key};
-use tokio::io::{AsyncRead, AsyncWrite};
-use bitflags::bitflags;
 use thiserror::Error;
+use tokio::io::{AsyncRead, AsyncWrite};
 
 bitflags! {
     /// Set of authentication methods, represented by bit flags.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct MethodSet: u32 {
         /// The SSH `none` method (no authentication).
         const NONE = 1;
@@ -38,27 +39,6 @@ bitflags! {
         /// challenge, where the "challenge" can be a password prompt,
         /// a bytestring to sign with a smartcard, or something else).
         const KEYBOARD_INTERACTIVE = 16;
-    }
-}
-
-macro_rules! iter {
-    ( $y:expr, $x:expr ) => {{
-        if $y.contains($x) {
-            $y.remove($x);
-            return Some($x);
-        }
-    }};
-}
-
-impl Iterator for MethodSet {
-    type Item = MethodSet;
-    fn next(&mut self) -> Option<MethodSet> {
-        iter!(self, MethodSet::NONE);
-        iter!(self, MethodSet::PASSWORD);
-        iter!(self, MethodSet::PUBLICKEY);
-        iter!(self, MethodSet::HOSTBASED);
-        iter!(self, MethodSet::KEYBOARD_INTERACTIVE);
-        None
     }
 }
 
@@ -151,4 +131,3 @@ pub enum CurrentRequest {
         submethods: String,
     },
 }
-
