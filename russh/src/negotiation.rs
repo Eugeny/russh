@@ -52,11 +52,10 @@ pub struct Preferred {
     pub compression: &'static [&'static str],
 }
 
-const KEX_ORDER: &[kex::Name] = &[
+const SAFE_KEX_ORDER: &[kex::Name] = &[
     kex::CURVE25519,
+    kex::CURVE25519_PRE_RFC_8731,
     kex::DH_G14_SHA256,
-    kex::DH_G14_SHA1,
-    kex::DH_G1_SHA1,
     kex::EXTENSION_SUPPORT_AS_CLIENT,
     kex::EXTENSION_SUPPORT_AS_SERVER,
 ];
@@ -82,7 +81,7 @@ const HMAC_ORDER: &[mac::Name] = &[
 impl Preferred {
     #[cfg(feature = "openssl")]
     pub const DEFAULT: Preferred = Preferred {
-        kex: &[kex::CURVE25519, kex::DH_G14_SHA256],
+        kex: SAFE_KEX_ORDER,
         key: &[key::ED25519, key::RSA_SHA2_256, key::RSA_SHA2_512],
         cipher: CIPHER_ORDER,
         mac: HMAC_ORDER,
@@ -91,7 +90,7 @@ impl Preferred {
 
     #[cfg(not(feature = "openssl"))]
     pub const DEFAULT: Preferred = Preferred {
-        kex: KEX_ORDER,
+        kex: SAFE_KEX_ORDER,
         key: &[key::ED25519],
         cipher: CIPHER_ORDER,
         mac: HMAC_ORDER,
@@ -99,7 +98,7 @@ impl Preferred {
     };
 
     pub const COMPRESSED: Preferred = Preferred {
-        kex: KEX_ORDER,
+        kex: SAFE_KEX_ORDER,
         key: &[key::ED25519, key::RSA_SHA2_256, key::RSA_SHA2_512],
         cipher: CIPHER_ORDER,
         mac: HMAC_ORDER,
