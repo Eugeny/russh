@@ -75,7 +75,6 @@ const HMAC_ORDER: &[mac::Name] = &[
     mac::HMAC_SHA256,
     mac::HMAC_SHA1_ETM,
     mac::HMAC_SHA1,
-    mac::NONE,
 ];
 
 impl Preferred {
