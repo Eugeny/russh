@@ -56,8 +56,6 @@ const SAFE_KEX_ORDER: &[kex::Name] = &[
     kex::CURVE25519,
     kex::CURVE25519_PRE_RFC_8731,
     kex::DH_G14_SHA256,
-    kex::EXTENSION_SUPPORT_AS_CLIENT,
-    kex::EXTENSION_SUPPORT_AS_SERVER,
 ];
 
 const CIPHER_ORDER: &[cipher::Name] = &[
