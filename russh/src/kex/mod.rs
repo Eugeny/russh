@@ -83,8 +83,10 @@ impl AsRef<str> for Name {
     }
 }
 
+/// `curve25519-sha256`
+pub const CURVE25519: Name = Name("curve25519-sha256");
 /// `curve25519-sha256@libssh.org`
-pub const CURVE25519: Name = Name("curve25519-sha256@libssh.org");
+pub const CURVE25519_PRE_RFC_8731: Name = Name("curve25519-sha256@libssh.org");
 /// `diffie-hellman-group1-sha1`
 pub const DH_G1_SHA1: Name = Name("diffie-hellman-group1-sha1");
 /// `diffie-hellman-group14-sha1`
@@ -108,6 +110,7 @@ pub(crate) static KEXES: Lazy<HashMap<&'static Name, &(dyn KexType + Send + Sync
     Lazy::new(|| {
         let mut h: HashMap<&'static Name, &(dyn KexType + Send + Sync)> = HashMap::new();
         h.insert(&CURVE25519, &_CURVE25519);
+        h.insert(&CURVE25519_PRE_RFC_8731, &_CURVE25519);
         h.insert(&DH_G14_SHA256, &_DH_G14_SHA256);
         h.insert(&DH_G14_SHA1, &_DH_G14_SHA1);
         h.insert(&DH_G1_SHA1, &_DH_G1_SHA1);
