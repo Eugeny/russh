@@ -38,7 +38,7 @@ block-padding = { version = "0.3", features = ["std"] }
 byteorder = "1.4"
 data-encoding = "2.3"
 dirs = "5.0"
-ed25519-dalek = "1.0"
+ed25519-dalek = { version= "2.0", features = ["rand_core"] }
 futures = "0.3"
 hmac = "0.12"
 inout = { version = "0.1", features = ["std"] }
@@ -49,7 +49,7 @@ num-integer = "0.1"
 openssl = { version = "0.10", optional = true }
 pbkdf2 = "0.11"
 rand = "0.7"
-rand_core = { version = "0.5", features = ["std"] }
+rand_core = { version = "0.6.4", features = ["std"] }
 russh-cryptovec = { version = "0.7.0", path = "../cryptovec" }
 serde = { version = "1.0", features = ["derive"] }
 sha2 = "0.10"

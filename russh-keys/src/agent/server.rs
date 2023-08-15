@@ -1,6 +1,7 @@
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::convert::TryFrom;
 use std::marker::Sync;
+use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
@@ -211,7 +212,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
             }
         }
         let len = writebuf.len() - 4;
-            BigEndian::write_u32(&mut writebuf[..], len as u32);
+        BigEndian::write_u32(&mut writebuf[..], len as u32);
         Ok(())
     }
 
@@ -255,25 +256,18 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
         let t = r.read_string()?;
         let (blob, key) = match t {
             b"ssh-ed25519" => {
-                let public_ = r.read_string()?;
                 let pos1 = r.position;
                 let concat = r.read_string()?;
                 let _comment = r.read_string()?;
                 #[allow(clippy::indexing_slicing)] // length checked before
-                let public = ed25519_dalek::PublicKey::from_bytes(
-                    public_.get(..32).ok_or(Error::KeyIsCorrupt)?,
-                )?;
-                let secret = ed25519_dalek::SecretKey::from_bytes(
+                let secret = ed25519_dalek::SigningKey::try_from(
                     concat.get(..32).ok_or(Error::KeyIsCorrupt)?,
-                )?;
+                ).map_err(|_| Error::KeyIsCorrupt)?;
 
                 writebuf.push(msg::SUCCESS);
 
                 #[allow(clippy::indexing_slicing)] // positions checked before
-                (
-                    self.buf[pos0..pos1].to_vec(),
-                    key::KeyPair::Ed25519(ed25519_dalek::Keypair { public, secret }),
-                )
+                (self.buf[pos0..pos1].to_vec(), key::KeyPair::Ed25519(secret))
             }
             #[cfg(feature = "openssl")]
             b"ssh-rsa" => {

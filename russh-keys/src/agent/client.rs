@@ -1,8 +1,10 @@
+use std::convert::TryFrom;
+
 use byteorder::{BigEndian, ByteOrder};
+use log::{debug, info};
 use russh_cryptovec::CryptoVec;
 use tokio;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use log::{debug, info};
 
 use super::{msg, Constraint};
 use crate::encoding::{Encoding, Reader};
@@ -102,10 +104,10 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AgentClient<S> {
         match *key {
             key::KeyPair::Ed25519(ref pair) => {
                 self.buf.extend_ssh_string(b"ssh-ed25519");
-                self.buf.extend_ssh_string(pair.public.as_bytes());
+                self.buf.extend_ssh_string(pair.verifying_key().as_bytes());
                 self.buf.push_u32_be(64);
-                self.buf.extend(pair.secret.as_bytes());
-                self.buf.extend(pair.public.as_bytes());
+                self.buf.extend(pair.to_bytes().as_slice());
+                self.buf.extend(pair.verifying_key().as_bytes());
                 self.buf.extend_ssh_string(b"");
             }
             #[cfg(feature = "openssl")]
@@ -263,7 +265,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AgentClient<S> {
                         })
                     }
                     b"ssh-ed25519" => keys.push(PublicKey::Ed25519(
-                        ed25519_dalek::PublicKey::from_bytes(r.read_string()?)?,
+                        ed25519_dalek::VerifyingKey::try_from(r.read_string()?)?,
                     )),
                     t => {
                         info!("Unsupported key type: {:?}", std::str::from_utf8(t))
