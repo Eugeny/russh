@@ -69,3 +69,6 @@ vendored-openssl = ["openssl", "openssl/vendored"]
 [dev-dependencies]
 env_logger = "0.10"
 tempdir = "0.3"
+
+[package.metadata.docs.rs]
+features = ["openssl"]

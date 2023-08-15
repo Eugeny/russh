@@ -67,3 +67,6 @@ tokio = { version = "1.17.0", features = [
     "macros",
 ] }
 russh-sftp = "1.1"
+
+[package.metadata.docs.rs]
+features = ["openssl"]
