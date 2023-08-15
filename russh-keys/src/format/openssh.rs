@@ -1,3 +1,5 @@
+use std::convert::TryFrom;
+
 use aes::cipher::block_padding::NoPadding;
 use aes::cipher::{BlockDecryptMut, KeyIvInit, StreamCipher};
 use bcrypt_pbkdf;
@@ -42,14 +44,10 @@ pub fn decode_openssh(secret: &[u8], password: Option<&str>) -> Result<key::KeyP
                 if Some(pubkey) != seckey.get(32..) {
                     return Err(Error::KeyIsCorrupt);
                 }
-                let secret = ed25519_dalek::SecretKey::from_bytes(
+                let secret = ed25519_dalek::SigningKey::try_from(
                     seckey.get(..32).ok_or(Error::KeyIsCorrupt)?,
                 )?;
-                let public = (&secret).into();
-                return Ok(key::KeyPair::Ed25519(ed25519_dalek::Keypair {
-                    secret,
-                    public,
-                }));
+                return Ok(key::KeyPair::Ed25519(secret));
             } else if key_type == KEYTYPE_RSA && cfg!(feature = "openssl") {
                 #[cfg(feature = "openssl")]
                 {

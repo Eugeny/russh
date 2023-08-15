@@ -245,10 +245,10 @@ impl PublicKeyBase64 for key::KeyPair {
         s.extend_from_slice(name);
         match *self {
             key::KeyPair::Ed25519(ref key) => {
-                let public = key.public.as_bytes();
+                let public = key.verifying_key().to_bytes();
                 #[allow(clippy::unwrap_used)] // Vec<>.write can't fail
                 s.write_u32::<BigEndian>(public.len() as u32).unwrap();
-                s.extend_from_slice(public);
+                s.extend_from_slice(public.as_slice());
             }
             #[cfg(feature = "openssl")]
             key::KeyPair::RSA { ref key, .. } => {
