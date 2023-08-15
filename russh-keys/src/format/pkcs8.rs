@@ -154,6 +154,10 @@ fn read_key_v1(reader: &mut BERReaderSeq) -> Result<key::KeyPair, Error> {
                 .ok_or(Error::KeyIsCorrupt)
                 .and_then(|s| SigningKey::try_from(s).map_err(|_| Error::CouldNotReadKey))?
         };
+        // Consume the public key
+        reader
+            .next()
+            .read_tagged(yasna::Tag::context(1), |reader| reader.read_bitvec())?;
         Ok(key::KeyPair::Ed25519(secret))
     } else {
         Err(Error::CouldNotReadKey)
