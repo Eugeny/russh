@@ -39,14 +39,7 @@ impl KexInit {
         debug!("i0 = {:?}", i0);
 
         let mut kex = KEXES
-            .get(
-                &self
-                    .algo
-                    .as_ref()
-                    .map(|x| &x.kex)
-                    .or_else(|| config.preferred.kex.first())
-                    .ok_or(crate::Error::NoCommonKexAlgo)?,
-            )
+            .get(&algo.kex)
             .ok_or(crate::Error::UnknownAlgo)?
             .make();
 
