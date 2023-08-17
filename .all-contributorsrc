@@ -166,6 +166,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "RDruon",
+      "name": "Raphael Druon",
+      "avatar_url": "https://avatars.githubusercontent.com/u/64585623?v=4",
+      "profile": "https://github.com/RDruon",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,
