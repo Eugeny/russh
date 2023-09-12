@@ -613,26 +613,31 @@ impl Session {
             }
             Some(&msg::CHANNEL_WINDOW_ADJUST) => {
                 debug!("channel_window_adjust");
+
                 let mut r = buf.reader(1);
                 let channel_num = ChannelId(r.read_u32().map_err(crate::Error::from)?);
                 let amount = r.read_u32().map_err(crate::Error::from)?;
                 let mut new_size = 0;
+
                 debug!("amount: {:?}", amount);
+
                 if let Some(ref mut enc) = self.common.encrypted {
                     if let Some(ref mut channel) = enc.channels.get_mut(&channel_num) {
-                        channel.recipient_window_size += amount;
+                        channel.recipient_window_size =
+                            channel.recipient_window_size.saturating_add(amount);
+
                         new_size = channel.recipient_window_size;
                     } else {
                         return Err(crate::Error::WrongChannel.into());
                     }
+
+                    new_size = new_size.saturating_sub(enc.flush_pending(channel_num) as u32);
                 }
 
-                if let Some(ref mut enc) = self.common.encrypted {
-                    new_size -= enc.flush_pending(channel_num) as u32;
-                }
                 if let Some(chan) = self.channels.get(&channel_num) {
-                    let _ = chan.send(ChannelMsg::WindowAdjusted { new_size });
+                    _ = chan.send(ChannelMsg::WindowAdjusted { new_size });
                 }
+
                 client.window_adjusted(channel_num, new_size, self).await
             }
             Some(&msg::GLOBAL_REQUEST) => {

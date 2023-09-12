@@ -1,6 +1,6 @@
-use russh_cryptovec::CryptoVec;
-use tokio::sync::mpsc::{Sender, UnboundedReceiver};
 use log::debug;
+use russh_cryptovec::CryptoVec;
+use tokio::sync::mpsc::{error::TryRecvError, Sender, UnboundedReceiver};
 
 use crate::{ChannelId, ChannelOpenFailure, ChannelStream, Error, Pty, Sig};
 
@@ -290,23 +290,38 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + 'static> Channel<S> {
             while self.window_size == 0 {
                 match self.receiver.recv().await {
                     Some(ChannelMsg::WindowAdjusted { new_size }) => {
-                        debug!("window adjusted: {:?}", new_size);
+                        debug!("channel {} => window adjusted: {new_size}", self.id);
                         self.window_size = new_size;
                         break;
                     }
                     Some(msg) => {
-                        debug!("unexpected channel msg: {:?}", msg);
+                        debug!("channel {} => unexpected channel msg: {msg:?}", self.id);
                     }
                     None => break,
                 }
             }
-            debug!(
-                "sending data, self.window_size = {:?}, self.max_packet_size = {:?}, total = {:?}",
-                self.window_size, self.max_packet_size, total
-            );
-            let sendable = self.window_size.min(self.max_packet_size) as usize;
 
-            debug!("sendable {:?}", sendable);
+            // Some implementations send CHANNEL_WINDOW_ADJUST prior to
+            // window size being 0. Process those at each turn of the loop here.
+            match self.receiver.try_recv() {
+                Ok(ChannelMsg::WindowAdjusted { new_size }) => {
+                    debug!("channel {} => window adjusted: {new_size}", self.id);
+                    self.window_size = new_size;
+                }
+                Ok(msg) => {
+                    debug!("channel {} => unexpected channel msg: {msg:?}", self.id);
+                }
+                Err(TryRecvError::Empty | TryRecvError::Disconnected) => {}
+            }
+
+            debug!(
+                "channel {} => sending data, self.window_size = {}, self.max_packet_size = {}, total = {total}",
+                self.id, self.window_size, self.max_packet_size
+            );
+
+            let sendable = self.writable_packet_size();
+
+            debug!("channel {} => sendable {sendable}", self.id);
 
             // If we can not send anymore, continue
             // and wait for server window adjustment
@@ -318,14 +333,16 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + 'static> Channel<S> {
             let n = data.read(&mut c[..]).await?;
             total += n;
             c.resize(n);
-            self.window_size -= n as u32;
+
+            self.window_size = self.window_size.saturating_sub(n as u32);
+
             self.send_data_packet(ext, c).await?;
+
             if n == 0 {
                 break;
-            } else if self.window_size > 0 {
-                continue;
             }
         }
+
         Ok(())
     }
 
@@ -349,6 +366,7 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + 'static> Channel<S> {
         match self.receiver.recv().await {
             Some(ChannelMsg::WindowAdjusted { new_size }) => {
                 self.window_size = new_size;
+
                 Some(ChannelMsg::WindowAdjusted { new_size })
             }
             Some(msg) => Some(msg),
