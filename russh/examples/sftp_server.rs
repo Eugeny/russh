@@ -151,10 +151,12 @@ impl russh_sftp::server::Handler for SftpSession {
                 files: vec![
                     File {
                         filename: "foo".to_string(),
+                        longname: "".to_string(),
                         attrs: FileAttributes::default(),
                     },
                     File {
                         filename: "bar".to_string(),
+                        longname: "".to_string(),
                         attrs: FileAttributes::default(),
                     },
                 ],
@@ -169,6 +171,7 @@ impl russh_sftp::server::Handler for SftpSession {
             id,
             files: vec![File {
                 filename: "/".to_string(),
+                longname: "".to_string(),
                 attrs: FileAttributes::default(),
             }],
         })
@@ -185,7 +188,6 @@ async fn main() {
         auth_rejection_time: Duration::from_secs(3),
         auth_rejection_time_initial: Some(Duration::from_secs(0)),
         keys: vec![KeyPair::generate_ed25519().unwrap()],
-        inactivity_timeout: Some(Duration::from_secs(3600)),
         ..Default::default()
     };
 
