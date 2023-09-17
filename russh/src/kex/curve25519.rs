@@ -103,9 +103,7 @@ impl KexAlgorithm for Curve25519Kex {
     }
 
     fn compute_shared_secret(&mut self, remote_pubkey_: &[u8]) -> Result<(), crate::Error> {
-        let local_secret =
-            std::mem::replace(&mut self.local_secret, None).ok_or(crate::Error::KexInit)?;
-
+        let local_secret = self.local_secret.take().ok_or(crate::Error::KexInit)?;
         let mut remote_pubkey = MontgomeryPoint([0; 32]);
         remote_pubkey.0.clone_from_slice(remote_pubkey_);
         let shared = local_secret * remote_pubkey;

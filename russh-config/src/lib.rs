@@ -93,18 +93,13 @@ pub fn parse_path<P: AsRef<Path>>(path: P, host: &str) -> Result<Config, Error> 
     parse(&s, host)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum AddKeysToAgent {
     Yes,
     Confirm,
     Ask,
+    #[default]
     No,
-}
-
-impl Default for AddKeysToAgent {
-    fn default() -> Self {
-        AddKeysToAgent::No
-    }
 }
 
 pub fn parse(file: &str, host: &str) -> Result<Config, Error> {

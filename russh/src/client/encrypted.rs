@@ -55,7 +55,7 @@ impl Session {
                 // If we're not currently re-keying, but buf is a rekey request
                 let kexinit = if let Some(Kex::Init(kexinit)) = enc.rekey.take() {
                     Some(kexinit)
-                } else if let Some(exchange) = std::mem::replace(&mut enc.exchange, None) {
+                } else if let Some(exchange) = enc.exchange.take() {
                     Some(KexInit::received_rekey(
                         exchange,
                         negotiation::Client::read_kex(buf, &self.common.config.as_ref().preferred)?,

@@ -1041,7 +1041,7 @@ impl Session {
             )? {
                 info!("Re-exchanging keys");
                 if enc.rekey.is_none() {
-                    if let Some(exchange) = std::mem::replace(&mut enc.exchange, None) {
+                    if let Some(exchange) = enc.exchange.take() {
                         let mut kexinit = KexInit::initiate_rekey(exchange, &enc.session_id);
                         kexinit.client_write(
                             self.common.config.as_ref(),

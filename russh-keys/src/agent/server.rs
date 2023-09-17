@@ -262,7 +262,8 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
                 #[allow(clippy::indexing_slicing)] // length checked before
                 let secret = ed25519_dalek::SigningKey::try_from(
                     concat.get(..32).ok_or(Error::KeyIsCorrupt)?,
-                ).map_err(|_| Error::KeyIsCorrupt)?;
+                )
+                .map_err(|_| Error::KeyIsCorrupt)?;
 
                 writebuf.push(msg::SUCCESS);
 
@@ -369,7 +370,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
         let key = {
             let blob = r.read_string()?;
             let k = self.keys.0.read().or(Err(Error::AgentFailure))?;
-            if let Some(&(ref key, _, ref constraints)) = k.get(blob) {
+            if let Some((key, _, constraints)) = k.get(blob) {
                 if constraints.iter().any(|c| *c == Constraint::Confirm) {
                     needs_confirm = true;
                 }
