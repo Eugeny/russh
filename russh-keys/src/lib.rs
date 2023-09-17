@@ -434,7 +434,7 @@ mod test {
     use std::fs::File;
     use std::io::Write;
 
-    #[cfg(feature = "openssl")]
+    #[cfg(all(unix, feature = "openssl"))]
     use futures::Future;
 
     use super::*;
@@ -843,14 +843,14 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
     }
 
     #[test]
-    #[cfg(feature = "openssl")]
+    #[cfg(all(unix, feature = "openssl"))]
     fn test_client_agent_rsa() {
         let key = decode_secret_key(PKCS8_ENCRYPTED, Some("blabla")).unwrap();
         test_client_agent(key)
     }
 
     #[test]
-    #[cfg(feature = "openssl")]
+    #[cfg(all(unix, feature = "openssl"))]
     fn test_client_agent_openssh_rsa() {
         let key = decode_secret_key(RSA_KEY, None).unwrap();
         test_client_agent(key)
