@@ -283,9 +283,9 @@ pub fn load_secret_key<P: AsRef<Path>>(
 }
 
 fn is_base64_char(c: char) -> bool {
-    ('a'..='z').contains(&c)
-        || ('A'..='Z').contains(&c)
-        || ('0'..='9').contains(&c)
+    c.is_ascii_lowercase()
+        || c.is_ascii_uppercase()
+        || c.is_ascii_digit()
         || c == '/'
         || c == '+'
         || c == '='
@@ -413,7 +413,7 @@ pub fn check_known_hosts(host: &str, port: u16, pubkey: &key::PublicKey) -> Resu
         known_host_file.push("known_hosts");
         check_known_hosts_path(host, port, pubkey, &known_host_file)
     } else {
-        Err(Error::NoHomeDir.into())
+        Err(Error::NoHomeDir)
     }
 }
 
