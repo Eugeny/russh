@@ -1,11 +1,14 @@
 use std::{
     io,
     pin::Pin,
-    sync::{Arc, Mutex, TryLockError},
+    sync::Arc,
     task::{Context, Poll},
 };
 
-use tokio::{io::AsyncRead, sync::mpsc::error::TryRecvError};
+use tokio::{
+    io::AsyncRead,
+    sync::{mpsc::error::TryRecvError, Mutex},
+};
 
 use super::ChannelMsg;
 use crate::{Channel, ChannelId};
@@ -77,13 +80,7 @@ where
 
                         None
                     }
-                    Err(TryLockError::WouldBlock) => Some(msg),
-                    Err(TryLockError::Poisoned(err)) => {
-                        return Poll::Ready(Err(io::Error::new(
-                            io::ErrorKind::Other,
-                            err.to_string(),
-                        )))
-                    }
+                    Err(_) => Some(msg),
                 };
 
                 self.buffer = buffer;

@@ -1,13 +1,16 @@
 use std::{
     io,
     pin::Pin,
-    sync::{Arc, Mutex, TryLockError},
+    sync::Arc,
     task::{Context, Poll},
 };
 
 use tokio::{
     io::AsyncWrite,
-    sync::mpsc::{self, error::TrySendError},
+    sync::{
+        mpsc::{self, error::TrySendError},
+        Mutex,
+    },
 };
 
 use russh_cryptovec::CryptoVec;
@@ -50,12 +53,9 @@ where
     ) -> Poll<Result<usize, io::Error>> {
         let mut window_size = match self.window_size.try_lock() {
             Ok(window_size) => window_size,
-            Err(TryLockError::WouldBlock) => {
+            Err(_) => {
                 cx.waker().wake_by_ref();
                 return Poll::Pending;
-            }
-            Err(TryLockError::Poisoned(err)) => {
-                return Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, err.to_string())))
             }
         };
 
