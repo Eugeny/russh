@@ -4,6 +4,8 @@ use log::debug;
 
 use crate::{ChannelId, ChannelOpenFailure, ChannelStream, Error, Pty, Sig};
 
+pub mod io;
+
 #[derive(Debug)]
 #[non_exhaustive]
 /// Possible messages that [Channel::wait] can receive.
@@ -409,5 +411,23 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + 'static> Channel<S> {
             Ok::<_, crate::Error>(())
         });
         stream
+    }
+
+    /// Setup the [`Channel`] to be able to send messages through [`io::ChannelTx`],
+    /// and receiving them through [`io::ChannelRx`].
+    pub fn into_io_parts(self) -> (io::ChannelTx<S>, io::ChannelRx) {
+        use std::sync::{Arc, Mutex};
+
+        let window_size = Arc::new(Mutex::new(self.window_size));
+
+        (
+            io::ChannelTx::new(
+                self.sender,
+                self.id,
+                window_size.clone(),
+                self.max_packet_size,
+            ),
+            io::ChannelRx::new(self.receiver, window_size),
+        )
     }
 }
