@@ -24,6 +24,7 @@ pub struct ChannelTx<S> {
 
     window_size: Arc<Mutex<u32>>,
     max_packet_size: u32,
+    ext: Option<u32>,
 }
 
 impl<S> ChannelTx<S> {
@@ -32,12 +33,14 @@ impl<S> ChannelTx<S> {
         id: ChannelId,
         window_size: Arc<Mutex<u32>>,
         max_packet_size: u32,
+        ext: Option<u32>,
     ) -> Self {
         Self {
             sender,
             id,
             window_size,
             max_packet_size,
+            ext,
         }
     }
 }
@@ -73,10 +76,12 @@ where
         *window_size -= writable as u32;
         drop(window_size);
 
-        match self
-            .sender
-            .try_send((self.id, ChannelMsg::Data { data }).into())
-        {
+        let msg = match self.ext {
+            None => ChannelMsg::Data { data },
+            Some(ext) => ChannelMsg::ExtendedData { data, ext },
+        };
+
+        match self.sender.try_send((self.id, msg).into()) {
             Ok(_) => Poll::Ready(Ok(writable)),
             Err(TrySendError::Closed(_)) => Poll::Ready(Ok(0)),
             Err(TrySendError::Full(_)) => {

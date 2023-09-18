@@ -413,9 +413,19 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + 'static> Channel<S> {
         stream
     }
 
-    /// Setup the [`Channel`] to be able to send messages through [`io::ChannelTx`],
-    /// and receiving them through [`io::ChannelRx`].
+    /// Setup the [`Channel`] to be able to send and receive [`ChannelMsg::Data`]
+    /// through [`io::ChannelTx`] and [`io::ChannelRx`].
     pub fn into_io_parts(&mut self) -> (io::ChannelTx<S>, io::ChannelRx<'_, S>) {
+        self.into_io_parts_ext(None)
+    }
+
+    /// Setup the [`Channel`] to be able to send and receive [`ChannelMsg::Data`]
+    /// or [`ChannelMsg::ExtendedData`] through [`io::ChannelTx`] and [`io::ChannelRx`]
+    /// depending on the `ext` parameter.
+    pub fn into_io_parts_ext(
+        &mut self,
+        ext: Option<u32>,
+    ) -> (io::ChannelTx<S>, io::ChannelRx<'_, S>) {
         use std::sync::Arc;
         use tokio::sync::Mutex;
 
@@ -425,10 +435,11 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + 'static> Channel<S> {
             io::ChannelTx::new(
                 self.sender.clone(),
                 self.id,
-                window_size.clone(),
+                window_size,
                 self.max_packet_size,
+                ext,
             ),
-            io::ChannelRx::new(self, window_size),
+            io::ChannelRx::new(self, ext),
         )
     }
 }

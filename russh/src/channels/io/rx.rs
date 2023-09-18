@@ -1,14 +1,10 @@
 use std::{
     io,
     pin::Pin,
-    sync::Arc,
     task::{Context, Poll},
 };
 
-use tokio::{
-    io::AsyncRead,
-    sync::{mpsc::error::TryRecvError, Mutex},
-};
+use tokio::{io::AsyncRead, sync::mpsc::error::TryRecvError};
 
 use super::ChannelMsg;
 use crate::{Channel, ChannelId};
@@ -21,18 +17,18 @@ where
     channel: &'i mut Channel<S>,
     buffer: Option<ChannelMsg>,
 
-    window_size: Arc<Mutex<u32>>,
+    ext: Option<u32>,
 }
 
 impl<'i, S> ChannelRx<'i, S>
 where
     S: From<(ChannelId, ChannelMsg)>,
 {
-    pub fn new(channel: &'i mut Channel<S>, window_size: Arc<Mutex<u32>>) -> Self {
+    pub fn new(channel: &'i mut Channel<S>, ext: Option<u32>) -> Self {
         Self {
             channel,
             buffer: None,
-            window_size,
+            ext,
         }
     }
 }
@@ -60,8 +56,8 @@ where
             },
         };
 
-        match &msg {
-            ChannelMsg::Data { data } => {
+        match (&msg, self.ext) {
+            (ChannelMsg::Data { data }, None) => {
                 if buf.remaining() >= data.len() {
                     buf.put_slice(data);
 
@@ -73,22 +69,19 @@ where
                     Poll::Pending
                 }
             }
-            ChannelMsg::WindowAdjusted { new_size } => {
-                let buffer = match self.window_size.try_lock() {
-                    Ok(mut window_size) => {
-                        *window_size = *new_size;
+            (ChannelMsg::ExtendedData { data, ext }, Some(target)) if *ext == target => {
+                if buf.remaining() >= data.len() {
+                    buf.put_slice(data);
 
-                        None
-                    }
-                    Err(_) => Some(msg),
-                };
+                    Poll::Ready(Ok(()))
+                } else {
+                    self.buffer = Some(msg);
 
-                self.buffer = buffer;
-
-                cx.waker().wake_by_ref();
-                Poll::Pending
+                    cx.waker().wake_by_ref();
+                    Poll::Pending
+                }
             }
-            ChannelMsg::Eof => {
+            (ChannelMsg::Eof, _) => {
                 self.channel.receiver.close();
 
                 Poll::Ready(Ok(()))
