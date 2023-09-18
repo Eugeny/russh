@@ -5,34 +5,39 @@ use std::{
     task::{Context, Poll},
 };
 
-use tokio::{
-    io::AsyncRead,
-    sync::mpsc::{self, error::TryRecvError},
-};
+use tokio::{io::AsyncRead, sync::mpsc::error::TryRecvError};
 
 use super::ChannelMsg;
+use crate::{Channel, ChannelId};
 
-pub struct ChannelRx {
-    receiver: mpsc::UnboundedReceiver<ChannelMsg>,
+#[derive(Debug)]
+pub struct ChannelRx<'i, S>
+where
+    S: From<(ChannelId, ChannelMsg)>,
+{
+    channel: &'i mut Channel<S>,
     buffer: Option<ChannelMsg>,
 
     window_size: Arc<Mutex<u32>>,
 }
 
-impl ChannelRx {
-    pub fn new(
-        receiver: mpsc::UnboundedReceiver<ChannelMsg>,
-        window_size: Arc<Mutex<u32>>,
-    ) -> Self {
+impl<'i, S> ChannelRx<'i, S>
+where
+    S: From<(ChannelId, ChannelMsg)>,
+{
+    pub fn new(channel: &'i mut Channel<S>, window_size: Arc<Mutex<u32>>) -> Self {
         Self {
-            receiver,
+            channel,
             buffer: None,
             window_size,
         }
     }
 }
 
-impl AsyncRead for ChannelRx {
+impl<'i, S> AsyncRead for ChannelRx<'i, S>
+where
+    S: From<(ChannelId, ChannelMsg)>,
+{
     fn poll_read(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -40,7 +45,7 @@ impl AsyncRead for ChannelRx {
     ) -> Poll<io::Result<()>> {
         let msg = match self.buffer.take() {
             Some(msg) => msg,
-            None => match self.receiver.try_recv() {
+            None => match self.channel.receiver.try_recv() {
                 Ok(msg) => msg,
                 Err(TryRecvError::Empty) => {
                     cx.waker().wake_by_ref();
@@ -87,7 +92,7 @@ impl AsyncRead for ChannelRx {
                 Poll::Pending
             }
             ChannelMsg::Eof => {
-                self.receiver.close();
+                self.channel.receiver.close();
 
                 Poll::Ready(Ok(()))
             }

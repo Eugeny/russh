@@ -415,19 +415,19 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + 'static> Channel<S> {
 
     /// Setup the [`Channel`] to be able to send messages through [`io::ChannelTx`],
     /// and receiving them through [`io::ChannelRx`].
-    pub fn into_io_parts(self) -> (io::ChannelTx<S>, io::ChannelRx) {
+    pub fn into_io_parts(&mut self) -> (io::ChannelTx<S>, io::ChannelRx<'_, S>) {
         use std::sync::{Arc, Mutex};
 
         let window_size = Arc::new(Mutex::new(self.window_size));
 
         (
             io::ChannelTx::new(
-                self.sender,
+                self.sender.clone(),
                 self.id,
                 window_size.clone(),
                 self.max_packet_size,
             ),
-            io::ChannelRx::new(self.receiver, window_size),
+            io::ChannelRx::new(self, window_size),
         )
     }
 }
