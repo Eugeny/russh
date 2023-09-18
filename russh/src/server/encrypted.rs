@@ -21,7 +21,6 @@ use negotiation::Select;
 use russh_keys::encoding::{Encoding, Position, Reader};
 use russh_keys::key;
 use russh_keys::key::Verify;
-use tokio::sync::mpsc::unbounded_channel;
 use tokio::time::Instant;
 use {msg, negotiation};
 
@@ -676,6 +675,8 @@ impl Session {
                     enc.flush_pending(channel_num);
                 }
                 if let Some(chan) = self.channels.get(&channel_num) {
+                    *chan.window_size().lock().await = new_size;
+
                     chan.send(ChannelMsg::WindowAdjusted { new_size })
                         .unwrap_or(())
                 }
@@ -1058,20 +1059,18 @@ impl Session {
             pending_data: std::collections::VecDeque::new(),
         };
 
-        let (sender, receiver) = unbounded_channel();
-        let channel = Channel {
-            id: sender_channel,
-            sender: self.sender.sender.clone(),
-            receiver,
-            max_packet_size: channel_params.recipient_maximum_packet_size,
-            window_size: channel_params.recipient_window_size,
-        };
+        let (channel, reference) = Channel::new(
+            sender_channel,
+            self.sender.sender.clone(),
+            channel_params.recipient_maximum_packet_size,
+            channel_params.recipient_window_size,
+        );
 
         match &msg.typ {
             ChannelType::Session => {
                 let mut result = handler.channel_open_session(channel, self).await;
                 if let Ok((_, allowed, s)) = &mut result {
-                    s.channels.insert(sender_channel, sender);
+                    s.channels.insert(sender_channel, reference);
                     s.finalize_channel_open(&msg, channel_params, *allowed);
                 }
                 result
@@ -1084,7 +1083,7 @@ impl Session {
                     .channel_open_x11(channel, originator_address, *originator_port, self)
                     .await;
                 if let Ok((_, allowed, s)) = &mut result {
-                    s.channels.insert(sender_channel, sender);
+                    s.channels.insert(sender_channel, reference);
                     s.finalize_channel_open(&msg, channel_params, *allowed);
                 }
                 result
@@ -1101,7 +1100,7 @@ impl Session {
                     )
                     .await;
                 if let Ok((_, allowed, s)) = &mut result {
-                    s.channels.insert(sender_channel, sender);
+                    s.channels.insert(sender_channel, reference);
                     s.finalize_channel_open(&msg, channel_params, *allowed);
                 }
                 result
@@ -1118,7 +1117,7 @@ impl Session {
                     )
                     .await;
                 if let Ok((_, allowed, s)) = &mut result {
-                    s.channels.insert(sender_channel, sender);
+                    s.channels.insert(sender_channel, reference);
                     s.finalize_channel_open(&msg, channel_params, *allowed);
                 }
                 result

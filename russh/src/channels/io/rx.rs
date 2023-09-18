@@ -1,10 +1,9 @@
-use std::{
-    io,
-    pin::Pin,
-    task::{Context, Poll},
-};
+use std::io;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 
-use tokio::{io::AsyncRead, sync::mpsc::error::TryRecvError};
+use tokio::io::AsyncRead;
+use tokio::sync::mpsc::error::TryRecvError;
 
 use super::ChannelMsg;
 use crate::{Channel, ChannelId};

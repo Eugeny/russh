@@ -1,10 +1,15 @@
+use std::sync::Arc;
+
 use russh_cryptovec::CryptoVec;
 use tokio::sync::mpsc::{Sender, UnboundedReceiver};
-use log::debug;
+use tokio::sync::Mutex;
 
 use crate::{ChannelId, ChannelOpenFailure, ChannelStream, Error, Pty, Sig};
 
 pub mod io;
+
+mod channel_ref;
+pub use channel_ref::ChannelRef;
 
 #[derive(Debug)]
 #[non_exhaustive]
@@ -113,7 +118,7 @@ pub struct Channel<Send: From<(ChannelId, ChannelMsg)>> {
     pub(crate) sender: Sender<Send>,
     pub(crate) receiver: UnboundedReceiver<ChannelMsg>,
     pub(crate) max_packet_size: u32,
-    pub(crate) window_size: u32,
+    pub(crate) window_size: Arc<Mutex<u32>>,
 }
 
 impl<T: From<(ChannelId, ChannelMsg)>> std::fmt::Debug for Channel<T> {
@@ -123,14 +128,32 @@ impl<T: From<(ChannelId, ChannelMsg)>> std::fmt::Debug for Channel<T> {
 }
 
 impl<S: From<(ChannelId, ChannelMsg)> + Send + 'static> Channel<S> {
-    pub fn id(&self) -> ChannelId {
-        self.id
+    pub(crate) fn new(
+        id: ChannelId,
+        sender: Sender<S>,
+        max_packet_size: u32,
+        window_size: u32,
+    ) -> (Self, ChannelRef) {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let window_size = Arc::new(Mutex::new(window_size));
+
+        (
+            Self {
+                id,
+                sender,
+                receiver: rx,
+                max_packet_size,
+                window_size: window_size.clone(),
+            },
+            ChannelRef {
+                sender: tx,
+                window_size,
+            },
+        )
     }
 
-    /// Returns the min between the maximum packet size and the
-    /// remaining window size in the channel.
-    pub fn writable_packet_size(&self) -> usize {
-        self.max_packet_size.min(self.window_size) as usize
+    pub fn id(&self) -> ChannelId {
+        self.id
     }
 
     /// Request a pseudo-terminal with the given characteristics.
@@ -266,14 +289,14 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + 'static> Channel<S> {
     }
 
     /// Send data to a channel.
-    pub async fn data<R: tokio::io::AsyncReadExt + Unpin>(&mut self, data: R) -> Result<(), Error> {
+    pub async fn data<R: tokio::io::AsyncRead + Unpin>(&mut self, data: R) -> Result<(), Error> {
         self.send_data(None, data).await
     }
 
     /// Send data to a channel. The number of bytes added to the
     /// "sending pipeline" (to be processed by the event loop) is
     /// returned.
-    pub async fn extended_data<R: tokio::io::AsyncReadExt + Unpin>(
+    pub async fn extended_data<R: tokio::io::AsyncRead + Unpin>(
         &mut self,
         ext: u32,
         data: R,
@@ -281,63 +304,15 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + 'static> Channel<S> {
         self.send_data(Some(ext), data).await
     }
 
-    async fn send_data<R: tokio::io::AsyncReadExt + Unpin>(
+    async fn send_data<R: tokio::io::AsyncRead + Unpin>(
         &mut self,
         ext: Option<u32>,
         mut data: R,
     ) -> Result<(), Error> {
-        let mut total = 0;
-        loop {
-            // wait for the window to be restored.
-            while self.window_size == 0 {
-                match self.receiver.recv().await {
-                    Some(ChannelMsg::WindowAdjusted { new_size }) => {
-                        debug!("window adjusted: {:?}", new_size);
-                        self.window_size = new_size;
-                        break;
-                    }
-                    Some(msg) => {
-                        debug!("unexpected channel msg: {:?}", msg);
-                    }
-                    None => break,
-                }
-            }
-            debug!(
-                "sending data, self.window_size = {:?}, self.max_packet_size = {:?}, total = {:?}",
-                self.window_size, self.max_packet_size, total
-            );
-            let sendable = self.window_size.min(self.max_packet_size) as usize;
+        let (mut tx, _) = self.into_io_parts_ext(ext);
 
-            debug!("sendable {:?}", sendable);
+        tokio::io::copy(&mut data, &mut tx).await?;
 
-            // If we can not send anymore, continue
-            // and wait for server window adjustment
-            if sendable == 0 {
-                continue;
-            }
-
-            let mut c = CryptoVec::new_zeroed(sendable);
-            let n = data.read(&mut c[..]).await?;
-            total += n;
-            c.resize(n);
-            self.window_size -= n as u32;
-            self.send_data_packet(ext, c).await?;
-            if n == 0 {
-                break;
-            } else if self.window_size > 0 {
-                continue;
-            }
-        }
-        Ok(())
-    }
-
-    async fn send_data_packet(&mut self, ext: Option<u32>, data: CryptoVec) -> Result<(), Error> {
-        self.send_msg(if let Some(ext) = ext {
-            ChannelMsg::ExtendedData { ext, data }
-        } else {
-            ChannelMsg::Data { data }
-        })
-        .await?;
         Ok(())
     }
 
@@ -348,14 +323,7 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + 'static> Channel<S> {
 
     /// Wait for data to come.
     pub async fn wait(&mut self) -> Option<ChannelMsg> {
-        match self.receiver.recv().await {
-            Some(ChannelMsg::WindowAdjusted { new_size }) => {
-                self.window_size = new_size;
-                Some(ChannelMsg::WindowAdjusted { new_size })
-            }
-            Some(msg) => Some(msg),
-            None => None,
-        }
+        self.receiver.recv().await
     }
 
     async fn send_msg(&self, msg: ChannelMsg) -> Result<(), Error> {
@@ -426,16 +394,11 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + 'static> Channel<S> {
         &mut self,
         ext: Option<u32>,
     ) -> (io::ChannelTx<S>, io::ChannelRx<'_, S>) {
-        use std::sync::Arc;
-        use tokio::sync::Mutex;
-
-        let window_size = Arc::new(Mutex::new(self.window_size));
-
         (
             io::ChannelTx::new(
                 self.sender.clone(),
                 self.id,
-                window_size,
+                self.window_size.clone(),
                 self.max_packet_size,
                 ext,
             ),

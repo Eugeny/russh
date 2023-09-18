@@ -4,10 +4,11 @@ use std::sync::Arc;
 use log::debug;
 use russh_keys::encoding::{Encoding, Reader};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
-use tokio::sync::mpsc::{unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{unbounded_channel, Receiver, Sender, UnboundedReceiver};
+use tokio::sync::Mutex;
 
 use super::*;
-use crate::channels::{Channel, ChannelMsg};
+use crate::channels::{Channel, ChannelMsg, ChannelRef};
 use crate::kex::EXTENSION_SUPPORT_AS_CLIENT;
 use crate::msg;
 
@@ -19,31 +20,31 @@ pub struct Session {
     pub(crate) target_window_size: u32,
     pub(crate) pending_reads: Vec<CryptoVec>,
     pub(crate) pending_len: u32,
-    pub(crate) channels: HashMap<ChannelId, UnboundedSender<ChannelMsg>>,
+    pub(crate) channels: HashMap<ChannelId, ChannelRef>,
 }
 #[derive(Debug)]
 pub enum Msg {
     ChannelOpenSession {
-        sender: UnboundedSender<ChannelMsg>,
+        channel_ref: ChannelRef,
     },
     ChannelOpenDirectTcpIp {
         host_to_connect: String,
         port_to_connect: u32,
         originator_address: String,
         originator_port: u32,
-        sender: UnboundedSender<ChannelMsg>,
+        channel_ref: ChannelRef,
     },
     ChannelOpenForwardedTcpIp {
         connected_address: String,
         connected_port: u32,
         originator_address: String,
         originator_port: u32,
-        sender: UnboundedSender<ChannelMsg>,
+        channel_ref: ChannelRef,
     },
     ChannelOpenX11 {
         originator_address: String,
         originator_port: u32,
-        sender: UnboundedSender<ChannelMsg>,
+        channel_ref: ChannelRef,
     },
     TcpIpForward {
         address: String,
@@ -170,11 +171,16 @@ impl Handle {
     /// `confirmed` field of the corresponding `Channel`.
     pub async fn channel_open_session(&self) -> Result<Channel<Msg>, Error> {
         let (sender, receiver) = unbounded_channel();
+        let channel_ref = ChannelRef::new(sender);
+        let window_size_ref = channel_ref.window_size().clone();
+
         self.sender
-            .send(Msg::ChannelOpenSession { sender })
+            .send(Msg::ChannelOpenSession { channel_ref })
             .await
             .map_err(|_| Error::SendError)?;
-        self.wait_channel_confirmation(receiver).await
+
+        self.wait_channel_confirmation(receiver, window_size_ref)
+            .await
     }
 
     /// Open a TCP/IP forwarding channel. This is usually done when a
@@ -190,17 +196,21 @@ impl Handle {
         originator_port: u32,
     ) -> Result<Channel<Msg>, Error> {
         let (sender, receiver) = unbounded_channel();
+        let channel_ref = ChannelRef::new(sender);
+        let window_size_ref = channel_ref.window_size().clone();
+
         self.sender
             .send(Msg::ChannelOpenDirectTcpIp {
                 host_to_connect: host_to_connect.into(),
                 port_to_connect,
                 originator_address: originator_address.into(),
                 originator_port,
-                sender,
+                channel_ref,
             })
             .await
             .map_err(|_| Error::SendError)?;
-        self.wait_channel_confirmation(receiver).await
+        self.wait_channel_confirmation(receiver, window_size_ref)
+            .await
     }
 
     pub async fn channel_open_forwarded_tcpip<A: Into<String>, B: Into<String>>(
@@ -211,17 +221,21 @@ impl Handle {
         originator_port: u32,
     ) -> Result<Channel<Msg>, Error> {
         let (sender, receiver) = unbounded_channel();
+        let channel_ref = ChannelRef::new(sender);
+        let window_size_ref = channel_ref.window_size().clone();
+
         self.sender
             .send(Msg::ChannelOpenForwardedTcpIp {
                 connected_address: connected_address.into(),
                 connected_port,
                 originator_address: originator_address.into(),
                 originator_port,
-                sender,
+                channel_ref,
             })
             .await
             .map_err(|_| Error::SendError)?;
-        self.wait_channel_confirmation(receiver).await
+        self.wait_channel_confirmation(receiver, window_size_ref)
+            .await
     }
 
     pub async fn channel_open_x11<A: Into<String>>(
@@ -230,20 +244,25 @@ impl Handle {
         originator_port: u32,
     ) -> Result<Channel<Msg>, Error> {
         let (sender, receiver) = unbounded_channel();
+        let channel_ref = ChannelRef::new(sender);
+        let window_size_ref = channel_ref.window_size().clone();
+
         self.sender
             .send(Msg::ChannelOpenX11 {
                 originator_address: originator_address.into(),
                 originator_port,
-                sender,
+                channel_ref,
             })
             .await
             .map_err(|_| Error::SendError)?;
-        self.wait_channel_confirmation(receiver).await
+        self.wait_channel_confirmation(receiver, window_size_ref)
+            .await
     }
 
     async fn wait_channel_confirmation(
         &self,
         mut receiver: UnboundedReceiver<ChannelMsg>,
+        window_size_ref: Arc<Mutex<u32>>,
     ) -> Result<Channel<Msg>, Error> {
         loop {
             match receiver.recv().await {
@@ -252,12 +271,14 @@ impl Handle {
                     max_packet_size,
                     window_size,
                 }) => {
+                    *window_size_ref.lock().await = window_size;
+
                     return Ok(Channel {
                         id,
                         sender: self.sender.clone(),
                         receiver,
                         max_packet_size,
-                        window_size,
+                        window_size: window_size_ref,
                     });
                 }
                 Some(ChannelMsg::OpenFailure(reason)) => {
@@ -420,21 +441,21 @@ impl Session {
                         Some(Msg::Channel(id, ChannelMsg::WindowAdjusted { new_size })) => {
                             debug!("window adjusted to {:?} for channel {:?}", new_size, id);
                         }
-                        Some(Msg::ChannelOpenSession { sender }) => {
+                        Some(Msg::ChannelOpenSession { channel_ref }) => {
                             let id = self.channel_open_session()?;
-                            self.channels.insert(id, sender);
+                            self.channels.insert(id, channel_ref);
                         }
-                        Some(Msg::ChannelOpenDirectTcpIp { host_to_connect, port_to_connect, originator_address, originator_port, sender }) => {
+                        Some(Msg::ChannelOpenDirectTcpIp { host_to_connect, port_to_connect, originator_address, originator_port, channel_ref }) => {
                             let id = self.channel_open_direct_tcpip(&host_to_connect, port_to_connect, &originator_address, originator_port)?;
-                            self.channels.insert(id, sender);
+                            self.channels.insert(id, channel_ref);
                         }
-                        Some(Msg::ChannelOpenForwardedTcpIp { connected_address, connected_port, originator_address, originator_port, sender }) => {
+                        Some(Msg::ChannelOpenForwardedTcpIp { connected_address, connected_port, originator_address, originator_port, channel_ref }) => {
                             let id = self.channel_open_forwarded_tcpip(&connected_address, connected_port, &originator_address, originator_port)?;
-                            self.channels.insert(id, sender);
+                            self.channels.insert(id, channel_ref);
                         }
-                        Some(Msg::ChannelOpenX11 { originator_address, originator_port, sender }) => {
+                        Some(Msg::ChannelOpenX11 { originator_address, originator_port, channel_ref }) => {
                             let id = self.channel_open_x11(&originator_address, originator_port)?;
-                            self.channels.insert(id, sender);
+                            self.channels.insert(id, channel_ref);
                         }
                         Some(Msg::TcpIpForward { address, port }) => {
                             self.tcpip_forward(&address, port);

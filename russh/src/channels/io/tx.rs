@@ -1,19 +1,13 @@
-use std::{
-    io,
-    pin::Pin,
-    sync::Arc,
-    task::{Context, Poll},
-};
-
-use tokio::{
-    io::AsyncWrite,
-    sync::{
-        mpsc::{self, error::TrySendError},
-        Mutex,
-    },
-};
+use std::io;
+use std::pin::Pin;
+use std::sync::Arc;
+use std::task::{Context, Poll};
 
 use russh_cryptovec::CryptoVec;
+use tokio::io::AsyncWrite;
+use tokio::sync::mpsc::error::TrySendError;
+use tokio::sync::mpsc::{self};
+use tokio::sync::Mutex;
 
 use super::ChannelMsg;
 use crate::ChannelId;
