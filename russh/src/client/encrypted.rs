@@ -19,7 +19,6 @@ use log::{debug, error, info, trace, warn};
 use russh_cryptovec::CryptoVec;
 use russh_keys::encoding::{Encoding, Reader};
 use russh_keys::key::parse_public_key;
-use tokio::sync::mpsc::unbounded_channel;
 
 use crate::client::{Handler, Msg, Prompt, Reply, Session};
 use crate::key::PubKey;
@@ -813,15 +812,16 @@ impl Session {
         id: ChannelId,
         msg: &OpenChannelMessage,
     ) -> Channel<Msg> {
-        let (sender, receiver) = unbounded_channel();
-        self.channels.insert(id, sender);
-        Channel {
+        let (channel, channel_ref) = Channel::new(
             id,
-            sender: self.inbound_channel_sender.clone(),
-            receiver,
-            max_packet_size: msg.recipient_maximum_packet_size,
-            window_size: msg.recipient_window_size,
-        }
+            self.inbound_channel_sender.clone(),
+            msg.recipient_maximum_packet_size,
+            msg.recipient_window_size,
+        );
+
+        self.channels.insert(id, channel_ref);
+
+        channel
     }
 
     pub(crate) fn write_auth_request_if_needed(&mut self, user: &str, meth: auth::Method) -> bool {
