@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
+use std::convert::TryFrom;
+
 use ed25519_dalek::{Signer, Verifier};
 #[cfg(feature = "openssl")]
 use openssl::pkey::{Private, Public};
 use rand_core::OsRng;
 use russh_cryptovec::CryptoVec;
 use serde::{Deserialize, Serialize};
-use std::convert::TryFrom;
 
 use crate::encoding::{Encoding, Reader};
 pub use crate::signature::*;

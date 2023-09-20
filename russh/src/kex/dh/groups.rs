@@ -70,14 +70,8 @@ impl DH {
     pub fn generate_private_key(&mut self, is_server: bool) -> BigUint {
         let q = (&self.prime_num - &BigUint::from(1u8)) / &BigUint::from(2u8);
         let mut rng = rand::thread_rng();
-        self.private_key = rng.gen_biguint_range(
-            &if is_server {
-                1u8.into()
-            } else {
-                2u8.into()
-            },
-            &q,
-        );
+        self.private_key =
+            rng.gen_biguint_range(&if is_server { 1u8.into() } else { 2u8.into() }, &q);
         self.private_key.clone()
     }
 

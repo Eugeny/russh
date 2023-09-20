@@ -1,12 +1,14 @@
+use std::collections::HashMap;
+use std::net::SocketAddr;
+use std::sync::Arc;
+use std::time::Duration;
+
 use async_trait::async_trait;
 use log::{error, info, LevelFilter};
-use russh::{
-    server::{Auth, Msg, Session},
-    Channel, ChannelId,
-};
+use russh::server::{Auth, Msg, Session};
+use russh::{Channel, ChannelId};
 use russh_keys::key::KeyPair;
 use russh_sftp::protocol::{File, FileAttributes, Handle, Name, Status, StatusCode, Version};
-use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::Duration};
 use tokio::sync::Mutex;
 
 #[derive(Clone)]
@@ -151,10 +153,12 @@ impl russh_sftp::server::Handler for SftpSession {
                 files: vec![
                     File {
                         filename: "foo".to_string(),
+                        longname: "".to_string(),
                         attrs: FileAttributes::default(),
                     },
                     File {
                         filename: "bar".to_string(),
+                        longname: "".to_string(),
                         attrs: FileAttributes::default(),
                     },
                 ],
@@ -169,6 +173,7 @@ impl russh_sftp::server::Handler for SftpSession {
             id,
             files: vec![File {
                 filename: "/".to_string(),
+                longname: "".to_string(),
                 attrs: FileAttributes::default(),
             }],
         })
@@ -185,7 +190,6 @@ async fn main() {
         auth_rejection_time: Duration::from_secs(3),
         auth_rejection_time_initial: Some(Duration::from_secs(0)),
         keys: vec![KeyPair::generate_ed25519().unwrap()],
-        inactivity_timeout: Some(Duration::from_secs(3600)),
         ..Default::default()
     };
 

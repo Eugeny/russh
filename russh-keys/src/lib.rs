@@ -283,9 +283,9 @@ pub fn load_secret_key<P: AsRef<Path>>(
 }
 
 fn is_base64_char(c: char) -> bool {
-    ('a'..='z').contains(&c)
-        || ('A'..='Z').contains(&c)
-        || ('0'..='9').contains(&c)
+    c.is_ascii_lowercase()
+        || c.is_ascii_uppercase()
+        || c.is_ascii_digit()
         || c == '/'
         || c == '+'
         || c == '='
@@ -413,7 +413,7 @@ pub fn check_known_hosts(host: &str, port: u16, pubkey: &key::PublicKey) -> Resu
         known_host_file.push("known_hosts");
         check_known_hosts_path(host, port, pubkey, &known_host_file)
     } else {
-        Err(Error::NoHomeDir.into())
+        Err(Error::NoHomeDir)
     }
 }
 
@@ -434,7 +434,7 @@ mod test {
     use std::fs::File;
     use std::io::Write;
 
-    #[cfg(feature = "openssl")]
+    #[cfg(all(unix, feature = "openssl"))]
     use futures::Future;
 
     use super::*;
@@ -843,14 +843,14 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
     }
 
     #[test]
-    #[cfg(feature = "openssl")]
+    #[cfg(all(unix, feature = "openssl"))]
     fn test_client_agent_rsa() {
         let key = decode_secret_key(PKCS8_ENCRYPTED, Some("blabla")).unwrap();
         test_client_agent(key)
     }
 
     #[test]
-    #[cfg(feature = "openssl")]
+    #[cfg(all(unix, feature = "openssl"))]
     fn test_client_agent_openssh_rsa() {
         let key = decode_secret_key(RSA_KEY, None).unwrap();
         test_client_agent(key)
