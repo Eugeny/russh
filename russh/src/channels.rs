@@ -1,6 +1,6 @@
+use log::debug;
 use russh_cryptovec::CryptoVec;
 use tokio::sync::mpsc::{Sender, UnboundedReceiver};
-use log::debug;
 
 use crate::{ChannelId, ChannelOpenFailure, ChannelStream, Error, Pty, Sig};
 

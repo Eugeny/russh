@@ -116,9 +116,9 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
-use log::error;
 use async_trait::async_trait;
 use futures::future::Future;
+use log::error;
 use russh_keys::key;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, ToSocketAddrs};

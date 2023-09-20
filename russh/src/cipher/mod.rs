@@ -22,9 +22,9 @@ use std::num::Wrapping;
 use aes::{Aes128, Aes192, Aes256};
 use byteorder::{BigEndian, ByteOrder};
 use ctr::Ctr128BE;
+use log::debug;
 use once_cell::sync::Lazy;
 use tokio::io::{AsyncRead, AsyncReadExt};
-use log::debug;
 
 use crate::mac::MacAlgorithm;
 use crate::sshbuffer::SSHBuffer;

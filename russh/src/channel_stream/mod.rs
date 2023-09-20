@@ -103,7 +103,7 @@ impl AsyncWrite for ChannelStream {
     ) -> Poll<Result<(), io::Error>> {
         if let Err(err) = self.outgoing.send("".into()) {
             let err = format!("{err:?}");
-            return Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, err)))
+            return Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, err)));
         }
         Poll::Ready(Ok(()))
     }
