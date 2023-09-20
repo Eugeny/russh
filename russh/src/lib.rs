@@ -96,9 +96,9 @@
 
 use std::fmt::{Debug, Display, Formatter};
 
-use thiserror::Error;
 use parsing::ChannelOpenConfirmation;
 pub use russh_cryptovec::CryptoVec;
+use thiserror::Error;
 
 mod auth;
 
@@ -904,7 +904,7 @@ mod test_channels {
                             ChannelMsg::Data { data } => {
                                 channel.data(&data[..]).await.unwrap();
                                 channel.close().await.unwrap();
-                                break
+                                break;
                             }
                             _ => {}
                         }

@@ -1,11 +1,11 @@
-use async_trait::async_trait;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
+use async_trait::async_trait;
 use log::debug;
 use russh::server::{Auth, Msg, Session};
 use russh::*;
 use russh_keys::*;
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::convert::TryFrom;
 
 use aes::cipher::{BlockDecryptMut, BlockEncryptMut, KeyIvInit};
 use bit_vec::BitVec;
@@ -9,7 +10,6 @@ use openssl::pkey::Private;
 use openssl::rsa::Rsa;
 #[cfg(test)]
 use rand_core::OsRng;
-use std::convert::TryFrom;
 use yasna::BERReaderSeq;
 use {std, yasna};
 

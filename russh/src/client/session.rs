@@ -1,6 +1,6 @@
+use log::error;
 use russh_cryptovec::CryptoVec;
 use russh_keys::encoding::Encoding;
-use log::error;
 
 use crate::client::Session;
 use crate::session::EncryptedState;
@@ -81,7 +81,7 @@ impl Session {
 
     pub fn channel_open_direct_streamlocal(
         &mut self,
-        socket_path: &str
+        socket_path: &str,
     ) -> Result<ChannelId, crate::Error> {
         self.channel_open_generic(b"direct-streamlocal@openssh.com", |write| {
             write.extend_ssh_string(socket_path.as_bytes());
