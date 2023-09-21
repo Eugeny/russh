@@ -28,6 +28,12 @@ async fn test_reader_and_writer() -> Result<(), anyhow::Error> {
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
 
+    stream(addr, &data).await?;
+
+    Ok(())
+}
+
+async fn stream(addr: SocketAddr, data: &[u8]) -> Result<(), anyhow::Error> {
     let config = Arc::new(client::Config::default());
     let key = Arc::new(russh_keys::key::KeyPair::generate_ed25519().unwrap());
 
@@ -39,7 +45,7 @@ async fn test_reader_and_writer() -> Result<(), anyhow::Error> {
     };
 
     let mut buf = Vec::<u8>::new();
-    let (mut writer, mut reader) = (channel.make_writer(), channel.make_reader());
+    let (mut writer, mut reader) = (channel.make_writer_ext(Some(1)), channel.make_reader());
 
     let (r0, r1) = tokio::join!(
         async {
@@ -119,7 +125,8 @@ impl russh::server::Handler for Server {
         session: Session,
     ) -> Result<(Self, bool, Session), Self::Error> {
         tokio::spawn(async move {
-            let (mut writer, mut reader) = (channel.make_writer(), channel.make_reader());
+            let (mut writer, mut reader) =
+                (channel.make_writer(), channel.make_reader_ext(Some(1)));
 
             tokio::io::copy(&mut reader, &mut writer)
                 .await
