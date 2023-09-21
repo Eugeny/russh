@@ -165,7 +165,7 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + 'static> Channel<S> {
     /// Request a pseudo-terminal with the given characteristics.
     #[allow(clippy::too_many_arguments)] // length checked
     pub async fn request_pty(
-        &mut self,
+        &self,
         want_reply: bool,
         term: &str,
         col_width: u32,
@@ -183,42 +183,33 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + 'static> Channel<S> {
             pix_height,
             terminal_modes: terminal_modes.to_vec(),
         })
-        .await?;
-        Ok(())
+        .await
     }
 
     /// Request a remote shell.
-    pub async fn request_shell(&mut self, want_reply: bool) -> Result<(), Error> {
-        self.send_msg(ChannelMsg::RequestShell { want_reply })
-            .await?;
-        Ok(())
+    pub async fn request_shell(&self, want_reply: bool) -> Result<(), Error> {
+        self.send_msg(ChannelMsg::RequestShell { want_reply }).await
     }
 
     /// Execute a remote program (will be passed to a shell). This can
     /// be used to implement scp (by calling a remote scp and
     /// tunneling to its standard input).
-    pub async fn exec<A: Into<Vec<u8>>>(
-        &mut self,
-        want_reply: bool,
-        command: A,
-    ) -> Result<(), Error> {
+    pub async fn exec<A: Into<Vec<u8>>>(&self, want_reply: bool, command: A) -> Result<(), Error> {
         self.send_msg(ChannelMsg::Exec {
             want_reply,
             command: command.into(),
         })
-        .await?;
-        Ok(())
+        .await
     }
 
     /// Signal a remote process.
-    pub async fn signal(&mut self, signal: Sig) -> Result<(), Error> {
-        self.send_msg(ChannelMsg::Signal { signal }).await?;
-        Ok(())
+    pub async fn signal(&self, signal: Sig) -> Result<(), Error> {
+        self.send_msg(ChannelMsg::Signal { signal }).await
     }
 
     /// Request the start of a subsystem with the given name.
     pub async fn request_subsystem<A: Into<String>>(
-        &mut self,
+        &self,
         want_reply: bool,
         name: A,
     ) -> Result<(), Error> {
@@ -226,8 +217,7 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + 'static> Channel<S> {
             want_reply,
             name: name.into(),
         })
-        .await?;
-        Ok(())
+        .await
     }
 
     /// Request X11 forwarding through an already opened X11
@@ -235,7 +225,7 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + 'static> Channel<S> {
     /// [RFC4254](https://tools.ietf.org/html/rfc4254#section-6.3.1)
     /// for security issues related to cookies.
     pub async fn request_x11<A: Into<String>, B: Into<String>>(
-        &mut self,
+        &self,
         want_reply: bool,
         single_connection: bool,
         x11_authentication_protocol: A,
@@ -249,13 +239,12 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + 'static> Channel<S> {
             x11_authentication_cookie: x11_authentication_cookie.into(),
             x11_screen_number,
         })
-        .await?;
-        Ok(())
+        .await
     }
 
     /// Set a remote environment variable.
     pub async fn set_env<A: Into<String>, B: Into<String>>(
-        &mut self,
+        &self,
         want_reply: bool,
         variable_name: A,
         variable_value: B,
@@ -265,13 +254,12 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + 'static> Channel<S> {
             variable_name: variable_name.into(),
             variable_value: variable_value.into(),
         })
-        .await?;
-        Ok(())
+        .await
     }
 
     /// Inform the server that our window size has changed.
     pub async fn window_change(
-        &mut self,
+        &self,
         col_width: u32,
         row_height: u32,
         pix_width: u32,
@@ -283,19 +271,16 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + 'static> Channel<S> {
             pix_width,
             pix_height,
         })
-        .await?;
-        Ok(())
+        .await
     }
 
     /// Inform the server that we will accept agent forwarding channels
-    pub async fn agent_forward(&mut self, want_reply: bool) -> Result<(), Error> {
-        self.send_msg(ChannelMsg::AgentForward { want_reply })
-            .await?;
-        Ok(())
+    pub async fn agent_forward(&self, want_reply: bool) -> Result<(), Error> {
+        self.send_msg(ChannelMsg::AgentForward { want_reply }).await
     }
 
     /// Send data to a channel.
-    pub async fn data<R: tokio::io::AsyncRead + Unpin>(&mut self, data: R) -> Result<(), Error> {
+    pub async fn data<R: tokio::io::AsyncRead + Unpin>(&self, data: R) -> Result<(), Error> {
         self.send_data(None, data).await
     }
 
@@ -303,7 +288,7 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + 'static> Channel<S> {
     /// "sending pipeline" (to be processed by the event loop) is
     /// returned.
     pub async fn extended_data<R: tokio::io::AsyncRead + Unpin>(
-        &mut self,
+        &self,
         ext: u32,
         data: R,
     ) -> Result<(), Error> {
@@ -311,7 +296,7 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + 'static> Channel<S> {
     }
 
     async fn send_data<R: tokio::io::AsyncRead + Unpin>(
-        &mut self,
+        &self,
         ext: Option<u32>,
         mut data: R,
     ) -> Result<(), Error> {
@@ -322,14 +307,13 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + 'static> Channel<S> {
         Ok(())
     }
 
-    pub async fn eof(&mut self) -> Result<(), Error> {
-        self.send_msg(ChannelMsg::Eof).await?;
-        Ok(())
+    pub async fn eof(&self) -> Result<(), Error> {
+        self.send_msg(ChannelMsg::Eof).await
     }
 
-    /// Wait for data to come.
-    pub async fn wait(&mut self) -> Option<ChannelMsg> {
-        self.receiver.recv().await
+    /// Request that the channel be closed.
+    pub async fn close(&self) -> Result<(), Error> {
+        self.send_msg(ChannelMsg::Close).await
     }
 
     async fn send_msg(&self, msg: ChannelMsg) -> Result<(), Error> {
@@ -339,10 +323,9 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + 'static> Channel<S> {
             .map_err(|_| Error::SendError)
     }
 
-    /// Request that the channel be closed.
-    pub async fn close(&self) -> Result<(), Error> {
-        self.send_msg(ChannelMsg::Close).await?;
-        Ok(())
+    /// Awaits an incoming [`ChannelMsg`], this method returns [`None`] if the channel has been closed.
+    pub async fn wait(&mut self) -> Option<ChannelMsg> {
+        self.receiver.recv().await
     }
 
     pub fn into_stream(mut self) -> ChannelStream {

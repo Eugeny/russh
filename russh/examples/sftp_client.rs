@@ -44,7 +44,7 @@ async fn main() {
         .await
         .unwrap();
     if session.authenticate_password("root", "pass").await.unwrap() {
-        let mut channel = session.channel_open_session().await.unwrap();
+        let channel = session.channel_open_session().await.unwrap();
         channel.request_subsystem(true, "sftp").await.unwrap();
         let sftp = SftpSession::new(channel.into_stream()).await.unwrap();
         info!("current path: {:?}", sftp.canonicalize(".").await.unwrap());
