@@ -152,6 +152,12 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + 'static> Channel<S> {
         )
     }
 
+    /// Returns the min between the maximum packet size and the
+    /// remaining window size in the channel.
+    pub async fn writable_packet_size(&self) -> usize {
+        self.max_packet_size.min(*self.window_size.lock().await) as usize
+    }
+
     pub fn id(&self) -> ChannelId {
         self.id
     }
