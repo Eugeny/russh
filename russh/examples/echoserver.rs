@@ -102,7 +102,7 @@ impl server::Handler for Server {
         let address = address.to_string();
         let port = *port;
         tokio::spawn(async move {
-            let mut channel = handle
+            let channel = handle
                 .channel_open_forwarded_tcpip(address, port, "1.2.3.4", 1234)
                 .await
                 .unwrap();
