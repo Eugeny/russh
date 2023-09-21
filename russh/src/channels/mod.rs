@@ -315,7 +315,7 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + 'static> Channel<S> {
         ext: Option<u32>,
         mut data: R,
     ) -> Result<(), Error> {
-        let (mut tx, _) = self.into_io_parts_ext(ext);
+        let mut tx = self.make_writer_ext(ext);
 
         tokio::io::copy(&mut data, &mut tx).await?;
 
@@ -387,28 +387,33 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + 'static> Channel<S> {
         stream
     }
 
-    /// Setup the [`Channel`] to be able to send and receive [`ChannelMsg::Data`]
-    /// through [`io::ChannelTx`] and [`io::ChannelRx`].
-    pub fn into_io_parts(&mut self) -> (io::ChannelTx<S>, io::ChannelRx<'_, S>) {
-        self.into_io_parts_ext(None)
+    /// Make a reader for the [`Channel`] to receive [`ChannelMsg::Data`]
+    /// through the [`tokio::io::AsyncRead`] trait.
+    pub fn make_reader(&mut self) -> io::ChannelRx<'_, S> {
+        self.make_reader_ext(None)
     }
 
-    /// Setup the [`Channel`] to be able to send and receive [`ChannelMsg::Data`]
-    /// or [`ChannelMsg::ExtendedData`] through [`io::ChannelTx`] and [`io::ChannelRx`]
-    /// depending on the `ext` parameter.
-    pub fn into_io_parts_ext(
-        &mut self,
-        ext: Option<u32>,
-    ) -> (io::ChannelTx<S>, io::ChannelRx<'_, S>) {
-        (
-            io::ChannelTx::new(
-                self.sender.clone(),
-                self.id,
-                self.window_size.clone(),
-                self.max_packet_size,
-                ext,
-            ),
-            io::ChannelRx::new(self, ext),
+    /// Make a reader for the [`Channel`] to receive [`ChannelMsg::Data`] or [`ChannelMsg::ExtendedData`]
+    /// depending on the `ext` parameter, through the [`tokio::io::AsyncRead`] trait.
+    pub fn make_reader_ext(&mut self, ext: Option<u32>) -> io::ChannelRx<'_, S> {
+        io::ChannelRx::new(self, ext)
+    }
+
+    /// Make a writer for the [`Channel`] to send [`ChannelMsg::Data`]
+    /// through the [`tokio::io::AsyncWrite`] trait.
+    pub fn make_writer(&self) -> io::ChannelTx<S> {
+        self.make_writer_ext(None)
+    }
+
+    /// Make a writer for the [`Channel`] to send [`ChannelMsg::Data`] or [`ChannelMsg::ExtendedData`]
+    /// depending on the `ext` parameter, through the [`tokio::io::AsyncWrite`] trait.
+    pub fn make_writer_ext(&self, ext: Option<u32>) -> io::ChannelTx<S> {
+        io::ChannelTx::new(
+            self.sender.clone(),
+            self.id,
+            self.window_size.clone(),
+            self.max_packet_size,
+            ext,
         )
     }
 }
