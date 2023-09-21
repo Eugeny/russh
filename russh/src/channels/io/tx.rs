@@ -5,8 +5,8 @@ use std::task::{Context, Poll};
 
 use russh_cryptovec::CryptoVec;
 use tokio::io::AsyncWrite;
+use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
-use tokio::sync::mpsc::{self};
 use tokio::sync::Mutex;
 
 use super::ChannelMsg;
