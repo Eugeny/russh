@@ -77,7 +77,10 @@ where
 
         match self.sender.try_send((self.id, msg).into()) {
             Ok(_) => Poll::Ready(Ok(writable)),
-            Err(TrySendError::Closed(_)) => Poll::Ready(Ok(0)),
+            Err(err @ TrySendError::Closed(_)) => Poll::Ready(Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                err.to_string(),
+            ))),
             Err(TrySendError::Full(_)) => {
                 cx.waker().wake_by_ref();
                 Poll::Pending
@@ -90,6 +93,16 @@ where
     }
 
     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
-        self.poll_flush(cx)
+        match self.sender.try_send((self.id, ChannelMsg::Eof).into()) {
+            Ok(_) => Poll::Ready(Ok(())),
+            Err(err @ TrySendError::Closed(_)) => Poll::Ready(Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                err.to_string(),
+            ))),
+            Err(TrySendError::Full(_)) => {
+                cx.waker().wake_by_ref();
+                Poll::Pending
+            }
+        }
     }
 }
