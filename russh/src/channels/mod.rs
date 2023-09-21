@@ -4,12 +4,15 @@ use russh_cryptovec::CryptoVec;
 use tokio::sync::mpsc::{Sender, UnboundedReceiver};
 use tokio::sync::Mutex;
 
-use crate::{ChannelId, ChannelOpenFailure, ChannelStream, Error, Pty, Sig};
+use crate::{ChannelId, ChannelOpenFailure, Error, Pty, Sig};
 
 pub mod io;
 
 mod channel_ref;
 pub use channel_ref::ChannelRef;
+
+mod channel_stream;
+pub use channel_stream::ChannelStream;
 
 #[derive(Debug)]
 #[non_exhaustive]
@@ -328,68 +331,32 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + 'static> Channel<S> {
         self.receiver.recv().await
     }
 
-    pub fn into_stream(mut self) -> ChannelStream {
-        let (stream, mut r_rx, w_tx) = ChannelStream::new();
-
-        tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    data = r_rx.recv() => {
-                        match data {
-                            Some(data) if !data.is_empty() => self.data(&data[..]).await?,
-                            Some(_) => {
-                                log::debug!("closing chan {:?}, received empty data", &self.id);
-                                self.eof().await?;
-                                self.close().await?;
-                                break;
-                            },
-                            None => {
-                                self.close().await?;
-                                break
-                            }
-                        }
-                    },
-                    msg = self.wait() => {
-                        match msg {
-                            Some(ChannelMsg::Data { data }) => {
-                                w_tx.send(data[..].into()).map_err(|_| crate::Error::SendError)?;
-                            }
-                            Some(ChannelMsg::Eof) => {
-                                // Send a 0-length chunk to indicate EOF.
-                                w_tx.send("".into()).map_err(|_| crate::Error::SendError)?;
-                                break
-                            }
-                            None => break,
-                            _ => (),
-                        }
-                    }
-                }
-            }
-            Ok::<_, crate::Error>(())
-        });
-        stream
+    /// Consume the [`Channel`] to produce a bidirectionnal stream,
+    /// sending and receiving [`ChannelMsg::Data`] as `AsyncRead` + `AsyncWrite`.
+    pub fn into_stream(self) -> ChannelStream<S> {
+        ChannelStream::new(self.make_writer(), io::ChannelRx::new(self, None))
     }
 
     /// Make a reader for the [`Channel`] to receive [`ChannelMsg::Data`]
-    /// through the [`tokio::io::AsyncRead`] trait.
+    /// through the `AsyncRead` trait.
     pub fn make_reader(&mut self) -> io::ChannelRx<'_, S> {
         self.make_reader_ext(None)
     }
 
     /// Make a reader for the [`Channel`] to receive [`ChannelMsg::Data`] or [`ChannelMsg::ExtendedData`]
-    /// depending on the `ext` parameter, through the [`tokio::io::AsyncRead`] trait.
+    /// depending on the `ext` parameter, through the `AsyncRead` trait.
     pub fn make_reader_ext(&mut self, ext: Option<u32>) -> io::ChannelRx<'_, S> {
         io::ChannelRx::new(self, ext)
     }
 
     /// Make a writer for the [`Channel`] to send [`ChannelMsg::Data`]
-    /// through the [`tokio::io::AsyncWrite`] trait.
+    /// through the `AsyncWrite` trait.
     pub fn make_writer(&self) -> io::ChannelTx<S> {
         self.make_writer_ext(None)
     }
 
     /// Make a writer for the [`Channel`] to send [`ChannelMsg::Data`] or [`ChannelMsg::ExtendedData`]
-    /// depending on the `ext` parameter, through the [`tokio::io::AsyncWrite`] trait.
+    /// depending on the `ext` parameter, through the `AsyncWrite` trait.
     pub fn make_writer_ext(&self, ext: Option<u32>) -> io::ChannelTx<S> {
         io::ChannelTx::new(
             self.sender.clone(),
