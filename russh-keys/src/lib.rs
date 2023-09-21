@@ -794,66 +794,69 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
     }
 
     #[cfg(unix)]
-    fn test_client_agent(key: key::KeyPair) {
+    async fn test_client_agent(key: key::KeyPair) -> Result<(), Box<dyn std::error::Error>> {
         env_logger::try_init().unwrap_or(());
-        use std::process::{Command, Stdio};
-        let dir = tempdir::TempDir::new("russh").unwrap();
+        use std::process::Stdio;
+
+        let dir = tempdir::TempDir::new("russh")?;
         let agent_path = dir.path().join("agent");
-        let mut agent = Command::new("ssh-agent")
+        let mut agent = tokio::process::Command::new("ssh-agent")
             .arg("-a")
             .arg(&agent_path)
             .arg("-D")
             .stdout(Stdio::null())
             .stderr(Stdio::null())
-            .spawn()
-            .expect("failed to execute process");
-        std::thread::sleep(std::time::Duration::from_millis(10));
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async move {
-            let public = key.clone_public_key()?;
-            let stream = tokio::net::UnixStream::connect(&agent_path).await?;
-            let mut client = agent::client::AgentClient::connect(stream);
-            client.add_identity(&key, &[]).await?;
-            client.request_identities().await?;
-            let buf = russh_cryptovec::CryptoVec::from_slice(b"blabla");
-            let len = buf.len();
-            let (_, buf) = client.sign_request(&public, buf).await;
-            let buf = buf?;
-            let (a, b) = buf.split_at(len);
-            match key {
-                key::KeyPair::Ed25519 { .. } => {
-                    let sig = &b[b.len() - 64..];
-                    assert!(public.verify_detached(a, sig));
-                }
-                #[cfg(feature = "openssl")]
-                _ => {}
+            .spawn()?;
+
+        // Wait for the socket to be created
+        while agent_path.canonicalize().is_err() {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+
+        let public = key.clone_public_key()?;
+        let stream = tokio::net::UnixStream::connect(&agent_path).await?;
+        let mut client = agent::client::AgentClient::connect(stream);
+        client.add_identity(&key, &[]).await?;
+        client.request_identities().await?;
+        let buf = russh_cryptovec::CryptoVec::from_slice(b"blabla");
+        let len = buf.len();
+        let (_, buf) = client.sign_request(&public, buf).await;
+        let buf = buf?;
+        let (a, b) = buf.split_at(len);
+        match key {
+            key::KeyPair::Ed25519 { .. } => {
+                let sig = &b[b.len() - 64..];
+                assert!(public.verify_detached(a, sig));
             }
-            Ok::<(), Error>(())
-        })
-        .unwrap();
-        agent.kill().unwrap();
-        agent.wait().unwrap();
+            #[cfg(feature = "openssl")]
+            _ => {}
+        }
+
+        agent.kill().await?;
+        agent.wait().await?;
+
+        Ok(())
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(unix)]
-    fn test_client_agent_ed25519() {
+    async fn test_client_agent_ed25519() {
         let key = decode_secret_key(ED25519_KEY, Some("blabla")).unwrap();
-        test_client_agent(key)
+        test_client_agent(key).await.expect("ssh-agent test failed")
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(all(unix, feature = "openssl"))]
-    fn test_client_agent_rsa() {
+    async fn test_client_agent_rsa() {
         let key = decode_secret_key(PKCS8_ENCRYPTED, Some("blabla")).unwrap();
-        test_client_agent(key)
+        test_client_agent(key).await.expect("ssh-agent test failed")
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(all(unix, feature = "openssl"))]
-    fn test_client_agent_openssh_rsa() {
+    async fn test_client_agent_openssh_rsa() {
         let key = decode_secret_key(RSA_KEY, None).unwrap();
-        test_client_agent(key)
+        test_client_agent(key).await.expect("ssh-agent test failed")
     }
 
     #[test]
