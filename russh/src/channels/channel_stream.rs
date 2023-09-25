@@ -9,6 +9,7 @@ use super::{
     ChannelId, ChannelMsg,
 };
 
+/// AsyncRead/AsyncWrite wrapper for SSH Channels
 pub struct ChannelStream<S>
 where
     S: From<(ChannelId, ChannelMsg)> + 'static,
