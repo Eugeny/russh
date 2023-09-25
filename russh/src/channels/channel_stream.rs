@@ -21,7 +21,7 @@ impl<S> ChannelStream<S>
 where
     S: From<(ChannelId, ChannelMsg)>,
 {
-    pub fn new(tx: ChannelTx<S>, rx: ChannelRx<'static, S>) -> Self {
+    pub(super) fn new(tx: ChannelTx<S>, rx: ChannelRx<'static, S>) -> Self {
         Self { tx, rx }
     }
 }
