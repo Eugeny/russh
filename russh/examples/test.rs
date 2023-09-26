@@ -51,42 +51,38 @@ impl server::Handler for Server {
     type Error = anyhow::Error;
 
     async fn channel_open_session(
-        self,
+        &mut self,
         channel: Channel<Msg>,
-        session: Session,
-    ) -> Result<(Self, bool, Session), Self::Error> {
+        _session: &mut Session,
+    ) -> Result<bool, Self::Error> {
         {
             debug!("channel open session");
             let mut clients = self.clients.lock().unwrap();
             clients.insert((self.id, channel.id()), channel);
         }
-        Ok((self, true, session))
+        Ok(true)
     }
 
     /// The client requests a shell.
     #[allow(unused_variables)]
     async fn shell_request(
-        self,
+        &mut self,
         channel: ChannelId,
-        mut session: Session,
-    ) -> Result<(Self, Session), Self::Error> {
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
         session.request_success();
-        Ok((self, session))
+        Ok(())
     }
 
-    async fn auth_publickey(
-        self,
-        _: &str,
-        _: &key::PublicKey,
-    ) -> Result<(Self, Auth), Self::Error> {
-        Ok((self, server::Auth::Accept))
+    async fn auth_publickey(&mut self, _: &str, _: &key::PublicKey) -> Result<Auth, Self::Error> {
+        Ok(server::Auth::Accept)
     }
     async fn data(
-        self,
+        &mut self,
         _channel: ChannelId,
         data: &[u8],
-        mut session: Session,
-    ) -> Result<(Self, Session), Self::Error> {
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
         debug!("data: {data:?}");
         {
             let mut clients = self.clients.lock().unwrap();
@@ -94,6 +90,6 @@ impl server::Handler for Server {
                 session.data(channel.id(), CryptoVec::from(data.to_vec()));
             }
         }
-        Ok((self, session))
+        Ok(())
     }
 }

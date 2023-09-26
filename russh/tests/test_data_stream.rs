@@ -49,7 +49,7 @@ async fn stream(addr: SocketAddr, data: &[u8]) -> Result<(), anyhow::Error> {
 
     let (r0, r1) = tokio::join!(
         async {
-            writer.write_all(&data).await?;
+            writer.write_all(data).await?;
             writer.shutdown().await?;
 
             Ok::<_, anyhow::Error>(())
@@ -111,19 +111,15 @@ impl russh::server::Server for Server {
 impl russh::server::Handler for Server {
     type Error = anyhow::Error;
 
-    async fn auth_publickey(
-        self,
-        _: &str,
-        _: &key::PublicKey,
-    ) -> Result<(Self, Auth), Self::Error> {
-        Ok((self, Auth::Accept))
+    async fn auth_publickey(&mut self, _: &str, _: &key::PublicKey) -> Result<Auth, Self::Error> {
+        Ok(Auth::Accept)
     }
 
     async fn channel_open_session(
-        self,
+        &mut self,
         mut channel: Channel<Msg>,
-        session: Session,
-    ) -> Result<(Self, bool, Session), Self::Error> {
+        _session: &mut Session,
+    ) -> Result<bool, Self::Error> {
         tokio::spawn(async move {
             let (mut writer, mut reader) =
                 (channel.make_writer(), channel.make_reader_ext(Some(1)));
@@ -135,7 +131,7 @@ impl russh::server::Handler for Server {
             writer.shutdown().await.expect("Shutdown failed");
         });
 
-        Ok((self, true, session))
+        Ok(true)
     }
 }
 

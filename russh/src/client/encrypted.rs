@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-use std::cell::RefCell;
+
 use std::convert::TryInto;
 
 use log::{debug, error, info, trace, warn};
@@ -28,10 +28,6 @@ use crate::session::{Encrypted, EncryptedState, Kex, KexInit};
 use crate::{
     auth, msg, negotiation, Channel, ChannelId, ChannelMsg, ChannelOpenFailure, ChannelParams, Sig,
 };
-
-thread_local! {
-    static SIGNATURE_BUFFER: RefCell<CryptoVec> = RefCell::new(CryptoVec::new());
-}
 
 impl Session {
     pub(crate) async fn client_read_encrypted<H: Handler>(

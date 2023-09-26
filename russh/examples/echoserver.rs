@@ -61,43 +61,43 @@ impl server::Handler for Server {
     type Error = anyhow::Error;
 
     async fn channel_open_session(
-        self,
+        &mut self,
         channel: Channel<Msg>,
-        session: Session,
-    ) -> Result<(Self, bool, Session), Self::Error> {
+        session: &mut Session,
+    ) -> Result<bool, Self::Error> {
         {
             let mut clients = self.clients.lock().await;
             clients.insert((self.id, channel.id()), session.handle());
         }
-        Ok((self, true, session))
+        Ok(true)
     }
 
     async fn auth_publickey(
-        self,
+        &mut self,
         _: &str,
         _: &key::PublicKey,
-    ) -> Result<(Self, server::Auth), Self::Error> {
-        Ok((self, server::Auth::Accept))
+    ) -> Result<server::Auth, Self::Error> {
+        Ok(server::Auth::Accept)
     }
 
     async fn data(
-        mut self,
+        &mut self,
         channel: ChannelId,
         data: &[u8],
-        mut session: Session,
-    ) -> Result<(Self, Session), Self::Error> {
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
         let data = CryptoVec::from(format!("Got data: {}\r\n", String::from_utf8_lossy(data)));
         self.post(data.clone()).await;
         session.data(channel, data);
-        Ok((self, session))
+        Ok(())
     }
 
     async fn tcpip_forward(
-        self,
+        &mut self,
         address: &str,
         port: &mut u32,
-        session: Session,
-    ) -> Result<(Self, bool, Session), Self::Error> {
+        session: &mut Session,
+    ) -> Result<bool, Self::Error> {
         let handle = session.handle();
         let address = address.to_string();
         let port = *port;
@@ -109,6 +109,6 @@ impl server::Handler for Server {
             let _ = channel.data(&b"Hello from a forwarded port"[..]).await;
             let _ = channel.eof().await;
         });
-        Ok((self, true, session))
+        Ok(true)
     }
 }

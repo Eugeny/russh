@@ -45,38 +45,38 @@ impl SshSession {
 impl russh::server::Handler for SshSession {
     type Error = anyhow::Error;
 
-    async fn auth_password(self, user: &str, password: &str) -> Result<(Self, Auth), Self::Error> {
+    async fn auth_password(&mut self, user: &str, password: &str) -> Result<Auth, Self::Error> {
         info!("credentials: {}, {}", user, password);
-        Ok((self, Auth::Accept))
+        Ok(Auth::Accept)
     }
 
     async fn auth_publickey(
-        self,
+        &mut self,
         user: &str,
         public_key: &russh_keys::key::PublicKey,
-    ) -> Result<(Self, Auth), Self::Error> {
+    ) -> Result<Auth, Self::Error> {
         info!("credentials: {}, {:?}", user, public_key);
-        Ok((self, Auth::Accept))
+        Ok(Auth::Accept)
     }
 
     async fn channel_open_session(
-        mut self,
+        &mut self,
         channel: Channel<Msg>,
-        session: Session,
-    ) -> Result<(Self, bool, Session), Self::Error> {
+        _session: &mut Session,
+    ) -> Result<bool, Self::Error> {
         {
             let mut clients = self.clients.lock().await;
             clients.insert(channel.id(), channel);
         }
-        Ok((self, true, session))
+        Ok(true)
     }
 
     async fn subsystem_request(
-        mut self,
+        &mut self,
         channel_id: ChannelId,
         name: &str,
-        mut session: Session,
-    ) -> Result<(Self, Session), Self::Error> {
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
         info!("subsystem: {}", name);
 
         if name == "sftp" {
@@ -88,22 +88,14 @@ impl russh::server::Handler for SshSession {
             session.channel_failure(channel_id);
         }
 
-        Ok((self, session))
+        Ok(())
     }
 }
 
+#[derive(Default)]
 struct SftpSession {
     version: Option<u32>,
     root_dir_read_done: bool,
-}
-
-impl Default for SftpSession {
-    fn default() -> Self {
-        Self {
-            version: None,
-            root_dir_read_done: false,
-        }
-    }
 }
 
 #[async_trait]
