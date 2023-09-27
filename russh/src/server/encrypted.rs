@@ -408,7 +408,7 @@ impl Encrypted {
                     } else if auth_user.is_empty() {
                         auth_user.clear();
                         auth_user.push_str(user);
-                        let (h, auth) = handler.auth_publickey(user, &pubkey).await?;
+                        let (h, auth) = handler.auth_publickey_offered(user, &pubkey).await?;
                         handler = h;
                         auth == Auth::Accept
                     } else {
@@ -426,8 +426,23 @@ impl Encrypted {
                             pubkey.verify_client_auth(&buf, sig)
                         }) {
                             debug!("signature verified");
-                            server_auth_request_success(&mut self.write);
-                            self.state = EncryptedState::InitCompression;
+                            let (h, auth) = handler.auth_publickey(user, &pubkey).await?;
+                            handler = h;
+
+                            if auth == Auth::Accept {
+                                server_auth_request_success(&mut self.write);
+                                self.state = EncryptedState::InitCompression;
+                            } else {
+                                if let Auth::Reject {
+                                    proceed_with_methods: Some(proceed_with_methods),
+                                } = auth
+                                {
+                                    auth_request.methods = proceed_with_methods;
+                                }
+                                auth_request.partial_success = false;
+                                auth_user.clear();
+                                reject_auth_request(until, &mut self.write, auth_request).await;
+                            }
                         } else {
                             debug!("signature wrong");
                             reject_auth_request(until, &mut self.write, auth_request).await;
@@ -439,7 +454,7 @@ impl Encrypted {
                 } else {
                     auth_user.clear();
                     auth_user.push_str(user);
-                    let (h, auth) = handler.auth_publickey(user, &pubkey).await?;
+                    let (h, auth) = handler.auth_publickey_offered(user, &pubkey).await?;
                     handler = h;
                     match auth {
                         Auth::Accept => {
