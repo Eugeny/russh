@@ -126,11 +126,11 @@ mod compress {
         type Error = super::Error;
 
         async fn check_server_key(
-            self,
+            &mut self,
             _server_public_key: &russh_keys::key::PublicKey,
-        ) -> Result<(Self, bool), Self::Error> {
+        ) -> Result<bool, Self::Error> {
             // println!("check_server_key: {:?}", server_public_key);
-            Ok((self, true))
+            Ok(true)
         }
     }
 }
@@ -221,21 +221,21 @@ mod channels {
             type Error = crate::Error;
 
             async fn check_server_key(
-                self,
+                &mut self,
                 _server_public_key: &russh_keys::key::PublicKey,
-            ) -> Result<(Self, bool), Self::Error> {
-                Ok((self, true))
+            ) -> Result<bool, Self::Error> {
+                Ok(true)
             }
 
             async fn data(
-                self,
+                &mut self,
                 channel: ChannelId,
                 data: &[u8],
-                mut session: client::Session,
-            ) -> Result<(Self, client::Session), Self::Error> {
+                session: &mut client::Session,
+            ) -> Result<(), Self::Error> {
                 assert_eq!(data, &b"hello world!"[..]);
                 session.data(channel, CryptoVec::from_slice(&b"hey there!"[..]));
-                Ok((self, session))
+                Ok(())
             }
         }
 
@@ -303,10 +303,10 @@ mod channels {
             type Error = crate::Error;
 
             async fn check_server_key(
-                self,
+                &mut self,
                 _server_public_key: &russh_keys::key::PublicKey,
-            ) -> Result<(Self, bool), Self::Error> {
-                Ok((self, true))
+            ) -> Result<bool, Self::Error> {
+                Ok(true)
             }
         }
 
@@ -399,10 +399,10 @@ mod channels {
             type Error = crate::Error;
 
             async fn check_server_key(
-                self,
+                &mut self,
                 _server_public_key: &russh_keys::key::PublicKey,
-            ) -> Result<(Self, bool), Self::Error> {
-                Ok((self, true))
+            ) -> Result<bool, Self::Error> {
+                Ok(true)
             }
         }
 

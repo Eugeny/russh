@@ -12,11 +12,11 @@ impl client::Handler for Client {
     type Error = russh::Error;
 
     async fn check_server_key(
-        self,
+        &mut self,
         server_public_key: &key::PublicKey,
-    ) -> Result<(Self, bool), Self::Error> {
+    ) -> Result<bool, Self::Error> {
         println!("check_server_key: {:?}", server_public_key);
-        Ok((self, true))
+        Ok(true)
     }
 }
 

@@ -141,7 +141,7 @@ struct Client;
 impl russh::client::Handler for Client {
     type Error = anyhow::Error;
 
-    async fn check_server_key(self, _: &key::PublicKey) -> Result<(Self, bool), Self::Error> {
-        Ok((self, true))
+    async fn check_server_key(&mut self, _: &key::PublicKey) -> Result<bool, Self::Error> {
+        Ok(true)
     }
 }

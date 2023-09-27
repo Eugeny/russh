@@ -35,21 +35,20 @@
 //! use futures::Future;
 //! use std::io::Read;
 //!
-//! struct Client {
-//! }
+//! struct Client;
 //!
 //! #[async_trait]
 //! impl client::Handler for Client {
 //!    type Error = anyhow::Error;
 //!
-//!    async fn check_server_key(self, server_public_key: &key::PublicKey) -> Result<(Self, bool), Self::Error> {
+//!    async fn check_server_key(&mut self, server_public_key: &key::PublicKey) -> Result<bool, Self::Error> {
 //!        println!("check_server_key: {:?}", server_public_key);
-//!        Ok((self, true))
+//!        Ok(true)
 //!    }
 //!
-//!    async fn data(self, channel: ChannelId, data: &[u8], session: client::Session) -> Result<(Self, client::Session), Self::Error> {
+//!    async fn data(&mut self, channel: ChannelId, data: &[u8], _session: &mut client::Session) -> Result<(), Self::Error> {
 //!        println!("data on channel {:?}: {:?}", channel, std::str::from_utf8(data));
-//!        Ok((self, session))
+//!        Ok(())
 //!    }
 //! }
 //!
@@ -57,7 +56,7 @@
 //! async fn main() {
 //!   let config = russh::client::Config::default();
 //!   let config = Arc::new(config);
-//!   let sh = Client{};
+//!   let sh = Client;
 //!
 //!   let key = russh_keys::key::KeyPair::generate_ed25519().unwrap();
 //!   let mut agent = russh_keys::agent::client::AgentClient::connect_env().await.unwrap();
@@ -804,9 +803,7 @@ impl Session {
                         if buf[0] == crate::msg::DISCONNECT {
                             break;
                         } else if buf[0] > 4 {
-                            let (h, s) = reply(self, handler, &mut encrypted_signal, buf).await?;
-                            handler = h;
-                            self = s;
+                            reply(&mut self, &mut handler, &mut encrypted_signal, buf).await?;
                         }
                     }
 
@@ -1094,9 +1091,9 @@ impl KexDhDone {
     async fn server_key_check<H: Handler>(
         mut self,
         rekey: bool,
-        mut handler: H,
+        handler: &mut H,
         buf: &[u8],
-    ) -> Result<(NewKeys, H), H::Error> {
+    ) -> Result<NewKeys, H::Error> {
         let mut reader = buf.reader(1);
         let pubkey = reader.read_string().map_err(crate::Error::from)?; // server public key.
         let pubkey = parse_public_key(
@@ -1108,9 +1105,8 @@ impl KexDhDone {
         debug!("server_public_Key: {:?}", pubkey);
         if !rekey {
             let ret = handler.check_server_key(&pubkey).await?;
-            handler = ret.0;
-            let check = ret.1;
-            if !check {
+
+            if !ret {
                 return Err(crate::Error::UnknownKey.into());
             }
         }
@@ -1150,17 +1146,17 @@ impl KexDhDone {
             };
             let mut newkeys = self.compute_keys(hash, false)?;
             newkeys.sent = true;
-            Ok((newkeys, handler))
+            Ok(newkeys)
         })
     }
 }
 
 async fn reply<H: Handler>(
-    mut session: Session,
-    mut handler: H,
+    session: &mut Session,
+    handler: &mut H,
     sender: &mut Option<tokio::sync::oneshot::Sender<()>>,
     buf: &[u8],
-) -> Result<(H, Session), H::Error> {
+) -> Result<(), H::Error> {
     match session.common.kex.take() {
         Some(Kex::Init(kexinit)) => {
             if kexinit.algo.is_some()
@@ -1176,7 +1172,7 @@ async fn reply<H: Handler>(
 
                 if done.kex.skip_exchange() {
                     session.common.encrypted(
-                        initial_encrypted_state(&session),
+                        initial_encrypted_state(session),
                         done.compute_keys(CryptoVec::new(), false)?,
                     );
 
@@ -1188,17 +1184,16 @@ async fn reply<H: Handler>(
                 }
                 session.flush()?;
             }
-            Ok((handler, session))
+            Ok(())
         }
         Some(Kex::DhDone(mut kexdhdone)) => {
             if kexdhdone.names.ignore_guessed {
                 kexdhdone.names.ignore_guessed = false;
                 session.common.kex = Some(Kex::DhDone(kexdhdone));
-                Ok((handler, session))
+                Ok(())
             } else if buf.first() == Some(&msg::KEX_ECDH_REPLY) {
                 // We've sent ECDH_INIT, waiting for ECDH_REPLY
-                let (kex, h) = kexdhdone.server_key_check(false, handler, buf).await?;
-                handler = h;
+                let kex = kexdhdone.server_key_check(false, handler, buf).await?;
                 session.common.kex = Some(Kex::Keys(kex));
                 session
                     .common
@@ -1206,7 +1201,7 @@ async fn reply<H: Handler>(
                     .local_to_remote
                     .write(&[msg::NEWKEYS], &mut session.common.write_buffer);
                 session.flush()?;
-                Ok((handler, session))
+                Ok(())
             } else {
                 error!("Wrong packet received");
                 Err(crate::Error::Inconsistent.into())
@@ -1222,13 +1217,13 @@ async fn reply<H: Handler>(
             }
             session
                 .common
-                .encrypted(initial_encrypted_state(&session), newkeys);
+                .encrypted(initial_encrypted_state(session), newkeys);
             // Ok, NEWKEYS received, now encrypted.
-            Ok((handler, session))
+            Ok(())
         }
         Some(kex) => {
             session.common.kex = Some(kex);
-            Ok((handler, session))
+            Ok(())
         }
         None => session.client_read_encrypted(handler, buf).await,
     }
@@ -1288,7 +1283,7 @@ impl Default for Config {
 /// Note: this is an `async_trait`. Click `[source]` on the right to see actual async function definitions.
 
 #[async_trait]
-pub trait Handler: Sized + Send {
+pub trait Handler: Send {
     type Error: From<crate::Error> + Send;
 
     /// Called when the server sends us an authentication banner. This
@@ -1299,11 +1294,11 @@ pub trait Handler: Sized + Send {
     /// The returned Boolean is ignored.
     #[allow(unused_variables)]
     async fn auth_banner(
-        self,
+        &mut self,
         banner: &str,
-        session: Session,
-    ) -> Result<(Self, Session), Self::Error> {
-        Ok((self, session))
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        Ok(())
     }
 
     /// Called to check the server's public key. This is a very important
@@ -1311,10 +1306,10 @@ pub trait Handler: Sized + Send {
     /// implementation rejects all keys.
     #[allow(unused_variables)]
     async fn check_server_key(
-        self,
+        &mut self,
         server_public_key: &key::PublicKey,
-    ) -> Result<(Self, bool), Self::Error> {
-        Ok((self, false))
+    ) -> Result<bool, Self::Error> {
+        Ok(false)
     }
 
     /// Called when the server confirmed our request to open a
@@ -1322,134 +1317,134 @@ pub trait Handler: Sized + Send {
     /// message (this library panics otherwise).
     #[allow(unused_variables)]
     async fn channel_open_confirmation(
-        self,
+        &mut self,
         id: ChannelId,
         max_packet_size: u32,
         window_size: u32,
-        session: Session,
-    ) -> Result<(Self, Session), Self::Error> {
-        Ok((self, session))
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        Ok(())
     }
 
     /// Called when the server signals success.
     #[allow(unused_variables)]
     async fn channel_success(
-        self,
+        &mut self,
         channel: ChannelId,
-        session: Session,
-    ) -> Result<(Self, Session), Self::Error> {
-        Ok((self, session))
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        Ok(())
     }
 
     /// Called when the server signals failure.
     #[allow(unused_variables)]
     async fn channel_failure(
-        self,
+        &mut self,
         channel: ChannelId,
-        session: Session,
-    ) -> Result<(Self, Session), Self::Error> {
-        Ok((self, session))
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        Ok(())
     }
 
     /// Called when the server closes a channel.
     #[allow(unused_variables)]
     async fn channel_close(
-        self,
+        &mut self,
         channel: ChannelId,
-        session: Session,
-    ) -> Result<(Self, Session), Self::Error> {
-        Ok((self, session))
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        Ok(())
     }
 
     /// Called when the server sends EOF to a channel.
     #[allow(unused_variables)]
     async fn channel_eof(
-        self,
+        &mut self,
         channel: ChannelId,
-        session: Session,
-    ) -> Result<(Self, Session), Self::Error> {
-        Ok((self, session))
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        Ok(())
     }
 
     /// Called when the server rejected our request to open a channel.
     #[allow(unused_variables)]
     async fn channel_open_failure(
-        self,
+        &mut self,
         channel: ChannelId,
         reason: ChannelOpenFailure,
         description: &str,
         language: &str,
-        session: Session,
-    ) -> Result<(Self, Session), Self::Error> {
-        Ok((self, session))
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        Ok(())
     }
 
     /// Called when the server opens a channel for a new remote port forwarding connection
     #[allow(unused_variables)]
     async fn server_channel_open_forwarded_tcpip(
-        self,
+        &mut self,
         channel: Channel<Msg>,
         connected_address: &str,
         connected_port: u32,
         originator_address: &str,
         originator_port: u32,
-        session: Session,
-    ) -> Result<(Self, Session), Self::Error> {
-        Ok((self, session))
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        Ok(())
     }
 
     /// Called when the server opens an agent forwarding channel
     #[allow(unused_variables)]
     async fn server_channel_open_agent_forward(
-        self,
+        &mut self,
         channel: ChannelId,
-        session: Session,
-    ) -> Result<(Self, Session), Self::Error> {
-        Ok((self, session))
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        Ok(())
     }
 
     /// Called when the server gets an unknown channel. It may return `true`,
     /// if the channel of unknown type should be handled. If it returns `false`,
     /// the channel will not be created and an error will be sent to the server.
     #[allow(unused_variables)]
-    fn server_channel_handle_unknown(&self, channel: ChannelId, channel_type: &[u8]) -> bool {
+    fn server_channel_handle_unknown(&mut self, channel: ChannelId, channel_type: &[u8]) -> bool {
         false
     }
 
     /// Called when the server opens a session channel.
     #[allow(unused_variables)]
     async fn server_channel_open_session(
-        self,
+        &mut self,
         channel: ChannelId,
-        session: Session,
-    ) -> Result<(Self, Session), Self::Error> {
-        Ok((self, session))
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        Ok(())
     }
 
     /// Called when the server opens a direct tcp/ip channel.
     #[allow(unused_variables)]
     async fn server_channel_open_direct_tcpip(
-        self,
+        &mut self,
         channel: ChannelId,
         host_to_connect: &str,
         port_to_connect: u32,
         originator_address: &str,
         originator_port: u32,
-        session: Session,
-    ) -> Result<(Self, Session), Self::Error> {
-        Ok((self, session))
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        Ok(())
     }
 
     /// Called when the server opens an X11 channel.
     #[allow(unused_variables)]
     async fn server_channel_open_x11(
-        self,
+        &mut self,
         channel: Channel<Msg>,
         originator_address: &str,
         originator_port: u32,
-        session: Session,
-    ) -> Result<(Self, Session), Self::Error> {
-        Ok((self, session))
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        Ok(())
     }
 
     /// Called when the server sends us data. The `extended_code`
@@ -1458,12 +1453,12 @@ pub trait Handler: Sized + Send {
     /// [RFC4254](https://tools.ietf.org/html/rfc4254#section-5.2).
     #[allow(unused_variables)]
     async fn data(
-        self,
+        &mut self,
         channel: ChannelId,
         data: &[u8],
-        session: Session,
-    ) -> Result<(Self, Session), Self::Error> {
-        Ok((self, session))
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        Ok(())
     }
 
     /// Called when the server sends us data. The `extended_code`
@@ -1472,13 +1467,13 @@ pub trait Handler: Sized + Send {
     /// [RFC4254](https://tools.ietf.org/html/rfc4254#section-5.2).
     #[allow(unused_variables)]
     async fn extended_data(
-        self,
+        &mut self,
         channel: ChannelId,
         ext: u32,
         data: &[u8],
-        session: Session,
-    ) -> Result<(Self, Session), Self::Error> {
-        Ok((self, session))
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        Ok(())
     }
 
     /// The server informs this client of whether the client may
@@ -1486,37 +1481,37 @@ pub trait Handler: Sized + Send {
     /// [RFC4254](https://tools.ietf.org/html/rfc4254#section-6.8).
     #[allow(unused_variables)]
     async fn xon_xoff(
-        self,
+        &mut self,
         channel: ChannelId,
         client_can_do: bool,
-        session: Session,
-    ) -> Result<(Self, Session), Self::Error> {
-        Ok((self, session))
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        Ok(())
     }
 
     /// The remote process has exited, with the given exit status.
     #[allow(unused_variables)]
     async fn exit_status(
-        self,
+        &mut self,
         channel: ChannelId,
         exit_status: u32,
-        session: Session,
-    ) -> Result<(Self, Session), Self::Error> {
-        Ok((self, session))
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        Ok(())
     }
 
     /// The remote process exited upon receiving a signal.
     #[allow(unused_variables)]
     async fn exit_signal(
-        self,
+        &mut self,
         channel: ChannelId,
         signal_name: Sig,
         core_dumped: bool,
         error_message: &str,
         lang_tag: &str,
-        session: Session,
-    ) -> Result<(Self, Session), Self::Error> {
-        Ok((self, session))
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        Ok(())
     }
 
     /// Called when the network window is adjusted, meaning that we
@@ -1526,12 +1521,12 @@ pub trait Handler: Sized + Send {
     /// full amount of data.
     #[allow(unused_variables)]
     async fn window_adjusted(
-        self,
+        &mut self,
         channel: ChannelId,
         new_size: u32,
-        session: Session,
-    ) -> Result<(Self, Session), Self::Error> {
-        Ok((self, session))
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        Ok(())
     }
 
     /// Called when this client adjusts the network window. Return the
@@ -1544,11 +1539,11 @@ pub trait Handler: Sized + Send {
     /// Called when the server signals success.
     #[allow(unused_variables)]
     async fn openssh_ext_host_keys_announced(
-        self,
+        &mut self,
         keys: Vec<PublicKey>,
-        session: Session,
-    ) -> Result<(Self, Session), Self::Error> {
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
         debug!("openssh_ext_hostkeys_announced: {:?}", keys);
-        Ok((self, session))
+        Ok(())
     }
 }
