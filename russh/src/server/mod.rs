@@ -285,6 +285,24 @@ pub trait Handler: Sized {
     /// `config.auth_rejection_time`, except if this method takes more
     /// time than that.
     #[allow(unused_variables)]
+    async fn auth_publickey_offered(
+        self,
+        user: &str,
+        public_key: &key::PublicKey,
+    ) -> Result<(Self, Auth), Self::Error> {
+        Ok((
+            self,
+            Auth::Accept,
+        ))
+    }
+
+    /// Check authentication using the "publickey" method. This method
+    /// is called after the signature has been verified and key
+    /// ownership has been confirmed.
+    /// Russh guarantees that rejection happens in constant time
+    /// `config.auth_rejection_time`, except if this method takes more
+    /// time than that.
+    #[allow(unused_variables)]
     async fn auth_publickey(
         self,
         user: &str,
