@@ -103,7 +103,9 @@ use crate::key::PubKey;
 use crate::session::{CommonSession, EncryptedState, Exchange, Kex, KexDhDone, KexInit, NewKeys};
 use crate::ssh_read::SshRead;
 use crate::sshbuffer::{SSHBuffer, SshId};
-use crate::{auth, msg, negotiation, ChannelId, ChannelOpenFailure, Disconnect, Limits, Sig};
+use crate::{
+    auth, msg, negotiation, timeout, ChannelId, ChannelOpenFailure, Disconnect, Limits, Sig,
+};
 
 mod encrypted;
 mod kex;
@@ -772,6 +774,8 @@ impl Session {
         pin!(reading);
         pin!(time_for_keepalive);
 
+        let delay = self.common.config.inactivity_timeout;
+
         #[allow(clippy::panic)] // false positive in select! macro
         while !self.common.disconnected {
             tokio::select! {
@@ -852,6 +856,10 @@ impl Session {
                         }
                     }
                 }
+                _ = timeout(delay) => {
+                    debug!("timeout");
+                    break
+                },
             }
             self.flush()?;
             if !self.common.write_buffer.buffer.is_empty() {

@@ -650,14 +650,6 @@ thread_local! {
     static B2: RefCell<CryptoVec> = RefCell::new(CryptoVec::new());
 }
 
-pub(crate) async fn timeout(delay: Option<std::time::Duration>) {
-    if let Some(delay) = delay {
-        tokio::time::sleep(delay).await
-    } else {
-        futures::future::pending().await
-    };
-}
-
 async fn start_reading<R: AsyncRead + Unpin>(
     mut stream_read: R,
     mut buffer: SSHBuffer,
