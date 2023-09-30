@@ -46,7 +46,7 @@ impl Session {
         // Either this packet is a KEXINIT, in which case we start a key re-exchange.
 
         #[allow(clippy::unwrap_used)]
-        let mut enc = self.common.encrypted.as_mut().unwrap();
+        let enc = self.common.encrypted.as_mut().unwrap();
         if buf.first() == Some(&msg::KEXINIT) {
             debug!("Received rekeying request");
             // If we're not currently rekeying, but `buf` is a rekey request
@@ -142,7 +142,7 @@ impl Session {
         };
 
         #[allow(clippy::unwrap_used)]
-        let mut enc = self.common.encrypted.as_mut().unwrap();
+        let enc = self.common.encrypted.as_mut().unwrap();
         // If we've successfully read a packet.
         match enc.state {
             EncryptedState::WaitingAuthServiceRequest {

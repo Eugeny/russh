@@ -882,9 +882,10 @@ impl Session {
             }
         }
         debug!("disconnected");
-        if self.common.disconnected {
-            stream_write.shutdown().await.map_err(crate::Error::from)?;
-        }
+        self.receiver.close();
+        self.inbound_channel_receiver.close();
+        stream_write.shutdown().await.map_err(crate::Error::from)?;
+
         Ok(())
     }
 
