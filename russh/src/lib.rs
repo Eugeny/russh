@@ -465,3 +465,11 @@ impl ChannelParams {
         self.confirmed = true;
     }
 }
+
+pub(crate) async fn timeout(delay: Option<std::time::Duration>) {
+    if let Some(delay) = delay {
+        tokio::time::sleep(delay).await
+    } else {
+        futures::future::pending().await
+    };
+}
