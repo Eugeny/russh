@@ -90,13 +90,26 @@ mod compress {
 
         async fn channel_open_session(
             &mut self,
-            channel: Channel<Msg>,
+            mut channel: Channel<Msg>,
             session: &mut Session,
         ) -> Result<bool, Self::Error> {
-            {
-                let mut clients = self.clients.lock().unwrap();
-                clients.insert((self.id, channel.id()), session.handle());
-            }
+            self.clients
+                .lock()
+                .unwrap()
+                .insert((self.id, channel.id()), session.handle());
+
+            tokio::spawn(async move {
+                while let Some(msg) = channel.wait().await {
+                    match msg {
+                        ChannelMsg::Data { data } => {
+                            debug!("server data = {:?}", std::str::from_utf8(&data));
+                            channel.data(&*data).await.expect("Failed to send");
+                        }
+                        _ => (),
+                    }
+                }
+            });
+
             Ok(true)
         }
         async fn auth_publickey(
@@ -106,16 +119,6 @@ mod compress {
         ) -> Result<server::Auth, Self::Error> {
             debug!("auth_publickey");
             Ok(server::Auth::Accept)
-        }
-        async fn data(
-            &mut self,
-            channel: ChannelId,
-            data: &[u8],
-            session: &mut Session,
-        ) -> Result<(), Self::Error> {
-            debug!("server data = {:?}", std::str::from_utf8(data));
-            session.data(channel, CryptoVec::from_slice(data));
-            Ok(())
         }
     }
 

@@ -612,7 +612,8 @@ impl Session {
                     chan.send(ChannelMsg::Eof).unwrap_or(())
                 }
                 debug!("handler.channel_eof {:?}", channel_num);
-                handler.channel_eof(channel_num, self).await
+
+                Ok(())
             }
             Some(&msg::CHANNEL_EXTENDED_DATA) | Some(&msg::CHANNEL_DATA) => {
                 let mut r = buf.reader(1);
@@ -644,7 +645,8 @@ impl Session {
                         })
                         .unwrap_or(())
                     }
-                    handler.extended_data(channel_num, ext, data, self).await
+
+                    Ok(())
                 } else {
                     if let Some(chan) = self.channels.get(&channel_num) {
                         chan.send(ChannelMsg::Data {
@@ -652,7 +654,8 @@ impl Session {
                         })
                         .unwrap_or(())
                     }
-                    handler.data(channel_num, data, self).await
+
+                    Ok(())
                 }
             }
 
@@ -679,7 +682,8 @@ impl Session {
                         .unwrap_or(())
                 }
                 debug!("handler.window_adjusted {:?}", channel_num);
-                handler.window_adjusted(channel_num, new_size, self).await
+
+                Ok(())
             }
 
             Some(&msg::CHANNEL_OPEN_CONFIRMATION) => {
@@ -779,19 +783,8 @@ impl Session {
                         }
 
                         debug!("handler.pty_request {:?}", channel_num);
-                        #[allow(clippy::indexing_slicing)] // `modes` length checked
-                        handler
-                            .pty_request(
-                                channel_num,
-                                term,
-                                col_width,
-                                row_height,
-                                pix_width,
-                                pix_height,
-                                &modes[0..i],
-                                self,
-                            )
-                            .await
+
+                        Ok(())
                     }
                     b"x11-req" => {
                         let single_connection = r.read_byte().map_err(crate::Error::from)? != 0;
@@ -813,16 +806,8 @@ impl Session {
                             });
                         }
                         debug!("handler.x11_request {:?}", channel_num);
-                        handler
-                            .x11_request(
-                                channel_num,
-                                single_connection,
-                                x11_auth_protocol,
-                                x11_auth_cookie,
-                                x11_screen_number,
-                                self,
-                            )
-                            .await
+
+                        Ok(())
                     }
                     b"env" => {
                         let env_variable =
@@ -841,29 +826,22 @@ impl Session {
                         }
 
                         debug!("handler.env_request {:?}", channel_num);
-                        handler
-                            .env_request(channel_num, env_variable, env_value, self)
-                            .await
+
+                        Ok(())
                     }
                     b"shell" => {
                         if let Some(chan) = self.channels.get(&channel_num) {
                             let _ = chan.send(ChannelMsg::RequestShell { want_reply: true });
                         }
                         debug!("handler.shell_request {:?}", channel_num);
-                        handler.shell_request(channel_num, self).await
+
+                        Ok(())
                     }
                     b"auth-agent-req@openssh.com" => {
                         if let Some(chan) = self.channels.get(&channel_num) {
                             let _ = chan.send(ChannelMsg::AgentForward { want_reply: true });
                         }
                         debug!("handler.agent_request {:?}", channel_num);
-                        let response = handler.agent_request(channel_num, self).await?;
-
-                        if response {
-                            self.request_success()
-                        } else {
-                            self.request_failure()
-                        }
 
                         Ok(())
                     }
@@ -876,7 +854,8 @@ impl Session {
                             });
                         }
                         debug!("handler.exec_request {:?}", channel_num);
-                        handler.exec_request(channel_num, req, self).await
+
+                        Ok(())
                     }
                     b"subsystem" => {
                         let name =
@@ -890,7 +869,8 @@ impl Session {
                             });
                         }
                         debug!("handler.subsystem_request {:?}", channel_num);
-                        handler.subsystem_request(channel_num, name, self).await
+
+                        Ok(())
                     }
                     b"window-change" => {
                         let col_width = r.read_u32().map_err(crate::Error::from)?;
@@ -908,16 +888,8 @@ impl Session {
                         }
 
                         debug!("handler.window_change {:?}", channel_num);
-                        handler
-                            .window_change_request(
-                                channel_num,
-                                col_width,
-                                row_height,
-                                pix_width,
-                                pix_height,
-                                self,
-                            )
-                            .await
+
+                        Ok(())
                     }
                     b"signal" => {
                         let signal = Sig::from_name(r.read_string().map_err(crate::Error::from)?)?;
@@ -928,7 +900,8 @@ impl Session {
                             .unwrap_or(())
                         }
                         debug!("handler.signal {:?} {:?}", channel_num, signal);
-                        handler.signal(channel_num, signal, self).await
+
+                        Ok(())
                     }
                     x => {
                         warn!("unknown channel request {}", String::from_utf8_lossy(x));

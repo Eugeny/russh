@@ -317,16 +317,6 @@ pub trait Handler {
         Ok(())
     }
 
-    /// Called when the client sends EOF to a channel.
-    #[allow(unused_variables)]
-    async fn channel_eof(
-        &mut self,
-        channel: ChannelId,
-        session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
-    }
-
     /// Called when a new session channel is created.
     /// Return value indicates whether the channel request should be granted.
     #[allow(unused_variables)]
@@ -395,165 +385,11 @@ pub trait Handler {
         Ok(())
     }
 
-    /// Called when a data packet is received. A response can be
-    /// written to the `response` argument.
-    #[allow(unused_variables)]
-    async fn data(
-        &mut self,
-        channel: ChannelId,
-        data: &[u8],
-        session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
-    }
-
-    /// Called when an extended data packet is received. Code 1 means
-    /// that this packet comes from stderr, other codes are not
-    /// defined (see
-    /// [RFC4254](https://tools.ietf.org/html/rfc4254#section-5.2)).
-    #[allow(unused_variables)]
-    async fn extended_data(
-        &mut self,
-        channel: ChannelId,
-        code: u32,
-        data: &[u8],
-        session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
-    }
-
-    /// Called when the network window is adjusted, meaning that we
-    /// can send more bytes.
-    #[allow(unused_variables)]
-    async fn window_adjusted(
-        &mut self,
-        channel: ChannelId,
-        new_size: u32,
-        session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
-    }
-
     /// Called when this server adjusts the network window. Return the
     /// next target window.
     #[allow(unused_variables)]
     fn adjust_window(&mut self, channel: ChannelId, current: u32) -> u32 {
         current
-    }
-
-    /// The client requests a pseudo-terminal with the given
-    /// specifications.
-    #[allow(unused_variables, clippy::too_many_arguments)]
-    async fn pty_request(
-        &mut self,
-        channel: ChannelId,
-        term: &str,
-        col_width: u32,
-        row_height: u32,
-        pix_width: u32,
-        pix_height: u32,
-        modes: &[(Pty, u32)],
-        session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
-    }
-
-    /// The client requests an X11 connection.
-    #[allow(unused_variables)]
-    async fn x11_request(
-        &mut self,
-        channel: ChannelId,
-        single_connection: bool,
-        x11_auth_protocol: &str,
-        x11_auth_cookie: &str,
-        x11_screen_number: u32,
-        session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
-    }
-
-    /// The client wants to set the given environment variable. Check
-    /// these carefully, as it is dangerous to allow any variable
-    /// environment to be set.
-    #[allow(unused_variables)]
-    async fn env_request(
-        &mut self,
-        channel: ChannelId,
-        variable_name: &str,
-        variable_value: &str,
-        session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
-    }
-
-    /// The client requests a shell.
-    #[allow(unused_variables)]
-    async fn shell_request(
-        &mut self,
-        channel: ChannelId,
-        session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
-    }
-
-    /// The client sends a command to execute, to be passed to a
-    /// shell. Make sure to check the command before doing so.
-    #[allow(unused_variables)]
-    async fn exec_request(
-        &mut self,
-        channel: ChannelId,
-        data: &[u8],
-        session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
-    }
-
-    /// The client asks to start the subsystem with the given name
-    /// (such as sftp).
-    #[allow(unused_variables)]
-    async fn subsystem_request(
-        &mut self,
-        channel: ChannelId,
-        name: &str,
-        session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
-    }
-
-    /// The client's pseudo-terminal window size has changed.
-    #[allow(unused_variables)]
-    async fn window_change_request(
-        &mut self,
-        channel: ChannelId,
-        col_width: u32,
-        row_height: u32,
-        pix_width: u32,
-        pix_height: u32,
-        session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
-    }
-
-    /// The client requests OpenSSH agent forwarding
-    #[allow(unused_variables)]
-    async fn agent_request(
-        &mut self,
-        channel: ChannelId,
-        session: &mut Session,
-    ) -> Result<bool, Self::Error> {
-        Ok(false)
-    }
-
-    /// The client is sending a signal (usually to pass to the
-    /// currently running process).
-    #[allow(unused_variables)]
-    async fn signal(
-        &mut self,
-        channel: ChannelId,
-        signal: Sig,
-        session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
     }
 
     /// Used for reverse-forwarding ports, see
