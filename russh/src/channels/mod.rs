@@ -133,7 +133,7 @@ impl<T: From<(ChannelId, ChannelMsg)>> std::fmt::Debug for Channel<T> {
     }
 }
 
-impl<S: From<(ChannelId, ChannelMsg)> + Send + 'static> Channel<S> {
+impl<S: From<(ChannelId, ChannelMsg)> + Send + Sync + 'static> Channel<S> {
     pub(crate) fn new(
         id: ChannelId,
         sender: Sender<S>,

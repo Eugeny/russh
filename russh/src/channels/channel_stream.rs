@@ -42,7 +42,7 @@ where
 
 impl<S> AsyncWrite for ChannelStream<S>
 where
-    S: From<(ChannelId, ChannelMsg)> + 'static,
+    S: From<(ChannelId, ChannelMsg)> + 'static + Send + Sync,
 {
     fn poll_write(
         mut self: Pin<&mut Self>,
