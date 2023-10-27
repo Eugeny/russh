@@ -1,9 +1,8 @@
 use std::io;
 use std::pin::Pin;
-use std::task::{Context, Poll};
+use std::task::{Context, Poll, ready};
 
 use tokio::io::AsyncRead;
-use tokio::sync::mpsc::error::TryRecvError;
 
 use super::{ChannelAsMut, ChannelMsg};
 use crate::ChannelId;
@@ -43,15 +42,9 @@ where
     ) -> Poll<io::Result<()>> {
         let (msg, mut idx) = match self.buffer.take() {
             Some(msg) => msg,
-            None => match self.channel.as_mut().receiver.try_recv() {
-                Ok(msg) => (msg, 0),
-                Err(TryRecvError::Empty) => {
-                    cx.waker().wake_by_ref();
-                    return Poll::Pending;
-                }
-                Err(TryRecvError::Disconnected) => {
-                    return Poll::Ready(Ok(()));
-                }
+            None => match ready!(self.channel.as_mut().receiver.poll_recv(cx)) {
+                Some(msg) => (msg, 0),
+                None => return Poll::Ready(Ok(())),
             },
         };
 
