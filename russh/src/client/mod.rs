@@ -767,12 +767,17 @@ impl Session {
         let mut opening_cipher = Box::new(clear::Key) as Box<dyn OpeningKey + Send>;
         std::mem::swap(&mut opening_cipher, &mut self.common.cipher.remote_to_local);
 
+        let time_for_keepalive = tokio::time::sleep_until(self.common.config.keepalive_deadline());
         let reading = start_reading(stream_read, buffer, opening_cipher);
         pin!(reading);
+        pin!(time_for_keepalive);
 
         #[allow(clippy::panic)] // false positive in select! macro
         while !self.common.disconnected {
             tokio::select! {
+                () = &mut time_for_keepalive => {
+                    self.send_keepalive(true);
+                }
                 r = &mut reading => {
                     let (stream_read, buffer, mut opening_cipher) = match r {
                         Ok((_, stream_read, buffer, opening_cipher)) => (stream_read, buffer, opening_cipher),
@@ -812,6 +817,7 @@ impl Session {
 
                     std::mem::swap(&mut opening_cipher, &mut self.common.cipher.remote_to_local);
                     reading.set(start_reading(stream_read, buffer, opening_cipher));
+                    time_for_keepalive.as_mut().reset(self.common.config.keepalive_deadline());
                 }
                 msg = self.receiver.recv(), if !self.is_rekeying() => {
                     match msg {
@@ -829,6 +835,7 @@ impl Session {
                             Err(_) => break
                         }
                     }
+                    time_for_keepalive.as_mut().reset(self.common.config.keepalive_deadline());
                 }
                 msg = self.inbound_channel_receiver.recv(), if !self.is_rekeying() => {
                     match msg {
@@ -1260,8 +1267,16 @@ pub struct Config {
     pub preferred: negotiation::Preferred,
     /// Time after which the connection is garbage-collected.
     pub inactivity_timeout: Option<std::time::Duration>,
+    /// If nothing is sent or received for this amount of time, send a keepalive message.
+    pub keepalive_interval: Option<std::time::Duration>,
     /// Whether to expect and wait for an authentication call.
     pub anonymous: bool,
+}
+
+impl Config {
+    fn keepalive_deadline(&self) -> tokio::time::Instant {
+        tokio::time::Instant::now() + self.keepalive_interval.unwrap_or(std::time::Duration::from_secs(86400*365))
+    }
 }
 
 impl Default for Config {
@@ -1277,6 +1292,7 @@ impl Default for Config {
             maximum_packet_size: 32768,
             preferred: Default::default(),
             inactivity_timeout: None,
+            keepalive_interval: None,
             anonymous: false,
         }
     }
