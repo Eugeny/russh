@@ -776,6 +776,7 @@ impl Session {
         while !self.common.disconnected {
             tokio::select! {
                 () = &mut time_for_keepalive => {
+                    time_for_keepalive.as_mut().reset(self.common.config.keepalive_deadline());
                     self.send_keepalive(true);
                 }
                 r = &mut reading => {
