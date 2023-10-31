@@ -184,6 +184,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "mmirate",
+      "name": "Milo Mirate",
+      "avatar_url": "https://avatars.githubusercontent.com/u/992859?v=4",
+      "profile": "https://github.com/mmirate",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,
