@@ -72,7 +72,9 @@ use aes::cipher::block_padding::UnpadError;
 use aes::cipher::inout::PadError;
 use byteorder::{BigEndian, WriteBytesExt};
 use data_encoding::BASE64_MIME;
+use hmac::{Hmac, Mac};
 use log::debug;
+use sha1::Sha1;
 use thiserror::Error;
 
 pub mod encoding;
@@ -365,8 +367,7 @@ pub fn check_known_hosts_path<P: AsRef<Path>>(
             let key = s.next();
             if let (Some(h), Some(k)) = (hosts, key) {
                 debug!("{:?} {:?}", h, k);
-                let host_matches = h.split(',').any(|x| x == host_port);
-                if host_matches {
+                if match_hostname(&host_port, h) {
                     if &parse_public_key_base64(k)? == pubkey {
                         return Ok(true);
                     } else {
@@ -379,6 +380,28 @@ pub fn check_known_hosts_path<P: AsRef<Path>>(
         line += 1;
     }
     Ok(false)
+}
+
+fn match_hostname(host: &str, pattern: &str) -> bool {
+    for entry in pattern.split(',') {
+        if entry.starts_with("|1|") {
+            let mut parts = entry.split('|').skip(2);
+            let Some(Ok(salt)) = parts.next().map(|p| BASE64_MIME.decode(p.as_bytes())) else {
+                continue;
+            };
+            let Some(Ok(hash)) = parts.next().map(|p| BASE64_MIME.decode(p.as_bytes())) else {
+                continue;
+            };
+            if let Ok(hmac) = Hmac::<Sha1>::new_from_slice(&salt) {
+                if hmac.chain_update(host).verify_slice(&hash).is_ok() {
+                    return true;
+                }
+            }
+        } else if host == entry {
+            return true;
+        }
+    }
+    false
 }
 
 /// Record a host's public key into the user's known_hosts file.
@@ -526,7 +549,10 @@ QR+u0AypRPmzHnOPAAAAEXJvb3RAMTQwOTExNTQ5NDBkAQ==
         let path = dir.path().join("known_hosts");
         {
             let mut f = File::create(&path).unwrap();
-            f.write(b"[localhost]:13265 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJdD7y3aLq454yWBdwLWbieU1ebz9/cu7/QEXn9OIeZJ\n#pijul.org,37.120.161.53 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIA6rWI3G2sz07DnfFlrouTcysQlj2P+jpNSOEWD9OJ3X\npijul.org,37.120.161.53 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIA6rWI3G1sz07DnfFlrouTcysQlj2P+jpNSOEWD9OJ3X\n").unwrap();
+            f.write_all(b"[localhost]:13265 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJdD7y3aLq454yWBdwLWbieU1ebz9/cu7/QEXn9OIeZJ\n").unwrap();
+            f.write_all(b"#pijul.org,37.120.161.53 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIA6rWI3G2sz07DnfFlrouTcysQlj2P+jpNSOEWD9OJ3X\n").unwrap();
+            f.write_all(b"pijul.org,37.120.161.53 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIA6rWI3G1sz07DnfFlrouTcysQlj2P+jpNSOEWD9OJ3X\n").unwrap();
+            f.write_all(b"|1|O33ESRMWPVkMYIwJ1Uw+n877jTo=|nuuC5vEqXlEZ/8BXQR7m619W6Ak= ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILIG2T/B0l0gaqj3puu510tu9N1OkQ4znY3LYuEm5zCF\n").unwrap();
         }
 
         // Valid key, non-standard port.
@@ -534,6 +560,15 @@ QR+u0AypRPmzHnOPAAAAEXJvb3RAMTQwOTExNTQ5NDBkAQ==
         let port = 13265;
         let hostkey = parse_public_key_base64(
             "AAAAC3NzaC1lZDI1NTE5AAAAIJdD7y3aLq454yWBdwLWbieU1ebz9/cu7/QEXn9OIeZJ",
+        )
+        .unwrap();
+        assert!(check_known_hosts_path(host, port, &hostkey, &path).unwrap());
+
+        // Valid key, hashed.
+        let host = "example.com";
+        let port = 22;
+        let hostkey = parse_public_key_base64(
+            "AAAAC3NzaC1lZDI1NTE5AAAAILIG2T/B0l0gaqj3puu510tu9N1OkQ4znY3LYuEm5zCF",
         )
         .unwrap();
         assert!(check_known_hosts_path(host, port, &hostkey, &path).unwrap());
