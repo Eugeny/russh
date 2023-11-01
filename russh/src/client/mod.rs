@@ -1276,7 +1276,10 @@ pub struct Config {
 
 impl Config {
     fn keepalive_deadline(&self) -> tokio::time::Instant {
-        tokio::time::Instant::now() + self.keepalive_interval.unwrap_or(std::time::Duration::from_secs(86400*365))
+        tokio::time::Instant::now()
+            + self
+                .keepalive_interval
+                .unwrap_or(std::time::Duration::from_secs(86400 * 365))
     }
 }
 

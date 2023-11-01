@@ -290,10 +290,7 @@ pub trait Handler: Sized {
         user: &str,
         public_key: &key::PublicKey,
     ) -> Result<(Self, Auth), Self::Error> {
-        Ok((
-            self,
-            Auth::Accept,
-        ))
+        Ok((self, Auth::Accept))
     }
 
     /// Check authentication using the "publickey" method. This method

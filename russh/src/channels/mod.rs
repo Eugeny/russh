@@ -1,11 +1,9 @@
 use std::sync::Arc;
 
 use russh_cryptovec::CryptoVec;
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::sync::mpsc::{Sender, UnboundedReceiver};
 use tokio::sync::Mutex;
-use tokio::{
-    io::{AsyncRead, AsyncWrite},
-    sync::mpsc::{Sender, UnboundedReceiver},
-};
 
 use crate::{ChannelId, ChannelOpenFailure, Error, Pty, Sig};
 

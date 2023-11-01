@@ -1,14 +1,9 @@
-use std::{
-    net::{SocketAddr, TcpListener, TcpStream},
-    sync::Arc,
-};
+use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::sync::Arc;
 
 use rand::RngCore;
-use russh::{
-    client,
-    server::{self, Auth, Msg, Session},
-    Channel,
-};
+use russh::server::{self, Auth, Msg, Session};
+use russh::{client, Channel};
 use russh_keys::key;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 

@@ -165,7 +165,8 @@ impl PublicKey {
                 if key_algo != b"ssh-ed25519" {
                     return Err(Error::CouldNotReadKey);
                 }
-                let Ok(key_bytes) = <&[u8; ed25519_dalek::PUBLIC_KEY_LENGTH]>::try_from(key_bytes) else {
+                let Ok(key_bytes) = <&[u8; ed25519_dalek::PUBLIC_KEY_LENGTH]>::try_from(key_bytes)
+                else {
                     return Err(Error::CouldNotReadKey);
                 };
                 ed25519_dalek::VerifyingKey::from_bytes(key_bytes)

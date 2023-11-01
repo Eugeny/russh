@@ -4,10 +4,8 @@ use std::task::{Context, Poll};
 
 use tokio::io::{AsyncRead, AsyncWrite};
 
-use super::{
-    io::{ChannelRx, ChannelTx},
-    ChannelId, ChannelMsg,
-};
+use super::io::{ChannelRx, ChannelTx};
+use super::{ChannelId, ChannelMsg};
 
 /// AsyncRead/AsyncWrite wrapper for SSH Channels
 pub struct ChannelStream<S>

@@ -138,10 +138,10 @@ mod compress {
 mod channels {
     use async_trait::async_trait;
     use russh_cryptovec::CryptoVec;
+    use server::Session;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     use super::*;
-    use server::Session;
 
     async fn test_session<RC, RS, CH, SH, F1, F2>(
         client_handler: CH,

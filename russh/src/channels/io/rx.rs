@@ -1,6 +1,6 @@
 use std::io;
 use std::pin::Pin;
-use std::task::{Context, Poll, ready};
+use std::task::{ready, Context, Poll};
 
 use tokio::io::AsyncRead;
 
