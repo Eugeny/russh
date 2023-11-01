@@ -193,6 +193,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "george-hopkins",
+      "name": "George Hopkins",
+      "avatar_url": "https://avatars.githubusercontent.com/u/552590?v=4",
+      "profile": "https://github.com/george-hopkins",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,
