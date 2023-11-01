@@ -36,7 +36,7 @@ jobs:
     - name: Install rustfmt
       run: rustup component add rustfmt
 
-    - name: Clippy (all features enabled)
+    - name: rustfmt
       run: cargo fmt
 
   Clippy:
