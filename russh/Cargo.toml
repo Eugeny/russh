@@ -58,7 +58,9 @@ tokio-util = "0.7"
 [dev-dependencies]
 anyhow = "1.0"
 env_logger = "0.10"
+clap = { version = "3.2", features = ["derive"] }
 tokio = { version = "1.17.0", features = [
+    "io-std",
     "io-util",
     "rt-multi-thread",
     "time",
@@ -68,6 +70,9 @@ tokio = { version = "1.17.0", features = [
 ] }
 russh-sftp = "2.0.0-beta.2"
 rand = "0.8.5"
+shell-escape = "0.1"
+tokio-fd = "0.3"
+termion = "2"
 
 [package.metadata.docs.rs]
 features = ["openssl"]
