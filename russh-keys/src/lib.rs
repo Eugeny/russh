@@ -66,7 +66,7 @@
 use std::borrow::Cow;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use aes::cipher::block_padding::UnpadError;
 use aes::cipher::inout::PadError;
@@ -293,6 +293,11 @@ fn is_base64_char(c: char) -> bool {
         || c == '='
 }
 
+/// Record a host's public key into the user's known_hosts file.
+pub fn learn_known_hosts(host: &str, port: u16, pubkey: &key::PublicKey) -> Result<(), Error> {
+    learn_known_hosts_path(host, port, pubkey, known_hosts_path()?)
+}
+
 /// Record a host's public key into a nonstandard location.
 pub fn learn_known_hosts_path<P: AsRef<Path>>(
     host: &str,
@@ -333,17 +338,21 @@ pub fn learn_known_hosts_path<P: AsRef<Path>>(
     Ok(())
 }
 
-/// Check that a server key matches the one recorded in file `path`.
-pub fn check_known_hosts_path<P: AsRef<Path>>(
+/// Get the server key that matches the one recorded in the user's known_hosts file.
+pub fn known_host_key(host: &str, port: u16) -> Result<Option<(usize, key::PublicKey)>, Error> {
+    known_host_key_path(host, port, known_hosts_path()?)
+}
+
+/// Get the server key that matches the one recorded in `path`.
+pub fn known_host_key_path<P: AsRef<Path>>(
     host: &str,
     port: u16,
-    pubkey: &key::PublicKey,
     path: P,
-) -> Result<bool, Error> {
+) -> Result<Option<(usize, key::PublicKey)>, Error> {
     let mut f = if let Ok(f) = File::open(path) {
         BufReader::new(f)
     } else {
-        return Ok(false);
+        return Ok(None);
     };
     let mut buffer = String::new();
 
@@ -368,18 +377,14 @@ pub fn check_known_hosts_path<P: AsRef<Path>>(
             if let (Some(h), Some(k)) = (hosts, key) {
                 debug!("{:?} {:?}", h, k);
                 if match_hostname(&host_port, h) {
-                    if &parse_public_key_base64(k)? == pubkey {
-                        return Ok(true);
-                    } else {
-                        return Err(Error::KeyChanged { line });
-                    }
+                    return Ok(Some((line, parse_public_key_base64(k)?)));
                 }
             }
         }
         buffer.clear();
         line += 1;
     }
-    Ok(false)
+    Ok(None)
 }
 
 fn match_hostname(host: &str, pattern: &str) -> bool {
@@ -404,49 +409,42 @@ fn match_hostname(host: &str, pattern: &str) -> bool {
     false
 }
 
-/// Record a host's public key into the user's known_hosts file.
-#[cfg(target_os = "windows")]
-pub fn learn_known_hosts(host: &str, port: u16, pubkey: &key::PublicKey) -> Result<(), Error> {
-    if let Some(mut known_host_file) = dirs::home_dir() {
-        known_host_file.push("ssh");
-        known_host_file.push("known_hosts");
-        learn_known_hosts_path(host, port, pubkey, &known_host_file)
-    } else {
-        Err(Error::NoHomeDir)
-    }
-}
-
-/// Record a host's public key into the user's known_hosts file.
-#[cfg(not(target_os = "windows"))]
-pub fn learn_known_hosts(host: &str, port: u16, pubkey: &key::PublicKey) -> Result<(), Error> {
-    if let Some(mut known_host_file) = dirs::home_dir() {
-        known_host_file.push(".ssh");
-        known_host_file.push("known_hosts");
-        learn_known_hosts_path(host, port, pubkey, &known_host_file)
-    } else {
-        Err(Error::NoHomeDir)
-    }
-}
-
 /// Check whether the host is known, from its standard location.
-#[cfg(target_os = "windows")]
 pub fn check_known_hosts(host: &str, port: u16, pubkey: &key::PublicKey) -> Result<bool, Error> {
-    if let Some(mut known_host_file) = dirs::home_dir() {
-        known_host_file.push("ssh");
-        known_host_file.push("known_hosts");
-        check_known_hosts_path(host, port, pubkey, &known_host_file)
+    check_known_hosts_path(host, port, pubkey, known_hosts_path()?)
+}
+
+/// Check that a server key matches the one recorded in file `path`.
+pub fn check_known_hosts_path<P: AsRef<Path>>(
+    host: &str,
+    port: u16,
+    pubkey: &key::PublicKey,
+    path: P,
+) -> Result<bool, Error> {
+    if let Some((line, recorded)) = known_host_key_path(host, port, path)? {
+        if recorded == *pubkey {
+            Ok(true)
+        } else {
+            Err(Error::KeyChanged { line })
+        }
+    } else {
+        Ok(false)
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn known_hosts_path() -> Result<PathBuf, Error> {
+    if let Some(home_dir) = dirs::home_dir() {
+        Ok(home_dir.join("ssh").join("known_hosts"))
     } else {
         Err(Error::NoHomeDir)
     }
 }
 
-/// Check whether the host is known, from its standard location.
 #[cfg(not(target_os = "windows"))]
-pub fn check_known_hosts(host: &str, port: u16, pubkey: &key::PublicKey) -> Result<bool, Error> {
-    if let Some(mut known_host_file) = dirs::home_dir() {
-        known_host_file.push(".ssh");
-        known_host_file.push("known_hosts");
-        check_known_hosts_path(host, port, pubkey, &known_host_file)
+fn known_hosts_path() -> Result<PathBuf, Error> {
+    if let Some(home_dir) = dirs::home_dir() {
+        Ok(home_dir.join(".ssh").join("known_hosts"))
     } else {
         Err(Error::NoHomeDir)
     }
