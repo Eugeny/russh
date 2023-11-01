@@ -19,4 +19,5 @@ pub const EXTENSION: u8 = 27;
 
 pub const CONSTRAIN_LIFETIME: u8 = 1;
 pub const CONSTRAIN_CONFIRM: u8 = 2;
-pub const CONSTRAIN_EXTENSION: u8 = 3;
+// pub const CONSTRAIN_MAXSIGN: u8 = 3;
+pub const CONSTRAIN_EXTENSION: u8 = 255;

@@ -325,10 +325,8 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
         let mut w = self.keys.0.write().or(Err(Error::AgentFailure))?;
         let now = SystemTime::now();
         if constrained {
-            let n = r.read_u32()?;
             let mut c = Vec::new();
-            for _ in 0..n {
-                let t = r.read_byte()?;
+            while let Ok(t) = r.read_byte() {
                 if t == msg::CONSTRAIN_LIFETIME {
                     let seconds = r.read_u32()?;
                     c.push(Constraint::KeyLifetime { seconds });
@@ -353,7 +351,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
                     return Ok(false);
                 }
             }
-            w.insert(blob, (Arc::new(key), now, Vec::new()));
+            w.insert(blob, (Arc::new(key), now, c));
         } else {
             w.insert(blob, (Arc::new(key), now, Vec::new()));
         }

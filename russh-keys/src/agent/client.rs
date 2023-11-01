@@ -87,6 +87,15 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AgentClient<S> {
         Ok(())
     }
 
+    async fn read_success(&mut self) -> Result<(), Error> {
+        self.read_response().await?;
+        if self.buf.first() == Some(&msg::SUCCESS) {
+            Ok(())
+        } else {
+            Err(Error::AgentFailure)
+        }
+    }
+
     /// Send a key to the agent, with a (possibly empty) slice of
     /// constraints to apply when using the key to sign.
     pub async fn add_identity(
@@ -131,12 +140,11 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AgentClient<S> {
             }
         }
         if !constraints.is_empty() {
-            self.buf.push_u32_be(constraints.len() as u32);
             for cons in constraints {
                 match *cons {
                     Constraint::KeyLifetime { seconds } => {
                         self.buf.push(msg::CONSTRAIN_LIFETIME);
-                        self.buf.push_u32_be(seconds)
+                        self.buf.push_u32_be(seconds);
                     }
                     Constraint::Confirm => self.buf.push(msg::CONSTRAIN_CONFIRM),
                     Constraint::Extensions {
@@ -153,7 +161,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AgentClient<S> {
         let len = self.buf.len() - 4;
         BigEndian::write_u32(&mut self.buf[..], len as u32);
 
-        self.read_response().await?;
+        self.read_success().await?;
         Ok(())
     }
 
@@ -467,8 +475,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AgentClient<S> {
         self.buf.clear();
         self.buf.resize(4);
         self.buf.push(msg::REMOVE_ALL_IDENTITIES);
-        BigEndian::write_u32(&mut self.buf[..], 5);
-        self.read_response().await?;
+        BigEndian::write_u32(&mut self.buf[..], 1);
+        self.read_success().await?;
         Ok(())
     }
 
