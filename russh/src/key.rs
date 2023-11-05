@@ -15,6 +15,7 @@
 use russh_cryptovec::CryptoVec;
 use russh_keys::encoding::*;
 use russh_keys::key::*;
+use russh_keys::PublicKeyBase64;
 
 #[doc(hidden)]
 pub trait PubKey {
@@ -28,6 +29,9 @@ impl PubKey for PublicKey {
                 buffer.push_u32_be((ED25519.0.len() + public.as_bytes().len() + 8) as u32);
                 buffer.extend_ssh_string(ED25519.0.as_bytes());
                 buffer.extend_ssh_string(public.as_bytes());
+            }
+            PublicKey::P256(_) => {
+                buffer.extend_ssh_string(&self.public_key_bytes());
             }
             #[cfg(feature = "openssl")]
             PublicKey::RSA { ref key, .. } => {

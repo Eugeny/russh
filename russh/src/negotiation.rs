@@ -76,19 +76,16 @@ const HMAC_ORDER: &[mac::Name] = &[
 ];
 
 impl Preferred {
-    #[cfg(feature = "openssl")]
     pub const DEFAULT: Preferred = Preferred {
         kex: SAFE_KEX_ORDER,
-        key: &[key::ED25519, key::RSA_SHA2_256, key::RSA_SHA2_512],
-        cipher: CIPHER_ORDER,
-        mac: HMAC_ORDER,
-        compression: &["none", "zlib", "zlib@openssh.com"],
-    };
-
-    #[cfg(not(feature = "openssl"))]
-    pub const DEFAULT: Preferred = Preferred {
-        kex: SAFE_KEX_ORDER,
-        key: &[key::ED25519],
+        key: &[
+            key::ED25519,
+            key::ECDSA_SHA2_NISTP256,
+            #[cfg(feature = "openssl")]
+            key::RSA_SHA2_256,
+            #[cfg(feature = "openssl")]
+            key::RSA_SHA2_512,
+        ],
         cipher: CIPHER_ORDER,
         mac: HMAC_ORDER,
         compression: &["none", "zlib", "zlib@openssh.com"],
@@ -96,7 +93,7 @@ impl Preferred {
 
     pub const COMPRESSED: Preferred = Preferred {
         kex: SAFE_KEX_ORDER,
-        key: &[key::ED25519, key::RSA_SHA2_256, key::RSA_SHA2_512],
+        key: Preferred::DEFAULT.key,
         cipher: CIPHER_ORDER,
         mac: HMAC_ORDER,
         compression: &["zlib", "zlib@openssh.com", "none"],
@@ -121,15 +118,15 @@ impl Named for () {
     }
 }
 
-#[cfg(not(feature = "openssl"))]
-use russh_keys::key::ED25519;
 #[cfg(feature = "openssl")]
-use russh_keys::key::{ED25519, SSH_RSA};
+use russh_keys::key::SSH_RSA;
+use russh_keys::key::{ECDSA_SHA2_NISTP256, ED25519};
 
 impl Named for PublicKey {
     fn name(&self) -> &'static str {
         match self {
             PublicKey::Ed25519(_) => ED25519.0,
+            PublicKey::P256(_) => ECDSA_SHA2_NISTP256.0,
             #[cfg(feature = "openssl")]
             PublicKey::RSA { .. } => SSH_RSA.0,
         }

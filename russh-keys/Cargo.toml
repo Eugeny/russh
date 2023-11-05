@@ -47,6 +47,7 @@ md5 = "0.7"
 num-bigint = "0.4"
 num-integer = "0.1"
 openssl = { version = "0.10", optional = true }
+p256 = "0.13"
 pbkdf2 = "0.11"
 rand = "0.7"
 rand_core = { version = "0.6.4", features = ["std"] }

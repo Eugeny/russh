@@ -16,6 +16,8 @@ pub struct SignatureBytes(pub [u8; 64]);
 pub enum Signature {
     /// An Ed25519 signature
     Ed25519(SignatureBytes),
+    /// An EC-DSA NIST P-256 signature
+    P256(Vec<u8>),
     /// An RSA signature
     RSA { hash: SignatureHash, bytes: Vec<u8> },
 }
@@ -34,6 +36,15 @@ impl Signature {
                 bytes_.extend_ssh_string(t);
                 bytes_.extend_ssh_string(&bytes.0[..]);
             }
+            Signature::P256(ref bytes) => {
+                let t = b"ecdsa-sha2-nistp256";
+                #[allow(clippy::unwrap_used)] // Vec<>.write_all can't fail
+                bytes_
+                    .write_u32::<BigEndian>((t.len() + bytes.len() + 8) as u32)
+                    .unwrap();
+                bytes_.extend_ssh_string(t);
+                bytes_.extend_ssh_string(bytes);
+            }
             Signature::RSA {
                 ref hash,
                 ref bytes,
@@ -48,7 +59,7 @@ impl Signature {
                     .write_u32::<BigEndian>((t.len() + bytes.len() + 8) as u32)
                     .unwrap();
                 bytes_.extend_ssh_string(t);
-                bytes_.extend_ssh_string(&bytes[..]);
+                bytes_.extend_ssh_string(bytes);
             }
         }
         data_encoding::BASE64_NOPAD.encode(&bytes_[..])
@@ -80,6 +91,7 @@ impl Signature {
                 hash: SignatureHash::SHA1,
                 bytes: bytes.to_vec(),
             }),
+            b"ecdsa-sha2-nistp256" => Ok(Signature::P256(bytes.to_vec())),
             _ => Err(Error::UnknownSignatureType {
                 sig_type: std::str::from_utf8(typ).unwrap_or("").to_string(),
             }),
@@ -92,6 +104,7 @@ impl AsRef<[u8]> for Signature {
         match *self {
             Signature::Ed25519(ref signature) => &signature.0,
             Signature::RSA { ref bytes, .. } => &bytes[..],
+            Signature::P256(ref signature) => signature,
         }
     }
 }
