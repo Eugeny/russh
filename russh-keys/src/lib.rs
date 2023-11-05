@@ -101,6 +101,9 @@ pub enum Error {
     /// The type of the key is unsupported
     #[error("Invalid Ed25519 key data")]
     Ed25519KeyError(#[from] ed25519_dalek::SignatureError),
+    /// The type of the key is unsupported
+    #[error("Invalid NIST-P256 key data")]
+    P256KeyError(#[from] p256::elliptic_curve::Error),
     /// The key is encrypted (should supply a password?)
     #[error("The key is encrypted")]
     KeyIsEncrypted,
@@ -162,7 +165,7 @@ impl From<yasna::ASN1Error> for Error {
 const KEYTYPE_ED25519: &[u8] = b"ssh-ed25519";
 const KEYTYPE_RSA: &[u8] = b"ssh-rsa";
 
-/// Load a public key from a file. Ed25519 and RSA keys are supported.
+/// Load a public key from a file. Ed25519, EC-DSA and RSA keys are supported.
 ///
 /// ```
 /// russh_keys::load_public_key("../files/id_ed25519.pub").unwrap();
@@ -232,6 +235,12 @@ impl PublicKeyBase64 for key::PublicKey {
                 s.extend_ssh_mpint(&key.0.rsa().unwrap().e().to_vec());
                 #[allow(clippy::unwrap_used)] // TODO check
                 s.extend_ssh_mpint(&key.0.rsa().unwrap().n().to_vec());
+            }
+            key::PublicKey::P256(ref publickey) => {
+                use encoding::Encoding;
+                s.extend_ssh_string(b"ecdsa-sha2-nistp256");
+                s.extend_ssh_string(b"nistp256");
+                s.extend_ssh_string(&publickey.to_sec1_bytes());
             }
         }
         s
@@ -588,6 +597,14 @@ QR+u0AypRPmzHnOPAAAAEXJvb3RAMTQwOTExNTQ5NDBkAQ==
         )
         .unwrap();
         assert!(check_known_hosts_path(host, port, &hostkey, &path).is_err());
+    }
+
+    #[test]
+    fn test_parse_p256_public_key() {
+        env_logger::try_init().unwrap_or(());
+        let key = "AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBMxBTpMIGvo7CnordO7wP0QQRqpBwUjOLl4eMhfucfE1sjTYyK5wmTl1UqoSDS1PtRVTBdl+0+9pquFb46U7fwg=";
+
+        parse_public_key_base64(key).unwrap();
     }
 
     #[test]

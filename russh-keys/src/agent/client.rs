@@ -9,7 +9,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use super::{msg, Constraint};
 use crate::encoding::{Encoding, Reader};
 use crate::key::{PublicKey, SignatureHash};
-use crate::{key, Error};
+use crate::{key, Error, PublicKeyBase64};
 
 /// SSH agent client.
 pub struct AgentClient<S: AsyncRead + AsyncWrite> {
@@ -275,6 +275,14 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AgentClient<S> {
                     b"ssh-ed25519" => keys.push(PublicKey::Ed25519(
                         ed25519_dalek::VerifyingKey::try_from(r.read_string()?)?,
                     )),
+                    b"ecdsa-sha2-nistp256" => {
+                        let curve = r.read_string()?;
+                        if curve != b"nistp256" {
+                            return Err(Error::P256KeyError(p256::elliptic_curve::Error));
+                        }
+                        let key = r.read_string()?;
+                        keys.push(PublicKey::P256(p256::PublicKey::from_sec1_bytes(key)?));
+                    }
                     t => {
                         info!("Unsupported key type: {:?}", std::str::from_utf8(t))
                     }
@@ -533,6 +541,9 @@ fn key_blob(public: &key::PublicKey, buf: &mut CryptoVec) -> Result<(), Error> {
             let len1 = buf.len();
             #[allow(clippy::indexing_slicing)] // length is known
             BigEndian::write_u32(&mut buf[5..], (len1 - len0) as u32);
+        }
+        PublicKey::P256(_) => {
+            buf.extend_ssh_string(&public.public_key_bytes());
         }
     }
     Ok(())

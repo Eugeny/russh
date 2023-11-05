@@ -17,6 +17,7 @@ use std::convert::TryFrom;
 use ed25519_dalek::{Signer, Verifier};
 #[cfg(feature = "openssl")]
 use openssl::pkey::{Private, Public};
+use p256::elliptic_curve::generic_array::typenum::Unsigned;
 use rand_core::OsRng;
 use russh_cryptovec::CryptoVec;
 use serde::{Deserialize, Serialize};
@@ -35,6 +36,8 @@ impl AsRef<str> for Name {
     }
 }
 
+/// The name of the ecdsa-sha2-nistp256 algorithm for SSH.
+pub const ECDSA_SHA2_NISTP256: Name = Name("ecdsa-sha2-nistp256");
 /// The name of the Ed25519 algorithm for SSH.
 pub const ED25519: Name = Name("ssh-ed25519");
 /// The name of the ssh-sha2-512 algorithm for SSH.
@@ -50,6 +53,7 @@ impl Name {
     /// Base name of the private key file for a key name.
     pub fn identity_file(&self) -> &'static str {
         match *self {
+            ECDSA_SHA2_NISTP256 => "id_ecdsa",
             ED25519 => "id_ed25519",
             RSA_SHA2_512 => "id_rsa",
             RSA_SHA2_256 => "id_rsa",
@@ -117,6 +121,8 @@ pub enum PublicKey {
         key: OpenSSLPKey,
         hash: SignatureHash,
     },
+    #[doc(hidden)]
+    P256(p256::PublicKey),
 }
 
 impl PartialEq for PublicKey {
@@ -125,7 +131,7 @@ impl PartialEq for PublicKey {
             #[cfg(feature = "openssl")]
             (Self::RSA { key: a, .. }, Self::RSA { key: b, .. }) => a == b,
             (Self::Ed25519(a), Self::Ed25519(b)) => a == b,
-            #[cfg(feature = "openssl")]
+            (Self::P256(a), Self::P256(b)) => a == b,
             _ => false,
         }
     }
@@ -205,6 +211,18 @@ impl PublicKey {
                     unreachable!()
                 }
             }
+            b"ecdsa-sha2-nistp256" => {
+                let mut p = pubkey.reader(0);
+                let key_algo = p.read_string()?;
+                let curve = p.read_string()?;
+                if key_algo != b"ecdsa-sha2-nistp256" || curve != b"nistp256" {
+                    return Err(Error::CouldNotReadKey);
+                }
+                let sec1_bytes = p.read_string()?;
+                let key = p256::PublicKey::from_sec1_bytes(sec1_bytes)
+                    .map_err(|_| Error::CouldNotReadKey)?;
+                Ok(PublicKey::P256(key))
+            }
             _ => Err(Error::CouldNotReadKey),
         }
     }
@@ -215,6 +233,7 @@ impl PublicKey {
             PublicKey::Ed25519(_) => ED25519.0,
             #[cfg(feature = "openssl")]
             PublicKey::RSA { ref hash, .. } => hash.name().0,
+            PublicKey::P256(_) => ECDSA_SHA2_NISTP256.0,
         }
     }
 
@@ -238,6 +257,30 @@ impl PublicKey {
                     verifier.verify(sig)
                 };
                 verify().unwrap_or(false)
+            }
+            PublicKey::P256(ref public) => {
+                const FIELD_LEN: usize =
+                    <p256::NistP256 as p256::elliptic_curve::Curve>::FieldBytesSize::USIZE;
+                let mut reader = sig.reader(0);
+                let mut read_field = || -> Option<p256::FieldBytes> {
+                    let f = reader.read_mpint().ok()?;
+                    let f = f.strip_prefix(&[0]).unwrap_or(f);
+                    let mut result = [0; FIELD_LEN];
+                    if f.len() > FIELD_LEN {
+                        return None;
+                    }
+                    #[allow(clippy::indexing_slicing)] // length is known
+                    result[FIELD_LEN - f.len()..].copy_from_slice(f);
+                    Some(result.into())
+                };
+                let Some(r) = read_field() else { return false };
+                let Some(s) = read_field() else { return false };
+                let Ok(signature) = p256::ecdsa::Signature::from_scalars(r, s) else {
+                    return false;
+                };
+                p256::ecdsa::VerifyingKey::from(public)
+                    .verify(buffer, &signature)
+                    .is_ok()
             }
         }
     }
@@ -508,6 +551,14 @@ pub fn parse_public_key(
                 hash: prefer_hash.unwrap_or(SignatureHash::SHA2_256),
             });
         }
+    }
+    if t == b"ecdsa-sha2-nistp256" {
+        if pos.read_string()? != b"nistp256" {
+            return Err(Error::CouldNotReadKey);
+        }
+        let sec1_bytes = pos.read_string()?;
+        let key = p256::PublicKey::from_sec1_bytes(sec1_bytes)?;
+        return Ok(PublicKey::P256(key));
     }
     Err(Error::CouldNotReadKey)
 }
