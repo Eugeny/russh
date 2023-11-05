@@ -20,6 +20,7 @@ use russh_keys::deps::ed25519_dalek;
 use russh_keys::deps::p256::NistP256;
 use russh_keys::encoding::*;
 use russh_keys::key::*;
+use russh_keys::PublicKeyBase64;
 
 #[doc(hidden)]
 pub trait PubKey {
