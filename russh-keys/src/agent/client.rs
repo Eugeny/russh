@@ -119,6 +119,9 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AgentClient<S> {
                 self.buf.extend(pair.verifying_key().as_bytes());
                 self.buf.extend_ssh_string(b"");
             }
+            key::KeyPair::EcdsaSha2NistP256(ref key) => {
+                todo!("TODO");
+            }
             #[cfg(feature = "openssl")]
             #[allow(clippy::unwrap_used)] // key is known to be private
             key::KeyPair::RSA { ref key, .. } => {

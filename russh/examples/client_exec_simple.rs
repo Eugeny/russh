@@ -18,7 +18,6 @@ use tokio::net::ToSocketAddrs;
 #[tokio::main]
 async fn main() -> Result<()> {
     env_logger::builder()
-        .filter_level(log::LevelFilter::Info)
         .init();
 
     // CLI options are defined later in this file
@@ -81,6 +80,7 @@ impl Session {
         addrs: A,
     ) -> Result<Self> {
         let key_pair = load_secret_key(key_path, None)?;
+        println!("{:?}", key_pair.public_key_base64());
         let config = client::Config {
             inactivity_timeout: Some(Duration::from_secs(5)),
             ..<_>::default()

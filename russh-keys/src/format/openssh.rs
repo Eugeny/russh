@@ -8,7 +8,7 @@ use ctr::Ctr64BE;
 use openssl::bn::BigNum;
 
 use crate::encoding::Reader;
-use crate::{key, Error, KEYTYPE_ED25519, KEYTYPE_RSA};
+use crate::{key, Error, KEYTYPE_ED25519, KEYTYPE_P256, KEYTYPE_RSA};
 
 /// Decode a secret key given in the OpenSSH format, deciphering it if
 /// needed using the supplied password.
@@ -79,6 +79,25 @@ pub fn decode_openssh(secret: &[u8], password: Option<&str>) -> Result<key::KeyP
                         hash: key::SignatureHash::SHA2_512,
                     });
                 }
+            } else if key_type == KEYTYPE_P256 {
+                let curve = position.read_string()?;
+                if curve != b"nistp256" {
+                    return Err(Error::P256KeyError(p256::elliptic_curve::Error));
+                }
+
+                let data = position.read_string()?;
+                let (check, _public_key_bytes) = data.split_at(1);
+                if check.get(0) != Some(&4) {
+                    return Err(Error::P256KeyError(p256::elliptic_curve::Error));
+                }
+
+                let data = position.read_string()?;
+                let (_check, private_key_bytes) = data.split_at(1);
+
+                let field = p256::FieldBytes::from_slice(private_key_bytes);
+                return p256::SecretKey::from_bytes(field)
+                    .map_err(|e| Error::P256KeyError(e))
+                    .map(|k| key::KeyPair::EcdsaSha2NistP256(k));
             } else {
                 return Err(Error::UnsupportedKeyType {
                     key_type_string: String::from_utf8(key_type.to_vec())

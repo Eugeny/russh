@@ -14,6 +14,8 @@
 //
 use std::convert::TryFrom;
 
+use byteorder::{BigEndian, ByteOrder, WriteBytesExt};
+use ecdsa::elliptic_curve::ff::PrimeField;
 use ed25519_dalek::{Signer, Verifier};
 #[cfg(feature = "openssl")]
 use openssl::pkey::{Private, Public};
@@ -22,7 +24,7 @@ use rand_core::OsRng;
 use russh_cryptovec::CryptoVec;
 use serde::{Deserialize, Serialize};
 
-use crate::encoding::{Encoding, Reader};
+use crate::encoding::{mpint_len, Encoding, Reader};
 pub use crate::signature::*;
 use crate::Error;
 
@@ -215,7 +217,7 @@ impl PublicKey {
                 let mut p = pubkey.reader(0);
                 let key_algo = p.read_string()?;
                 let curve = p.read_string()?;
-                if key_algo != b"ecdsa-sha2-nistp256" || curve != b"nistp256" {
+                if key_algo != ECDSA_SHA2_NISTP256.0.as_bytes() || curve != b"nistp256" {
                     return Err(Error::CouldNotReadKey);
                 }
                 let sec1_bytes = p.read_string()?;
@@ -325,6 +327,7 @@ impl Verify for PublicKey {
 #[allow(clippy::large_enum_variant)]
 pub enum KeyPair {
     Ed25519(ed25519_dalek::SigningKey),
+    EcdsaSha2NistP256(p256::SecretKey),
     #[cfg(feature = "openssl")]
     RSA {
         key: openssl::rsa::Rsa<Private>,
@@ -339,6 +342,8 @@ impl Clone for KeyPair {
             Self::Ed25519(kp) => {
                 Self::Ed25519(ed25519_dalek::SigningKey::from_bytes(&kp.to_bytes()))
             }
+            #[allow(clippy::expect_used)]
+            Self::EcdsaSha2NistP256(k) => Self::EcdsaSha2NistP256(k.clone()),
             #[cfg(feature = "openssl")]
             Self::RSA { key, hash } => Self::RSA {
                 key: key.clone(),
@@ -356,6 +361,7 @@ impl std::fmt::Debug for KeyPair {
                 "Ed25519 {{ public: {:?}, secret: (hidden) }}",
                 key.verifying_key().as_bytes()
             ),
+            KeyPair::EcdsaSha2NistP256 { .. } => write!(f, "P256 {{ (hidden) }}"),
             #[cfg(feature = "openssl")]
             KeyPair::RSA { .. } => write!(f, "RSA {{ (hidden) }}"),
         }
@@ -373,6 +379,7 @@ impl KeyPair {
     pub fn clone_public_key(&self) -> Result<PublicKey, Error> {
         Ok(match self {
             KeyPair::Ed25519(ref key) => PublicKey::Ed25519(key.verifying_key()),
+            KeyPair::EcdsaSha2NistP256(ref key) => PublicKey::P256(key.public_key()),
             #[cfg(feature = "openssl")]
             KeyPair::RSA { ref key, ref hash } => {
                 use openssl::pkey::PKey;
@@ -390,6 +397,7 @@ impl KeyPair {
     pub fn name(&self) -> &'static str {
         match *self {
             KeyPair::Ed25519(_) => ED25519.0,
+            KeyPair::EcdsaSha2NistP256(_) => ECDSA_SHA2_NISTP256.0,
             #[cfg(feature = "openssl")]
             KeyPair::RSA { ref hash, .. } => hash.name().0,
         }
@@ -414,10 +422,12 @@ impl KeyPair {
     /// Sign a slice using this algorithm.
     pub fn sign_detached(&self, to_sign: &[u8]) -> Result<Signature, Error> {
         match self {
-            #[allow(clippy::unwrap_used)]
             KeyPair::Ed25519(ref secret) => Ok(Signature::Ed25519(SignatureBytes(
                 secret.sign(to_sign).to_bytes(),
             ))),
+            KeyPair::EcdsaSha2NistP256(ref secret) => Ok(Signature::P256({
+                p256_signature(secret, to_sign)
+            })),
             #[cfg(feature = "openssl")]
             KeyPair::RSA { ref key, ref hash } => Ok(Signature::RSA {
                 bytes: rsa_signature(hash, key, to_sign)?,
@@ -442,6 +452,10 @@ impl KeyPair {
                 buffer.push_u32_be((ED25519.0.len() + signature.to_bytes().len() + 8) as u32);
                 buffer.extend_ssh_string(ED25519.0.as_bytes());
                 buffer.extend_ssh_string(signature.to_bytes().as_slice());
+            }
+            KeyPair::EcdsaSha2NistP256(ref secret) => {
+                let signature = p256_signature(secret, to_sign.as_ref());
+                encode_ecdsa_signature(buffer, &ECDSA_SHA2_NISTP256, &signature);
             }
             #[cfg(feature = "openssl")]
             KeyPair::RSA { ref key, ref hash } => {
@@ -468,6 +482,10 @@ impl KeyPair {
                 buffer.extend_ssh_string(ED25519.0.as_bytes());
                 buffer.extend_ssh_string(signature.to_bytes().as_slice());
             }
+            KeyPair::EcdsaSha2NistP256(ref secret) => {
+                let signature = p256_signature(secret, buffer.as_ref());
+                encode_ecdsa_signature(buffer, &ECDSA_SHA2_NISTP256, &signature);
+            }
             #[cfg(feature = "openssl")]
             KeyPair::RSA { ref key, ref hash } => {
                 // https://tools.ietf.org/html/draft-rsa-dsa-sha2-256-02#section-2.2
@@ -486,6 +504,7 @@ impl KeyPair {
     pub fn with_signature_hash(&self, hash: SignatureHash) -> Option<Self> {
         match self {
             KeyPair::Ed25519(_) => None,
+            KeyPair::EcdsaSha2NistP256(_) => None,
             #[cfg(feature = "openssl")]
             KeyPair::RSA { key, .. } => Some(KeyPair::RSA {
                 key: key.clone(),
@@ -517,6 +536,37 @@ fn rsa_signature(
     let mut signer = Signer::new(hash.message_digest(), &pkey)?;
     signer.update(b)?;
     Ok(signer.sign_to_vec()?)
+}
+
+fn p256_signature(
+    secret: &p256::SecretKey,
+    to_sign: &[u8],
+) -> p256::ecdsa::Signature {
+    let signer = p256::ecdsa::SigningKey::from(secret);
+    signer.sign(to_sign)
+}
+
+pub(crate) fn encode_ecdsa_signature<E: Encoding + WriteBytesExt>(
+    buffer: &mut E,
+    name: &Name,
+    signature: &p256::ecdsa::Signature,
+) {
+    let r = signature.r().to_repr();
+    let s = signature.s().to_repr();
+
+    let mut blob = vec![];
+    blob.extend_ssh_mpint(&r);
+    blob.extend_ssh_mpint(&s);
+
+    #[allow(clippy::unwrap_used)] // Vec<>.write_all can't fail
+    buffer
+        // .write_u32::<BigEndian>((name.0.len() + mpint_len(&r) + mpint_len(&s) + 4) as u32)
+        .write_u32::<BigEndian>((name.0.len() + blob.len() + 8) as u32)
+        .unwrap();
+    buffer.extend_ssh_string(name.0.as_bytes());
+    buffer.extend_ssh_string(&blob[..]);
+    // buffer.extend_ssh_mpint(&r);
+    // buffer.extend_ssh_mpint(&s);
 }
 
 /// Parse a public key from a byte slice.

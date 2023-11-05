@@ -82,6 +82,7 @@ pub mod key;
 pub mod signature;
 
 mod format;
+pub mod deps;
 pub use format::*;
 
 /// A module to write SSH agent.
@@ -163,6 +164,7 @@ impl From<yasna::ASN1Error> for Error {
 }
 
 const KEYTYPE_ED25519: &[u8] = b"ssh-ed25519";
+const KEYTYPE_P256: &[u8] = b"ecdsa-sha2-nistp256";
 const KEYTYPE_RSA: &[u8] = b"ssh-rsa";
 
 /// Load a public key from a file. Ed25519, EC-DSA and RSA keys are supported.
@@ -261,6 +263,12 @@ impl PublicKeyBase64 for key::KeyPair {
                 s.write_u32::<BigEndian>(public.len() as u32).unwrap();
                 s.extend_from_slice(public.as_slice());
             }
+            key::KeyPair::EcdsaSha2NistP256(ref key) => {
+                let public = key.public_key().to_sec1_bytes();
+                #[allow(clippy::unwrap_used)] // Vec<>.write can't fail
+                s.write_u32::<BigEndian>(public.len() as u32).unwrap();
+                s.extend_from_slice(&public);
+            },
             #[cfg(feature = "openssl")]
             key::KeyPair::RSA { ref key, .. } => {
                 use encoding::Encoding;

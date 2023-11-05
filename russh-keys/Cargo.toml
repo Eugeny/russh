@@ -38,6 +38,7 @@ block-padding = { version = "0.3", features = ["std"] }
 byteorder = "1.4"
 data-encoding = "2.3"
 dirs = "5.0"
+ecdsa = { version = "0.16", features = ["serde"] }
 ed25519-dalek = { version= "2.0", features = ["rand_core"] }
 futures = "0.3"
 hmac = "0.12"

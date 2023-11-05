@@ -6,7 +6,7 @@ use serde::de::{SeqAccess, Visitor};
 use serde::ser::SerializeTuple;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::key::SignatureHash;
+use crate::key::{SignatureHash, ECDSA_SHA2_NISTP256, encode_ecdsa_signature};
 use crate::Error;
 
 pub struct SignatureBytes(pub [u8; 64]);
@@ -17,7 +17,7 @@ pub enum Signature {
     /// An Ed25519 signature
     Ed25519(SignatureBytes),
     /// An EC-DSA NIST P-256 signature
-    P256(Vec<u8>),
+    P256(p256::ecdsa::Signature),
     /// An RSA signature
     RSA { hash: SignatureHash, bytes: Vec<u8> },
 }
@@ -36,14 +36,8 @@ impl Signature {
                 bytes_.extend_ssh_string(t);
                 bytes_.extend_ssh_string(&bytes.0[..]);
             }
-            Signature::P256(ref bytes) => {
-                let t = b"ecdsa-sha2-nistp256";
-                #[allow(clippy::unwrap_used)] // Vec<>.write_all can't fail
-                bytes_
-                    .write_u32::<BigEndian>((t.len() + bytes.len() + 8) as u32)
-                    .unwrap();
-                bytes_.extend_ssh_string(t);
-                bytes_.extend_ssh_string(bytes);
+            Signature::P256(ref signature) => {
+                encode_ecdsa_signature(&mut bytes_, &ECDSA_SHA2_NISTP256, &signature);
             }
             Signature::RSA {
                 ref hash,
@@ -91,7 +85,9 @@ impl Signature {
                 hash: SignatureHash::SHA1,
                 bytes: bytes.to_vec(),
             }),
-            b"ecdsa-sha2-nistp256" => Ok(Signature::P256(bytes.to_vec())),
+            b"ecdsa-sha2-nistp256" => Ok(Signature::P256(
+                p256::ecdsa::Signature::from_slice(bytes)?,
+            )),
             _ => Err(Error::UnknownSignatureType {
                 sig_type: std::str::from_utf8(typ).unwrap_or("").to_string(),
             }),
@@ -104,7 +100,7 @@ impl AsRef<[u8]> for Signature {
         match *self {
             Signature::Ed25519(ref signature) => &signature.0,
             Signature::RSA { ref bytes, .. } => &bytes[..],
-            Signature::P256(ref signature) => signature,
+            Signature::P256(ref signature) => todo!(),
         }
     }
 }

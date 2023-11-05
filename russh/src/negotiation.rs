@@ -137,6 +137,7 @@ impl Named for KeyPair {
     fn name(&self) -> &'static str {
         match self {
             KeyPair::Ed25519 { .. } => ED25519.0,
+            KeyPair::EcdsaSha2NistP256 { .. } => ECDSA_SHA2_NISTP256.0,
             #[cfg(feature = "openssl")]
             KeyPair::RSA { ref hash, .. } => hash.name().0,
         }
