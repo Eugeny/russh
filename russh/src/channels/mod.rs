@@ -32,6 +32,7 @@ pub enum ChannelMsg {
         ext: u32,
     },
     Eof,
+    Close,
     /// (client only)
     RequestPty {
         want_reply: bool,
@@ -109,8 +110,6 @@ pub enum ChannelMsg {
     Success,
     /// (server only)
     Failure,
-    /// (server only)
-    Close,
     OpenFailure(ChannelOpenFailure),
 }
 
