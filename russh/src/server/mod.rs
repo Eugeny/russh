@@ -118,7 +118,7 @@ use std::task::{Context, Poll};
 
 use async_trait::async_trait;
 use futures::future::Future;
-use log::error;
+use log::{debug, error};
 use russh_keys::key;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, ToSocketAddrs};
@@ -619,6 +619,8 @@ pub trait Server {
     type Handler: Handler + Send;
     /// Called when a new client connects.
     fn new_client(&mut self, peer_addr: Option<std::net::SocketAddr>) -> Self::Handler;
+    /// Called when an active connection fails.
+    fn handle_session_error(&mut self, _error: <Self::Handler as Handler>::Error) {}
 }
 
 /// Run a server.
@@ -636,11 +638,44 @@ pub async fn run<H: Server + Send + 'static, A: ToSocketAddrs>(
             config.maximum_packet_size
         );
     }
-    while let Ok((socket, _)) = socket.accept().await {
-        let config = config.clone();
-        let server = server.new_client(socket.peer_addr().ok());
-        tokio::spawn(run_stream(config, socket, server));
+
+    let (error_tx, mut error_rx) = tokio::sync::mpsc::unbounded_channel();
+
+    loop {
+        tokio::select! {
+            accept_result = socket.accept() => {
+                match accept_result {
+                    Ok((socket, _)) => {
+                        let config = config.clone();
+                        let handler = server.new_client(socket.peer_addr().ok());
+                        let error_tx = error_tx.clone();
+                        tokio::spawn(async move {
+                            let session = match run_stream(config, socket, handler).await {
+                                Ok(s) => s,
+                                Err(e) => {
+                                    debug!("Connection setup failed");
+                                    let _ = error_tx.send(e);
+                                    return
+                                }
+                            };
+                            match session.await {
+                                Ok(_) => debug!("Connection closed"),
+                                Err(e) => {
+                                    debug!("Connection closed with error");
+                                    let _ = error_tx.send(e);
+                                }
+                            }
+                        });
+                    }
+                    _ => break,
+                }
+            },
+            Some(error) = error_rx.recv() => {
+                server.handle_session_error(error);
+            }
+        }
     }
+
     Ok(())
 }
 

@@ -44,6 +44,7 @@ impl KexInit {
                     session_id: self.session_id,
                 })
             } else {
+                debug!("unknown key {:?}", algo.key);
                 return Err(Error::UnknownKey);
             };
 

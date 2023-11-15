@@ -190,7 +190,7 @@ impl Session {
                     handler,
                     &mut enc.write,
                     auth,
-                    &mut self.common.auth_user,
+                    &self.common.auth_user,
                     buf,
                 )
                 .await?;
@@ -530,7 +530,7 @@ async fn read_userauth_info_response<H: Handler + Send>(
     mut handler: H,
     write: &mut CryptoVec,
     auth_request: &mut AuthRequest,
-    user: &mut str,
+    user: &str,
     b: &[u8],
 ) -> Result<(H, bool), H::Error> {
     if let Some(CurrentRequest::KeyboardInteractive { ref submethods }) = auth_request.current {
