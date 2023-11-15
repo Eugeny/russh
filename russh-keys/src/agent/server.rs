@@ -256,6 +256,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
         let t = r.read_string()?;
         let (blob, key) = match t {
             b"ssh-ed25519" => {
+                let _public = r.read_string()?;
                 let pos1 = r.position;
                 let concat = r.read_string()?;
                 let _comment = r.read_string()?;
