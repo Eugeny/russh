@@ -63,6 +63,7 @@ pub(crate) struct CommonSession<Config> {
     pub wants_reply: bool,
     pub disconnected: bool,
     pub buffer: CryptoVec,
+    pub strict_kex: bool,
 }
 
 impl<C> CommonSession<C> {
@@ -74,6 +75,7 @@ impl<C> CommonSession<C> {
             enc.client_mac = newkeys.names.client_mac;
             enc.server_mac = newkeys.names.server_mac;
             self.cipher = newkeys.cipher;
+            self.strict_kex = self.strict_kex || newkeys.names.strict_kex;
         }
     }
 
@@ -99,6 +101,7 @@ impl<C> CommonSession<C> {
             decompress: crate::compression::Decompress::None,
         });
         self.cipher = newkeys.cipher;
+        self.strict_kex = newkeys.names.strict_kex;
     }
 
     /// Send a disconnect message.
@@ -125,6 +128,12 @@ impl<C> CommonSession<C> {
     pub fn byte(&mut self, channel: ChannelId, msg: u8) {
         if let Some(ref mut enc) = self.encrypted {
             enc.byte(channel, msg)
+        }
+    }
+
+    pub(crate) fn maybe_reset_seqn(&mut self) {
+        if self.strict_kex {
+            self.write_buffer.seqn = Wrapping(0);
         }
     }
 }

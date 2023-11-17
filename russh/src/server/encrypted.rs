@@ -34,6 +34,7 @@ impl Session {
     pub(crate) async fn server_read_encrypted<H: Handler + Send>(
         mut self,
         mut handler: H,
+        seqn: &mut Wrapping<u32>,
         buf: &[u8],
     ) -> Result<(H, Self), H::Error> {
         #[allow(clippy::indexing_slicing)] // length checked
@@ -70,6 +71,9 @@ impl Session {
                     &mut self.common.write_buffer,
                 )?);
             }
+            if let Some(Kex::Dh(KexDh { ref names, .. })) = enc.rekey {
+                self.common.strict_kex = self.common.strict_kex || names.strict_kex;
+            }
             self.flush()?;
             return Ok((handler, self));
         }
@@ -82,6 +86,10 @@ impl Session {
                     buf,
                     &mut self.common.write_buffer,
                 )?);
+                if let Some(Kex::Keys(_)) = enc.rekey {
+                    // just sent NEWKEYS
+                    self.common.maybe_reset_seqn();
+                }
                 self.flush()?;
                 return Ok((handler, self));
             }
@@ -103,11 +111,21 @@ impl Session {
                 self.pending_reads = pending;
                 self.pending_len = 0;
                 self.common.newkeys(newkeys);
+                if self.common.strict_kex {
+                    *seqn = Wrapping(0);
+                }
                 self.flush()?;
                 return Ok((handler, self));
             }
             Some(Kex::Init(k)) => {
+                if let Some(ref algo) = k.algo {
+                    if self.common.strict_kex && !algo.strict_kex {
+                        return Err(strict_kex_violation(msg::KEXINIT, 0).into());
+                    }
+                }
+
                 enc.rekey = Some(Kex::Init(k));
+
                 self.pending_len += buf.len() as u32;
                 if self.pending_len > 2 * self.target_window_size {
                     return Err(Error::Pending.into());
