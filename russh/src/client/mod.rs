@@ -128,8 +128,6 @@ pub struct Session {
     pending_len: u32,
     inbound_channel_sender: Sender<Msg>,
     inbound_channel_receiver: Receiver<Msg>,
-    server_alive_timeouts: usize,
-    activity: bool,
 }
 
 const STRICT_KEX_MSG_ORDER: &[u8] = &[msg::KEXINIT, msg::KEX_ECDH_REPLY, msg::NEWKEYS];
@@ -700,6 +698,8 @@ where
             disconnected: false,
             buffer: CryptoVec::new(),
             strict_kex: false,
+            alive_timeouts: 0,
+            received_data: false,
         },
         session_receiver,
         session_sender,
@@ -730,16 +730,6 @@ async fn start_reading<R: AsyncRead + Unpin>(
     Ok((n, stream_read, buffer, cipher))
 }
 
-fn future_or_pending<F: futures::Future, T>(
-    val: Option<T>,
-    f: impl FnOnce(T) -> F,
-) -> futures::future::Either<futures::future::Pending<<F as futures::Future>::Output>, F> {
-    val.map_or(
-        futures::future::Either::Left(futures::future::pending()),
-        |x| futures::future::Either::Right(f(x)),
-    )
-}
-
 impl Session {
     fn new(
         target_window_size: u32,
@@ -758,8 +748,6 @@ impl Session {
             channels: HashMap::new(),
             pending_reads: Vec::new(),
             pending_len: 0,
-            server_alive_timeouts: 0,
-            activity: false,
         }
     }
 
@@ -789,11 +777,11 @@ impl Session {
         std::mem::swap(&mut opening_cipher, &mut self.common.cipher.remote_to_local);
 
         let keepalive_timer =
-            future_or_pending(self.common.config.keepalive_interval, tokio::time::sleep);
+            crate::future_or_pending(self.common.config.keepalive_interval, tokio::time::sleep);
         pin!(keepalive_timer);
 
         let inactivity_timer =
-            future_or_pending(self.common.config.inactivity_timeout, tokio::time::sleep);
+            crate::future_or_pending(self.common.config.inactivity_timeout, tokio::time::sleep);
         pin!(inactivity_timer);
 
         let reading = start_reading(stream_read, buffer, opening_cipher);
@@ -801,20 +789,9 @@ impl Session {
 
         #[allow(clippy::panic)] // false positive in select! macro
         while !self.common.disconnected {
-            self.activity = false;
+            self.common.received_data = false;
+            let mut only_sent_keepalive = false;
             tokio::select! {
-                () = &mut keepalive_timer => {
-                    self.send_keepalive(true);
-                    if self.common.config.keepalive_max != 0 && self.server_alive_timeouts > self.common.config.keepalive_max {
-                        debug!("Timeout, server not responding to keepalives");
-                        break
-                    }
-                    self.server_alive_timeouts = self.server_alive_timeouts.saturating_add(1);
-                }
-                () = &mut inactivity_timer => {
-                    debug!("timeout");
-                    break
-                }
                 r = &mut reading => {
                     let (stream_read, mut buffer, mut opening_cipher) = match r {
                         Ok((_, stream_read, buffer, opening_cipher)) => (stream_read, buffer, opening_cipher),
@@ -846,7 +823,7 @@ impl Session {
                         if buf[0] == crate::msg::DISCONNECT {
                             break;
                         } else {
-                            self.activity = true;
+                            self.common.received_data = true;
                             let (h, s) = reply(self, handler, &mut encrypted_signal, &mut buffer.seqn, buf).await?;
                             handler = h;
                             self = s;
@@ -855,6 +832,19 @@ impl Session {
 
                     std::mem::swap(&mut opening_cipher, &mut self.common.cipher.remote_to_local);
                     reading.set(start_reading(stream_read, buffer, opening_cipher));
+                }
+                () = &mut keepalive_timer => {
+                    self.send_keepalive(true);
+                    only_sent_keepalive = true;
+                    if self.common.config.keepalive_max != 0 && self.common.alive_timeouts > self.common.config.keepalive_max {
+                        debug!("Timeout, server not responding to keepalives");
+                        break
+                    }
+                    self.common.alive_timeouts = self.common.alive_timeouts.saturating_add(1);
+                }
+                () = &mut inactivity_timer => {
+                    debug!("timeout");
+                    break
                 }
                 msg = self.receiver.recv(), if !self.is_rekeying() => {
                     match msg {
@@ -895,7 +885,6 @@ impl Session {
                     "writing to stream: {:?} bytes",
                     self.common.write_buffer.buffer.len()
                 );
-                self.activity = true;
                 stream_write
                     .write_all(&self.common.write_buffer.buffer)
                     .await
@@ -910,14 +899,15 @@ impl Session {
                 }
             }
 
-            if let (futures::future::Either::Right(ref mut sleep), Some(d)) = (
-                keepalive_timer.as_mut().as_pin_mut(),
-                self.common.config.keepalive_interval,
-            ) {
-                sleep.as_mut().reset(tokio::time::Instant::now() + d);
+            if self.common.received_data {
+                if let (futures::future::Either::Right(ref mut sleep), Some(d)) = (
+                    keepalive_timer.as_mut().as_pin_mut(),
+                    self.common.config.keepalive_interval,
+                ) {
+                    sleep.as_mut().reset(tokio::time::Instant::now() + d);
+                }
             }
-
-            if self.activity {
+            if !only_sent_keepalive {
                 if let (futures::future::Either::Right(ref mut sleep), Some(d)) = (
                     inactivity_timer.as_mut().as_pin_mut(),
                     self.common.config.inactivity_timeout,
@@ -1348,7 +1338,7 @@ pub struct Config {
     pub preferred: negotiation::Preferred,
     /// Time after which the connection is garbage-collected.
     pub inactivity_timeout: Option<std::time::Duration>,
-    /// If nothing is sent or received for this amount of time, send a keepalive message.
+    /// If nothing is received from the server for this amount of time, send a keepalive message.
     pub keepalive_interval: Option<std::time::Duration>,
     /// If this many keepalives have been sent without reply, close the connection.
     pub keepalive_max: usize,

@@ -350,14 +350,23 @@ impl Session {
         let mut opening_cipher = Box::new(clear::Key) as Box<dyn OpeningKey + Send>;
         std::mem::swap(&mut opening_cipher, &mut self.common.cipher.remote_to_local);
 
+        let keepalive_timer =
+            future_or_pending(self.common.config.keepalive_interval, tokio::time::sleep);
+        pin!(keepalive_timer);
+
+        let inactivity_timer =
+            future_or_pending(self.common.config.inactivity_timeout, tokio::time::sleep);
+        pin!(inactivity_timer);
+
         let reading = start_reading(stream_read, buffer, opening_cipher);
         pin!(reading);
         let mut is_reading = None;
         let mut decomp = CryptoVec::new();
-        let delay = self.common.config.inactivity_timeout;
 
         #[allow(clippy::panic)] // false positive in macro
         while !self.common.disconnected {
+            self.common.received_data = false;
+            let mut only_sent_keepalive = false;
             tokio::select! {
                 r = &mut reading => {
                     let (stream_read, mut buffer, mut opening_cipher) = match r {
@@ -391,6 +400,7 @@ impl Session {
                             is_reading = Some((stream_read, buffer, opening_cipher));
                             break;
                         } else {
+                            self.common.received_data = true;
                             std::mem::swap(&mut opening_cipher, &mut self.common.cipher.remote_to_local);
                             // TODO it'd be cleaner to just pass cipher to reply()
                             match reply(self, handler, &mut buffer.seqn, buf).await {
@@ -405,10 +415,19 @@ impl Session {
                     }
                     reading.set(start_reading(stream_read, buffer, opening_cipher));
                 }
-                _ = timeout(delay) => {
+                () = &mut keepalive_timer => {
+                    only_sent_keepalive = true;
+                    self.keepalive_request();
+                    if self.common.config.keepalive_max != 0 && self.common.alive_timeouts > self.common.config.keepalive_max {
+                        debug!("Timeout, server not responding to keepalives");
+                        break
+                    }
+                    self.common.alive_timeouts = self.common.alive_timeouts.saturating_add(1);
+                }
+                () = &mut inactivity_timer => {
                     debug!("timeout");
                     break
-                },
+                }
                 msg = self.receiver.recv(), if !self.is_rekeying() => {
                     match msg {
                         Some(Msg::Channel(id, ChannelMsg::Data { data })) => {
@@ -480,6 +499,23 @@ impl Session {
                 .await
                 .map_err(crate::Error::from)?;
             self.common.write_buffer.buffer.clear();
+
+            if self.common.received_data {
+                if let (futures::future::Either::Right(ref mut sleep), Some(d)) = (
+                    keepalive_timer.as_mut().as_pin_mut(),
+                    self.common.config.keepalive_interval,
+                ) {
+                    sleep.as_mut().reset(tokio::time::Instant::now() + d);
+                }
+            }
+            if !only_sent_keepalive {
+                if let (futures::future::Either::Right(ref mut sleep), Some(d)) = (
+                    inactivity_timer.as_mut().as_pin_mut(),
+                    self.common.config.inactivity_timeout,
+                ) {
+                    sleep.as_mut().reset(tokio::time::Instant::now() + d);
+                }
+            }
         }
         debug!("disconnected");
         // Shutdown
@@ -719,6 +755,18 @@ impl Session {
                     enc.write.push(client_can_do as u8);
                 })
             }
+        }
+    }
+
+    /// Ping the client to verify there is still connectivity.
+    pub fn keepalive_request(&mut self) {
+        let want_reply = u8::from(true);
+        if let Some(ref mut enc) = self.common.encrypted {
+            push_packet!(enc.write, {
+                enc.write.push(msg::GLOBAL_REQUEST);
+                enc.write.extend_ssh_string(b"keepalive@openssh.com");
+                enc.write.push(want_reply);
+            })
         }
     }
 

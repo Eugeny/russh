@@ -64,6 +64,8 @@ pub(crate) struct CommonSession<Config> {
     pub disconnected: bool,
     pub buffer: CryptoVec,
     pub strict_kex: bool,
+    pub alive_timeouts: usize,
+    pub received_data: bool,
 }
 
 impl<C> CommonSession<C> {
