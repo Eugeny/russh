@@ -366,7 +366,7 @@ impl Session {
         #[allow(clippy::panic)] // false positive in macro
         while !self.common.disconnected {
             self.common.received_data = false;
-            let mut only_sent_keepalive = false;
+            let mut sent_keepalive = false;
             tokio::select! {
                 r = &mut reading => {
                     let (stream_read, mut buffer, mut opening_cipher) = match r {
@@ -416,13 +416,13 @@ impl Session {
                     reading.set(start_reading(stream_read, buffer, opening_cipher));
                 }
                 () = &mut keepalive_timer => {
-                    only_sent_keepalive = true;
-                    self.keepalive_request();
                     if self.common.config.keepalive_max != 0 && self.common.alive_timeouts > self.common.config.keepalive_max {
                         debug!("Timeout, server not responding to keepalives");
                         break
                     }
                     self.common.alive_timeouts = self.common.alive_timeouts.saturating_add(1);
+                    sent_keepalive = true;
+                    self.keepalive_request();
                 }
                 () = &mut inactivity_timer => {
                     debug!("timeout");
@@ -500,7 +500,7 @@ impl Session {
                 .map_err(crate::Error::from)?;
             self.common.write_buffer.buffer.clear();
 
-            if self.common.received_data {
+            if self.common.received_data || sent_keepalive {
                 if let (futures::future::Either::Right(ref mut sleep), Some(d)) = (
                     keepalive_timer.as_mut().as_pin_mut(),
                     self.common.config.keepalive_interval,
@@ -508,7 +508,7 @@ impl Session {
                     sleep.as_mut().reset(tokio::time::Instant::now() + d);
                 }
             }
-            if !only_sent_keepalive {
+            if !sent_keepalive {
                 if let (futures::future::Either::Right(ref mut sleep), Some(d)) = (
                     inactivity_timer.as_mut().as_pin_mut(),
                     self.common.config.inactivity_timeout,
