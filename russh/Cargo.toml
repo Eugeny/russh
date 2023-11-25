@@ -73,6 +73,7 @@ rand = "0.8.5"
 shell-escape = "0.1"
 tokio-fd = "0.3"
 termion = "2"
+pty-process = { git = "https://github.com/mobusoperandi/pty-process.git", branch = "macos_draft_pr", features = ["async"] }
 
 [package.metadata.docs.rs]
 features = ["openssl"]
