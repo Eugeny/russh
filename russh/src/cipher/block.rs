@@ -129,7 +129,7 @@ impl<C: StreamCipher + KeySizeUser + IvSizeUser> super::OpeningKey for OpeningKe
                 return Err(Error::PacketAuth);
             }
         }
-        Ok(ciphertext_in_plaintext_out)
+        Ok(&ciphertext_in_plaintext_out[PACKET_LENGTH_LEN..])
     }
 }
 

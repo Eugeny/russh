@@ -16,7 +16,6 @@
 // http://cvsweb.openbsd.org/cgi-bin/cvsweb/src/usr.bin/ssh/PROTOCOL.chacha20poly1305?annotate=HEAD
 
 use aes_gcm::{AeadCore, AeadInPlace, Aes256Gcm, KeyInit, KeySizeUser};
-use byteorder::{BigEndian, ByteOrder};
 use digest::typenum::Unsigned;
 use generic_array::GenericArray;
 use rand::RngCore;
@@ -84,27 +83,13 @@ pub struct SealingKey {
     cipher: Aes256Gcm,
 }
 
-const GCM_COUNTER_OFFSET: u64 = 3;
-
-fn make_nonce(
-    nonce: &GenericArray<u8, NonceSize>,
-    sequence_number: u32,
-) -> GenericArray<u8, NonceSize> {
-    let mut new_nonce = GenericArray::<u8, NonceSize>::default();
-    new_nonce.clone_from_slice(nonce);
-    // Increment the nonce
-    let i0 = new_nonce.len() - 8;
-
-    #[allow(clippy::indexing_slicing)] // length checked
-    let ctr = BigEndian::read_u64(&new_nonce[i0..]);
-
-    // GCM requires the counter to start from 1
-    #[allow(clippy::indexing_slicing)] // length checked
-    BigEndian::write_u64(
-        &mut new_nonce[i0..],
-        ctr + sequence_number as u64 - GCM_COUNTER_OFFSET,
-    );
-    new_nonce
+fn inc_nonce(nonce: &mut GenericArray<u8, NonceSize>) {
+    let mut carry = 1;
+    for i in (0..nonce.len()).rev() {
+        let n = nonce[i] as u16 + carry;
+        nonce[i] = n as u8;
+        carry = n >> 8;
+    }
 }
 
 impl super::OpeningKey for OpeningKey {
@@ -137,22 +122,21 @@ impl super::OpeningKey for OpeningKey {
         #[allow(clippy::indexing_slicing)] // length checked
         buffer.copy_from_slice(&ciphertext_in_plaintext_out[super::PACKET_LENGTH_LEN..]);
 
-        let nonce = make_nonce(&self.nonce, sequence_number);
-
         let mut tag_buf = GenericArray::<u8, TagSize>::default();
         tag_buf.clone_from_slice(tag);
 
         #[allow(clippy::indexing_slicing)]
         self.cipher
             .decrypt_in_place_detached(
-                &nonce,
+                &self.nonce,
                 &packet_length,
                 &mut ciphertext_in_plaintext_out[super::PACKET_LENGTH_LEN..],
                 &tag_buf,
             )
             .map_err(|_| Error::DecryptionError)?;
 
-        Ok(ciphertext_in_plaintext_out)
+        inc_nonce(&mut self.nonce);
+        Ok(&ciphertext_in_plaintext_out[super::PACKET_LENGTH_LEN..])
     }
 }
 
@@ -191,18 +175,17 @@ impl super::SealingKey for SealingKey {
         #[allow(clippy::indexing_slicing)] // length checked
         packet_length.clone_from_slice(&plaintext_in_ciphertext_out[..super::PACKET_LENGTH_LEN]);
 
-        let nonce = make_nonce(&self.nonce, sequence_number);
-
         #[allow(clippy::indexing_slicing, clippy::unwrap_used)]
         let tag_out = self
             .cipher
             .encrypt_in_place_detached(
-                &nonce,
+                &self.nonce,
                 &packet_length,
                 &mut plaintext_in_ciphertext_out[super::PACKET_LENGTH_LEN..],
             )
             .unwrap();
 
+        inc_nonce(&mut self.nonce);
         tag.clone_from_slice(&tag_out)
     }
 }
