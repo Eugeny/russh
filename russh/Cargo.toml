@@ -3,13 +3,13 @@ authors = ["Pierre-Étienne Meunier <pe@pijul.org>"]
 description = "A client and server SSH library."
 documentation = "https://docs.rs/russh"
 edition = "2018"
-homepage = "https://pijul.org/russh"
+homepage = "https://github.com/warp-tech/russh"
 keywords = ["ssh"]
 license = "Apache-2.0"
 name = "russh"
 readme = "../README.md"
 repository = "https://github.com/warp-tech/russh"
-version = "0.39.0-beta.1"
+version = "0.39.0"
 rust-version = "1.60"
 
 [features]
