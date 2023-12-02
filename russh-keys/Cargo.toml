@@ -25,7 +25,7 @@ keywords = ["ssh"]
 license = "Apache-2.0"
 name = "russh-keys"
 repository = "https://github.com/warp-tech/russh"
-version = "0.38.0"
+version = "0.40.0"
 
 [dependencies]
 aes = "0.8"
