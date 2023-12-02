@@ -85,6 +85,7 @@ pub struct SealingKey {
 
 fn inc_nonce(nonce: &mut GenericArray<u8, NonceSize>) {
     let mut carry = 1;
+    #[allow(clippy::indexing_slicing)] // length checked
     for i in (0..nonce.len()).rev() {
         let n = nonce[i] as u16 + carry;
         nonce[i] = n as u8;
@@ -107,7 +108,7 @@ impl super::OpeningKey for OpeningKey {
 
     fn open<'a>(
         &mut self,
-        sequence_number: u32,
+        _sequence_number: u32,
         ciphertext_in_plaintext_out: &'a mut [u8],
         tag: &[u8],
     ) -> Result<&'a [u8], Error> {
@@ -136,6 +137,8 @@ impl super::OpeningKey for OpeningKey {
             .map_err(|_| Error::DecryptionError)?;
 
         inc_nonce(&mut self.nonce);
+
+        #[allow(clippy::indexing_slicing)]
         Ok(&ciphertext_in_plaintext_out[super::PACKET_LENGTH_LEN..])
     }
 }
@@ -166,7 +169,7 @@ impl super::SealingKey for SealingKey {
 
     fn seal(
         &mut self,
-        sequence_number: u32,
+        _sequence_number: u32,
         plaintext_in_ciphertext_out: &mut [u8],
         tag: &mut [u8],
     ) {

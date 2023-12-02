@@ -129,6 +129,8 @@ impl<C: StreamCipher + KeySizeUser + IvSizeUser> super::OpeningKey for OpeningKe
                 return Err(Error::PacketAuth);
             }
         }
+
+        #[allow(clippy::indexing_slicing)]
         Ok(&ciphertext_in_plaintext_out[PACKET_LENGTH_LEN..])
     }
 }
