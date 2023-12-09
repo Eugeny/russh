@@ -278,10 +278,18 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AgentClient<S> {
                     b"ecdsa-sha2-nistp256" => {
                         let curve = r.read_string()?;
                         if curve != b"nistp256" {
-                            return Err(Error::P256KeyError(p256::elliptic_curve::Error));
+                            return Err(Error::EcdsaKeyError(p256::elliptic_curve::Error));
                         }
                         let key = r.read_string()?;
                         keys.push(PublicKey::P256(p256::PublicKey::from_sec1_bytes(key)?));
+                    }
+                    b"ecdsa-sha2-nistp512" => {
+                        let curve = r.read_string()?;
+                        if curve != b"nistp521" {
+                            return Err(Error::EcdsaKeyError(p521::elliptic_curve::Error));
+                        }
+                        let key = r.read_string()?;
+                        keys.push(PublicKey::P521(p521::PublicKey::from_sec1_bytes(key)?));
                     }
                     t => {
                         info!("Unsupported key type: {:?}", std::str::from_utf8(t))
@@ -542,7 +550,7 @@ fn key_blob(public: &key::PublicKey, buf: &mut CryptoVec) -> Result<(), Error> {
             #[allow(clippy::indexing_slicing)] // length is known
             BigEndian::write_u32(&mut buf[5..], (len1 - len0) as u32);
         }
-        PublicKey::P256(_) => {
+        PublicKey::P256(_) | PublicKey::P521(_) => {
             buf.extend_ssh_string(&public.public_key_bytes());
         }
     }

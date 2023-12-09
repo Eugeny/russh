@@ -102,8 +102,8 @@ pub enum Error {
     #[error("Invalid Ed25519 key data")]
     Ed25519KeyError(#[from] ed25519_dalek::SignatureError),
     /// The type of the key is unsupported
-    #[error("Invalid NIST-P256 key data")]
-    P256KeyError(#[from] p256::elliptic_curve::Error),
+    #[error("Invalid ECDSA key data")]
+    EcdsaKeyError(#[from] p256::elliptic_curve::Error),
     /// The key is encrypted (should supply a password?)
     #[error("The key is encrypted")]
     KeyIsEncrypted,
@@ -240,6 +240,12 @@ impl PublicKeyBase64 for key::PublicKey {
                 use encoding::Encoding;
                 s.extend_ssh_string(b"ecdsa-sha2-nistp256");
                 s.extend_ssh_string(b"nistp256");
+                s.extend_ssh_string(&publickey.to_sec1_bytes());
+            }
+            key::PublicKey::P521(ref publickey) => {
+                use encoding::Encoding;
+                s.extend_ssh_string(b"ecdsa-sha2-nistp521");
+                s.extend_ssh_string(b"nistp521");
                 s.extend_ssh_string(&publickey.to_sec1_bytes());
             }
         }
