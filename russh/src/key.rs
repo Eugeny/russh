@@ -30,7 +30,7 @@ impl PubKey for PublicKey {
                 buffer.extend_ssh_string(ED25519.0.as_bytes());
                 buffer.extend_ssh_string(public.as_bytes());
             }
-            PublicKey::P256(_) => {
+            PublicKey::P256(_) | PublicKey::P521(_) => {
                 buffer.extend_ssh_string(&self.public_key_bytes());
             }
             #[cfg(feature = "openssl")]
