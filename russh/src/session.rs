@@ -68,8 +68,14 @@ pub(crate) struct CommonSession<Config> {
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum ChannelFlushResult {
-    Incomplete { wrote: usize, },
-    Complete { wrote: usize, pending_eof: bool, pending_close: bool, }
+    Incomplete {
+        wrote: usize,
+    },
+    Complete {
+        wrote: usize,
+        pending_eof: bool,
+        pending_close: bool,
+    },
 }
 impl ChannelFlushResult {
     pub(crate) fn wrote(&self) -> usize {
@@ -79,7 +85,11 @@ impl ChannelFlushResult {
         }
     }
     pub(crate) fn complete(wrote: usize, channel: &ChannelParams) -> Self {
-        ChannelFlushResult::Complete { wrote, pending_eof: channel.pending_eof, pending_close: channel.pending_close }
+        ChannelFlushResult::Complete {
+            wrote,
+            pending_eof: channel.pending_eof,
+            pending_close: channel.pending_close,
+        }
     }
 }
 
@@ -233,14 +243,21 @@ impl Encrypted {
             pending_size += size;
             if from + size < buf.len() {
                 channel.pending_data.push_front((buf, a, from + size));
-                return ChannelFlushResult::Incomplete { wrote: pending_size };
+                return ChannelFlushResult::Incomplete {
+                    wrote: pending_size,
+                };
             }
         }
         ChannelFlushResult::complete(pending_size, channel)
     }
 
     fn handle_flushed_channel(&mut self, channel: ChannelId, flush_result: ChannelFlushResult) {
-        if let ChannelFlushResult::Complete { wrote: _, pending_eof, pending_close } = flush_result {
+        if let ChannelFlushResult::Complete {
+            wrote: _,
+            pending_eof,
+            pending_close,
+        } = flush_result
+        {
             if pending_eof {
                 self.eof(channel);
             }
@@ -272,7 +289,9 @@ impl Encrypted {
     }
 
     fn has_pending_data_mut(&mut self, channel: ChannelId) -> Option<&mut ChannelParams> {
-        self.channels.get_mut(&channel).filter(|c| !c.pending_data.is_empty())
+        self.channels
+            .get_mut(&channel)
+            .filter(|c| !c.pending_data.is_empty())
     }
 
     pub fn has_pending_data(&self, channel: ChannelId) -> bool {
