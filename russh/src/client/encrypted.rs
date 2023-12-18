@@ -738,6 +738,8 @@ impl Session {
                         confirmed: true,
                         wants_reply: false,
                         pending_data: std::collections::VecDeque::new(),
+                        pending_eof: false,
+                        pending_close: false,
                     };
 
                     let confirm = || {

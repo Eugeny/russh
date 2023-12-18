@@ -473,6 +473,8 @@ pub(crate) struct ChannelParams {
     pub confirmed: bool,
     wants_reply: bool,
     pending_data: std::collections::VecDeque<(CryptoVec, Option<u32>, usize)>,
+    pending_eof: bool,
+    pending_close: bool,
 }
 
 impl ChannelParams {
