@@ -105,8 +105,8 @@ use crate::session::{CommonSession, EncryptedState, Exchange, Kex, KexDhDone, Ke
 use crate::ssh_read::SshRead;
 use crate::sshbuffer::{SSHBuffer, SshId};
 use crate::{
-    auth, msg, negotiation, strict_kex_violation, ChannelId, ChannelOpenFailure,
-    Disconnect, Limits, Sig,
+    auth, msg, negotiation, strict_kex_violation, ChannelId, ChannelOpenFailure, Disconnect,
+    Limits, Sig,
 };
 
 mod encrypted;
