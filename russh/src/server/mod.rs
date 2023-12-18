@@ -112,6 +112,7 @@
 
 use std;
 use std::collections::HashMap;
+use std::num::Wrapping;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -805,14 +806,33 @@ async fn read_ssh_id<R: AsyncRead + Unpin>(
         wants_reply: false,
         disconnected: false,
         buffer: CryptoVec::new(),
+        strict_kex: false,
     })
 }
+
+const STRICT_KEX_MSG_ORDER: &[u8] = &[msg::KEXINIT, msg::KEX_ECDH_INIT, msg::NEWKEYS];
 
 async fn reply<H: Handler + Send>(
     mut session: Session,
     handler: H,
+    seqn: &mut Wrapping<u32>,
     buf: &[u8],
 ) -> Result<(H, Session), H::Error> {
+    if let Some(message_type) = buf.first() {
+        if session.common.strict_kex && session.common.encrypted.is_none() {
+            let seqno = seqn.0 - 1; // was incremented after read()
+            if let Some(expected) = STRICT_KEX_MSG_ORDER.get(seqno as usize) {
+                if message_type != expected {
+                    return Err(strict_kex_violation(*message_type, seqno as usize).into());
+                }
+            }
+        }
+
+        if [msg::IGNORE, msg::UNIMPLEMENTED, msg::DEBUG].contains(message_type) {
+            return Ok((handler, session));
+        }
+    }
+
     // Handle key exchange/re-exchange.
     if session.common.encrypted.is_none() {
         match session.common.kex.take() {
@@ -824,6 +844,13 @@ async fn reply<H: Handler + Send>(
                         buf,
                         &mut session.common.write_buffer,
                     )?);
+                    if let Some(Kex::Dh(KexDh { ref names, .. })) = session.common.kex {
+                        session.common.strict_kex = names.strict_kex;
+                    }
+                    // seqno has already been incremented after read()
+                    if session.common.strict_kex && seqn.0 != 1 {
+                        return Err(strict_kex_violation(msg::KEXINIT, seqn.0 as usize - 1).into());
+                    }
                     return Ok((handler, session));
                 } else {
                     // Else, i.e. if the other side has not started
@@ -839,6 +866,10 @@ async fn reply<H: Handler + Send>(
                     buf,
                     &mut session.common.write_buffer,
                 )?);
+                if let Some(Kex::Keys(_)) = session.common.kex {
+                    // just sent NEWKEYS
+                    session.common.maybe_reset_seqn();
+                }
                 return Ok((handler, session));
             }
             Some(Kex::Keys(newkeys)) => {
@@ -854,6 +885,9 @@ async fn reply<H: Handler + Send>(
                     newkeys,
                 );
                 session.maybe_send_ext_info();
+                if session.common.strict_kex {
+                    *seqn = Wrapping(0);
+                }
                 return Ok((handler, session));
             }
             Some(kex) => {
@@ -864,6 +898,6 @@ async fn reply<H: Handler + Send>(
         }
         Ok((handler, session))
     } else {
-        Ok(session.server_read_encrypted(handler, buf).await?)
+        Ok(session.server_read_encrypted(handler, seqn, buf).await?)
     }
 }
