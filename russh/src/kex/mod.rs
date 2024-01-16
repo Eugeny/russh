@@ -99,6 +99,10 @@ pub const NONE: Name = Name("none");
 pub const EXTENSION_SUPPORT_AS_CLIENT: Name = Name("ext-info-c");
 /// `ext-info-s`
 pub const EXTENSION_SUPPORT_AS_SERVER: Name = Name("ext-info-s");
+/// `kex-strict-c-v00@openssh.com`
+pub const EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT: Name = Name("kex-strict-c-v00@openssh.com");
+/// `kex-strict-s-v00@openssh.com`
+pub const EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER: Name = Name("kex-strict-s-v00@openssh.com");
 
 const _CURVE25519: Curve25519KexType = Curve25519KexType {};
 const _DH_G1_SHA1: DhGroup1Sha1KexType = DhGroup1Sha1KexType {};

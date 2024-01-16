@@ -77,6 +77,7 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::num::Wrapping;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -104,7 +105,8 @@ use crate::session::{CommonSession, EncryptedState, Exchange, Kex, KexDhDone, Ke
 use crate::ssh_read::SshRead;
 use crate::sshbuffer::{SSHBuffer, SshId};
 use crate::{
-    auth, msg, negotiation, timeout, ChannelId, ChannelOpenFailure, Disconnect, Limits, Sig,
+    auth, msg, negotiation, strict_kex_violation, timeout, ChannelId, ChannelOpenFailure,
+    Disconnect, Limits, Sig,
 };
 
 mod encrypted;
@@ -127,6 +129,8 @@ pub struct Session {
     inbound_channel_sender: Sender<Msg>,
     inbound_channel_receiver: Receiver<Msg>,
 }
+
+const STRICT_KEX_MSG_ORDER: &[u8] = &[msg::KEXINIT, msg::KEX_ECDH_REPLY, msg::NEWKEYS];
 
 impl Drop for Session {
     fn drop(&mut self) {
@@ -693,6 +697,7 @@ where
             wants_reply: false,
             disconnected: false,
             buffer: CryptoVec::new(),
+            strict_kex: false,
         },
         session_receiver,
         session_sender,
@@ -784,7 +789,7 @@ impl Session {
                     self.send_keepalive(true);
                 }
                 r = &mut reading => {
-                    let (stream_read, buffer, mut opening_cipher) = match r {
+                    let (stream_read, mut buffer, mut opening_cipher) = match r {
                         Ok((_, stream_read, buffer, opening_cipher)) => (stream_read, buffer, opening_cipher),
                         Err(e) => return Err(e.into())
                     };
@@ -813,8 +818,8 @@ impl Session {
                         #[allow(clippy::indexing_slicing)] // length checked
                         if buf[0] == crate::msg::DISCONNECT {
                             break;
-                        } else if buf[0] > 4 {
-                            let (h, s) = reply(self, handler, &mut encrypted_signal, buf).await?;
+                        } else {
+                            let (h, s) = reply(self, handler, &mut encrypted_signal, &mut buffer.seqn, buf).await?;
                             handler = h;
                             self = s;
                         }
@@ -1176,8 +1181,24 @@ async fn reply<H: Handler>(
     mut session: Session,
     mut handler: H,
     sender: &mut Option<tokio::sync::oneshot::Sender<()>>,
+    seqn: &mut Wrapping<u32>,
     buf: &[u8],
 ) -> Result<(H, Session), H::Error> {
+    if let Some(message_type) = buf.first() {
+        if session.common.strict_kex && session.common.encrypted.is_none() {
+            let seqno = seqn.0 - 1; // was incremented after read()
+            if let Some(expected) = STRICT_KEX_MSG_ORDER.get(seqno as usize) {
+                if message_type != expected {
+                    return Err(strict_kex_violation(*message_type, seqno as usize).into());
+                }
+            }
+        }
+
+        if [msg::IGNORE, msg::UNIMPLEMENTED, msg::DEBUG].contains(message_type) {
+            return Ok((handler, session));
+        }
+    }
+
     match session.common.kex.take() {
         Some(Kex::Init(kexinit)) => {
             if kexinit.algo.is_some()
@@ -1190,6 +1211,11 @@ async fn reply<H: Handler>(
                     buf,
                     &mut session.common.write_buffer,
                 )?;
+
+                // seqno has already been incremented after read()
+                if done.names.strict_kex && seqn.0 != 1 {
+                    return Err(strict_kex_violation(msg::KEXINIT, seqn.0 as usize - 1).into());
+                }
 
                 if done.kex.skip_exchange() {
                     session.common.encrypted(
@@ -1216,6 +1242,7 @@ async fn reply<H: Handler>(
                 // We've sent ECDH_INIT, waiting for ECDH_REPLY
                 let (kex, h) = kexdhdone.server_key_check(false, handler, buf).await?;
                 handler = h;
+                session.common.strict_kex = session.common.strict_kex || kex.names.strict_kex;
                 session.common.kex = Some(Kex::Keys(kex));
                 session
                     .common
@@ -1223,6 +1250,7 @@ async fn reply<H: Handler>(
                     .local_to_remote
                     .write(&[msg::NEWKEYS], &mut session.common.write_buffer);
                 session.flush()?;
+                session.common.maybe_reset_seqn();
                 Ok((handler, session))
             } else {
                 error!("Wrong packet received");
@@ -1241,13 +1269,16 @@ async fn reply<H: Handler>(
                 .common
                 .encrypted(initial_encrypted_state(&session), newkeys);
             // Ok, NEWKEYS received, now encrypted.
+            if session.common.strict_kex {
+                *seqn = Wrapping(0);
+            }
             Ok((handler, session))
         }
         Some(kex) => {
             session.common.kex = Some(kex);
             Ok((handler, session))
         }
-        None => session.client_read_encrypted(handler, buf).await,
+        None => session.client_read_encrypted(handler, seqn, buf).await,
     }
 }
 

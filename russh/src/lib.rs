@@ -96,6 +96,7 @@
 
 use std::fmt::{Debug, Display, Formatter};
 
+use log::debug;
 use parsing::ChannelOpenConfirmation;
 pub use russh_cryptovec::CryptoVec;
 use thiserror::Error;
@@ -285,6 +286,23 @@ pub enum Error {
 
     #[error(transparent)]
     Elapsed(#[from] tokio::time::error::Elapsed),
+
+    #[error("Violation detected during strict key exchange, message {message_type} at seq no {sequence_number}")]
+    StrictKeyExchangeViolation {
+        message_type: u8,
+        sequence_number: usize,
+    },
+}
+
+pub(crate) fn strict_kex_violation(message_type: u8, sequence_number: usize) -> crate::Error {
+    debug!(
+        "strict kex violated at sequence no. {:?}, message type: {:?}",
+        sequence_number, message_type
+    );
+    crate::Error::StrictKeyExchangeViolation {
+        message_type,
+        sequence_number,
+    }
 }
 
 #[derive(Debug, Error)]

@@ -14,6 +14,7 @@
 //
 use std::cell::RefCell;
 use std::convert::TryInto;
+use std::num::Wrapping;
 
 use log::{debug, error, info, trace, warn};
 use russh_cryptovec::CryptoVec;
@@ -26,7 +27,8 @@ use crate::negotiation::{Named, Select};
 use crate::parsing::{ChannelOpenConfirmation, ChannelType, OpenChannelMessage};
 use crate::session::{Encrypted, EncryptedState, Kex, KexInit};
 use crate::{
-    auth, msg, negotiation, Channel, ChannelId, ChannelMsg, ChannelOpenFailure, ChannelParams, Sig,
+    auth, msg, negotiation, strict_kex_violation, Channel, ChannelId, ChannelMsg,
+    ChannelOpenFailure, ChannelParams, Sig,
 };
 
 thread_local! {
@@ -37,6 +39,7 @@ impl Session {
     pub(crate) async fn client_read_encrypted<H: Handler>(
         mut self,
         mut client: H,
+        seqn: &mut Wrapping<u32>,
         buf: &[u8],
     ) -> Result<(H, Self), H::Error> {
         #[allow(clippy::indexing_slicing)] // length checked
@@ -65,6 +68,12 @@ impl Session {
                 };
 
                 if let Some(kexinit) = kexinit {
+                    if let Some(ref algo) = kexinit.algo {
+                        if self.common.strict_kex && !algo.strict_kex {
+                            return Err(strict_kex_violation(msg::KEXINIT, 0).into());
+                        }
+                    }
+
                     let dhdone = kexinit.client_parse(
                         self.common.config.as_ref(),
                         &mut *self.common.cipher.local_to_remote,
@@ -100,6 +109,7 @@ impl Session {
                             .local_to_remote
                             .write(&[msg::NEWKEYS], &mut self.common.write_buffer);
                         self.flush()?;
+                        self.common.maybe_reset_seqn();
                         Ok((client, self))
                     } else {
                         error!("Wrong packet received");
@@ -125,6 +135,11 @@ impl Session {
                     self.pending_len = 0;
                     self.common.newkeys(newkeys);
                     self.flush()?;
+
+                    if self.common.strict_kex {
+                        *seqn = Wrapping(0);
+                    }
+
                     return Ok((client, self));
                 }
                 Some(Kex::Init(k)) => {

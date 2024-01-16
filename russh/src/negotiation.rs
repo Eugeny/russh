@@ -23,6 +23,7 @@ use russh_keys::key::{KeyPair, PublicKey};
 
 use crate::cipher::CIPHERS;
 use crate::compression::*;
+use crate::kex::{EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT, EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER};
 use crate::{cipher, kex, mac, msg, Error};
 
 #[derive(Debug)]
@@ -35,6 +36,7 @@ pub struct Names {
     pub server_compression: Compression,
     pub client_compression: Compression,
     pub ignore_guessed: bool,
+    pub strict_kex: bool,
 }
 
 /// Lists of preferred algorithms. This is normally hard-coded into implementations.
@@ -56,6 +58,10 @@ const SAFE_KEX_ORDER: &[kex::Name] = &[
     kex::CURVE25519,
     kex::CURVE25519_PRE_RFC_8731,
     kex::DH_G14_SHA256,
+    kex::EXTENSION_SUPPORT_AS_CLIENT,
+    kex::EXTENSION_SUPPORT_AS_SERVER,
+    kex::EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT,
+    kex::EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER,
 ];
 
 const CIPHER_ORDER: &[cipher::Name] = &[
@@ -145,7 +151,9 @@ impl Named for KeyPair {
     }
 }
 
-pub trait Select {
+pub(crate) trait Select {
+    fn is_server() -> bool;
+
     fn select<S: AsRef<str> + Copy>(a: &[S], b: &[u8]) -> Option<(bool, S)>;
 
     fn read_kex(buffer: &[u8], pref: &Preferred) -> Result<Names, Error> {
@@ -161,6 +169,24 @@ pub trait Select {
             );
             return Err(Error::NoCommonKexAlgo);
         };
+
+        let strict_kex_requested = pref.kex.contains(if Self::is_server() {
+            &EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER
+        } else {
+            &EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT
+        });
+        let strict_kex_provided = Self::select(
+            &[if Self::is_server() {
+                EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT
+            } else {
+                EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER
+            }],
+            kex_string,
+        )
+        .is_some();
+        if strict_kex_requested && strict_kex_provided {
+            debug!("strict kex enabled")
+        }
 
         let key_string = r.read_string()?;
         let (key_both_first, key_algorithm) = if let Some(x) = Self::select(pref.key, key_string) {
@@ -240,6 +266,7 @@ pub trait Select {
                     server_compression,
                     // Ignore the next packet if (1) it follows and (2) it's not the correct guess.
                     ignore_guessed: fol && !(kex_both_first && key_both_first),
+                    strict_kex: strict_kex_requested && strict_kex_provided,
                 })
             }
             _ => Err(Error::KexInit),
@@ -251,6 +278,10 @@ pub struct Server;
 pub struct Client;
 
 impl Select for Server {
+    fn is_server() -> bool {
+        true
+    }
+
     fn select<S: AsRef<str> + Copy>(server_list: &[S], client_list: &[u8]) -> Option<(bool, S)> {
         let mut both_first_choice = true;
         for c in client_list.split(|&x| x == b',') {
@@ -266,6 +297,10 @@ impl Select for Server {
 }
 
 impl Select for Client {
+    fn is_server() -> bool {
+        false
+    }
+
     fn select<S: AsRef<str> + Copy>(client_list: &[S], server_list: &[u8]) -> Option<(bool, S)> {
         let mut both_first_choice = true;
         for &c in client_list {
@@ -289,11 +324,18 @@ pub fn write_kex(prefs: &Preferred, buf: &mut CryptoVec, as_server: bool) -> Res
 
     buf.extend(&cookie); // cookie
     buf.extend_list(prefs.kex.iter().filter(|k| {
-        **k != if as_server {
-            crate::kex::EXTENSION_SUPPORT_AS_CLIENT
+        !(if as_server {
+            [
+                crate::kex::EXTENSION_SUPPORT_AS_CLIENT,
+                crate::kex::EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT,
+            ]
         } else {
-            crate::kex::EXTENSION_SUPPORT_AS_SERVER
-        }
+            [
+                crate::kex::EXTENSION_SUPPORT_AS_SERVER,
+                crate::kex::EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER,
+            ]
+        })
+        .contains(*k)
     })); // kex algo
 
     buf.extend_list(prefs.key.iter());
