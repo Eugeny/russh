@@ -105,7 +105,7 @@ impl Session {
         let mut channel = self.session.channel_open_session().await?;
         channel.exec(true, command).await?;
 
-        let mut code = 0;
+        let mut code = None;
         let mut stdout = tokio::io::stdout();
 
         loop {
@@ -121,14 +121,13 @@ impl Session {
                 }
                 // The command has returned an exit code
                 ChannelMsg::ExitStatus { exit_status } => {
-                    code = exit_status;
-                    channel.eof().await?;
-                    break;
+                    code = Some(exit_status);
+                    // cannot leave the loop immediately, there might still be more data to receive
                 }
                 _ => {}
             }
         }
-        Ok(code)
+        Ok(code.expect("program did not exit cleanly"))
     }
 
     async fn close(&mut self) -> Result<()> {

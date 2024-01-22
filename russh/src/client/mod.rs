@@ -105,8 +105,8 @@ use crate::session::{CommonSession, EncryptedState, Exchange, Kex, KexDhDone, Ke
 use crate::ssh_read::SshRead;
 use crate::sshbuffer::{SSHBuffer, SshId};
 use crate::{
-    auth, msg, negotiation, strict_kex_violation, timeout, ChannelId, ChannelOpenFailure,
-    Disconnect, Limits, Sig,
+    auth, msg, negotiation, strict_kex_violation, ChannelId, ChannelOpenFailure, Disconnect,
+    Limits, Sig,
 };
 
 mod encrypted;
@@ -698,6 +698,8 @@ where
             disconnected: false,
             buffer: CryptoVec::new(),
             strict_kex: false,
+            alive_timeouts: 0,
+            received_data: false,
         },
         session_receiver,
         session_sender,
@@ -774,20 +776,22 @@ impl Session {
         let mut opening_cipher = Box::new(clear::Key) as Box<dyn OpeningKey + Send>;
         std::mem::swap(&mut opening_cipher, &mut self.common.cipher.remote_to_local);
 
-        let time_for_keepalive = tokio::time::sleep_until(self.common.config.keepalive_deadline());
+        let keepalive_timer =
+            crate::future_or_pending(self.common.config.keepalive_interval, tokio::time::sleep);
+        pin!(keepalive_timer);
+
+        let inactivity_timer =
+            crate::future_or_pending(self.common.config.inactivity_timeout, tokio::time::sleep);
+        pin!(inactivity_timer);
+
         let reading = start_reading(stream_read, buffer, opening_cipher);
         pin!(reading);
-        pin!(time_for_keepalive);
-
-        let delay = self.common.config.inactivity_timeout;
 
         #[allow(clippy::panic)] // false positive in select! macro
         while !self.common.disconnected {
+            self.common.received_data = false;
+            let mut sent_keepalive = false;
             tokio::select! {
-                () = &mut time_for_keepalive => {
-                    time_for_keepalive.as_mut().reset(self.common.config.keepalive_deadline());
-                    self.send_keepalive(true);
-                }
                 r = &mut reading => {
                     let (stream_read, mut buffer, mut opening_cipher) = match r {
                         Ok((_, stream_read, buffer, opening_cipher)) => (stream_read, buffer, opening_cipher),
@@ -819,6 +823,7 @@ impl Session {
                         if buf[0] == crate::msg::DISCONNECT {
                             break;
                         } else {
+                            self.common.received_data = true;
                             let (h, s) = reply(self, handler, &mut encrypted_signal, &mut buffer.seqn, buf).await?;
                             handler = h;
                             self = s;
@@ -827,7 +832,19 @@ impl Session {
 
                     std::mem::swap(&mut opening_cipher, &mut self.common.cipher.remote_to_local);
                     reading.set(start_reading(stream_read, buffer, opening_cipher));
-                    time_for_keepalive.as_mut().reset(self.common.config.keepalive_deadline());
+                }
+                () = &mut keepalive_timer => {
+                    if self.common.config.keepalive_max != 0 && self.common.alive_timeouts > self.common.config.keepalive_max {
+                        debug!("Timeout, server not responding to keepalives");
+                        break
+                    }
+                    self.common.alive_timeouts = self.common.alive_timeouts.saturating_add(1);
+                    self.send_keepalive(true);
+                    sent_keepalive = true;
+                }
+                () = &mut inactivity_timer => {
+                    debug!("timeout");
+                    break
                 }
                 msg = self.receiver.recv(), if !self.is_rekeying() => {
                     match msg {
@@ -845,7 +862,6 @@ impl Session {
                             Err(_) => break
                         }
                     }
-                    time_for_keepalive.as_mut().reset(self.common.config.keepalive_deadline());
                 }
                 msg = self.inbound_channel_receiver.recv(), if !self.is_rekeying() => {
                     match msg {
@@ -861,11 +877,8 @@ impl Session {
                         }
                     }
                 }
-                _ = timeout(delay) => {
-                    debug!("timeout");
-                    break
-                },
-            }
+            };
+
             self.flush()?;
             if !self.common.write_buffer.buffer.is_empty() {
                 trace!(
@@ -883,6 +896,23 @@ impl Session {
                 if let EncryptedState::InitCompression = enc.state {
                     enc.client_compression.init_compress(&mut enc.compress);
                     enc.state = EncryptedState::Authenticated;
+                }
+            }
+
+            if self.common.received_data || sent_keepalive {
+                if let (futures::future::Either::Right(ref mut sleep), Some(d)) = (
+                    keepalive_timer.as_mut().as_pin_mut(),
+                    self.common.config.keepalive_interval,
+                ) {
+                    sleep.as_mut().reset(tokio::time::Instant::now() + d);
+                }
+            }
+            if !sent_keepalive {
+                if let (futures::future::Either::Right(ref mut sleep), Some(d)) = (
+                    inactivity_timer.as_mut().as_pin_mut(),
+                    self.common.config.inactivity_timeout,
+                ) {
+                    sleep.as_mut().reset(tokio::time::Instant::now() + d);
                 }
             }
         }
@@ -1308,19 +1338,12 @@ pub struct Config {
     pub preferred: negotiation::Preferred,
     /// Time after which the connection is garbage-collected.
     pub inactivity_timeout: Option<std::time::Duration>,
-    /// If nothing is sent or received for this amount of time, send a keepalive message.
+    /// If nothing is received from the server for this amount of time, send a keepalive message.
     pub keepalive_interval: Option<std::time::Duration>,
+    /// If this many keepalives have been sent without reply, close the connection.
+    pub keepalive_max: usize,
     /// Whether to expect and wait for an authentication call.
     pub anonymous: bool,
-}
-
-impl Config {
-    fn keepalive_deadline(&self) -> tokio::time::Instant {
-        tokio::time::Instant::now()
-            + self
-                .keepalive_interval
-                .unwrap_or(std::time::Duration::from_secs(86400 * 365))
-    }
 }
 
 impl Default for Config {
@@ -1337,6 +1360,7 @@ impl Default for Config {
             preferred: Default::default(),
             inactivity_timeout: None,
             keepalive_interval: None,
+            keepalive_max: 3,
             anonymous: false,
         }
     }

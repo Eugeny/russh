@@ -473,6 +473,8 @@ pub(crate) struct ChannelParams {
     pub confirmed: bool,
     wants_reply: bool,
     pending_data: std::collections::VecDeque<(CryptoVec, Option<u32>, usize)>,
+    pending_eof: bool,
+    pending_close: bool,
 }
 
 impl ChannelParams {
@@ -484,10 +486,12 @@ impl ChannelParams {
     }
 }
 
-pub(crate) async fn timeout(delay: Option<std::time::Duration>) {
-    if let Some(delay) = delay {
-        tokio::time::sleep(delay).await
-    } else {
-        futures::future::pending().await
-    };
+pub(crate) fn future_or_pending<F: futures::Future, T>(
+    val: Option<T>,
+    f: impl FnOnce(T) -> F,
+) -> futures::future::Either<futures::future::Pending<<F as futures::Future>::Output>, F> {
+    val.map_or(
+        futures::future::Either::Left(futures::future::pending()),
+        |x| futures::future::Either::Right(f(x)),
+    )
 }

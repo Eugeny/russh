@@ -605,6 +605,7 @@ impl Session {
                         Ok((client, self))
                     }
                     _ => {
+                        self.common.received_data = false;
                         let wants_reply = r.read_byte().map_err(crate::Error::from)?;
                         if wants_reply == 1 {
                             if let Some(ref mut enc) = self.common.encrypted {
@@ -704,6 +705,7 @@ impl Session {
                         push_packet!(enc.write, enc.write.push(msg::REQUEST_FAILURE))
                     }
                 }
+                self.common.received_data = false;
                 Ok((client, self))
             }
             Some(&msg::CHANNEL_SUCCESS) => {
@@ -738,6 +740,8 @@ impl Session {
                         confirmed: true,
                         wants_reply: false,
                         pending_data: std::collections::VecDeque::new(),
+                        pending_eof: false,
+                        pending_close: false,
                     };
 
                     let confirm = || {
@@ -816,7 +820,15 @@ impl Session {
                     Err(crate::Error::Inconsistent.into())
                 }
             }
+            Some(&msg::REQUEST_SUCCESS | &msg::REQUEST_FAILURE)
+                if self.common.alive_timeouts > 0 =>
+            {
+                // TODO what other things might need to happen in response to these two opcodes?
+                self.common.alive_timeouts = 0;
+                Ok((client, self))
+            }
             _ => {
+                self.common.received_data = false;
                 info!("Unhandled packet: {:?}", buf);
                 Ok((client, self))
             }
