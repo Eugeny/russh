@@ -614,6 +614,14 @@ QR+u0AypRPmzHnOPAAAAEXJvb3RAMTQwOTExNTQ5NDBkAQ==
     }
 
     #[test]
+    fn test_parse_p521_public_key() {
+        env_logger::try_init().unwrap_or(());
+        let key = "AAAAE2VjZHNhLXNoYTItbmlzdHA1MjEAAAAIbmlzdHA1MjEAAACFBAAQepXEpOrzlX22r4E5zEHjhHWeZUe//zaevTanOWRBnnaCGWJFGCdjeAbNOuAmLtXc+HZdJTCZGREeSLSrpJa71QDCgZl0N7DkDUanCpHZJe/DCK6qwtHYbEMn28iLMlGCOrCIa060EyJHbp1xcJx4I1SKj/f/fm3DhhID/do6zyf8Cg==";
+
+        parse_public_key_base64(key).unwrap();
+    }
+
+    #[test]
     #[cfg(feature = "openssl")]
     fn test_srhb() {
         env_logger::try_init().unwrap_or(());

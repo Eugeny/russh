@@ -49,6 +49,7 @@ num-bigint = "0.4"
 num-integer = "0.1"
 openssl = { version = "0.10", optional = true }
 p256 = "0.13"
+p521 = "0.13"
 pbkdf2 = "0.11"
 rand = "0.7"
 rand_core = { version = "0.6.4", features = ["std"] }
@@ -65,7 +66,6 @@ tokio = { version = "1.17.0", features = [
 ] }
 tokio-stream = { version = "0.1", features = ["net"] }
 yasna = { version = "0.5.0", features = ["bit-vec", "num-bigint"] }
-p521 = "0.13.3"
 
 [features]
 vendored-openssl = ["openssl", "openssl/vendored"]
