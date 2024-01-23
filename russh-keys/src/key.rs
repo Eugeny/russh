@@ -14,11 +14,11 @@
 //
 use std::convert::TryFrom;
 
-use block_padding::generic_array::GenericArray;
 use ed25519_dalek::{Signer, Verifier};
 #[cfg(feature = "openssl")]
 use openssl::pkey::{Private, Public};
 use p256::elliptic_curve::generic_array::typenum::Unsigned;
+use p521::elliptic_curve::generic_array::GenericArray;
 use rand_core::OsRng;
 use russh_cryptovec::CryptoVec;
 use serde::{Deserialize, Serialize};
@@ -314,15 +314,18 @@ impl PublicKey {
                     }
                     #[allow(clippy::indexing_slicing)] // length is known
                     result[FIELD_LEN - f.len()..].copy_from_slice(f);
-                    // Some(result.into())
-                    Some(GenericArray::clone_from_slice(&result)) // ew
+                    Some(GenericArray::clone_from_slice(&result))
                 };
                 let Some(r) = read_field() else { return false };
                 let Some(s) = read_field() else { return false };
                 let Ok(signature) = p521::ecdsa::Signature::from_scalars(r, s) else {
                     return false;
                 };
-                p521::ecdsa::VerifyingKey::from_sec1_bytes(&public.to_sec1_bytes()).unwrap() // also ew
+
+                // Length known
+                #[allow(clippy::unwrap_used)]
+                p521::ecdsa::VerifyingKey::from_sec1_bytes(&public.to_sec1_bytes())
+                    .unwrap()
                     .verify(buffer, &signature)
                     .is_ok()
             }
