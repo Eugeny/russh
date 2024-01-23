@@ -202,6 +202,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "akeamc",
+      "name": "Åke Amcoff",
+      "avatar_url": "https://avatars.githubusercontent.com/u/17624114?v=4",
+      "profile": "https://amcoff.net/",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,
