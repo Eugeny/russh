@@ -630,15 +630,13 @@ pub trait Server {
     fn handle_session_error(&mut self, _error: <Self::Handler as Handler>::Error) {}
 }
 
-/// Run a server.
-/// Create a new `Connection` from the server's configuration, a
-/// stream and a [`Handler`](trait.Handler.html).
-pub async fn run<H: Server + Send + 'static, A: ToSocketAddrs>(
+/// Run a server on a specified `tokio::net::TcpListener`. Useful when dropping
+/// privileges immediately after socket binding, for example.
+pub async fn run_on_socket<H: Server + Send + 'static>(
     config: Arc<Config>,
-    addrs: A,
+    socket: &TcpListener,
     mut server: H,
 ) -> Result<(), std::io::Error> {
-    let socket = TcpListener::bind(addrs).await?;
     if config.maximum_packet_size > 65535 {
         error!(
             "Maximum packet size ({:?}) should not larger than a TCP packet (65535)",
@@ -684,6 +682,18 @@ pub async fn run<H: Server + Send + 'static, A: ToSocketAddrs>(
     }
 
     Ok(())
+}
+
+/// Run a server.
+/// Create a new `Connection` from the server's configuration, a
+/// stream and a [`Handler`](trait.Handler.html).
+pub async fn run<H: Server + Send + 'static, A: ToSocketAddrs>(
+    config: Arc<Config>,
+    addrs: A,
+    server: H,
+) -> Result<(), std::io::Error> {
+    let socket = TcpListener::bind(addrs).await?;
+    run_on_socket(config, &socket, server).await
 }
 
 use std::cell::RefCell;
