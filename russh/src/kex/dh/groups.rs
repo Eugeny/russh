@@ -70,7 +70,7 @@ pub const DH_GROUP16: DhGroup = DhGroup {
         1F612970 CEE2D7AF B81BDD76 2170481C D0069127 D5B05AA9
         93B4EA98 8D8FDDC1 86FFB7DC 90A6C08F 4DF435C9 34063199
         FFFFFFFF FFFFFFFF
-              "
+        "
     )
     .as_slice(),
     generator: 2,
