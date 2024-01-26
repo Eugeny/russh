@@ -211,6 +211,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "bho01",
+      "name": "Brendon Ho",
+      "avatar_url": "https://avatars.githubusercontent.com/u/12106620?v=4",
+      "profile": "http://brendonho.com",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,
