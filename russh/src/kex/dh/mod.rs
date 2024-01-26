@@ -34,7 +34,7 @@ pub struct DhGroup14Sha256KexType {}
 
 impl KexType for DhGroup14Sha256KexType {
     fn make(&self) -> Box<dyn KexAlgorithm + Send> {
-        Box::new(DhGroupKex::<Sha256>::new(&DH_GROUP16)) as Box<dyn KexAlgorithm + Send>
+        Box::new(DhGroupKex::<Sha256>::new(&DH_GROUP14)) as Box<dyn KexAlgorithm + Send>
     }
 }
 
@@ -42,7 +42,7 @@ pub struct DhGroup16Sha512KexType {}
 
 impl KexType for DhGroup16Sha512KexType {
     fn make(&self) -> Box<dyn KexAlgorithm + Send> {
-        Box::new(DhGroupKex::<Sha512>::new(&DH_GROUP14)) as Box<dyn KexAlgorithm + Send>
+        Box::new(DhGroupKex::<Sha512>::new(&DH_GROUP16)) as Box<dyn KexAlgorithm + Send>
     }
 }
 
