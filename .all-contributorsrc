@@ -220,6 +220,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "samuela",
+      "name": "Samuel Ainsworth",
+      "avatar_url": "https://avatars.githubusercontent.com/u/226872?v=4",
+      "profile": "http://samlikes.pizza/",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,
