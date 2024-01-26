@@ -9,9 +9,9 @@ use num_bigint::BigUint;
 use russh_cryptovec::CryptoVec;
 use russh_keys::encoding::Encoding;
 use sha1::Sha1;
-use sha2::Sha256;
+use sha2::{Sha256, Sha512};
 
-use self::groups::{DhGroup, DH_GROUP1, DH_GROUP14};
+use self::groups::{DhGroup, DH_GROUP1, DH_GROUP14, DH_GROUP16};
 use super::{compute_keys, KexAlgorithm, KexType};
 use crate::session::Exchange;
 use crate::{cipher, mac, msg};
@@ -34,7 +34,15 @@ pub struct DhGroup14Sha256KexType {}
 
 impl KexType for DhGroup14Sha256KexType {
     fn make(&self) -> Box<dyn KexAlgorithm + Send> {
-        Box::new(DhGroupKex::<Sha256>::new(&DH_GROUP14)) as Box<dyn KexAlgorithm + Send>
+        Box::new(DhGroupKex::<Sha256>::new(&DH_GROUP16)) as Box<dyn KexAlgorithm + Send>
+    }
+}
+
+pub struct DhGroup16Sha512KexType {}
+
+impl KexType for DhGroup16Sha512KexType {
+    fn make(&self) -> Box<dyn KexAlgorithm + Send> {
+        Box::new(DhGroupKex::<Sha512>::new(&DH_GROUP14)) as Box<dyn KexAlgorithm + Send>
     }
 }
 
