@@ -1,6 +1,6 @@
 # Russh
 [![Rust](https://github.com/warp-tech/russh/actions/workflows/rust.yml/badge.svg)](https://github.com/warp-tech/russh/actions/workflows/rust.yml)  <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
-[![All Contributors](https://img.shields.io/badge/all_contributors-25-orange.svg?style=flat-square)](#contributors-)
+[![All Contributors](https://img.shields.io/badge/all_contributors-26-orange.svg?style=flat-square)](#contributors-)
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
 
 Low-level Tokio SSH2 client and server implementation.
@@ -107,6 +107,7 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
       <td align="center" valign="top" width="14.28%"><a href="https://amcoff.net/"><img src="https://avatars.githubusercontent.com/u/17624114?v=4?s=100" width="100px;" alt="Åke Amcoff"/><br /><sub><b>Åke Amcoff</b></sub></a><br /><a href="https://github.com/warp-tech/russh/commits?author=akeamc" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="http://brendonho.com"><img src="https://avatars.githubusercontent.com/u/12106620?v=4?s=100" width="100px;" alt="Brendon Ho"/><br /><sub><b>Brendon Ho</b></sub></a><br /><a href="https://github.com/warp-tech/russh/commits?author=bho01" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="http://samlikes.pizza/"><img src="https://avatars.githubusercontent.com/u/226872?v=4?s=100" width="100px;" alt="Samuel Ainsworth"/><br /><sub><b>Samuel Ainsworth</b></sub></a><br /><a href="https://github.com/warp-tech/russh/commits?author=samuela" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/Sherlock-Holo"><img src="https://avatars.githubusercontent.com/u/10096425?v=4?s=100" width="100px;" alt="Sherlock Holo"/><br /><sub><b>Sherlock Holo</b></sub></a><br /><a href="https://github.com/warp-tech/russh/commits?author=sherlock-holo" title="Code">💻</a></td>
     </tr>
   </tbody>
 </table>
