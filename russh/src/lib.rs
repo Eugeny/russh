@@ -450,7 +450,7 @@ impl ChannelOpenFailure {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 /// The identifier of a channel.
 pub struct ChannelId(u32);
 
