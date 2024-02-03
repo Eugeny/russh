@@ -417,7 +417,7 @@ impl Session {
                 }
                 () = &mut keepalive_timer => {
                     if self.common.config.keepalive_max != 0 && self.common.alive_timeouts > self.common.config.keepalive_max {
-                        debug!("Timeout, server not responding to keepalives");
+                        debug!("Timeout, client not responding to keepalives");
                         break
                     }
                     self.common.alive_timeouts = self.common.alive_timeouts.saturating_add(1);
