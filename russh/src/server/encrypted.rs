@@ -300,7 +300,14 @@ impl Encrypted {
                     self.state = EncryptedState::InitCompression;
                 } else {
                     auth_user.clear();
-                    auth_request.methods -= MethodSet::PASSWORD;
+                    if let Auth::Reject {
+                        proceed_with_methods: Some(proceed_with_methods),
+                    } = auth
+                    {
+                        auth_request.methods = proceed_with_methods;
+                    } else {
+                        auth_request.methods -= MethodSet::PASSWORD;
+                    }
                     auth_request.partial_success = false;
                     reject_auth_request(until, &mut self.write, auth_request).await;
                 }
@@ -326,7 +333,14 @@ impl Encrypted {
                     self.state = EncryptedState::InitCompression;
                 } else {
                     auth_user.clear();
-                    auth_request.methods -= MethodSet::NONE;
+                    if let Auth::Reject {
+                        proceed_with_methods: Some(proceed_with_methods),
+                    } = auth
+                    {
+                        auth_request.methods = proceed_with_methods;
+                    } else {
+                        auth_request.methods -= MethodSet::NONE;
+                    }
                     auth_request.partial_success = false;
                     reject_auth_request(until, &mut self.write, auth_request).await;
                 }
