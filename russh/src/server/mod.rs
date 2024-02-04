@@ -22,93 +22,10 @@
 //! In both cases, you'll first need to implement the [Handler](server::Handler) trait -
 //! this is where you'll handle various events.
 //!
-//! Here is an example server, which forwards input from each client
-//! to all other clients:
+//! Check out the following examples:
 //!
-//! ```
-//! use async_trait::async_trait;
-//! use std::sync::{Mutex, Arc};
-//! use russh::*;
-//! use russh::server::{Auth, Session, Msg};
-//! use russh_keys::*;
-//! use std::collections::HashMap;
-//! use futures::Future;
-//!
-//! #[tokio::main]
-//! async fn main() {
-//!     let client_key = russh_keys::key::KeyPair::generate_ed25519().unwrap();
-//!     let client_pubkey = Arc::new(client_key.clone_public_key().unwrap());
-//!     let mut config = russh::server::Config::default();
-//!     config.inactivity_timeout = Some(std::time::Duration::from_secs(3));
-//!     config.auth_rejection_time = std::time::Duration::from_secs(3);
-//!     config.keys.push(russh_keys::key::KeyPair::generate_ed25519().unwrap());
-//!     let config = Arc::new(config);
-//!     let sh = Server{
-//!         client_pubkey,
-//!         clients: Arc::new(Mutex::new(HashMap::new())),
-//!         id: 0
-//!     };
-//!     tokio::time::timeout(
-//!        std::time::Duration::from_secs(1),
-//!        russh::server::run(config, ("0.0.0.0", 2222), sh)
-//!     ).await.unwrap_or(Ok(()));
-//! }
-//!
-//! #[derive(Clone)]
-//! struct Server {
-//!     client_pubkey: Arc<russh_keys::key::PublicKey>,
-//!     clients: Arc<Mutex<HashMap<(usize, ChannelId), Channel<Msg>>>>,
-//!     id: usize,
-//! }
-//!
-//! impl server::Server for Server {
-//!     type Handler = Self;
-//!     fn new_client(&mut self, _: Option<std::net::SocketAddr>) -> Self {
-//!         let s = self.clone();
-//!         self.id += 1;
-//!         s
-//!     }
-//! }
-//!
-//! #[async_trait]
-//! impl server::Handler for Server {
-//!     type Error = anyhow::Error;
-//!
-//!     async fn channel_open_session(self, channel: Channel<Msg>, session: Session) -> Result<(Self, bool, Session), Self::Error> {
-//!         {
-//!             let mut clients = self.clients.lock().unwrap();
-//!             clients.insert((self.id, channel.id()), channel);
-//!         }
-//!         Ok((self, true, session))
-//!     }
-//!     async fn auth_publickey(self, _: &str, _: &key::PublicKey) -> Result<(Self, Auth), Self::Error> {
-//!         Ok((self, server::Auth::Accept))
-//!     }
-//!     async fn data(self, channel: ChannelId, data: &[u8], mut session: Session) -> Result<(Self, Session), Self::Error> {
-//!         {
-//!             let mut clients = self.clients.lock().unwrap();
-//!             for ((id, _channel_id), ref mut channel) in clients.iter_mut() {
-//!                 channel.data(data);
-//!             }
-//!         }
-//!         Ok((self, session))
-//!     }
-//! }
-//! ```
-//!
-//! Note the call to `session.handle()`, which allows to keep a handle
-//! to a client outside the event loop. This feature is internally
-//! implemented using `futures::sync::mpsc` channels.
-//!
-//! Note that this is just a toy server. In particular:
-//!
-//! - It doesn't handle errors when `s.data` returns an error, i.e. when the
-//!   client has disappeared
-//!
-//! - Each new connection increments the `id` field. Even though we
-//! would need a lot of connections per second for a very long time to
-//! saturate it, there are probably better ways to handle this to
-//! avoid collisions.
+//! * [Server that forwards your input to all connected clients](https://github.com/warp-tech/russh/blob/main/russh/examples/echoserver.rs)
+//! * [Server handing channel processing off to a library (here, `russh-sftp`)](https://github.com/warp-tech/russh/blob/main/russh/examples/sftp_server.rs)
 
 use std;
 use std::collections::HashMap;
