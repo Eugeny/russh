@@ -13,14 +13,14 @@ version = "0.41.0-beta.4"
 rust-version = "1.65"
 
 [features]
-default = ["flate2"]
+default = ["flate2", "async-trait"]
 openssl = ["russh-keys/openssl", "dep:openssl"]
 vendored-openssl = ["openssl/vendored", "russh-keys/vendored-openssl"]
 
 [dependencies]
 aes = "0.8"
 aes-gcm = "0.10"
-async-trait = "0.1"
+async-trait = { version = "0.1", optional = true }
 bitflags = "2.0"
 byteorder = "1.3"
 chacha20 = "0.9"
