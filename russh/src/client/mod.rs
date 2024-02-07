@@ -899,6 +899,14 @@ impl Session {
                 }
             }
 
+            if self.common.received_data {
+                // Reset the number of failed keepalive attempts. We don't
+                // bother detecting keepalive response messages specifically
+                // (OpenSSH_9.6p1 responds with REQUEST_FAILURE aka 82). Instead
+                // we assume that the server is still alive if we receive any
+                // data from it.
+                self.common.alive_timeouts = 0;
+            }
             if self.common.received_data || sent_keepalive {
                 if let (futures::future::Either::Right(ref mut sleep), Some(d)) = (
                     keepalive_timer.as_mut().as_pin_mut(),
