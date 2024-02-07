@@ -601,7 +601,6 @@ impl Session {
                         Ok(())
                     }
                     _ => {
-                        self.common.received_data = false;
                         let wants_reply = r.read_byte().map_err(crate::Error::from)?;
                         if wants_reply == 1 {
                             if let Some(ref mut enc) = self.common.encrypted {
@@ -823,7 +822,6 @@ impl Session {
                 Ok(())
             }
             _ => {
-                self.common.received_data = false;
                 info!("Unhandled packet: {:?}", buf);
                 Ok(())
             }
