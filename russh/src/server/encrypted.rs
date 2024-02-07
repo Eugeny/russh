@@ -104,7 +104,7 @@ impl Session {
                 enc.flush_all_pending();
                 let mut pending = std::mem::take(&mut self.pending_reads);
                 for p in pending.drain(..) {
-                    let handler = self.process_packet(handler, &p).await?;
+                    self.process_packet(handler, &p).await?;
                 }
                 self.pending_reads = pending;
                 self.pending_len = 0;
@@ -192,7 +192,7 @@ impl Session {
                 self.common.auth_attempts += 1;
                 if let EncryptedState::InitCompression = enc.state {
                     enc.client_compression.init_decompress(&mut enc.decompress);
-                    handler.auth_succeeded(self).await;
+                    handler.auth_succeeded(self).await?;
                 }
                 Ok(())
             }

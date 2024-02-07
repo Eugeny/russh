@@ -469,7 +469,7 @@ pub enum EncryptedState {
     Authenticated,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Exchange {
     pub client_id: CryptoVec,
     pub server_id: CryptoVec,
@@ -570,17 +570,14 @@ impl Debug for KexDhDone {
 }
 
 impl KexDhDone {
-    pub fn compute_keys(
-        &mut self,
-        hash: CryptoVec,
-        is_server: bool,
-    ) -> Result<NewKeys, crate::Error> {
-        let session_id = if let Some(session_id) = self.session_id {
+    pub fn compute_keys(&self, hash: CryptoVec, is_server: bool) -> Result<NewKeys, crate::Error> {
+        let session_id = if let Some(session_id) = self.session_id.clone() {
             session_id
         } else {
             hash.clone()
         };
         // Now computing keys.
+        let names = self.names.clone();
         let c = self.kex.compute_keys(
             &session_id,
             &hash,
@@ -598,9 +595,9 @@ impl KexDhDone {
             is_server,
         )?;
         Ok(NewKeys {
-            exchange: self.exchange,
-            names: self.names,
-            kex: self.kex,
+            exchange: self.exchange.clone(),
+            names,
+            kex: self.kex.clone(),
             key: self.key,
             cipher: c,
             session_id,

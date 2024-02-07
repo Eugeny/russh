@@ -38,10 +38,8 @@ mod compress {
 
         tokio::spawn(async move {
             let (socket, _) = socket.accept().await.unwrap();
-            let mut server = sh.new_client(socket.peer_addr().ok());
-            server::run_stream(config, socket, &mut server)
-                .await
-                .unwrap();
+            let server = sh.new_client(socket.peer_addr().ok());
+            server::run_stream(config, socket, server).await.unwrap();
         });
 
         let mut config = client::Config::default();
@@ -49,7 +47,7 @@ mod compress {
         let config = Arc::new(config);
 
         dbg!(&addr);
-        let mut session = client::connect(config, addr, &mut Client {}).await.unwrap();
+        let mut session = client::connect(config, addr, Client {}).await.unwrap();
         let authenticated = session
             .authenticate_publickey(
                 std::env::var("USER").unwrap_or("user".to_owned()),
@@ -146,8 +144,8 @@ mod channels {
     use super::*;
 
     async fn test_session<RC, RS, CH, SH, F1, F2>(
-        client_handler: &mut CH,
-        server_handler: &mut SH,
+        client_handler: CH,
+        server_handler: SH,
         run_client: RC,
         run_server: RS,
     ) where
@@ -264,7 +262,7 @@ mod channels {
             ) -> Result<server::Auth, Self::Error> {
                 Ok(server::Auth::Accept)
             }
-            async fn auth_succeeded(&mut self, session: &mut Session) -> Result<(), Self::Error> {
+            async fn auth_succeeded(&mut self, _session: &mut Session) -> Result<(), Self::Error> {
                 if let Some(a) = self.did_auth.take() {
                     a.send(()).unwrap();
                 }
@@ -275,8 +273,8 @@ mod channels {
         let mut sh = ServerHandle { did_auth: None };
         let a = sh.get_auth_waiter();
         test_session(
-            &mut Client {},
-            &mut sh,
+            Client {},
+            sh,
             |c| async move { c },
             |s| async move {
                 a.await.unwrap();
@@ -341,7 +339,7 @@ mod channels {
             async fn channel_open_session(
                 &mut self,
                 channel: Channel<server::Msg>,
-                session: &mut server::Session,
+                _session: &mut server::Session,
             ) -> Result<bool, Self::Error> {
                 if let Some(a) = self.channel.take() {
                     println!("channel open session {:?}", a);
@@ -355,8 +353,8 @@ mod channels {
         let scw = sh.get_channel_waiter();
 
         test_session(
-            &mut Client {},
-            &mut sh,
+            Client {},
+            sh,
             |client| async move {
                 let ch = client.channel_open_session().await.unwrap();
                 let mut stream = ch.into_stream();
@@ -427,7 +425,7 @@ mod channels {
             async fn channel_open_session(
                 &mut self,
                 mut channel: Channel<server::Msg>,
-                session: &mut Session,
+                _session: &mut Session,
             ) -> Result<bool, Self::Error> {
                 tokio::spawn(async move {
                     while let Some(msg) = channel.wait().await {
@@ -447,8 +445,8 @@ mod channels {
 
         let sh = ServerHandle {};
         test_session(
-            &mut Client {},
-            &mut sh,
+            Client {},
+            sh,
             |c| async move {
                 let mut ch = c.channel_open_session().await.unwrap();
                 ch.data(&b"hello world!"[..]).await.unwrap();

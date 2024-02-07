@@ -77,6 +77,7 @@ mod session;
 /// It is in charge of multiplexing and keeping track of various channels
 /// that may get opened and closed during the lifetime of an SSH session and
 /// allows sending messages to the server.
+
 pub struct Session {
     common: CommonSession<Arc<Config>>,
     receiver: Receiver<Msg>,
@@ -599,7 +600,7 @@ impl<H: Handler> Future for Handle<H> {
 pub async fn connect<H: Handler + Send + 'static, A: ToSocketAddrs>(
     config: Arc<Config>,
     addrs: A,
-    handler: &mut H,
+    handler: H,
 ) -> Result<Handle<H>, H::Error> {
     let socket = TcpStream::connect(addrs)
         .await
@@ -614,7 +615,7 @@ pub async fn connect<H: Handler + Send + 'static, A: ToSocketAddrs>(
 pub async fn connect_stream<H, R>(
     config: Arc<Config>,
     mut stream: R,
-    handler: &mut H,
+    handler: H,
 ) -> Result<Handle<H>, H::Error>
 where
     H: Handler + Send + 'static,
@@ -711,9 +712,9 @@ impl Session {
     }
 
     async fn run<H: Handler + Send, R: AsyncRead + AsyncWrite + Unpin + Send>(
-        &mut self,
+        mut self,
         mut stream: SshRead<R>,
-        handler: &mut H,
+        mut handler: H,
         mut encrypted_signal: Option<tokio::sync::oneshot::Sender<()>>,
     ) -> Result<(), H::Error> {
         self.flush()?;
@@ -783,7 +784,7 @@ impl Session {
                             break;
                         } else {
                             self.common.received_data = true;
-                            reply( self, handler, &mut encrypted_signal, &mut buffer.seqn, buf).await?;
+                            reply( &mut self,&mut  handler, &mut encrypted_signal, &mut buffer.seqn, buf).await?;
                         }
                     }
 
@@ -1190,7 +1191,7 @@ async fn reply<H: Handler>(
                 || buf.first() == Some(&msg::KEXINIT)
                 || session.common.encrypted.is_none()
             {
-                let mut done = kexinit.client_parse(
+                let done = kexinit.client_parse(
                     session.common.config.as_ref(),
                     &mut *session.common.cipher.local_to_remote,
                     buf,

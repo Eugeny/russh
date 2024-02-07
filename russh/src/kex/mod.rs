@@ -46,9 +46,15 @@ impl Debug for dyn KexAlgorithm + Send {
     }
 }
 
-pub(crate) trait KexAlgorithm {
-    fn skip_exchange(&self) -> bool;
+impl Clone for Box<dyn KexAlgorithm + Send> {
+    fn clone(&self) -> Self {
+        self.box_clone()
+    }
+}
 
+pub(crate) trait KexAlgorithm {
+    fn box_clone(&self) -> Box<dyn KexAlgorithm + Send>;
+    fn skip_exchange(&self) -> bool;
     fn server_dh(&mut self, exchange: &mut Exchange, payload: &[u8]) -> Result<(), crate::Error>;
 
     fn client_dh(

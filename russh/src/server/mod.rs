@@ -540,7 +540,7 @@ pub trait Server {
 pub async fn run_on_socket<H: Server + Send + 'static>(
     config: Arc<Config>,
     socket: &TcpListener,
-    mut server: H,
+    server: &mut H,
 ) -> Result<(), std::io::Error> {
     if config.maximum_packet_size > 65535 {
         error!(
@@ -557,10 +557,10 @@ pub async fn run_on_socket<H: Server + Send + 'static>(
                 match accept_result {
                     Ok((socket, _)) => {
                         let config = config.clone();
-                        let mut handler = server.new_client(socket.peer_addr().ok());
+                        let  handler = server.new_client(socket.peer_addr().ok());
                         let error_tx = error_tx.clone();
                         tokio::spawn(async move {
-                            let session = match run_stream(config, socket, &mut handler).await {
+                            let session = match run_stream(config, socket,  handler).await {
                                 Ok(s) => s,
                                 Err(e) => {
                                     debug!("Connection setup failed");
@@ -595,7 +595,7 @@ pub async fn run_on_socket<H: Server + Send + 'static>(
 pub async fn run<H: Server + Send + 'static, A: ToSocketAddrs>(
     config: Arc<Config>,
     addrs: A,
-    server: H,
+    server: &mut H,
 ) -> Result<(), std::io::Error> {
     let socket = TcpListener::bind(addrs).await?;
     run_on_socket(config, &socket, server).await
@@ -650,7 +650,7 @@ impl<H: Handler> Future for RunningSession<H> {
 pub async fn run_stream<H, R>(
     config: Arc<Config>,
     mut stream: R,
-    handler: &mut H,
+    handler: H,
 ) -> Result<RunningSession<H>, H::Error>
 where
     H: Handler + Send + 'static,
@@ -669,7 +669,7 @@ where
     let (sender, receiver) = tokio::sync::mpsc::channel(config.event_buffer_size);
     let common = read_ssh_id(config, &mut stream).await?;
     let handle = server::session::Handle { sender };
-    let mut session = Session {
+    let session = Session {
         target_window_size: common.config.window_size,
         common,
         receiver,
@@ -678,7 +678,6 @@ where
         pending_len: 0,
         channels: HashMap::new(),
     };
-
     let join = tokio::spawn(session.run(stream, handler));
 
     Ok(RunningSession { handle, join })

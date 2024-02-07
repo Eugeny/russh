@@ -378,7 +378,7 @@ impl Session {
         }
     }
 
-    fn handle_ext_info<H: Handler>(&mut self, client: &mut H, buf: &[u8]) -> Result<(), H::Error> {
+    fn handle_ext_info<H: Handler>(&mut self, _client: &mut H, buf: &[u8]) -> Result<(), H::Error> {
         debug!("Received EXT_INFO: {:?}", buf);
         Ok(())
     }

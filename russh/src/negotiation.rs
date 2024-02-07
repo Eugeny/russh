@@ -26,7 +26,7 @@ use crate::compression::*;
 use crate::kex::{EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT, EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER};
 use crate::{cipher, kex, mac, msg, Error};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Names {
     pub kex: kex::Name,
     pub key: key::Name,

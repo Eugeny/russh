@@ -47,6 +47,7 @@ impl KexType for DhGroup16Sha512KexType {
 }
 
 #[doc(hidden)]
+#[derive(Clone)]
 pub struct DhGroupKex<D: Digest> {
     dh: DH,
     shared_secret: Option<Vec<u8>>,
@@ -85,7 +86,10 @@ fn biguint_to_mpint(biguint: &BigUint) -> Vec<u8> {
     mpint
 }
 
-impl<D: Digest> KexAlgorithm for DhGroupKex<D> {
+impl<D: Digest + Clone + Send + 'static> KexAlgorithm for DhGroupKex<D> {
+    fn box_clone(&self) -> Box<dyn KexAlgorithm + Send> {
+        Box::new((*self).clone())
+    }
     fn skip_exchange(&self) -> bool {
         false
     }
