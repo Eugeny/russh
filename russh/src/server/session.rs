@@ -328,9 +328,9 @@ impl Session {
     }
 
     pub(crate) async fn run<H, R>(
-        mut self,
+        &mut self,
         mut stream: SshRead<R>,
-        mut handler: H,
+        handler: &mut H,
     ) -> Result<(), H::Error>
     where
         H: Handler + Send + 'static,
@@ -404,10 +404,7 @@ impl Session {
                             std::mem::swap(&mut opening_cipher, &mut self.common.cipher.remote_to_local);
                             // TODO it'd be cleaner to just pass cipher to reply()
                             match reply(self, handler, &mut buffer.seqn, buf).await {
-                                Ok((h, s)) => {
-                                    handler = h;
-                                    self = s;
-                                },
+                                Ok(_) => {},
                                 Err(e) => return Err(e),
                             }
                             std::mem::swap(&mut opening_cipher, &mut self.common.cipher.remote_to_local);

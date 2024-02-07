@@ -38,8 +38,10 @@ mod compress {
 
         tokio::spawn(async move {
             let (socket, _) = socket.accept().await.unwrap();
-            let server = sh.new_client(socket.peer_addr().ok());
-            server::run_stream(config, socket, server).await.unwrap();
+            let mut server = sh.new_client(socket.peer_addr().ok());
+            server::run_stream(config, socket, &mut server)
+                .await
+                .unwrap();
         });
 
         let mut config = client::Config::default();
@@ -47,7 +49,7 @@ mod compress {
         let config = Arc::new(config);
 
         dbg!(&addr);
-        let mut session = client::connect(config, addr, Client {}).await.unwrap();
+        let mut session = client::connect(config, addr, &mut Client {}).await.unwrap();
         let authenticated = session
             .authenticate_publickey(
                 std::env::var("USER").unwrap_or("user".to_owned()),
@@ -89,33 +91,33 @@ mod compress {
         type Error = super::Error;
 
         async fn channel_open_session(
-            self,
+            &mut self,
             channel: Channel<Msg>,
-            session: Session,
-        ) -> Result<(Self, bool, Session), Self::Error> {
+            session: &mut Session,
+        ) -> Result<bool, Self::Error> {
             {
                 let mut clients = self.clients.lock().unwrap();
                 clients.insert((self.id, channel.id()), session.handle());
             }
-            Ok((self, true, session))
+            Ok(true)
         }
         async fn auth_publickey(
-            self,
+            &mut self,
             _: &str,
             _: &russh_keys::key::PublicKey,
-        ) -> Result<(Self, server::Auth), Self::Error> {
+        ) -> Result<server::Auth, Self::Error> {
             debug!("auth_publickey");
-            Ok((self, server::Auth::Accept))
+            Ok(server::Auth::Accept)
         }
         async fn data(
-            self,
+            &mut self,
             channel: ChannelId,
             data: &[u8],
-            mut session: Session,
-        ) -> Result<(Self, Session), Self::Error> {
+            session: &mut Session,
+        ) -> Result<(), Self::Error> {
             debug!("server data = {:?}", std::str::from_utf8(data));
             session.data(channel, CryptoVec::from_slice(data));
-            Ok((self, session))
+            Ok(())
         }
     }
 
@@ -126,11 +128,11 @@ mod compress {
         type Error = super::Error;
 
         async fn check_server_key(
-            self,
+            &mut self,
             _server_public_key: &russh_keys::key::PublicKey,
-        ) -> Result<(Self, bool), Self::Error> {
+        ) -> Result<bool, Self::Error> {
             // println!("check_server_key: {:?}", server_public_key);
-            Ok((self, true))
+            Ok(true)
         }
     }
 }
@@ -144,8 +146,8 @@ mod channels {
     use super::*;
 
     async fn test_session<RC, RS, CH, SH, F1, F2>(
-        client_handler: CH,
-        server_handler: SH,
+        client_handler: &mut CH,
+        server_handler: &mut SH,
         run_client: RC,
         run_server: RS,
     ) where
@@ -221,21 +223,21 @@ mod channels {
             type Error = crate::Error;
 
             async fn check_server_key(
-                self,
+                &mut self,
                 _server_public_key: &russh_keys::key::PublicKey,
-            ) -> Result<(Self, bool), Self::Error> {
-                Ok((self, true))
+            ) -> Result<bool, Self::Error> {
+                Ok(true)
             }
 
             async fn data(
-                self,
+                &mut self,
                 channel: ChannelId,
                 data: &[u8],
-                mut session: client::Session,
-            ) -> Result<(Self, client::Session), Self::Error> {
+                session: &mut client::Session,
+            ) -> Result<(), Self::Error> {
                 assert_eq!(data, &b"hello world!"[..]);
                 session.data(channel, CryptoVec::from_slice(&b"hey there!"[..]));
-                Ok((self, session))
+                Ok(())
             }
         }
 
@@ -256,28 +258,25 @@ mod channels {
             type Error = crate::Error;
 
             async fn auth_publickey(
-                self,
+                &mut self,
                 _: &str,
                 _: &russh_keys::key::PublicKey,
-            ) -> Result<(Self, server::Auth), Self::Error> {
-                Ok((self, server::Auth::Accept))
+            ) -> Result<server::Auth, Self::Error> {
+                Ok(server::Auth::Accept)
             }
-            async fn auth_succeeded(
-                mut self,
-                session: Session,
-            ) -> Result<(Self, Session), Self::Error> {
+            async fn auth_succeeded(&mut self, session: &mut Session) -> Result<(), Self::Error> {
                 if let Some(a) = self.did_auth.take() {
                     a.send(()).unwrap();
                 }
-                Ok((self, session))
+                Ok(())
             }
         }
 
         let mut sh = ServerHandle { did_auth: None };
         let a = sh.get_auth_waiter();
         test_session(
-            Client {},
-            sh,
+            &mut Client {},
+            &mut sh,
             |c| async move { c },
             |s| async move {
                 a.await.unwrap();
@@ -306,10 +305,10 @@ mod channels {
             type Error = crate::Error;
 
             async fn check_server_key(
-                self,
+                &mut self,
                 _server_public_key: &russh_keys::key::PublicKey,
-            ) -> Result<(Self, bool), Self::Error> {
-                Ok((self, true))
+            ) -> Result<bool, Self::Error> {
+                Ok(true)
             }
         }
 
@@ -332,23 +331,23 @@ mod channels {
             type Error = crate::Error;
 
             async fn auth_publickey(
-                self,
+                &mut self,
                 _: &str,
                 _: &russh_keys::key::PublicKey,
-            ) -> Result<(Self, server::Auth), Self::Error> {
-                Ok((self, server::Auth::Accept))
+            ) -> Result<server::Auth, Self::Error> {
+                Ok(server::Auth::Accept)
             }
 
             async fn channel_open_session(
-                mut self,
+                &mut self,
                 channel: Channel<server::Msg>,
-                session: server::Session,
-            ) -> Result<(Self, bool, Session), Self::Error> {
+                session: &mut server::Session,
+            ) -> Result<bool, Self::Error> {
                 if let Some(a) = self.channel.take() {
                     println!("channel open session {:?}", a);
                     a.send(channel).unwrap();
                 }
-                Ok((self, true, session))
+                Ok(true)
             }
         }
 
@@ -356,8 +355,8 @@ mod channels {
         let scw = sh.get_channel_waiter();
 
         test_session(
-            Client {},
-            sh,
+            &mut Client {},
+            &mut sh,
             |client| async move {
                 let ch = client.channel_open_session().await.unwrap();
                 let mut stream = ch.into_stream();
@@ -402,10 +401,10 @@ mod channels {
             type Error = crate::Error;
 
             async fn check_server_key(
-                self,
+                &mut self,
                 _server_public_key: &russh_keys::key::PublicKey,
-            ) -> Result<(Self, bool), Self::Error> {
-                Ok((self, true))
+            ) -> Result<bool, Self::Error> {
+                Ok(true)
             }
         }
 
@@ -418,18 +417,18 @@ mod channels {
             type Error = crate::Error;
 
             async fn auth_publickey(
-                self,
+                &mut self,
                 _: &str,
                 _: &russh_keys::key::PublicKey,
-            ) -> Result<(Self, server::Auth), Self::Error> {
-                Ok((self, server::Auth::Accept))
+            ) -> Result<server::Auth, Self::Error> {
+                Ok(server::Auth::Accept)
             }
 
             async fn channel_open_session(
-                self,
+                &mut self,
                 mut channel: Channel<server::Msg>,
-                session: Session,
-            ) -> Result<(Self, bool, Session), Self::Error> {
+                session: &mut Session,
+            ) -> Result<bool, Self::Error> {
                 tokio::spawn(async move {
                     while let Some(msg) = channel.wait().await {
                         match msg {
@@ -442,14 +441,14 @@ mod channels {
                         }
                     }
                 });
-                Ok((self, true, session))
+                Ok(true)
             }
         }
 
         let sh = ServerHandle {};
         test_session(
-            Client {},
-            sh,
+            &mut Client {},
+            &mut sh,
             |c| async move {
                 let mut ch = c.channel_open_session().await.unwrap();
                 ch.data(&b"hello world!"[..]).await.unwrap();

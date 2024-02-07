@@ -570,7 +570,11 @@ impl Debug for KexDhDone {
 }
 
 impl KexDhDone {
-    pub fn compute_keys(self, hash: CryptoVec, is_server: bool) -> Result<NewKeys, crate::Error> {
+    pub fn compute_keys(
+        &mut self,
+        hash: CryptoVec,
+        is_server: bool,
+    ) -> Result<NewKeys, crate::Error> {
         let session_id = if let Some(session_id) = self.session_id {
             session_id
         } else {
