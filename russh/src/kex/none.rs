@@ -13,9 +13,6 @@ impl KexType for NoneKexType {
 struct NoneKexAlgorithm {}
 
 impl KexAlgorithm for NoneKexAlgorithm {
-    fn box_clone(&self) -> Box<dyn KexAlgorithm + Send> {
-        Box::new(NoneKexAlgorithm {})
-    }
     fn skip_exchange(&self) -> bool {
         true
     }

@@ -41,12 +41,6 @@ impl std::fmt::Debug for Curve25519Kex {
 // that curve is controversial, see
 // http://safecurves.cr.yp.to/rigid.html
 impl KexAlgorithm for Curve25519Kex {
-    fn box_clone(&self) -> Box<dyn KexAlgorithm + Send> {
-        Box::new(Curve25519Kex {
-            local_secret: self.local_secret,
-            shared_secret: self.shared_secret,
-        })
-    }
     fn skip_exchange(&self) -> bool {
         false
     }

@@ -570,14 +570,13 @@ impl Debug for KexDhDone {
 }
 
 impl KexDhDone {
-    pub fn compute_keys(&self, hash: CryptoVec, is_server: bool) -> Result<NewKeys, crate::Error> {
-        let session_id = if let Some(session_id) = self.session_id.clone() {
+    pub fn compute_keys(self, hash: CryptoVec, is_server: bool) -> Result<NewKeys, crate::Error> {
+        let session_id = if let Some(session_id) = self.session_id {
             session_id
         } else {
             hash.clone()
         };
         // Now computing keys.
-        let names = self.names.clone();
         let c = self.kex.compute_keys(
             &session_id,
             &hash,
@@ -595,9 +594,9 @@ impl KexDhDone {
             is_server,
         )?;
         Ok(NewKeys {
-            exchange: self.exchange.clone(),
-            names,
-            kex: self.kex.clone(),
+            exchange: self.exchange,
+            names: self.names,
+            kex: self.kex,
             key: self.key,
             cipher: c,
             session_id,

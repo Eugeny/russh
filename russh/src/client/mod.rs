@@ -77,7 +77,6 @@ mod session;
 /// It is in charge of multiplexing and keeping track of various channels
 /// that may get opened and closed during the lifetime of an SSH session and
 /// allows sending messages to the server.
-
 pub struct Session {
     common: CommonSession<Arc<Config>>,
     receiver: Receiver<Msg>,
@@ -1110,7 +1109,7 @@ thread_local! {
 
 impl KexDhDone {
     async fn server_key_check<H: Handler>(
-        &mut self,
+        mut self,
         rekey: bool,
         handler: &mut H,
         buf: &[u8],
