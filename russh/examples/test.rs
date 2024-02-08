@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use log::debug;
+use russh::server::Server as _;
 use russh::server::{Auth, Msg, Session};
 use russh::*;
 use russh_keys::*;
@@ -22,7 +23,7 @@ async fn main() -> anyhow::Result<()> {
     };
     tokio::time::timeout(
         std::time::Duration::from_secs(60),
-        russh::server::run(config, ("0.0.0.0", 2222), &mut sh),
+        sh.run_on_address(config, ("0.0.0.0", 2222)),
     )
     .await
     .unwrap_or(Ok(()))?;

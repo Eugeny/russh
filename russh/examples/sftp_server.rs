@@ -5,7 +5,9 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use log::{error, info, LevelFilter};
+use russh::server::Server as _;
 use russh::server::{Auth, Msg, Session};
+
 use russh::{Channel, ChannelId};
 use russh_keys::key::KeyPair;
 use russh_sftp::protocol::{File, FileAttributes, Handle, Name, Status, StatusCode, Version};
@@ -195,17 +197,17 @@ async fn main() {
 
     let mut server = Server;
 
-    russh::server::run(
-        Arc::new(config),
-        (
-            "0.0.0.0",
-            std::env::var("PORT")
-                .unwrap_or("22".to_string())
-                .parse()
-                .unwrap(),
-        ),
-        &mut server,
-    )
-    .await
-    .unwrap();
+    server
+        .run_on_address(
+            Arc::new(config),
+            (
+                "0.0.0.0",
+                std::env::var("PORT")
+                    .unwrap_or("22".to_string())
+                    .parse()
+                    .unwrap(),
+            ),
+        )
+        .await
+        .unwrap();
 }

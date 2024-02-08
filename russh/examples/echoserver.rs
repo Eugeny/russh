@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use russh::server::Server as _;
 use russh::server::{Msg, Session};
 use russh::*;
 use russh_keys::*;
@@ -25,9 +26,7 @@ async fn main() {
         clients: Arc::new(Mutex::new(HashMap::new())),
         id: 0,
     };
-    russh::server::run(config, ("0.0.0.0", 2222), &mut sh)
-        .await
-        .unwrap();
+    sh.run_on_address(config, ("0.0.0.0", 2222)).await.unwrap();
 }
 
 #[derive(Clone)]

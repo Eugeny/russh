@@ -51,7 +51,6 @@ use crate::*;
 
 mod kex;
 mod session;
-pub use self::kex::*;
 pub use self::session::*;
 mod encrypted;
 
@@ -525,80 +524,81 @@ pub trait Handler: Sized {
     }
 }
 
+#[async_trait]
 /// Trait used to create new handlers when clients connect.
 pub trait Server {
     /// The type of handlers.
-    type Handler: Handler + Send;
+    type Handler: Handler + Send + 'static;
     /// Called when a new client connects.
     fn new_client(&mut self, peer_addr: Option<std::net::SocketAddr>) -> Self::Handler;
     /// Called when an active connection fails.
     fn handle_session_error(&mut self, _error: <Self::Handler as Handler>::Error) {}
-}
 
-/// Run a server on a specified `tokio::net::TcpListener`. Useful when dropping
-/// privileges immediately after socket binding, for example.
-pub async fn run_on_socket<H: Server + Send + 'static>(
-    config: Arc<Config>,
-    socket: &TcpListener,
-    server: &mut H,
-) -> Result<(), std::io::Error> {
-    if config.maximum_packet_size > 65535 {
-        error!(
-            "Maximum packet size ({:?}) should not larger than a TCP packet (65535)",
-            config.maximum_packet_size
-        );
-    }
+    /// Run a server on a specified `tokio::net::TcpListener`. Useful when dropping
+    /// privileges immediately after socket binding, for example.
+    async fn run_on_socket(
+        &mut self,
+        config: Arc<Config>,
+        socket: &TcpListener,
+    ) -> Result<(), std::io::Error> {
+        if config.maximum_packet_size > 65535 {
+            error!(
+                "Maximum packet size ({:?}) should not larger than a TCP packet (65535)",
+                config.maximum_packet_size
+            );
+        }
 
-    let (error_tx, mut error_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (error_tx, mut error_rx) = tokio::sync::mpsc::unbounded_channel();
 
-    loop {
-        tokio::select! {
-            accept_result = socket.accept() => {
-                match accept_result {
-                    Ok((socket, _)) => {
-                        let config = config.clone();
-                        let  handler = server.new_client(socket.peer_addr().ok());
-                        let error_tx = error_tx.clone();
-                        tokio::spawn(async move {
-                            let session = match run_stream(config, socket,  handler).await {
-                                Ok(s) => s,
-                                Err(e) => {
-                                    debug!("Connection setup failed");
-                                    let _ = error_tx.send(e);
-                                    return
+        loop {
+            tokio::select! {
+                accept_result = socket.accept() => {
+                    match accept_result {
+                        Ok((socket, _)) => {
+                            let config = config.clone();
+                            let  handler = self.new_client(socket.peer_addr().ok());
+                            let error_tx = error_tx.clone();
+                            tokio::spawn(async move {
+                                let session = match run_stream(config, socket,  handler).await {
+                                    Ok(s) => s,
+                                    Err(e) => {
+                                        debug!("Connection setup failed");
+                                        let _ = error_tx.send(e);
+                                        return
+                                    }
+                                };
+                                match session.await {
+                                    Ok(_) => debug!("Connection closed"),
+                                    Err(e) => {
+                                        debug!("Connection closed with error");
+                                        let _ = error_tx.send(e);
+                                    }
                                 }
-                            };
-                            match session.await {
-                                Ok(_) => debug!("Connection closed"),
-                                Err(e) => {
-                                    debug!("Connection closed with error");
-                                    let _ = error_tx.send(e);
-                                }
-                            }
-                        });
+                            });
+                        }
+                        _ => break,
                     }
-                    _ => break,
+                },
+                Some(error) = error_rx.recv() => {
+                    self.handle_session_error(error);
                 }
-            },
-            Some(error) = error_rx.recv() => {
-                server.handle_session_error(error);
             }
         }
+
+        Ok(())
     }
 
-    Ok(())
-}
-
-/// Run a server.
-/// Create a new `Connection` from the server's configuration, a
-/// stream and a [`Handler`](trait.Handler.html).
-pub async fn run<H: Server + Send + 'static, A: ToSocketAddrs>(
-    config: Arc<Config>,
-    addrs: A,
-    server: &mut H,
-) -> Result<(), std::io::Error> {
-    let socket = TcpListener::bind(addrs).await?;
-    run_on_socket(config, &socket, server).await
+    /// Run a server.
+    /// Create a new `Connection` from the server's configuration, a
+    /// stream and a [`Handler`](trait.Handler.html).
+    async fn run_on_address<A: ToSocketAddrs + Send>(
+        &mut self,
+        config: Arc<Config>,
+        addrs: A,
+    ) -> Result<(), std::io::Error> {
+        let socket = TcpListener::bind(addrs).await?;
+        self.run_on_socket(config, &socket).await
+    }
 }
 
 use std::cell::RefCell;

@@ -2,6 +2,7 @@ use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::Arc;
 
 use rand::RngCore;
+use russh::server::Server as _;
 use russh::server::{self, Auth, Msg, Session};
 use russh::{client, Channel};
 use russh_keys::key;
@@ -90,7 +91,7 @@ impl Server {
         });
         let mut sh = Server {};
 
-        russh::server::run(config, addr, &mut sh).await.unwrap();
+        sh.run_on_address(config, addr).await.unwrap();
     }
 }
 
