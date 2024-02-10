@@ -238,6 +238,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "ricott1",
+      "name": "Alessandro Ricottone",
+      "avatar_url": "https://avatars.githubusercontent.com/u/16502243?v=4",
+      "profile": "https://github.com/ricott1",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,
