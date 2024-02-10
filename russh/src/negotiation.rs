@@ -24,6 +24,7 @@ use russh_keys::key::{KeyPair, PublicKey};
 use crate::cipher::CIPHERS;
 use crate::compression::*;
 use crate::kex::{EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT, EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER};
+use crate::server::Config;
 use crate::{cipher, kex, mac, msg, Error};
 
 #[derive(Debug, Clone)]
@@ -40,11 +41,11 @@ pub struct Names {
 }
 
 /// Lists of preferred algorithms. This is normally hard-coded into implementations.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Preferred {
     /// Preferred key exchange algorithms.
     pub kex: &'static [kex::Name],
-    /// Preferred public key algorithms.
+    /// Preferred host & public key algorithms.
     pub key: &'static [key::Name],
     /// Preferred symmetric ciphers.
     pub cipher: &'static [cipher::Name],
@@ -316,7 +317,11 @@ impl Select for Client {
     }
 }
 
-pub fn write_kex(prefs: &Preferred, buf: &mut CryptoVec, as_server: bool) -> Result<(), Error> {
+pub fn write_kex(
+    prefs: &Preferred,
+    buf: &mut CryptoVec,
+    server_config: Option<&Config>,
+) -> Result<(), Error> {
     // buf.clear();
     buf.push(msg::KEXINIT);
 
@@ -325,7 +330,7 @@ pub fn write_kex(prefs: &Preferred, buf: &mut CryptoVec, as_server: bool) -> Res
 
     buf.extend(&cookie); // cookie
     buf.extend_list(prefs.kex.iter().filter(|k| {
-        !(if as_server {
+        !(if server_config.is_some() {
             [
                 crate::kex::EXTENSION_SUPPORT_AS_CLIENT,
                 crate::kex::EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT,
@@ -339,7 +344,17 @@ pub fn write_kex(prefs: &Preferred, buf: &mut CryptoVec, as_server: bool) -> Res
         .contains(*k)
     })); // kex algo
 
-    buf.extend_list(prefs.key.iter());
+    if let Some(server_config) = server_config {
+        // Only advertise host key algorithms that we have keys for.
+        buf.extend_list(
+            prefs
+                .key
+                .iter()
+                .filter(|name| server_config.keys.iter().any(|k| k.name() == name.0)),
+        );
+    } else {
+        buf.extend_list(prefs.key.iter());
+    }
 
     buf.extend_list(prefs.cipher.iter()); // cipher client to server
     buf.extend_list(prefs.cipher.iter()); // cipher server to client
