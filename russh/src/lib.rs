@@ -347,6 +347,7 @@ pub use auth::{AgentAuthError, MethodSet, Signer};
 
 /// A reason for disconnection.
 #[allow(missing_docs)] // This should be relatively self-explanatory.
+#[allow(clippy::manual_non_exhaustive)]
 #[derive(Debug)]
 pub enum Disconnect {
     HostNotAllowedToConnect = 1,

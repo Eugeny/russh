@@ -37,11 +37,11 @@ thread_local! {
 
 impl Session {
     pub(crate) async fn client_read_encrypted<H: Handler>(
-        mut self,
-        mut client: H,
+        &mut self,
+        client: &mut H,
         seqn: &mut Wrapping<u32>,
         buf: &[u8],
-    ) -> Result<(H, Self), H::Error> {
+    ) -> Result<(), H::Error> {
         #[allow(clippy::indexing_slicing)] // length checked
         {
             trace!(
@@ -89,7 +89,7 @@ impl Session {
                 unreachable!()
             }
             self.flush()?;
-            return Ok((client, self));
+            return Ok(());
         }
 
         if let Some(ref mut enc) = self.common.encrypted {
@@ -98,11 +98,10 @@ impl Session {
                     return if kexdhdone.names.ignore_guessed {
                         kexdhdone.names.ignore_guessed = false;
                         enc.rekey = Some(Kex::DhDone(kexdhdone));
-                        Ok((client, self))
+                        Ok(())
                     } else if buf.first() == Some(&msg::KEX_ECDH_REPLY) {
                         // We've sent ECDH_INIT, waiting for ECDH_REPLY
-                        let (kex, h) = kexdhdone.server_key_check(true, client, buf).await?;
-                        client = h;
+                        let kex = kexdhdone.server_key_check(true, client, buf).await?;
                         enc.rekey = Some(Kex::Keys(kex));
                         self.common
                             .cipher
@@ -110,7 +109,7 @@ impl Session {
                             .write(&[msg::NEWKEYS], &mut self.common.write_buffer);
                         self.flush()?;
                         self.common.maybe_reset_seqn();
-                        Ok((client, self))
+                        Ok(())
                     } else {
                         error!("Wrong packet received");
                         Err(crate::Error::Inconsistent.into())
@@ -127,9 +126,7 @@ impl Session {
                     enc.flush_all_pending();
                     let mut pending = std::mem::take(&mut self.pending_reads);
                     for p in pending.drain(..) {
-                        let (h, s) = self.process_packet(client, &p).await?;
-                        self = s;
-                        client = h;
+                        self.process_packet(client, &p).await?;
                     }
                     self.pending_reads = pending;
                     self.pending_len = 0;
@@ -140,7 +137,7 @@ impl Session {
                         *seqn = Wrapping(0);
                     }
 
-                    return Ok((client, self));
+                    return Ok(());
                 }
                 Some(Kex::Init(k)) => {
                     enc.rekey = Some(Kex::Init(k));
@@ -149,7 +146,7 @@ impl Session {
                         return Err(crate::Error::Pending.into());
                     }
                     self.pending_reads.push(CryptoVec::from_slice(buf));
-                    return Ok((client, self));
+                    return Ok(());
                 }
                 rek => enc.rekey = rek,
             }
@@ -158,10 +155,10 @@ impl Session {
     }
 
     async fn process_packet<H: Handler>(
-        mut self,
-        client: H,
+        &mut self,
+        client: &mut H,
         buf: &[u8],
-    ) -> Result<(H, Self), H::Error> {
+    ) -> Result<(), H::Error> {
         // If we've successfully read a packet.
         trace!("process_packet buf = {:?} bytes", buf.len());
         trace!("buf = {:?}", buf);
@@ -226,15 +223,14 @@ impl Session {
                             .map_err(|_| crate::Error::SendError)?;
                         enc.state = EncryptedState::InitCompression;
                         enc.server_compression.init_decompress(&mut enc.decompress);
-                        return Ok((client, self));
+                        return Ok(());
                     } else if buf.first() == Some(&msg::USERAUTH_BANNER) {
                         let mut r = buf.reader(1);
                         let banner = r.read_string().map_err(crate::Error::from)?;
                         return if let Ok(banner) = std::str::from_utf8(banner) {
-                            let (h, s) = client.auth_banner(banner, self).await?;
-                            Ok((h, s))
+                            client.auth_banner(banner, self).await
                         } else {
-                            Ok((client, self))
+                            Ok(())
                         };
                     } else if buf.first() == Some(&msg::USERAUTH_FAILURE) {
                         debug!("userauth_failure");
@@ -320,7 +316,7 @@ impl Session {
                             };
                             // write responses
                             enc.client_send_auth_response(&responses)?;
-                            return Ok((client, self));
+                            return Ok(());
                         }
 
                         // continue with userauth_pk_ok
@@ -378,20 +374,20 @@ impl Session {
         if is_authenticated {
             self.client_read_authenticated(client, buf).await
         } else {
-            Ok((client, self))
+            Ok(())
         }
     }
 
-    fn handle_ext_info<H: Handler>(self, client: H, buf: &[u8]) -> Result<(H, Self), H::Error> {
+    fn handle_ext_info<H: Handler>(&mut self, _client: &mut H, buf: &[u8]) -> Result<(), H::Error> {
         debug!("Received EXT_INFO: {:?}", buf);
-        Ok((client, self))
+        Ok(())
     }
 
     async fn client_read_authenticated<H: Handler>(
-        mut self,
-        mut client: H,
+        &mut self,
+        client: &mut H,
         buf: &[u8],
-    ) -> Result<(H, Self), H::Error> {
+    ) -> Result<(), H::Error> {
         match buf.first() {
             Some(&msg::CHANNEL_OPEN_CONFIRMATION) => {
                 debug!("channel_open_confirmation");
@@ -602,7 +598,7 @@ impl Session {
                         } else {
                             warn!("Received keepalive without reply request!");
                         }
-                        Ok((client, self))
+                        Ok(())
                     }
                     _ => {
                         let wants_reply = r.read_byte().map_err(crate::Error::from)?;
@@ -620,7 +616,7 @@ impl Session {
                             std::str::from_utf8(req),
                             wants_reply
                         );
-                        Ok((client, self))
+                        Ok(())
                     }
                 }
             }
@@ -704,7 +700,8 @@ impl Session {
                         push_packet!(enc.write, enc.write.push(msg::REQUEST_FAILURE))
                     }
                 }
-                Ok((client, self))
+                self.common.received_data = false;
+                Ok(())
             }
             Some(&msg::CHANNEL_SUCCESS) => {
                 let mut r = buf.reader(1);
@@ -753,7 +750,7 @@ impl Session {
                         enc.channels.insert(id, channel);
                     };
 
-                    Ok(match &msg.typ {
+                    match &msg.typ {
                         ChannelType::Session => {
                             confirm();
                             client.server_channel_open_session(id, self).await?
@@ -811,9 +808,9 @@ impl Session {
                                 debug!("unknown channel type: {}", String::from_utf8_lossy(typ));
                                 msg.unknown_type(&mut enc.write);
                             }
-                            (client, self)
                         }
-                    })
+                    };
+                    Ok(())
                 } else {
                     Err(crate::Error::Inconsistent.into())
                 }
@@ -823,11 +820,11 @@ impl Session {
             {
                 // TODO what other things might need to happen in response to these two opcodes?
                 self.common.alive_timeouts = 0;
-                Ok((client, self))
+                Ok(())
             }
             _ => {
                 info!("Unhandled packet: {:?}", buf);
-                Ok((client, self))
+                Ok(())
             }
         }
     }
