@@ -750,7 +750,7 @@ impl Session {
                         enc.channels.insert(id, channel);
                     };
 
-                    Ok(match &msg.typ {
+                    match &msg.typ {
                         ChannelType::Session => {
                             confirm();
                             client.server_channel_open_session(id, self).await?
@@ -809,7 +809,8 @@ impl Session {
                                 msg.unknown_type(&mut enc.write);
                             }
                         }
-                    })
+                    };
+                    Ok(())
                 } else {
                     Err(crate::Error::Inconsistent.into())
                 }

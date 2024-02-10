@@ -1212,7 +1212,7 @@ async fn reply<H: Handler>(
 
                 if done.kex.skip_exchange() {
                     session.common.encrypted(
-                        initial_encrypted_state(&session),
+                        initial_encrypted_state(session),
                         done.compute_keys(CryptoVec::new(), false)?,
                     );
 
@@ -1259,7 +1259,7 @@ async fn reply<H: Handler>(
             }
             session
                 .common
-                .encrypted(initial_encrypted_state(&session), newkeys);
+                .encrypted(initial_encrypted_state(session), newkeys);
             // Ok, NEWKEYS received, now encrypted.
             if session.common.strict_kex {
                 *seqn = Wrapping(0);
@@ -1341,8 +1341,6 @@ pub trait Handler: Sized + Send {
     /// is usually meant to be shown to the user, see
     /// [RFC4252](https://tools.ietf.org/html/rfc4252#section-5.4) for
     /// more details.
-    ///
-    /// The returned Boolean is ignored.
     #[allow(unused_variables)]
     async fn auth_banner(
         &mut self,

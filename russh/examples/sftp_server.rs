@@ -5,9 +5,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use log::{error, info, LevelFilter};
-use russh::server::Server as _;
-use russh::server::{Auth, Msg, Session};
-
+use russh::server::{Auth, Msg, Server as _, Session};
 use russh::{Channel, ChannelId};
 use russh_keys::key::KeyPair;
 use russh_sftp::protocol::{File, FileAttributes, Handle, Name, Status, StatusCode, Version};
@@ -94,18 +92,10 @@ impl russh::server::Handler for SshSession {
     }
 }
 
+#[derive(Default)]
 struct SftpSession {
     version: Option<u32>,
     root_dir_read_done: bool,
-}
-
-impl Default for SftpSession {
-    fn default() -> Self {
-        Self {
-            version: None,
-            root_dir_read_done: false,
-        }
-    }
 }
 
 #[async_trait]

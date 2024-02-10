@@ -896,8 +896,8 @@ impl Session {
                             let _ = chan.send(ChannelMsg::AgentForward { want_reply: true });
                         }
                         debug!("handler.agent_request {:?}", channel_num);
-                        let response;
-                        response = handler.agent_request(channel_num, self).await?;
+
+                        let response = handler.agent_request(channel_num, self).await?;
                         if response {
                             self.request_success()
                         } else {

@@ -2,8 +2,7 @@ use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::Arc;
 
 use rand::RngCore;
-use russh::server::Server as _;
-use russh::server::{self, Auth, Msg, Session};
+use russh::server::{self, Auth, Msg, Server as _, Session};
 use russh::{client, Channel};
 use russh_keys::key;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -45,7 +44,7 @@ async fn stream(addr: SocketAddr, data: &[u8]) -> Result<(), anyhow::Error> {
 
     let (r0, r1) = tokio::join!(
         async {
-            writer.write_all(&data).await?;
+            writer.write_all(data).await?;
             writer.shutdown().await?;
 
             Ok::<_, anyhow::Error>(())
