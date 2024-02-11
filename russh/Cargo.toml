@@ -73,6 +73,7 @@ rand = "0.8.5"
 shell-escape = "0.1"
 tokio-fd = "0.3"
 termion = "2"
+ratatui = "0.26.0"
 
 [package.metadata.docs.rs]
 features = ["openssl"]
