@@ -440,7 +440,7 @@ impl Encrypted {
                     };
                     if is_valid {
                         let session_id = self.session_id.as_ref();
-                        #[allow(clippy::blocks_in_if_conditions)] // length checked
+                        #[allow(clippy::blocks_in_conditions)]
                         if SIGNATURE_BUFFER.with(|buf| {
                             let mut buf = buf.borrow_mut();
                             buf.clear();
