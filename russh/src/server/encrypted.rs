@@ -1059,6 +1059,22 @@ impl Session {
 
                 Ok(())
             }
+            Some(&msg::REQUEST_SUCCESS) => {
+                trace!("Global Request Success");
+                Ok(())
+            }
+            Some(&msg::REQUEST_FAILURE) => {
+                // Right now, the only global request we send with a request for reply is keepalive,
+                // which just needs to be ignored.
+                // If there are other global requests with reply implemented,
+                // we'll need to build infrastructure to filter the expected request failures from the keepalive
+                // The following works as long as only a single keepalive request was sent before a reply:
+                // `if self.common.alive_timeouts > 0`
+                // since any data received will reset alive_timeouts back to zero,
+                // even if multiple keepalives will be processed due to TCP delivering all of them after connectivity was restored
+                trace!("Global Request Failure");
+                Ok(())
+            }
             m => {
                 debug!("unknown message received: {:?}", m);
                 Ok(())

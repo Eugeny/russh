@@ -292,7 +292,7 @@ impl Session {
         if let Some(ref mut enc) = self.common.encrypted {
             push_packet!(enc.write, {
                 enc.write.push(msg::GLOBAL_REQUEST);
-                enc.write.extend_ssh_string(b"keepalive@openssh.org");
+                enc.write.extend_ssh_string(b"keepalive@openssh.com");
                 enc.write.push(want_reply as u8);
             });
         }
