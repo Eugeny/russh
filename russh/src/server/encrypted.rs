@@ -1061,18 +1061,51 @@ impl Session {
             }
             Some(&msg::REQUEST_SUCCESS) => {
                 trace!("Global Request Success");
+                match self.open_global_requests.pop_front() {
+                    Some(GlobalRequestResponse::Keepalive) => {
+                        // ignore keepalives
+                    }
+                    Some(GlobalRequestResponse::TcpIpForward(return_channel)) => {
+                        let result = if buf.len() == 1 {
+                            // If a specific port was requested, the reply has no data
+                            Some(0)
+                        } else {
+                            let mut r = buf.reader(1);
+                            match r.read_u32() {
+                                Ok(port) => Some(port),
+                                Err(e) => {
+                                    error!("Error parsing port for TcpIpForward request: {e:?}");
+                                    None
+                                }
+                            }
+                        };
+                        let _ = return_channel.send(result);
+                    }
+                    Some(GlobalRequestResponse::CancelTcpIpForward(return_channel)) => {
+                        let _ = return_channel.send(true);
+                    }
+                    None => {
+                        error!("Received global request failure for unknown request!")
+                    }
+                }
                 Ok(())
             }
             Some(&msg::REQUEST_FAILURE) => {
-                // Right now, the only global request we send with a request for reply is keepalive,
-                // which just needs to be ignored.
-                // If there are other global requests with reply implemented,
-                // we'll need to build infrastructure to filter the expected request failures from the keepalive
-                // The following works as long as only a single keepalive request was sent before a reply:
-                // `if self.common.alive_timeouts > 0`
-                // since any data received will reset alive_timeouts back to zero,
-                // even if multiple keepalives will be processed due to TCP delivering all of them after connectivity was restored
-                trace!("Global Request Failure");
+                trace!("global request failure");
+                match self.open_global_requests.pop_front() {
+                    Some(GlobalRequestResponse::Keepalive) => {
+                        // ignore keepalives
+                    }
+                    Some(GlobalRequestResponse::TcpIpForward(return_channel)) => {
+                        let _ = return_channel.send(None);
+                    }
+                    Some(GlobalRequestResponse::CancelTcpIpForward(return_channel)) => {
+                        let _ = return_channel.send(false);
+                    }
+                    None => {
+                        error!("Received global request failure for unknown request!")
+                    }
+                }
                 Ok(())
             }
             m => {

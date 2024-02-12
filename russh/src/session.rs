@@ -21,6 +21,7 @@ use byteorder::{BigEndian, ByteOrder};
 use log::{debug, trace};
 use russh_cryptovec::CryptoVec;
 use russh_keys::encoding::Encoding;
+use tokio::sync::oneshot;
 
 use crate::cipher::SealingKey;
 use crate::kex::KexAlgorithm;
@@ -614,4 +615,13 @@ pub(crate) struct NewKeys {
     pub cipher: cipher::CipherPair,
     pub session_id: CryptoVec,
     pub sent: bool,
+}
+
+pub(crate) enum GlobalRequestResponse {
+    /// request was for Keepalive, ignore result
+    Keepalive,
+    /// request was for TcpIpForward, sends Some(port) for success or None for failure
+    TcpIpForward(oneshot::Sender<Option<u32>>),
+    /// request was for CancelTcpIpForward, sends true for success or false for failure
+    CancelTcpIpForward(oneshot::Sender<bool>),
 }

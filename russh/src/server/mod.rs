@@ -29,7 +29,7 @@
 //! * Serving `ratatui` based TUI app to clients: [per-client](https://github.com/warp-tech/russh/blob/main/russh/examples/ratatui_app.rs), [shared](https://github.com/warp-tech/russh/blob/main/russh/examples/ratatui_shared_app.rs)
 
 use std;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::num::Wrapping;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -678,6 +678,7 @@ where
         pending_reads: Vec::new(),
         pending_len: 0,
         channels: HashMap::new(),
+        open_global_requests: VecDeque::new(),
     };
     let join = tokio::spawn(session.run(stream, handler));
 
