@@ -1,6 +1,7 @@
 use log::error;
 use russh_cryptovec::CryptoVec;
 use russh_keys::encoding::Encoding;
+use tokio::sync::oneshot;
 
 use crate::client::Session;
 use crate::session::EncryptedState;
@@ -264,8 +265,23 @@ impl Session {
         }
     }
 
-    pub fn tcpip_forward(&mut self, want_reply: bool, address: &str, port: u32) {
+    /// Requests a TCP/IP forwarding from the server
+    ///
+    /// If `reply_channel` is not None, sets want_reply and returns the server's response via the channel,
+    /// Some<u32> for a success message with port, or None for failure
+    pub fn tcpip_forward(
+        &mut self,
+        reply_channel: Option<oneshot::Sender<Option<u32>>>,
+        address: &str,
+        port: u32,
+    ) {
         if let Some(ref mut enc) = self.common.encrypted {
+            let want_reply = reply_channel.is_some();
+            if let Some(reply_channel) = reply_channel {
+                self.open_global_requests.push_back(
+                    crate::session::GlobalRequestResponse::TcpIpForward(reply_channel),
+                );
+            }
             push_packet!(enc.write, {
                 enc.write.push(msg::GLOBAL_REQUEST);
                 enc.write.extend_ssh_string(b"tcpip-forward");
@@ -276,8 +292,23 @@ impl Session {
         }
     }
 
-    pub fn cancel_tcpip_forward(&mut self, want_reply: bool, address: &str, port: u32) {
+    /// Requests cancellation of TCP/IP forwarding from the server
+    ///
+    /// If `want_reply` is `true`, returns a oneshot receiveing the server's reply:
+    /// `true` for a success message, or `false` for failure
+    pub fn cancel_tcpip_forward(
+        &mut self,
+        reply_channel: Option<oneshot::Sender<bool>>,
+        address: &str,
+        port: u32,
+    ) {
         if let Some(ref mut enc) = self.common.encrypted {
+            let want_reply = reply_channel.is_some();
+            if let Some(reply_channel) = reply_channel {
+                self.open_global_requests.push_back(
+                    crate::session::GlobalRequestResponse::CancelTcpIpForward(reply_channel),
+                );
+            }
             push_packet!(enc.write, {
                 enc.write.push(msg::GLOBAL_REQUEST);
                 enc.write.extend_ssh_string(b"cancel-tcpip-forward");
@@ -289,6 +320,8 @@ impl Session {
     }
 
     pub fn send_keepalive(&mut self, want_reply: bool) {
+        self.open_global_requests
+            .push_back(crate::session::GlobalRequestResponse::Keepalive);
         if let Some(ref mut enc) = self.common.encrypted {
             push_packet!(enc.write, {
                 enc.write.push(msg::GLOBAL_REQUEST);

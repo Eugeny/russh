@@ -35,7 +35,7 @@
 //! [Session]: client::Session
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::num::Wrapping;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -55,12 +55,15 @@ use tokio::pin;
 use tokio::sync::mpsc::{
     channel, unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender,
 };
-use tokio::sync::Mutex;
+use tokio::sync::{oneshot, Mutex};
 
 use crate::channels::{Channel, ChannelMsg, ChannelRef};
 use crate::cipher::{self, clear, CipherPair, OpeningKey};
 use crate::key::PubKey;
-use crate::session::{CommonSession, EncryptedState, Exchange, Kex, KexDhDone, KexInit, NewKeys};
+use crate::session::{
+    CommonSession, EncryptedState, Exchange, GlobalRequestResponse, Kex, KexDhDone, KexInit,
+    NewKeys,
+};
 use crate::ssh_read::SshRead;
 use crate::sshbuffer::{SSHBuffer, SshId};
 use crate::{
@@ -87,6 +90,7 @@ pub struct Session {
     pending_len: u32,
     inbound_channel_sender: Sender<Msg>,
     inbound_channel_receiver: Receiver<Msg>,
+    open_global_requests: VecDeque<GlobalRequestResponse>,
 }
 
 const STRICT_KEX_MSG_ORDER: &[u8] = &[msg::KEXINIT, msg::KEX_ECDH_REPLY, msg::NEWKEYS];
@@ -146,12 +150,14 @@ pub enum Msg {
         channel_ref: ChannelRef,
     },
     TcpIpForward {
-        want_reply: bool,
+        /// Provide a channel for the reply result to request a reply from the server
+        reply_channel: Option<oneshot::Sender<Option<u32>>>,
         address: String,
         port: u32,
     },
     CancelTcpIpForward {
-        want_reply: bool,
+        /// Provide a channel for the reply result to request a reply from the server
+        reply_channel: Option<oneshot::Sender<bool>>,
         address: String,
         port: u32,
     },
@@ -507,39 +513,57 @@ impl<H: Handler> Handle<H> {
             .await
     }
 
+    /// Requests the server to open a TCP/IP forward channel
+    ///
+    /// If port == 0 the server will choose a port that will be returned, returns 0 otherwise
     pub async fn tcpip_forward<A: Into<String>>(
         &mut self,
         address: A,
         port: u32,
-    ) -> Result<bool, crate::Error> {
+    ) -> Result<u32, crate::Error> {
+        let (reply_send, reply_recv) = oneshot::channel();
         self.sender
             .send(Msg::TcpIpForward {
-                want_reply: true,
+                reply_channel: Some(reply_send),
                 address: address.into(),
                 port,
             })
             .await
             .map_err(|_| crate::Error::SendError)?;
-        if port == 0 {
-            self.wait_recv_reply().await?;
+
+        match reply_recv.await {
+            Ok(Some(port)) => Ok(port),
+            Ok(None) => Err(crate::Error::RequestDenied),
+            Err(e) => {
+                error!("Unable to receive TcpIpForward result: {e:?}");
+                Err(crate::Error::Disconnect)
+            }
         }
-        Ok(true)
     }
 
     pub async fn cancel_tcpip_forward<A: Into<String>>(
         &self,
         address: A,
         port: u32,
-    ) -> Result<bool, crate::Error> {
+    ) -> Result<(), crate::Error> {
+        let (reply_send, reply_recv) = oneshot::channel();
         self.sender
             .send(Msg::CancelTcpIpForward {
-                want_reply: true,
+                reply_channel: Some(reply_send),
                 address: address.into(),
                 port,
             })
             .await
             .map_err(|_| crate::Error::SendError)?;
-        Ok(true)
+
+        match reply_recv.await {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(crate::Error::RequestDenied),
+            Err(e) => {
+                error!("Unable to receive CancelTcpIpForward result: {e:?}");
+                Err(crate::Error::Disconnect)
+            }
+        }
     }
 
     /// Sends a disconnect message.
@@ -707,6 +731,7 @@ impl Session {
             channels: HashMap::new(),
             pending_reads: Vec::new(),
             pending_len: 0,
+            open_global_requests: VecDeque::new(),
         }
     }
 
@@ -931,15 +956,15 @@ impl Session {
                 self.channels.insert(id, channel_ref);
             }
             Msg::TcpIpForward {
-                want_reply,
+                reply_channel,
                 address,
                 port,
-            } => self.tcpip_forward(want_reply, &address, port),
+            } => self.tcpip_forward(reply_channel, &address, port),
             Msg::CancelTcpIpForward {
-                want_reply,
+                reply_channel,
                 address,
                 port,
-            } => self.cancel_tcpip_forward(want_reply, &address, port),
+            } => self.cancel_tcpip_forward(reply_channel, &address, port),
             Msg::Disconnect {
                 reason,
                 description,

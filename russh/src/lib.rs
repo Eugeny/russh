@@ -262,6 +262,9 @@ pub enum Error {
     #[error("Failed to decrypt a packet")]
     DecryptionError,
 
+    #[error("The request was rejected by the other party")]
+    RequestDenied,
+
     #[error(transparent)]
     Keys(#[from] russh_keys::Error),
 
