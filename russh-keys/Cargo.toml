@@ -47,7 +47,9 @@ log = "0.4"
 md5 = "0.7"
 num-bigint = "0.4"
 num-integer = "0.1"
+# You must select either openssl or rsa
 openssl = { version = "0.10", optional = true }
+rsa = { version = "0.9.6", features = ["sha1", "sha2"], optional = true}
 p256 = "0.13"
 p521 = "0.13"
 pbkdf2 = "0.11"
@@ -68,6 +70,7 @@ tokio-stream = { version = "0.1", features = ["net"] }
 yasna = { version = "0.5.0", features = ["bit-vec", "num-bigint"] }
 
 [features]
+default = ["rsa"]
 vendored-openssl = ["openssl", "openssl/vendored"]
 
 [dev-dependencies]

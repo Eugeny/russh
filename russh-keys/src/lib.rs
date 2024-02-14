@@ -74,6 +74,8 @@ use byteorder::{BigEndian, WriteBytesExt};
 use data_encoding::BASE64_MIME;
 use hmac::{Hmac, Mac};
 use log::debug;
+#[cfg(not(feature = "openssl"))]
+pub use rsa::traits::PublicKeyParts;
 use sha1::Sha1;
 use thiserror::Error;
 
@@ -192,11 +194,7 @@ pub fn load_public_key<P: AsRef<Path>>(path: P) -> Result<key::PublicKey, Error>
 /// ```
 pub fn parse_public_key_base64(key: &str) -> Result<key::PublicKey, Error> {
     let base = BASE64_MIME.decode(key.as_bytes())?;
-    key::parse_public_key(
-        &base,
-        #[cfg(feature = "openssl")]
-        None,
-    )
+    key::parse_public_key(&base, None)
 }
 
 pub trait PublicKeyBase64 {
@@ -224,17 +222,25 @@ impl PublicKeyBase64 for key::PublicKey {
                     .unwrap();
                 s.extend_from_slice(publickey.as_bytes());
             }
-            #[cfg(feature = "openssl")]
             key::PublicKey::RSA { ref key, .. } => {
                 use encoding::Encoding;
                 let name = b"ssh-rsa";
                 #[allow(clippy::unwrap_used)] // Vec<>.write_all can't fail
                 s.write_u32::<BigEndian>(name.len() as u32).unwrap();
                 s.extend_from_slice(name);
-                #[allow(clippy::unwrap_used)] // TODO check
-                s.extend_ssh_mpint(&key.0.rsa().unwrap().e().to_vec());
-                #[allow(clippy::unwrap_used)] // TODO check
-                s.extend_ssh_mpint(&key.0.rsa().unwrap().n().to_vec());
+                #[cfg(feature = "openssl")]
+                {
+                    #[allow(clippy::unwrap_used)] // TODO check
+                    s.extend_ssh_mpint(&key.0.rsa().unwrap().e().to_vec());
+                    #[allow(clippy::unwrap_used)] // TODO check
+                    s.extend_ssh_mpint(&key.0.rsa().unwrap().n().to_vec());
+                }
+                #[cfg(not(feature = "openssl"))]
+                {
+                    let kk = key.clone();
+                    s.extend_ssh_mpint(&(kk.e().to_bytes_be()));
+                    s.extend_ssh_mpint(&(kk.n().to_bytes_be()));
+                }
             }
             key::PublicKey::P256(ref publickey) => {
                 use encoding::Encoding;
@@ -267,11 +273,18 @@ impl PublicKeyBase64 for key::KeyPair {
                 s.write_u32::<BigEndian>(public.len() as u32).unwrap();
                 s.extend_from_slice(public.as_slice());
             }
-            #[cfg(feature = "openssl")]
             key::KeyPair::RSA { ref key, .. } => {
                 use encoding::Encoding;
-                s.extend_ssh_mpint(&key.e().to_vec());
-                s.extend_ssh_mpint(&key.n().to_vec());
+                #[cfg(feature = "openssl")]
+                {
+                    s.extend_ssh_mpint(&key.e().to_vec());
+                    s.extend_ssh_mpint(&key.n().to_vec());
+                }
+                #[cfg(not(feature = "openssl"))]
+                {
+                    s.extend_ssh_mpint(&key.e().to_bytes_be());
+                    s.extend_ssh_mpint(&key.n().to_bytes_be());
+                }
             }
         }
         s
@@ -494,7 +507,6 @@ dP3jryYgvsCIBAA5jMWSjrmnOTXhidqcOy4xYCrAttzSnZ/cUadfBenL+DQq6neffw7j8r
 sJWR7W+cGvJ/vLsw==
 -----END OPENSSH PRIVATE KEY-----";
 
-    #[cfg(feature = "openssl")]
     const RSA_KEY: &str = "-----BEGIN OPENSSH PRIVATE KEY-----
 b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAABFwAAAAdzc2gtcn
 NhAAAAAwEAAQAAAQEAuSvQ9m76zhRB4m0BUKPf17lwccj7KQ1Qtse63AOqP/VYItqEH8un
@@ -536,14 +548,12 @@ QR+u0AypRPmzHnOPAAAAEXJvb3RAMTQwOTExNTQ5NDBkAQ==
     }
 
     #[test]
-    #[cfg(feature = "openssl")]
     fn test_decode_rsa_secret_key() {
         env_logger::try_init().unwrap_or(());
         decode_secret_key(RSA_KEY, None).unwrap();
     }
 
     #[test]
-    #[cfg(feature = "openssl")]
     fn test_fingerprint() {
         let key = parse_public_key_base64(
             "AAAAC3NzaC1lZDI1NTE5AAAAILagOJFgwaMNhBWQINinKOXmqS4Gh5NgxgriXwdOoINJ",
@@ -622,7 +632,6 @@ QR+u0AypRPmzHnOPAAAAEXJvb3RAMTQwOTExNTQ5NDBkAQ==
     }
 
     #[test]
-    #[cfg(feature = "openssl")]
     fn test_srhb() {
         env_logger::try_init().unwrap_or(());
         let key = "AAAAB3NzaC1yc2EAAAADAQABAAACAQC0Xtz3tSNgbUQAXem4d+d6hMx7S8Nwm/DOO2AWyWCru+n/+jQ7wz2b5+3oG2+7GbWZNGj8HCc6wJSA3jUsgv1N6PImIWclD14qvoqY3Dea1J0CJgXnnM1xKzBz9C6pDHGvdtySg+yzEO41Xt4u7HFn4Zx5SGuI2NBsF5mtMLZXSi33jCIWVIkrJVd7sZaY8jiqeVZBB/UvkLPWewGVuSXZHT84pNw4+S0Rh6P6zdNutK+JbeuO+5Bav4h9iw4t2sdRkEiWg/AdMoSKmo97Gigq2mKdW12ivnXxz3VfxrCgYJj9WwaUUWSfnAju5SiNly0cTEAN4dJ7yB0mfLKope1kRhPsNaOuUmMUqlu/hBDM/luOCzNjyVJ+0LLB7SV5vOiV7xkVd4KbEGKou8eeCR3yjFazUe/D1pjYPssPL8cJhTSuMc+/UC9zD8yeEZhB9V+vW4NMUR+lh5+XeOzenl65lWYd/nBZXLBbpUMf1AOfbz65xluwCxr2D2lj46iApSIpvE63i3LzFkbGl9GdUiuZJLMFJzOWdhGGc97cB5OVyf8umZLqMHjaImxHEHrnPh1MOVpv87HYJtSBEsN4/omINCMZrk++CRYAIRKRpPKFWV7NQHcvw3m7XLR3KaTYe+0/MINIZwGdou9fLUU3zSd521vDjA/weasH0CyDHq7sZw==";
@@ -631,7 +640,6 @@ QR+u0AypRPmzHnOPAAAAEXJvb3RAMTQwOTExNTQ5NDBkAQ==
     }
 
     #[test]
-    #[cfg(feature = "openssl")]
     fn test_nikao() {
         env_logger::try_init().unwrap_or(());
         let key = "-----BEGIN RSA PRIVATE KEY-----
@@ -665,7 +673,6 @@ QaChXiDsryJZwsRnruvMRX9nedtqHrgnIsJLTXjppIhGhq5Kg4RQfOU=
         decode_secret_key(key, None).unwrap();
     }
 
-    #[cfg(feature = "openssl")]
     pub const PKCS8_RSA: &str = "-----BEGIN RSA PRIVATE KEY-----
 MIIEpAIBAAKCAQEAwBGetHjW+3bDQpVktdemnk7JXgu1NBWUM+ysifYLDBvJ9ttX
 GNZSyQKA4v/dNr0FhAJ8I9BuOTjYCy1YfKylhl5D/DiSSXFPsQzERMmGgAlYvU2U
@@ -696,7 +703,6 @@ xV/JrzLAwPoKk3bkqys3bUmgo6DxVC/6RmMwPQ0rmpw78kOgEej90g==
 ";
 
     #[test]
-    #[cfg(feature = "openssl")]
     fn test_loewenheim() -> Result<(), Error> {
         env_logger::try_init().unwrap_or(());
         let key = "-----BEGIN RSA PRIVATE KEY-----
@@ -739,7 +745,6 @@ KJaj7gc0n6gmKY6r0/Ddufy1JZ6eihBCSJ64RARBXeg2rZpyT+xxhMEZLK5meOeR
     }
 
     #[test]
-    #[cfg(feature = "openssl")]
     fn test_o01eg() {
         env_logger::try_init().unwrap_or(());
 
@@ -777,14 +782,12 @@ br8gXU8KyiY9sZVbmplRPF+ar462zcI2kt0a18mr0vbrdqp2eMjb37QDbVBJ+rPE
         decode_secret_key(key, Some("12345")).unwrap();
     }
     #[test]
-    #[cfg(feature = "openssl")]
     fn test_pkcs8() {
         env_logger::try_init().unwrap_or(());
         println!("test");
         decode_secret_key(PKCS8_RSA, Some("blabla")).unwrap();
     }
 
-    #[cfg(feature = "openssl")]
     const PKCS8_ENCRYPTED: &str = "-----BEGIN ENCRYPTED PRIVATE KEY-----
 MIIFLTBXBgkqhkiG9w0BBQ0wSjApBgkqhkiG9w0BBQwwHAQITo1O0b8YrS0CAggA
 MAwGCCqGSIb3DQIJBQAwHQYJYIZIAWUDBAEqBBBtLH4T1KOfo1GGr7salhR8BIIE
@@ -817,7 +820,6 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
 -----END ENCRYPTED PRIVATE KEY-----";
 
     #[test]
-    #[cfg(feature = "openssl")]
     fn test_gpg() {
         env_logger::try_init().unwrap_or(());
         let algo = [115, 115, 104, 45, 114, 115, 97];
@@ -850,7 +852,6 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
     }
 
     #[test]
-    #[cfg(feature = "openssl")]
     fn test_pkcs8_encrypted() {
         env_logger::try_init().unwrap_or(());
         println!("test");
@@ -892,7 +893,6 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
                 let sig = &b[b.len() - 64..];
                 assert!(public.verify_detached(a, sig));
             }
-            #[cfg(feature = "openssl")]
             _ => {}
         }
 
@@ -925,7 +925,6 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
 
     #[test]
     #[cfg(unix)]
-    #[cfg(feature = "openssl")]
     fn test_agent() {
         env_logger::try_init().unwrap_or(());
         let dir = tempdir::TempDir::new("russh").unwrap();

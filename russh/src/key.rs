@@ -33,12 +33,24 @@ impl PubKey for PublicKey {
             PublicKey::P256(_) | PublicKey::P521(_) => {
                 buffer.extend_ssh_string(&self.public_key_bytes());
             }
-            #[cfg(feature = "openssl")]
             PublicKey::RSA { ref key, .. } => {
+                let mut e = Vec::new();
+                let mut n = Vec::new();
+
+                #[cfg(feature = "openssl")]
                 #[allow(clippy::unwrap_used)] // type known
-                let rsa = key.0.rsa().unwrap();
-                let e = rsa.e().to_vec();
-                let n = rsa.n().to_vec();
+                {
+                    let rsa = key.0.rsa().unwrap();
+                    e = rsa.e().to_vec();
+                    n = rsa.n().to_vec();
+                }
+                #[cfg(not(feature = "openssl"))]
+                {
+                    use russh_keys::PublicKeyParts;
+                    let rsa = key.clone();
+                    e = rsa.e().to_bytes_be();
+                    n = rsa.n().to_bytes_be();
+                }
                 buffer.push_u32_be((4 + SSH_RSA.0.len() + mpint_len(&n) + mpint_len(&e)) as u32);
                 buffer.extend_ssh_string(SSH_RSA.0.as_bytes());
                 buffer.extend_ssh_mpint(&e);
@@ -57,10 +69,21 @@ impl PubKey for KeyPair {
                 buffer.extend_ssh_string(ED25519.0.as_bytes());
                 buffer.extend_ssh_string(public.as_slice());
             }
-            #[cfg(feature = "openssl")]
             KeyPair::RSA { ref key, .. } => {
-                let e = key.e().to_vec();
-                let n = key.n().to_vec();
+                let mut e = Vec::new();
+                let mut n = Vec::new();
+                #[cfg(feature = "openssl")]
+                {
+                    e = key.e().to_vec();
+                    n = key.n().to_vec();
+                }
+
+                #[cfg(not(feature = "openssl"))]
+                {
+                    use russh_keys::PublicKeyParts;
+                    e = key.e().to_bytes_be();
+                    n = key.n().to_bytes_be();
+                }
                 buffer.push_u32_be((4 + SSH_RSA.0.len() + mpint_len(&n) + mpint_len(&e)) as u32);
                 buffer.extend_ssh_string(SSH_RSA.0.as_bytes());
                 buffer.extend_ssh_mpint(&e);

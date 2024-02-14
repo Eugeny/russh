@@ -46,9 +46,7 @@ use futures::Future;
 use log::{debug, error, info, trace};
 use russh_cryptovec::CryptoVec;
 use russh_keys::encoding::Reader;
-#[cfg(feature = "openssl")]
-use russh_keys::key::SignatureHash;
-use russh_keys::key::{self, parse_public_key, PublicKey};
+use russh_keys::key::{self, parse_public_key, PublicKey, SignatureHash};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpStream, ToSocketAddrs};
 use tokio::pin;
@@ -1120,7 +1118,6 @@ impl KexDhDone {
         let pubkey = reader.read_string().map_err(crate::Error::from)?; // server public key.
         let pubkey = parse_public_key(
             pubkey,
-            #[cfg(feature = "openssl")]
             SignatureHash::from_rsa_hostkey_algo(self.names.key.0.as_bytes()),
         )
         .map_err(crate::Error::from)?;

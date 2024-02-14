@@ -10,6 +10,8 @@ use openssl::pkey::Private;
 use openssl::rsa::Rsa;
 #[cfg(test)]
 use rand_core::OsRng;
+#[cfg(not(feature = "openssl"))]
+use rsa::RsaPrivateKey;
 use yasna::BERReaderSeq;
 use {std, yasna};
 
@@ -164,6 +166,11 @@ fn read_key_v1(reader: &mut BERReaderSeq) -> Result<key::KeyPair, Error> {
     }
 }
 
+#[cfg(not(feature = "openssl"))]
+fn write_key_v0(writer: &mut yasna::DERWriterSeq, key: &RsaPrivateKey) {
+    todo!()
+}
+
 #[cfg(feature = "openssl")]
 fn write_key_v0(writer: &mut yasna::DERWriterSeq, key: &Rsa<Private>) {
     writer.next().write_u32(0);
@@ -316,7 +323,6 @@ pub fn encode_pkcs8(key: &key::KeyPair) -> Vec<u8> {
     yasna::construct_der(|writer| {
         writer.write_sequence(|writer| match *key {
             key::KeyPair::Ed25519(ref pair) => write_key_v1(writer, pair),
-            #[cfg(feature = "openssl")]
             key::KeyPair::RSA { ref key, .. } => write_key_v0(writer, key),
         })
     })

@@ -126,9 +126,7 @@ impl Named for () {
     }
 }
 
-#[cfg(feature = "openssl")]
-use russh_keys::key::SSH_RSA;
-use russh_keys::key::{ECDSA_SHA2_NISTP256, ECDSA_SHA2_NISTP521, ED25519};
+use russh_keys::key::{ECDSA_SHA2_NISTP256, ECDSA_SHA2_NISTP521, ED25519, SSH_RSA};
 
 impl Named for PublicKey {
     fn name(&self) -> &'static str {
@@ -136,7 +134,6 @@ impl Named for PublicKey {
             PublicKey::Ed25519(_) => ED25519.0,
             PublicKey::P256(_) => ECDSA_SHA2_NISTP256.0,
             PublicKey::P521(_) => ECDSA_SHA2_NISTP521.0,
-            #[cfg(feature = "openssl")]
             PublicKey::RSA { .. } => SSH_RSA.0,
         }
     }
@@ -146,7 +143,6 @@ impl Named for KeyPair {
     fn name(&self) -> &'static str {
         match self {
             KeyPair::Ed25519 { .. } => ED25519.0,
-            #[cfg(feature = "openssl")]
             KeyPair::RSA { ref hash, .. } => hash.name().0,
         }
     }
