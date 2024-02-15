@@ -33,6 +33,7 @@ impl PubKey for PublicKey {
             PublicKey::P256(_) | PublicKey::P521(_) => {
                 buffer.extend_ssh_string(&self.public_key_bytes());
             }
+            #[allow(unused_assignments)]
             PublicKey::RSA { ref key, .. } => {
                 let mut e = Vec::new();
                 let mut n = Vec::new();
@@ -69,6 +70,7 @@ impl PubKey for KeyPair {
                 buffer.extend_ssh_string(ED25519.0.as_bytes());
                 buffer.extend_ssh_string(public.as_slice());
             }
+            #[allow(unused_assignments)]
             KeyPair::RSA { ref key, .. } => {
                 let mut e = Vec::new();
                 let mut n = Vec::new();

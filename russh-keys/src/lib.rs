@@ -139,6 +139,10 @@ pub enum Error {
     #[error(transparent)]
     Openssl(#[from] openssl::error::ErrorStack),
 
+    #[cfg(not(feature = "openssl"))]
+    #[error(transparent)]
+    RSA(#[from] rsa::errors::Error),
+
     #[error(transparent)]
     Pad(#[from] PadError),
 

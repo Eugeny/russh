@@ -3,7 +3,7 @@ use std::convert::TryFrom;
 use byteorder::{BigEndian, ByteOrder};
 use log::{debug, info};
 #[cfg(not(feature = "openssl"))]
-use rsa::traits::PublicKeyParts;
+use rsa::traits::{PrivateKeyParts, PublicKeyParts};
 use russh_cryptovec::CryptoVec;
 use tokio;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -142,7 +142,24 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AgentClient<S> {
             }
             #[cfg(not(feature = "openssl"))]
             key::KeyPair::RSA { ref key, .. } => {
-                todo!();
+                use num_bigint_dig::traits::ModInverse;
+
+                self.buf.extend_ssh_string(b"ssh-rsa");
+                self.buf.extend_ssh_mpint(&key.n().to_bytes_be());
+                self.buf.extend_ssh_mpint(&key.e().to_bytes_be());
+                self.buf.extend_ssh_mpint(&key.d().to_bytes_be());
+                let primes = key.primes();
+                if let Some(iqmp) = key.crt_coefficient() {
+                    self.buf.extend_ssh_mpint(&iqmp.to_bytes_be());
+                } else {
+                    if let Some(iqmp) = (&primes[0]).mod_inverse(&primes[1]) {
+                        let (_, val) = &iqmp.to_bytes_be();
+                        self.buf.extend_ssh_mpint(val);
+                    }
+                }
+                self.buf.extend_ssh_mpint(&primes[0].to_bytes_be());
+                self.buf.extend_ssh_mpint(&primes[1].to_bytes_be());
+                self.buf.extend_ssh_string(b"");
             }
         }
         if !constraints.is_empty() {

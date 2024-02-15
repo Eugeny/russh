@@ -28,7 +28,7 @@ use {
 #[cfg(not(feature = "openssl"))]
 use {
     rsa::{
-        pss::SigningKey,
+        pss::{Pss, SigningKey},
         sha2::Sha512,
         sha2::{Digest, Sha256},
         signature::{RandomizedSigner, SignatureEncoding},
@@ -254,7 +254,7 @@ impl PublicKey {
                     let n = BigUint::from_bytes_be(key_n);
 
                     Ok(PublicKey::RSA {
-                        key: RsaPublicKey::new(n, e).unwrap(),
+                        key: RsaPublicKey::new(n, e)?,
                         hash: SignatureHash::from_rsa_hostkey_algo(algo)
                             .unwrap_or(SignatureHash::SHA1),
                     })
@@ -321,7 +321,12 @@ impl PublicKey {
             }
             #[cfg(not(feature = "openssl"))]
             PublicKey::RSA { ref key, ref hash } => {
-                todo!()
+                let pss = match hash {
+                    SignatureHash::SHA1 => Pss::new::<Sha1>(),
+                    SignatureHash::SHA2_256 => Pss::new::<Sha256>(),
+                    SignatureHash::SHA2_512 => Pss::new::<Sha512>(),
+                };
+                key.verify(pss, buffer, sig).is_ok()
             }
             PublicKey::P256(ref public) => {
                 const FIELD_LEN: usize =
@@ -476,9 +481,9 @@ impl KeyPair {
             }
             #[cfg(not(feature = "openssl"))]
             KeyPair::RSA { ref key, ref hash } => {
-                let cloned_key = RsaPublicKey::new(key.n().clone(), key.e().clone());
+                let cloned_key = RsaPublicKey::new(key.n().clone(), key.e().clone())?;
                 PublicKey::RSA {
-                    key: cloned_key.unwrap(),
+                    key: cloned_key,
                     hash: *hash,
                 }
             }
@@ -671,7 +676,7 @@ pub fn parse_public_key(p: &[u8], refer_hash: Option<SignatureHash>) -> Result<P
             let n = BigUint::from_bytes_be(n);
 
             return Ok(PublicKey::RSA {
-                key: RsaPublicKey::new(n, e).unwrap(),
+                key: RsaPublicKey::new(n, e)?,
                 hash: refer_hash.unwrap_or(SignatureHash::SHA2_256),
             });
         }
