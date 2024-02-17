@@ -622,7 +622,7 @@ fn rsa_signature(
 #[cfg(not(feature = "openssl"))]
 fn rsa_signature(hash: &SignatureHash, key: &RsaPrivateKey, b: &[u8]) -> Result<Vec<u8>, Error> {
     let private_key = key.clone();
-    let mut rng = OsRng.clone();
+    let mut rng = OsRng;
 
     let signing_key = match hash {
         SignatureHash::SHA2_256 => {

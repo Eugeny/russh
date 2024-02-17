@@ -487,7 +487,7 @@ mod test {
     use std::fs::File;
     use std::io::Write;
 
-    #[cfg(all(unix, feature = "openssl"))]
+    #[cfg(unix)]
     use futures::Future;
 
     use super::*;

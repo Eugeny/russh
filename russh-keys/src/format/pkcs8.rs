@@ -17,7 +17,6 @@ use {openssl::pkey::Private, openssl::rsa::Rsa};
 use {std, yasna};
 
 use super::Encryption;
-use crate::key::SignatureHash;
 use crate::{key, Error};
 
 const PBES2: &[u64] = &[1, 2, 840, 113549, 1, 5, 13];
@@ -176,10 +175,10 @@ fn write_key_v0(writer: &mut yasna::DERWriterSeq, key: &RsaPrivateKey) {
 
     // Encode key data
     let bytes = yasna::construct_der(|writer| {
-        writer.write_sequence(|writer| {
+        let _ = writer.write_sequence(|writer| -> Result<(), Error> {
             writer.next().write_u32(0); // Version
-
             use num_bigint::BigUint;
+
             writer
                 .next()
                 .write_biguint(&BigUint::from_bytes_be(&key.n().to_bytes_be()));
@@ -191,12 +190,13 @@ fn write_key_v0(writer: &mut yasna::DERWriterSeq, key: &RsaPrivateKey) {
                 .write_biguint(&BigUint::from_bytes_be(&key.d().to_bytes_be()));
 
             let primes = key.primes();
-            writer
-                .next()
-                .write_biguint(&BigUint::from_bytes_be(&primes[0].to_bytes_be()));
-            writer
-                .next()
-                .write_biguint(&BigUint::from_bytes_be(&primes[1].to_bytes_be()));
+
+            writer.next().write_biguint(&BigUint::from_bytes_be(
+                &primes.get(0).ok_or(Error::IndexOutOfBounds)?.to_bytes_be(),
+            ));
+            writer.next().write_biguint(&BigUint::from_bytes_be(
+                &primes.get(1).ok_or(Error::IndexOutOfBounds)?.to_bytes_be(),
+            ));
 
             if let (Some(dp), Some(dq), Some(iqmp)) = (key.dp(), key.dq(), key.crt_coefficient()) {
                 writer
@@ -208,8 +208,9 @@ fn write_key_v0(writer: &mut yasna::DERWriterSeq, key: &RsaPrivateKey) {
                 writer
                     .next()
                     .write_biguint(&BigUint::from_bytes_be(&iqmp.to_bytes_be()));
-            }
-        })
+            };
+            Ok(())
+        });
     });
 
     // Write encoded bytes
@@ -260,6 +261,7 @@ fn write_key_v0(writer: &mut yasna::DERWriterSeq, key: &Rsa<Private>) {
 
 #[cfg(feature = "openssl")]
 fn read_key_v0(reader: &mut BERReaderSeq) -> Result<key::KeyPair, Error> {
+    use crate::key::SignatureHash;
     let oid = reader.next().read_sequence(|reader| {
         let oid = reader.next().read_oid()?;
         reader.next().read_null()?;

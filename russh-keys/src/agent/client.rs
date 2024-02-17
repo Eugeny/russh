@@ -151,14 +151,18 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AgentClient<S> {
                 let primes = key.primes();
                 if let Some(iqmp) = key.crt_coefficient() {
                     self.buf.extend_ssh_mpint(&iqmp.to_bytes_be());
-                } else {
-                    if let Some(iqmp) = (&primes[0]).mod_inverse(&primes[1]) {
-                        let (_, val) = &iqmp.to_bytes_be();
-                        self.buf.extend_ssh_mpint(val);
-                    }
+                } else if let Some(iqmp) = &primes
+                    .get(0)
+                    .ok_or(Error::IndexOutOfBounds)?
+                    .mod_inverse(primes.get(1).ok_or(Error::IndexOutOfBounds)?)
+                {
+                    let (_, val) = &iqmp.to_bytes_be();
+                    self.buf.extend_ssh_mpint(val);
                 }
-                self.buf.extend_ssh_mpint(&primes[0].to_bytes_be());
-                self.buf.extend_ssh_mpint(&primes[1].to_bytes_be());
+                self.buf
+                    .extend_ssh_mpint(&primes.get(0).ok_or(Error::IndexOutOfBounds)?.to_bytes_be());
+                self.buf
+                    .extend_ssh_mpint(&primes.get(1).ok_or(Error::IndexOutOfBounds)?.to_bytes_be());
                 self.buf.extend_ssh_string(b"");
             }
         }
