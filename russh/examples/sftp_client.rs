@@ -14,21 +14,21 @@ impl client::Handler for Client {
     type Error = anyhow::Error;
 
     async fn check_server_key(
-        self,
+        &mut self,
         server_public_key: &key::PublicKey,
-    ) -> Result<(Self, bool), Self::Error> {
+    ) -> Result<bool, Self::Error> {
         info!("check_server_key: {:?}", server_public_key);
-        Ok((self, true))
+        Ok(true)
     }
 
     async fn data(
-        self,
+        &mut self,
         channel: ChannelId,
         data: &[u8],
-        session: client::Session,
-    ) -> Result<(Self, client::Session), Self::Error> {
+        _session: &mut client::Session,
+    ) -> Result<(), Self::Error> {
         info!("data on channel {:?}: {}", channel, data.len());
-        Ok((self, session))
+        Ok(())
     }
 }
 

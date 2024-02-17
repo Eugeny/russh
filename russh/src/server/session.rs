@@ -1,11 +1,11 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
 use log::debug;
 use russh_keys::encoding::{Encoding, Reader};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc::{unbounded_channel, Receiver, Sender, UnboundedReceiver};
-use tokio::sync::Mutex;
+use tokio::sync::{oneshot, Mutex};
 
 use super::*;
 use crate::channels::{Channel, ChannelMsg, ChannelRef};
@@ -21,6 +21,7 @@ pub struct Session {
     pub(crate) pending_reads: Vec<CryptoVec>,
     pub(crate) pending_len: u32,
     pub(crate) channels: HashMap<ChannelId, ChannelRef>,
+    pub(crate) open_global_requests: VecDeque<GlobalRequestResponse>,
 }
 #[derive(Debug)]
 pub enum Msg {
@@ -47,10 +48,14 @@ pub enum Msg {
         channel_ref: ChannelRef,
     },
     TcpIpForward {
+        /// Provide a channel for the reply result to request a reply from the server
+        reply_channel: Option<oneshot::Sender<Option<u32>>>,
         address: String,
         port: u32,
     },
     CancelTcpIpForward {
+        /// Provide a channel for the reply result to request a reply from the server
+        reply_channel: Option<oneshot::Sender<bool>>,
         address: String,
         port: u32,
     },
@@ -149,19 +154,46 @@ impl Handle {
     }
 
     /// Notifies the client that it can open TCP/IP forwarding channels for a port.
-    pub async fn forward_tcpip(&self, address: String, port: u32) -> Result<(), ()> {
+    pub async fn forward_tcpip(&self, address: String, port: u32) -> Result<u32, ()> {
+        let (reply_send, reply_recv) = oneshot::channel();
         self.sender
-            .send(Msg::TcpIpForward { address, port })
+            .send(Msg::TcpIpForward {
+                reply_channel: Some(reply_send),
+                address,
+                port,
+            })
             .await
-            .map_err(|_| ())
+            .map_err(|_| ())?;
+
+        match reply_recv.await {
+            Ok(Some(port)) => Ok(port),
+            Ok(None) => Err(()), // crate::Error::RequestDenied
+            Err(e) => {
+                error!("Unable to receive TcpIpForward result: {e:?}");
+                Err(()) // crate::Error::Disconnect
+            }
+        }
     }
 
     /// Notifies the client that it can no longer open TCP/IP forwarding channel for a port.
     pub async fn cancel_forward_tcpip(&self, address: String, port: u32) -> Result<(), ()> {
+        let (reply_send, reply_recv) = oneshot::channel();
         self.sender
-            .send(Msg::CancelTcpIpForward { address, port })
+            .send(Msg::CancelTcpIpForward {
+                reply_channel: Some(reply_send),
+                address,
+                port,
+            })
             .await
-            .map_err(|_| ())
+            .map_err(|_| ())?;
+        match reply_recv.await {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(()), // crate::Error::RequestDenied
+            Err(e) => {
+                error!("Unable to receive CancelTcpIpForward result: {e:?}");
+                Err(()) // crate::Error::Disconnect
+            }
+        }
     }
 
     /// Request a session channel (the most basic type of
@@ -403,11 +435,8 @@ impl Session {
                             self.common.received_data = true;
                             std::mem::swap(&mut opening_cipher, &mut self.common.cipher.remote_to_local);
                             // TODO it'd be cleaner to just pass cipher to reply()
-                            match reply(self, handler, &mut buffer.seqn, buf).await {
-                                Ok((h, s)) => {
-                                    handler = h;
-                                    self = s;
-                                },
+                            match reply(&mut self, &mut handler, &mut buffer.seqn, buf).await {
+                                Ok(_) => {},
                                 Err(e) => return Err(e),
                             }
                             std::mem::swap(&mut opening_cipher, &mut self.common.cipher.remote_to_local);
@@ -476,11 +505,11 @@ impl Session {
                             let id = self.channel_open_x11(&originator_address, originator_port)?;
                             self.channels.insert(id, channel_ref);
                         }
-                        Some(Msg::TcpIpForward { address, port }) => {
-                            self.tcpip_forward(&address, port);
+                        Some(Msg::TcpIpForward { address, port, reply_channel }) => {
+                            self.tcpip_forward(&address, port, reply_channel);
                         }
-                        Some(Msg::CancelTcpIpForward { address, port }) => {
-                            self.cancel_tcpip_forward(&address, port);
+                        Some(Msg::CancelTcpIpForward { address, port, reply_channel }) => {
+                            self.cancel_tcpip_forward(&address, port, reply_channel);
                         }
                         Some(_) => {
                             // should be unreachable, since the receiver only gets
@@ -770,6 +799,8 @@ impl Session {
     pub fn keepalive_request(&mut self) {
         let want_reply = u8::from(true);
         if let Some(ref mut enc) = self.common.encrypted {
+            self.open_global_requests
+                .push_back(GlobalRequestResponse::Keepalive);
             push_packet!(enc.write, {
                 enc.write.push(msg::GLOBAL_REQUEST);
                 enc.write.extend_ssh_string(b"keepalive@openssh.com");
@@ -925,12 +956,23 @@ impl Session {
     /// Requests that the client forward connections to the given host and port.
     /// See [RFC4254](https://tools.ietf.org/html/rfc4254#section-7). The client
     /// will open forwarded_tcpip channels for each connection.
-    pub fn tcpip_forward(&mut self, address: &str, port: u32) {
+    pub fn tcpip_forward(
+        &mut self,
+        address: &str,
+        port: u32,
+        reply_channel: Option<oneshot::Sender<Option<u32>>>,
+    ) {
         if let Some(ref mut enc) = self.common.encrypted {
+            let want_reply = reply_channel.is_some();
+            if let Some(reply_channel) = reply_channel {
+                self.open_global_requests.push_back(
+                    crate::session::GlobalRequestResponse::TcpIpForward(reply_channel),
+                );
+            }
             push_packet!(enc.write, {
                 enc.write.push(msg::GLOBAL_REQUEST);
                 enc.write.extend_ssh_string(b"tcpip-forward");
-                enc.write.push(0);
+                enc.write.push(want_reply as u8);
                 enc.write.extend_ssh_string(address.as_bytes());
                 enc.write.push_u32_be(port);
             });
@@ -938,12 +980,23 @@ impl Session {
     }
 
     /// Cancels a previously tcpip_forward request.
-    pub fn cancel_tcpip_forward(&mut self, address: &str, port: u32) {
+    pub fn cancel_tcpip_forward(
+        &mut self,
+        address: &str,
+        port: u32,
+        reply_channel: Option<oneshot::Sender<bool>>,
+    ) {
         if let Some(ref mut enc) = self.common.encrypted {
+            let want_reply = reply_channel.is_some();
+            if let Some(reply_channel) = reply_channel {
+                self.open_global_requests.push_back(
+                    crate::session::GlobalRequestResponse::CancelTcpIpForward(reply_channel),
+                );
+            }
             push_packet!(enc.write, {
                 enc.write.push(msg::GLOBAL_REQUEST);
                 enc.write.extend_ssh_string(b"cancel-tcpip-forward");
-                enc.write.push(0);
+                enc.write.push(want_reply as u8);
                 enc.write.extend_ssh_string(address.as_bytes());
                 enc.write.push_u32_be(port);
             });

@@ -262,6 +262,9 @@ pub enum Error {
     #[error("Failed to decrypt a packet")]
     DecryptionError,
 
+    #[error("The request was rejected by the other party")]
+    RequestDenied,
+
     #[error(transparent)]
     Keys(#[from] russh_keys::Error),
 
@@ -347,6 +350,7 @@ pub use auth::{AgentAuthError, MethodSet, Signer};
 
 /// A reason for disconnection.
 #[allow(missing_docs)] // This should be relatively self-explanatory.
+#[allow(clippy::manual_non_exhaustive)]
 #[derive(Debug)]
 pub enum Disconnect {
     HostNotAllowedToConnect = 1,
