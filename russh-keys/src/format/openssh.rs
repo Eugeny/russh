@@ -6,7 +6,11 @@ use bcrypt_pbkdf;
 use ctr::Ctr64BE;
 #[cfg(feature = "openssl")]
 use openssl::bn::BigNum;
-
+#[cfg(not(feature = "openssl"))]
+use {
+    rsa::BigUint,
+    rsa::RsaPrivateKey
+};
 use crate::encoding::Reader;
 use crate::{key, Error, KEYTYPE_ED25519, KEYTYPE_RSA};
 
@@ -48,7 +52,7 @@ pub fn decode_openssh(secret: &[u8], password: Option<&str>) -> Result<key::KeyP
                     seckey.get(..32).ok_or(Error::KeyIsCorrupt)?,
                 )?;
                 return Ok(key::KeyPair::Ed25519(secret));
-            } else if key_type == KEYTYPE_RSA && cfg!(feature = "openssl") {
+            } else if key_type == KEYTYPE_RSA {
                 #[cfg(feature = "openssl")]
                 {
                     let n = BigNum::from_slice(position.read_string()?)?;
@@ -74,6 +78,21 @@ pub fn decode_openssh(secret: &[u8], password: Option<&str>) -> Result<key::KeyP
                         .set_crt_params(dmp1, dmq1, iqmp)?
                         .build();
                     key.check_key()?;
+                    return Ok(key::KeyPair::RSA {
+                        key,
+                        hash: key::SignatureHash::SHA2_512,
+                    });
+                }
+                #[cfg(not(feature = "openssl"))]
+                {
+                    let n = BigUint::from_bytes_be(position.read_string()?);
+                    let e = BigUint::from_bytes_be(position.read_string()?);
+                    let d = BigUint::from_bytes_be(position.read_string()?);
+                    let _ = position.read_string()?;
+                    let p = BigUint::from_bytes_be(position.read_string()?);
+                    let q = BigUint::from_bytes_be(position.read_string()?);
+
+                    let key = RsaPrivateKey::from_components(n, e, d, vec![p, q])?;
                     return Ok(key::KeyPair::RSA {
                         key,
                         hash: key::SignatureHash::SHA2_512,

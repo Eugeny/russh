@@ -299,6 +299,20 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AgentClient<S> {
                             hash: SignatureHash::SHA2_512,
                         })
                     }
+                    #[cfg(not(feature = "openssl"))]
+                    b"ssh-rsa" => {
+                        let e = r.read_mpint()?;
+                        let n = r.read_mpint()?;
+                        use rsa::{RsaPublicKey, BigUint};
+
+                        let e = BigUint::from_bytes_be(&e);
+                        let n = BigUint::from_bytes_be(&n);
+
+                        keys.push(PublicKey::RSA {
+                            key: RsaPublicKey::new(n, e)?,
+                            hash: SignatureHash::SHA2_512,
+                        })
+                    }
                     b"ssh-ed25519" => keys.push(PublicKey::Ed25519(
                         ed25519_dalek::VerifyingKey::try_from(r.read_string()?)?,
                     )),

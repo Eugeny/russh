@@ -10,6 +10,7 @@ use rand_core::OsRng;
 use rsa::{
     traits::{PrivateKeyParts, PublicKeyParts},
     RsaPrivateKey,
+    BigUint
 };
 use yasna::BERReaderSeq;
 #[cfg(feature = "openssl")]
@@ -260,6 +261,31 @@ fn write_key_v0(writer: &mut yasna::DERWriterSeq, key: &Rsa<Private>) {
 }
 
 #[cfg(feature = "openssl")]
+fn read_key(reader: &mut BERReaderSeq) -> Result<Rsa<Private>, Error>{
+    use openssl::bn::BigNum;
+    Ok(Rsa::from_private_components(
+        BigNum::from_slice(&reader.next().read_biguint()?.to_bytes_be())?,
+        BigNum::from_slice(&reader.next().read_biguint()?.to_bytes_be())?,
+        BigNum::from_slice(&reader.next().read_biguint()?.to_bytes_be())?,
+        BigNum::from_slice(&reader.next().read_biguint()?.to_bytes_be())?,
+        BigNum::from_slice(&reader.next().read_biguint()?.to_bytes_be())?,
+        BigNum::from_slice(&reader.next().read_biguint()?.to_bytes_be())?,
+        BigNum::from_slice(&reader.next().read_biguint()?.to_bytes_be())?,
+        BigNum::from_slice(&reader.next().read_biguint()?.to_bytes_be())?,
+    )?)
+}
+
+#[cfg(not(feature = "openssl"))]
+fn read_key(reader: &mut BERReaderSeq) -> Result<RsaPrivateKey, Error> {
+    let n = BigUint::from_bytes_be(&reader.next().read_biguint()?.to_bytes_be());
+    let e = BigUint::from_bytes_be(&reader.next().read_biguint()?.to_bytes_be());
+    let d = BigUint::from_bytes_be(&reader.next().read_biguint()?.to_bytes_be());
+    let _ = &reader.next().read_biguint()?.to_bytes_be();
+    let p = BigUint::from_bytes_be(&reader.next().read_biguint()?.to_bytes_be());
+    let q = BigUint::from_bytes_be(&reader.next().read_biguint()?.to_bytes_be());
+    Ok(RsaPrivateKey::from_components(n, e, d, vec![p, q])?)
+}
+
 fn read_key_v0(reader: &mut BERReaderSeq) -> Result<key::KeyPair, Error> {
     use crate::key::SignatureHash;
     let oid = reader.next().read_sequence(|reader| {
@@ -269,26 +295,13 @@ fn read_key_v0(reader: &mut BERReaderSeq) -> Result<key::KeyPair, Error> {
     })?;
     if oid.components().as_slice() == RSA {
         let seq = &reader.next().read_bytes()?;
-        let rsa: Result<Rsa<Private>, Error> = yasna::parse_der(seq, |reader| {
+        let rsa = yasna::parse_der(seq, |reader| {
             reader.read_sequence(|reader| {
                 let version = reader.next().read_u32()?;
                 if version != 0 {
                     return Ok(Err(Error::CouldNotReadKey));
                 }
-                use openssl::bn::BigNum;
-                let mut read_key = || -> Result<Rsa<Private>, Error> {
-                    Ok(Rsa::from_private_components(
-                        BigNum::from_slice(&reader.next().read_biguint()?.to_bytes_be())?,
-                        BigNum::from_slice(&reader.next().read_biguint()?.to_bytes_be())?,
-                        BigNum::from_slice(&reader.next().read_biguint()?.to_bytes_be())?,
-                        BigNum::from_slice(&reader.next().read_biguint()?.to_bytes_be())?,
-                        BigNum::from_slice(&reader.next().read_biguint()?.to_bytes_be())?,
-                        BigNum::from_slice(&reader.next().read_biguint()?.to_bytes_be())?,
-                        BigNum::from_slice(&reader.next().read_biguint()?.to_bytes_be())?,
-                        BigNum::from_slice(&reader.next().read_biguint()?.to_bytes_be())?,
-                    )?)
-                };
-                Ok(read_key())
+                Ok(read_key(reader))
             })
         })?;
         Ok(key::KeyPair::RSA {
@@ -298,11 +311,6 @@ fn read_key_v0(reader: &mut BERReaderSeq) -> Result<key::KeyPair, Error> {
     } else {
         Err(Error::CouldNotReadKey)
     }
-}
-
-#[cfg(not(feature = "openssl"))]
-fn read_key_v0(_: &mut BERReaderSeq) -> Result<key::KeyPair, Error> {
-    Err(Error::CouldNotReadKey)
 }
 
 #[test]

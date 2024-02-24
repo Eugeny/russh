@@ -15,8 +15,9 @@ use {std, tokio};
 
 use super::{msg, Constraint};
 use crate::encoding::{Encoding, Position, Reader};
-#[cfg(feature = "openssl")]
 use crate::key::SignatureHash;
+#[cfg(not(feature = "openssl"))]
+use rsa::{RsaPrivateKey, BigUint};
 use crate::{key, Error};
 
 #[derive(Clone)]
@@ -318,6 +319,38 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
                     key::KeyPair::RSA {
                         key,
                         hash: SignatureHash::SHA2_256,
+                    },
+                )
+            }
+            #[cfg(not(feature = "openssl"))]
+            b"ssh-rsa" => {
+                let n = r.read_string()?;
+                let e = r.read_string()?;
+
+                let n_buint = BigUint::from_bytes_be(n);
+                let e_buint = BigUint::from_bytes_be(e);
+                let d = BigUint::from_bytes_be(r.read_string()?);
+                let _ = r.read_string()?;
+                let p = BigUint::from_bytes_be(r.read_string()?);
+                let q = BigUint::from_bytes_be(r.read_string()?);
+
+                let key = RsaPrivateKey::from_components(n_buint, e_buint, d, vec![p, q])?;
+
+                let len0 = writebuf.len();
+                writebuf.extend_ssh_string(b"ssh-rsa");
+                writebuf.extend_ssh_mpint(e);
+                writebuf.extend_ssh_mpint(n);
+
+                #[allow(clippy::indexing_slicing)] // length is known
+                let blob = writebuf[len0..].to_vec();
+                writebuf.resize(len0);
+                writebuf.push(msg::SUCCESS);
+
+                (
+                    blob,
+                    key::KeyPair::RSA {
+                        key: key,
+                        hash: SignatureHash::SHA2_256, // Assuming SHA2_256 is compatible with your needs
                     },
                 )
             }

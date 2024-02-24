@@ -90,9 +90,7 @@ impl Preferred {
             key::ED25519,
             key::ECDSA_SHA2_NISTP256,
             key::ECDSA_SHA2_NISTP521,
-            #[cfg(feature = "openssl")]
             key::RSA_SHA2_256,
-            #[cfg(feature = "openssl")]
             key::RSA_SHA2_512,
         ],
         cipher: CIPHER_ORDER,

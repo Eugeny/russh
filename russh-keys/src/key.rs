@@ -204,7 +204,7 @@ impl PublicKey {
                     .map(PublicKey::Ed25519)
                     .map_err(Error::from)
             }
-            b"ssh-rsa" | b"rsa-sha2-256" | b"rsa-sha2-512" if cfg!(feature = "openssl") => {
+            b"ssh-rsa" | b"rsa-sha2-256" | b"rsa-sha2-512" => {
                 #[cfg(feature = "openssl")]
                 {
                     use log::debug;
