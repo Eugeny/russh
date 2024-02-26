@@ -94,7 +94,10 @@
 //! messages sent through a `server::Handle` are processed when there
 //! is no incoming packet to read.
 
-use std::fmt::{Debug, Display, Formatter};
+use std::{
+    convert::TryFrom,
+    fmt::{Debug, Display, Formatter},
+};
 
 use log::debug;
 use parsing::ChannelOpenConfirmation;
@@ -377,6 +380,31 @@ pub enum Disconnect {
     AuthCancelledByUser = 13,
     NoMoreAuthMethodsAvailable = 14,
     IllegalUserName = 15,
+}
+
+impl TryFrom<u32> for Disconnect {
+    type Error = crate::Error;
+
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        Ok(match value {
+            1 => Self::HostNotAllowedToConnect,
+            2 => Self::ProtocolError,
+            3 => Self::KeyExchangeFailed,
+            4 => Self::Reserved,
+            5 => Self::MACError,
+            6 => Self::CompressionError,
+            7 => Self::ServiceNotAvailable,
+            8 => Self::ProtocolVersionNotSupported,
+            9 => Self::HostKeyNotVerifiable,
+            10 => Self::ConnectionLost,
+            11 => Self::ByApplication,
+            12 => Self::TooManyConnections,
+            13 => Self::AuthCancelledByUser,
+            14 => Self::NoMoreAuthMethodsAvailable,
+            15 => Self::IllegalUserName,
+            _ => return Err(crate::Error::Inconsistent),
+        })
+    }
 }
 
 /// The type of signals that can be sent to a remote process. If you
