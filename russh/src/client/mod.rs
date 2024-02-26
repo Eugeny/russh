@@ -818,7 +818,7 @@ impl Session {
                 () = &mut keepalive_timer => {
                     if self.common.config.keepalive_max != 0 && self.common.alive_timeouts > self.common.config.keepalive_max {
                         debug!("Timeout, server not responding to keepalives");
-                        return Err(crate::Error::KeepaliveTimeout);
+                        return Err(crate::Error::KeepaliveTimeout.into());
                     }
                     self.common.alive_timeouts = self.common.alive_timeouts.saturating_add(1);
                     self.send_keepalive(true);
@@ -826,7 +826,7 @@ impl Session {
                 }
                 () = &mut inactivity_timer => {
                     debug!("timeout");
-                    return Err(crate::Error::InactivityTimeout);
+                    return Err(crate::Error::InactivityTimeout.into());
                 }
                 msg = self.receiver.recv(), if !self.is_rekeying() => {
                     match msg {
