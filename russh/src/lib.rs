@@ -249,6 +249,14 @@ pub enum Error {
     #[error("Connection timeout")]
     ConnectionTimeout,
 
+    /// Keepalive timeout.
+    #[error("Keepalive timeout")]
+    KeepaliveTimeout,
+
+    /// Inactivity timeout.
+    #[error("Inactivity timeout")]
+    InactivityTimeout,
+
     /// Missing authentication method.
     #[error("No authentication method")]
     NoAuthMethod,
