@@ -59,6 +59,11 @@ pub enum Msg {
         address: String,
         port: u32,
     },
+    Disconnect {
+        reason: crate::Disconnect,
+        description: String,
+        language_tag: String,
+    },
     Channel(ChannelId, ChannelMsg),
 }
 
@@ -348,6 +353,23 @@ impl Handle {
             .await
             .map_err(|_| ())
     }
+
+    /// Allows a server to disconnect a client session
+    pub async fn disconnect(
+        &self,
+        reason: Disconnect,
+        description: String,
+        language_tag: String,
+    ) -> Result<(), Error> {
+        self.sender
+            .send(Msg::Disconnect {
+                reason,
+                description,
+                language_tag,
+            })
+            .await
+            .map_err(|_| Error::SendError)
+    }
 }
 
 impl Session {
@@ -510,6 +532,9 @@ impl Session {
                         }
                         Some(Msg::CancelTcpIpForward { address, port, reply_channel }) => {
                             self.cancel_tcpip_forward(&address, port, reply_channel);
+                        }
+                        Some(Msg::Disconnect {reason, description, language_tag}) => {
+                            self.common.disconnect(reason, &description, &language_tag);
                         }
                         Some(_) => {
                             // should be unreachable, since the receiver only gets
