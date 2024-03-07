@@ -1028,6 +1028,11 @@ impl Session {
         }
     }
 
+    /// Returns the SSH ID (Protocol Version + Software Version) the client sent when connecting
+    pub fn remote_sshid(&self) -> &str {
+        &self.common.remote_sshid
+    }
+
     pub(crate) fn maybe_send_ext_info(&mut self) {
         if let Some(ref mut enc) = self.common.encrypted {
             // If client sent a ext-info-c message in the kex list, it supports RFC 8308 extension negotiation.

@@ -731,6 +731,7 @@ async fn read_ssh_id<R: AsyncRead + Unpin>(
         strict_kex: false,
         alive_timeouts: 0,
         received_data: false,
+        remote_sshid: String::from_utf8_lossy(sshid).into(),
     })
 }
 

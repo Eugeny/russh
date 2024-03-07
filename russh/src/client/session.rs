@@ -395,4 +395,9 @@ impl Session {
             0
         }
     }
+
+    /// Returns the SSH ID (Protocol Version + Software Version) the server sent when connecting
+    pub fn remote_sshid(&self) -> &str {
+        &self.common.remote_sshid
+    }
 }
