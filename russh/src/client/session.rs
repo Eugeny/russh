@@ -268,7 +268,7 @@ impl Session {
     /// Requests a TCP/IP forwarding from the server
     ///
     /// If `reply_channel` is not None, sets want_reply and returns the server's response via the channel,
-    /// Some<u32> for a success message with port, or None for failure
+    /// [`Some<u32>`] for a success message with port, or [`None`] for failure
     pub fn tcpip_forward(
         &mut self,
         reply_channel: Option<oneshot::Sender<Option<u32>>>,
@@ -397,7 +397,15 @@ impl Session {
     }
 
     /// Returns the SSH ID (Protocol Version + Software Version) the server sent when connecting
-    pub fn remote_sshid(&self) -> &str {
+    ///
+    /// This should contain only ASCII characters for implementations conforming to RFC4253, Section 4.2:
+    ///
+    /// > Both the 'protoversion' and 'softwareversion' strings MUST consist of
+    /// > printable US-ASCII characters, with the exception of whitespace
+    /// > characters and the minus sign (-).
+    ///
+    /// So it usually is fine to convert it to a `String` using `String::from_utf8_lossy`
+    pub fn remote_sshid(&self) -> &[u8] {
         &self.common.remote_sshid
     }
 }

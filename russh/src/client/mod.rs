@@ -697,7 +697,7 @@ where
             strict_kex: false,
             alive_timeouts: 0,
             received_data: false,
-            remote_sshid: String::from_utf8_lossy(sshid).into(),
+            remote_sshid: sshid.into(),
         },
         session_receiver,
         session_sender,

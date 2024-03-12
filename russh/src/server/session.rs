@@ -1029,7 +1029,15 @@ impl Session {
     }
 
     /// Returns the SSH ID (Protocol Version + Software Version) the client sent when connecting
-    pub fn remote_sshid(&self) -> &str {
+    ///
+    /// This should contain only ASCII characters for implementations conforming to RFC4253, Section 4.2:
+    ///
+    /// > Both the 'protoversion' and 'softwareversion' strings MUST consist of
+    /// > printable US-ASCII characters, with the exception of whitespace
+    /// > characters and the minus sign (-).
+    ///
+    /// So it usually is fine to convert it to a [`String`] using [`String::from_utf8_lossy`]
+    pub fn remote_sshid(&self) -> &[u8] {
         &self.common.remote_sshid
     }
 

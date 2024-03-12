@@ -16,7 +16,7 @@
 //! # Writing servers
 //!
 //! There are two ways of accepting connections:
-//! * implement the [Server](server::Server) trait and let [run](server::run) handle everything
+//! * implement the [Server](server::Server) trait and let [run_on_socket](server::Server::run_on_socket)/[run_on_address](server::Server::run_on_address) handle everything
 //! * accept connections yourself and pass them to [run_stream](server::run_stream)
 //!
 //! In both cases, you'll first need to implement the [Handler](server::Handler) trait -
@@ -731,7 +731,7 @@ async fn read_ssh_id<R: AsyncRead + Unpin>(
         strict_kex: false,
         alive_timeouts: 0,
         received_data: false,
-        remote_sshid: String::from_utf8_lossy(sshid).into(),
+        remote_sshid: sshid.into(),
     })
 }
 
