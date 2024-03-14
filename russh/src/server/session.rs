@@ -1028,6 +1028,19 @@ impl Session {
         }
     }
 
+    /// Returns the SSH ID (Protocol Version + Software Version) the client sent when connecting
+    ///
+    /// This should contain only ASCII characters for implementations conforming to RFC4253, Section 4.2:
+    ///
+    /// > Both the 'protoversion' and 'softwareversion' strings MUST consist of
+    /// > printable US-ASCII characters, with the exception of whitespace
+    /// > characters and the minus sign (-).
+    ///
+    /// So it usually is fine to convert it to a [`String`] using [`String::from_utf8_lossy`]
+    pub fn remote_sshid(&self) -> &[u8] {
+        &self.common.remote_sshid
+    }
+
     pub(crate) fn maybe_send_ext_info(&mut self) {
         if let Some(ref mut enc) = self.common.encrypted {
             // If client sent a ext-info-c message in the kex list, it supports RFC 8308 extension negotiation.
