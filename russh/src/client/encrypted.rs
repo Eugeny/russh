@@ -60,7 +60,11 @@ impl Session {
                 } else if let Some(exchange) = enc.exchange.take() {
                     Some(KexInit::received_rekey(
                         exchange,
-                        negotiation::Client::read_kex(buf, &self.common.config.as_ref().preferred)?,
+                        negotiation::Client::read_kex(
+                            buf,
+                            &self.common.config.as_ref().preferred,
+                            None,
+                        )?,
                         &enc.session_id,
                     ))
                 } else {
