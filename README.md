@@ -1,6 +1,6 @@
 # Russh
 [![Rust](https://github.com/warp-tech/russh/actions/workflows/rust.yml/badge.svg)](https://github.com/warp-tech/russh/actions/workflows/rust.yml)  <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
-[![All Contributors](https://img.shields.io/badge/all_contributors-27-orange.svg?style=flat-square)](#contributors-)
+[![All Contributors](https://img.shields.io/badge/all_contributors-28-orange.svg?style=flat-square)](#contributors-)
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
 
 Low-level Tokio SSH2 client and server implementation.
@@ -109,6 +109,7 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
       <td align="center" valign="top" width="14.28%"><a href="http://samlikes.pizza/"><img src="https://avatars.githubusercontent.com/u/226872?v=4?s=100" width="100px;" alt="Samuel Ainsworth"/><br /><sub><b>Samuel Ainsworth</b></sub></a><br /><a href="https://github.com/warp-tech/russh/commits?author=samuela" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/Sherlock-Holo"><img src="https://avatars.githubusercontent.com/u/10096425?v=4?s=100" width="100px;" alt="Sherlock Holo"/><br /><sub><b>Sherlock Holo</b></sub></a><br /><a href="https://github.com/warp-tech/russh/commits?author=sherlock-holo" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/ricott1"><img src="https://avatars.githubusercontent.com/u/16502243?v=4?s=100" width="100px;" alt="Alessandro Ricottone"/><br /><sub><b>Alessandro Ricottone</b></sub></a><br /><a href="https://github.com/warp-tech/russh/commits?author=ricott1" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/T0b1-iOS"><img src="https://avatars.githubusercontent.com/u/15174814?v=4?s=100" width="100px;" alt="T0b1-iOS"/><br /><sub><b>T0b1-iOS</b></sub></a><br /><a href="https://github.com/warp-tech/russh/commits?author=T0b1-iOS" title="Code">💻</a></td>
     </tr>
   </tbody>
 </table>

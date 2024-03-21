@@ -26,7 +26,7 @@ impl KexInit {
             let algo = {
                 // read algorithms from packet.
                 self.exchange.client_kex_init.extend(buf);
-                super::negotiation::Server::read_kex(buf, &config.preferred)?
+                super::negotiation::Server::read_kex(buf, &config.preferred, Some(&config.keys))?
             };
             if !self.sent {
                 self.server_write(config, cipher, write_buffer)?
