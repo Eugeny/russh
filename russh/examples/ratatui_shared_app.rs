@@ -1,14 +1,15 @@
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use async_trait::async_trait;
-use ratatui::{
-    backend::CrosstermBackend,
-    layout::Rect,
-    style::{Color, Style},
-    widgets::{Block, Borders, Clear, Paragraph},
-    Terminal,
-};
-use russh::{server::*, Channel, ChannelId};
+use ratatui::backend::CrosstermBackend;
+use ratatui::layout::Rect;
+use ratatui::style::{Color, Style};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::Terminal;
+use russh::server::*;
+use russh::{Channel, ChannelId};
 use russh_keys::key::PublicKey;
-use std::{collections::HashMap, sync::Arc};
 use tokio::sync::Mutex;
 
 type SshTerminal = Terminal<CrosstermBackend<TerminalHandle>>;
@@ -40,7 +41,7 @@ impl std::io::Write for TerminalHandle {
 
     fn flush(&mut self) -> std::io::Result<()> {
         let handle = self.handle.clone();
-        let channel_id = self.channel_id.clone();
+        let channel_id = self.channel_id;
         let data = self.sink.clone().into();
         futures::executor::block_on(async move {
             let result = handle.data(channel_id, data).await;
