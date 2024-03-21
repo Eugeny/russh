@@ -188,7 +188,7 @@ pub(crate) trait Select {
                 from_utf8(kex_string),
                 pref.kex
             );
-            return Error::NoCommonKexAlgo;
+            Error::NoCommonKexAlgo
         })?;
 
         // Strict kex detection
@@ -226,7 +226,7 @@ pub(crate) trait Select {
                     from_utf8(key_string),
                     pref.key
                 );
-                return Error::NoCommonKeyAlgo;
+                Error::NoCommonKeyAlgo
             })?;
 
         // Cipher

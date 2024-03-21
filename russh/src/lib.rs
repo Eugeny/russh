@@ -94,10 +94,8 @@
 //! messages sent through a `server::Handle` are processed when there
 //! is no incoming packet to read.
 
-use std::{
-    convert::TryFrom,
-    fmt::{Debug, Display, Formatter},
-};
+use std::convert::TryFrom;
+use std::fmt::{Debug, Display, Formatter};
 
 use log::debug;
 use parsing::ChannelOpenConfirmation;
