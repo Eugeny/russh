@@ -256,6 +256,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "citorva",
+      "name": "citorva",
+      "avatar_url": "https://avatars.githubusercontent.com/u/16229435?v=4",
+      "profile": "https://citorva.fr",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,
