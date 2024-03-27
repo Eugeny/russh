@@ -284,9 +284,11 @@ pub enum Error {
     Utf8(#[from] std::str::Utf8Error),
 
     #[error(transparent)]
+    #[cfg(feature = "flate2")]
     Compress(#[from] flate2::CompressError),
 
     #[error(transparent)]
+    #[cfg(feature = "flate2")]
     Decompress(#[from] flate2::DecompressError),
 
     #[error(transparent)]
