@@ -207,8 +207,8 @@ mod channels {
         let server_handle = tokio::spawn(run_server(server_session.unwrap().handle()));
 
         let (server_session, client_session) = tokio::join!(server_handle, client_handle);
-        drop(client_session);
-        drop(server_session);
+        drop(client_session.unwrap());
+        drop(server_session.unwrap());
     }
 
     #[tokio::test]
@@ -453,7 +453,7 @@ mod channels {
 
                 let msg = ch.wait().await.unwrap();
                 if let ChannelMsg::Data { data } = msg {
-                    assert_eq!(data.as_ref(), &b"hey there!"[..]);
+                    assert_eq!(data.as_ref(), &b"hello world!"[..]);
                 } else {
                     panic!("Unexpected message {:?}", msg);
                 }
