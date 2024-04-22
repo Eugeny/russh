@@ -3,7 +3,7 @@ use aes::*;
 use super::Encryption;
 use crate::{key, Error};
 
-/// Decode a secret key in the PKCS#5 format, possible deciphering it
+/// Decode a secret key in the PKCS#5 format, possibly deciphering it
 /// using the supplied password.
 #[cfg(feature = "openssl")]
 pub fn decode_pkcs5(
