@@ -59,6 +59,11 @@ pub enum Msg {
         address: String,
         port: u32,
     },
+    Disconnect {
+        reason: crate::Disconnect,
+        description: String,
+        language_tag: String,
+    },
     Channel(ChannelId, ChannelMsg),
 }
 
@@ -348,6 +353,23 @@ impl Handle {
             .await
             .map_err(|_| ())
     }
+
+    /// Allows a server to disconnect a client session
+    pub async fn disconnect(
+        &self,
+        reason: Disconnect,
+        description: String,
+        language_tag: String,
+    ) -> Result<(), Error> {
+        self.sender
+            .send(Msg::Disconnect {
+                reason,
+                description,
+                language_tag,
+            })
+            .await
+            .map_err(|_| Error::SendError)
+    }
 }
 
 impl Session {
@@ -447,7 +469,7 @@ impl Session {
                 () = &mut keepalive_timer => {
                     if self.common.config.keepalive_max != 0 && self.common.alive_timeouts > self.common.config.keepalive_max {
                         debug!("Timeout, client not responding to keepalives");
-                        break
+                        return Err(crate::Error::KeepaliveTimeout.into());
                     }
                     self.common.alive_timeouts = self.common.alive_timeouts.saturating_add(1);
                     sent_keepalive = true;
@@ -455,7 +477,7 @@ impl Session {
                 }
                 () = &mut inactivity_timer => {
                     debug!("timeout");
-                    break
+                    return Err(crate::Error::InactivityTimeout.into());
                 }
                 msg = self.receiver.recv(), if !self.is_rekeying() => {
                     match msg {
@@ -510,6 +532,9 @@ impl Session {
                         }
                         Some(Msg::CancelTcpIpForward { address, port, reply_channel }) => {
                             self.cancel_tcpip_forward(&address, port, reply_channel);
+                        }
+                        Some(Msg::Disconnect {reason, description, language_tag}) => {
+                            self.common.disconnect(reason, &description, &language_tag);
                         }
                         Some(_) => {
                             // should be unreachable, since the receiver only gets
@@ -1001,6 +1026,19 @@ impl Session {
                 enc.write.push_u32_be(port);
             });
         }
+    }
+
+    /// Returns the SSH ID (Protocol Version + Software Version) the client sent when connecting
+    ///
+    /// This should contain only ASCII characters for implementations conforming to RFC4253, Section 4.2:
+    ///
+    /// > Both the 'protoversion' and 'softwareversion' strings MUST consist of
+    /// > printable US-ASCII characters, with the exception of whitespace
+    /// > characters and the minus sign (-).
+    ///
+    /// So it usually is fine to convert it to a [`String`] using [`String::from_utf8_lossy`]
+    pub fn remote_sshid(&self) -> &[u8] {
+        &self.common.remote_sshid
     }
 
     pub(crate) fn maybe_send_ext_info(&mut self) {

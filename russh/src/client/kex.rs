@@ -21,7 +21,7 @@ impl KexInit {
             // read algorithms from packet.
             debug!("extending {:?}", &self.exchange.server_kex_init[..]);
             self.exchange.server_kex_init.extend(buf);
-            negotiation::Client::read_kex(buf, &config.preferred)?
+            negotiation::Client::read_kex(buf, &config.preferred, None)?
         };
         debug!("algo = {:?}", algo);
         debug!("write = {:?}", &write_buffer.buffer[..]);

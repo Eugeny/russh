@@ -36,6 +36,7 @@
 
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
+use std::convert::TryInto;
 use std::num::Wrapping;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -47,7 +48,7 @@ use log::{debug, error, info, trace};
 use russh_cryptovec::CryptoVec;
 use russh_keys::encoding::Reader;
 use russh_keys::key::{self, parse_public_key, PublicKey, SignatureHash};
-use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadHalf, WriteHalf};
 use tokio::net::{TcpStream, ToSocketAddrs};
 use tokio::pin;
 use tokio::sync::mpsc::{
@@ -191,6 +192,19 @@ pub enum KeyboardInteractiveAuthResponse {
 pub struct Prompt {
     pub prompt: String,
     pub echo: bool,
+}
+
+#[derive(Debug)]
+pub struct RemoteDisconnectInfo {
+    pub reason_code: crate::Disconnect,
+    pub message: String,
+    pub lang_tag: String,
+}
+
+#[derive(Debug)]
+pub enum DisconnectReason<E: From<crate::Error> + Send> {
+    ReceivedDisconnect(RemoteDisconnectInfo),
+    Error(E),
 }
 
 /// Handle to a session, used to send messages to a client outside of
@@ -681,6 +695,7 @@ where
             strict_kex: false,
             alive_timeouts: 0,
             received_data: false,
+            remote_sshid: sshid.into(),
         },
         session_receiver,
         session_sender,
@@ -735,23 +750,59 @@ impl Session {
 
     async fn run<H: Handler + Send, R: AsyncRead + AsyncWrite + Unpin + Send>(
         mut self,
-        mut stream: SshRead<R>,
+        stream: SshRead<R>,
         mut handler: H,
-        mut encrypted_signal: Option<tokio::sync::oneshot::Sender<()>>,
+        encrypted_signal: Option<tokio::sync::oneshot::Sender<()>>,
     ) -> Result<(), H::Error> {
+        let (stream_read, mut stream_write) = stream.split();
+        let result = self
+            .run_inner(
+                stream_read,
+                &mut stream_write,
+                &mut handler,
+                encrypted_signal,
+            )
+            .await;
+        trace!("disconnected");
+        self.receiver.close();
+        self.inbound_channel_receiver.close();
+        stream_write.shutdown().await.map_err(crate::Error::from)?;
+        match result {
+            Ok(v) => {
+                handler
+                    .disconnected(DisconnectReason::ReceivedDisconnect(v))
+                    .await?;
+                Ok(())
+            }
+            Err(e) => {
+                handler.disconnected(DisconnectReason::Error(e)).await?;
+                //Err(e)
+                Ok(())
+            }
+        }
+    }
+
+    async fn run_inner<H: Handler + Send, R: AsyncRead + AsyncWrite + Unpin + Send>(
+        &mut self,
+        stream_read: SshRead<ReadHalf<R>>,
+        stream_write: &mut WriteHalf<R>,
+        handler: &mut H,
+        mut encrypted_signal: Option<tokio::sync::oneshot::Sender<()>>,
+    ) -> Result<RemoteDisconnectInfo, H::Error> {
+        let mut result: Result<RemoteDisconnectInfo, H::Error> =
+            Err(crate::Error::Disconnect.into());
         self.flush()?;
         if !self.common.write_buffer.buffer.is_empty() {
             debug!("writing {:?} bytes", self.common.write_buffer.buffer.len());
-            stream
+            stream_write
                 .write_all(&self.common.write_buffer.buffer)
                 .await
                 .map_err(crate::Error::from)?;
-            stream.flush().await.map_err(crate::Error::from)?;
+            stream_write.flush().await.map_err(crate::Error::from)?;
         }
         self.common.write_buffer.buffer.clear();
         let mut decomp = CryptoVec::new();
 
-        let (stream_read, mut stream_write) = stream.split();
         let buffer = SSHBuffer::new();
 
         // Allow handing out references to the cipher
@@ -803,10 +854,10 @@ impl Session {
                     if !buf.is_empty() {
                         #[allow(clippy::indexing_slicing)] // length checked
                         if buf[0] == crate::msg::DISCONNECT {
-                            break;
+                            result = self.process_disconnect(buf);
                         } else {
                             self.common.received_data = true;
-                            reply( &mut self,&mut  handler, &mut encrypted_signal, &mut buffer.seqn, buf).await?;
+                            reply( self,handler, &mut encrypted_signal, &mut buffer.seqn, buf).await?;
                         }
                     }
 
@@ -816,7 +867,7 @@ impl Session {
                 () = &mut keepalive_timer => {
                     if self.common.config.keepalive_max != 0 && self.common.alive_timeouts > self.common.config.keepalive_max {
                         debug!("Timeout, server not responding to keepalives");
-                        break
+                        return Err(crate::Error::KeepaliveTimeout.into());
                     }
                     self.common.alive_timeouts = self.common.alive_timeouts.saturating_add(1);
                     self.send_keepalive(true);
@@ -824,7 +875,7 @@ impl Session {
                 }
                 () = &mut inactivity_timer => {
                     debug!("timeout");
-                    break
+                    return Err(crate::Error::InactivityTimeout.into());
                 }
                 msg = self.receiver.recv(), if !self.is_rekeying() => {
                     match msg {
@@ -904,12 +955,30 @@ impl Session {
                 }
             }
         }
-        debug!("disconnected");
-        self.receiver.close();
-        self.inbound_channel_receiver.close();
-        stream_write.shutdown().await.map_err(crate::Error::from)?;
 
-        Ok(())
+        result
+    }
+
+    fn process_disconnect<E: From<crate::Error> + Send>(
+        &mut self,
+        buf: &[u8],
+    ) -> Result<RemoteDisconnectInfo, E> {
+        self.common.disconnected = true;
+        let mut reader = buf.reader(1);
+
+        let reason_code = reader.read_u32().map_err(crate::Error::from)?.try_into()?;
+        let message = std::str::from_utf8(reader.read_string().map_err(crate::Error::from)?)
+            .map_err(crate::Error::from)?
+            .to_owned();
+        let lang_tag = std::str::from_utf8(reader.read_string().map_err(crate::Error::from)?)
+            .map_err(crate::Error::from)?
+            .to_owned();
+
+        Ok(RemoteDisconnectInfo {
+            reason_code,
+            message,
+            lang_tag,
+        })
     }
 
     fn handle_msg(&mut self, msg: Msg) -> Result<(), crate::Error> {
@@ -1357,7 +1426,7 @@ impl Default for Config {
 
 #[async_trait]
 pub trait Handler: Sized + Send {
-    type Error: From<crate::Error> + Send;
+    type Error: From<crate::Error> + Send + core::fmt::Debug;
 
     /// Called when the server sends us an authentication banner. This
     /// is usually meant to be shown to the user, see
@@ -1616,5 +1685,20 @@ pub trait Handler: Sized + Send {
     ) -> Result<(), Self::Error> {
         debug!("openssh_ext_hostkeys_announced: {:?}", keys);
         Ok(())
+    }
+
+    /// Called when the server sent a disconnect message
+    ///
+    /// If reason is an Error, this function should re-return the error so the join can also evaluate it
+    #[allow(unused_variables)]
+    async fn disconnected(
+        &mut self,
+        reason: DisconnectReason<Self::Error>,
+    ) -> Result<(), Self::Error> {
+        debug!("disconnected: {:?}", reason);
+        match reason {
+            DisconnectReason::ReceivedDisconnect(_) => Ok(()),
+            DisconnectReason::Error(e) => Err(e),
+        }
     }
 }

@@ -71,7 +71,7 @@ impl Compress {
         &mut self,
         input: &'a [u8],
         _: &'a mut russh_cryptovec::CryptoVec,
-    ) -> Result<&'a [u8], Error> {
+    ) -> Result<&'a [u8], crate::Error> {
         Ok(input)
     }
 }
@@ -82,7 +82,7 @@ impl Decompress {
         &mut self,
         input: &'a [u8],
         _: &'a mut russh_cryptovec::CryptoVec,
-    ) -> Result<&'a [u8], Error> {
+    ) -> Result<&'a [u8], crate::Error> {
         Ok(input)
     }
 }

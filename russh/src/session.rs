@@ -54,6 +54,7 @@ pub(crate) struct Encrypted {
 
 pub(crate) struct CommonSession<Config> {
     pub auth_user: String,
+    pub remote_sshid: Vec<u8>,
     pub config: Config,
     pub encrypted: Option<Encrypted>,
     pub auth_method: Option<auth::Method>,

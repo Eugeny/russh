@@ -55,6 +55,18 @@ pub struct Preferred {
     pub compression: &'static [&'static str],
 }
 
+impl Preferred {
+    pub(crate) fn possible_host_key_algos_for_keys(
+        &self,
+        available_host_keys: &[KeyPair],
+    ) -> Vec<&'static key::Name> {
+        self.key
+            .iter()
+            .filter(|n| available_host_keys.iter().any(|k| k.name() == n.0))
+            .collect::<Vec<_>>()
+    }
+}
+
 const SAFE_KEX_ORDER: &[kex::Name] = &[
     kex::CURVE25519,
     kex::CURVE25519_PRE_RFC_8731,
@@ -152,19 +164,28 @@ pub(crate) trait Select {
 
     fn select<S: AsRef<str> + Copy>(a: &[S], b: &[u8]) -> Option<(bool, S)>;
 
-    fn read_kex(buffer: &[u8], pref: &Preferred) -> Result<Names, Error> {
+    /// `available_host_keys`, if present, is used to limit the host key algorithms to the ones we have keys for.
+    fn read_kex(
+        buffer: &[u8],
+        pref: &Preferred,
+        available_host_keys: Option<&[KeyPair]>,
+    ) -> Result<Names, Error> {
         let mut r = buffer.reader(17);
+
+        // Key exchange
+
         let kex_string = r.read_string()?;
-        let (kex_both_first, kex_algorithm) = if let Some(x) = Self::select(pref.kex, kex_string) {
-            x
-        } else {
+        let (kex_both_first, kex_algorithm) = Self::select(pref.kex, kex_string).ok_or_else(||
+        {
             debug!(
                 "Could not find common kex algorithm, other side only supports {:?}, we only support {:?}",
                 from_utf8(kex_string),
                 pref.kex
             );
-            return Err(Error::NoCommonKexAlgo);
-        };
+            Error::NoCommonKexAlgo
+        })?;
+
+        // Strict kex detection
 
         let strict_kex_requested = pref.kex.contains(if Self::is_server() {
             &EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER
@@ -184,35 +205,42 @@ pub(crate) trait Select {
             debug!("strict kex enabled")
         }
 
-        let key_string = r.read_string()?;
-        let (key_both_first, key_algorithm) = if let Some(x) = Self::select(pref.key, key_string) {
-            x
-        } else {
-            debug!(
-                "Could not find common key algorithm, other side only supports {:?}, we only support {:?}",
-                from_utf8(key_string),
-                pref.key
-            );
-            return Err(Error::NoCommonKeyAlgo);
+        // Host key
+
+        let key_string: &[u8] = r.read_string()?;
+        let possible_host_key_algos = match available_host_keys {
+            Some(available_host_keys) => pref.possible_host_key_algos_for_keys(available_host_keys),
+            None => pref.key.iter().collect::<Vec<_>>(),
         };
 
+        let (key_both_first, key_algorithm) =
+            Self::select(&possible_host_key_algos[..], key_string).ok_or_else(|| {
+                debug!(
+                    "Could not find common key algorithm, other side only supports {:?}, we only support {:?}",
+                    from_utf8(key_string),
+                    pref.key
+                );
+                Error::NoCommonKeyAlgo
+            })?;
+
+        // Cipher
+
         let cipher_string = r.read_string()?;
-        let cipher = Self::select(pref.cipher, cipher_string);
-        if cipher.is_none() {
-            debug!(
+        let (_cipher_both_first, cipher) =
+            Self::select(pref.cipher, cipher_string).ok_or_else(|| {
+                debug!(
                 "Could not find common cipher, other side only supports {:?}, we only support {:?}",
                 from_utf8(cipher_string),
                 pref.cipher
             );
-            return Err(Error::NoCommonCipher);
-        }
+                Error::NoCommonCipher
+            })?;
         r.read_string()?; // cipher server-to-client.
         debug!("kex {}", line!());
 
-        let need_mac = cipher
-            .and_then(|x| CIPHERS.get(&x.1))
-            .map(|x| x.needs_mac())
-            .unwrap_or(false);
+        // MAC
+
+        let need_mac = CIPHERS.get(&cipher).map(|x| x.needs_mac()).unwrap_or(false);
 
         let client_mac = if let Some((_, m)) = Self::select(pref.mac, r.read_string()?) {
             m
@@ -228,6 +256,8 @@ pub(crate) trait Select {
         } else {
             mac::NONE
         };
+
+        // Compression
 
         debug!("kex {}", line!());
         // client-to-server compression.
@@ -250,23 +280,18 @@ pub(crate) trait Select {
         r.read_string()?; // languages server-to-client
 
         let follows = r.read_byte()? != 0;
-        match (cipher, follows) {
-            (Some((_, cipher)), fol) => {
-                Ok(Names {
-                    kex: kex_algorithm,
-                    key: key_algorithm,
-                    cipher,
-                    client_mac,
-                    server_mac,
-                    client_compression,
-                    server_compression,
-                    // Ignore the next packet if (1) it follows and (2) it's not the correct guess.
-                    ignore_guessed: fol && !(kex_both_first && key_both_first),
-                    strict_kex: strict_kex_requested && strict_kex_provided,
-                })
-            }
-            _ => Err(Error::KexInit),
-        }
+        Ok(Names {
+            kex: kex_algorithm,
+            key: *key_algorithm,
+            cipher,
+            client_mac,
+            server_mac,
+            client_compression,
+            server_compression,
+            // Ignore the next packet if (1) it follows and (2) it's not the correct guess.
+            ignore_guessed: follows && !(kex_both_first && key_both_first),
+            strict_kex: strict_kex_requested && strict_kex_provided,
+        })
     }
 }
 

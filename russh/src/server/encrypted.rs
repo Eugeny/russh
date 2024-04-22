@@ -61,7 +61,11 @@ impl Session {
             } else if let Some(exchange) = enc.exchange.take() {
                 let kexinit = KexInit::received_rekey(
                     exchange,
-                    negotiation::Server::read_kex(buf, &self.common.config.as_ref().preferred)?,
+                    negotiation::Server::read_kex(
+                        buf,
+                        &self.common.config.as_ref().preferred,
+                        Some(&self.common.config.as_ref().keys),
+                    )?,
                     &enc.session_id,
                 );
                 enc.rekey = Some(kexinit.server_parse(
