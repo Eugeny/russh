@@ -38,6 +38,8 @@ impl AsRef<str> for Name {
 
 /// The name of the ecdsa-sha2-nistp256 algorithm for SSH.
 pub const ECDSA_SHA2_NISTP256: Name = Name("ecdsa-sha2-nistp256");
+/// The name of the ecdsa-sha2-nistp384 algorithm for SSH.
+pub const ECDSA_SHA2_NISTP384: Name = Name("ecdsa-sha2-nistp384");
 /// The name of the ecdsa-sha2-nistp521 algorithm for SSH.
 pub const ECDSA_SHA2_NISTP521: Name = Name("ecdsa-sha2-nistp521");
 /// The name of the Ed25519 algorithm for SSH.
@@ -55,7 +57,7 @@ impl Name {
     /// Base name of the private key file for a key name.
     pub fn identity_file(&self) -> &'static str {
         match *self {
-            ECDSA_SHA2_NISTP256 | ECDSA_SHA2_NISTP521 => "id_ecdsa",
+            ECDSA_SHA2_NISTP256 | ECDSA_SHA2_NISTP384 | ECDSA_SHA2_NISTP521 => "id_ecdsa",
             ED25519 => "id_ed25519",
             RSA_SHA2_512 => "id_rsa",
             RSA_SHA2_256 => "id_rsa",

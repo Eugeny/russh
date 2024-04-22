@@ -73,7 +73,7 @@ impl PubKey for KeyPair {
     }
 }
 
-pub fn write_ec_public_key(buf: &mut CryptoVec, key: &ec::PublicKey) {
+pub(crate) fn write_ec_public_key(buf: &mut CryptoVec, key: &ec::PublicKey) {
     let algorithm = key.algorithm().as_bytes();
     let ident = key.ident().as_bytes();
     let q = key.to_sec1_bytes();

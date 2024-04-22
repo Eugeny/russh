@@ -14,7 +14,7 @@
 //! to do all these in a single example: start and SSH agent server,
 //! connect to it with a client, decipher an encrypted private key
 //! (the password is `b"blabla"`), send it to the agent, and ask the
-//! agent to sign a piece of data (`b"Please sign this", below).
+//! agent to sign a piece of data (`b"Please sign this"`, below).
 //!
 //!```
 //! use russh_keys::*;
