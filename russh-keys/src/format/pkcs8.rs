@@ -199,6 +199,9 @@ fn write_key_v0(writer: &mut yasna::DERWriterSeq, key: &RsaPrivateKey) {
                 &primes.get(1).ok_or(Error::IndexOutOfBounds)?.to_bytes_be(),
             ));
 
+            let mut key = key.clone();
+            key.precompute()?; // Compute dp/dq/crt_coefficient values
+
             if let (Some(dp), Some(dq), Some(iqmp)) = (key.dp(), key.dq(), key.crt_coefficient()) {
                 writer
                     .next()
