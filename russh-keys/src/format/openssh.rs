@@ -12,7 +12,7 @@ use {
     rsa::RsaPrivateKey
 };
 use crate::encoding::Reader;
-use crate::{key, Error, KEYTYPE_ED25519, KEYTYPE_RSA};
+use crate::{ec, key, Error, KEYTYPE_ED25519, KEYTYPE_RSA};
 
 /// Decode a secret key given in the OpenSSH format, deciphering it if
 /// needed using the supplied password.
@@ -83,6 +83,7 @@ pub fn decode_openssh(secret: &[u8], password: Option<&str>) -> Result<key::KeyP
                         hash: key::SignatureHash::SHA2_512,
                     });
                 }
+                
                 #[cfg(not(feature = "openssl"))]
                 {
                     let n = BigUint::from_bytes_be(position.read_string()?);
@@ -98,6 +99,28 @@ pub fn decode_openssh(secret: &[u8], password: Option<&str>) -> Result<key::KeyP
                         hash: key::SignatureHash::SHA2_512,
                     });
                 }
+
+            } else if key_type == crate::KEYTYPE_ECDSA_SHA2_NISTP256
+                || key_type == crate::KEYTYPE_ECDSA_SHA2_NISTP384
+                || key_type == crate::KEYTYPE_ECDSA_SHA2_NISTP521
+            {
+                let ident = position.read_string()?;
+                let pubkey = position.read_string()?;
+                let seckey = position.read_mpint()?;
+                let _comment = position.read_string()?;
+
+                let key = ec::PrivateKey::new_from_secret_scalar(key_type, seckey)?;
+
+                if ident != key.ident().as_bytes() {
+                    return Err(Error::CouldNotReadKey);
+                }
+
+                let pubkey = ec::PublicKey::from_sec1_bytes(key_type, pubkey)?;
+                if pubkey != key.to_public_key() {
+                    return Err(Error::CouldNotReadKey);
+                }
+
+                return Ok(key::KeyPair::EC { key });
             } else {
                 return Err(Error::UnsupportedKeyType {
                     key_type_string: String::from_utf8(key_type.to_vec())

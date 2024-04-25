@@ -19,6 +19,7 @@ use {std, yasna};
 
 use super::Encryption;
 use crate::{key, Error};
+use crate::key::SignatureHash;
 
 const PBES2: &[u64] = &[1, 2, 840, 113549, 1, 5, 13];
 const PBKDF2: &[u64] = &[1, 2, 840, 113549, 1, 5, 12];
@@ -26,6 +27,10 @@ const HMAC_SHA256: &[u64] = &[1, 2, 840, 113549, 2, 9];
 const AES256CBC: &[u64] = &[2, 16, 840, 1, 101, 3, 4, 1, 42];
 const ED25519: &[u64] = &[1, 3, 101, 112];
 const RSA: &[u64] = &[1, 2, 840, 113549, 1, 1, 1];
+const EC_PUBLIC_KEY: &[u64] = &[1, 2, 840, 10045, 2, 1];
+const SECP256R1: &[u64] = &[1, 2, 840, 10045, 3, 1, 7];
+const SECP384R1: &[u64] = &[1, 3, 132, 0, 34];
+const SECP521R1: &[u64] = &[1, 3, 132, 0, 35];
 
 /// Decode a PKCS#8-encoded private key.
 pub fn decode_pkcs8(ciphertext: &[u8], password: Option<&[u8]>) -> Result<key::KeyPair, Error> {
@@ -166,7 +171,7 @@ fn read_key_v1(reader: &mut BERReaderSeq) -> Result<key::KeyPair, Error> {
 }
 
 #[cfg(not(feature = "openssl"))]
-fn write_key_v0(writer: &mut yasna::DERWriterSeq, key: &RsaPrivateKey) {
+fn write_key_v0_rsa(writer: &mut yasna::DERWriterSeq, key: &RsaPrivateKey) {
     // Construct DER sequence
     writer.next().write_u32(0); // Version
     writer.next().write_sequence(|writer| {
@@ -221,8 +226,9 @@ fn write_key_v0(writer: &mut yasna::DERWriterSeq, key: &RsaPrivateKey) {
     writer.next().write_bytes(&bytes);
 }
 
+
 #[cfg(feature = "openssl")]
-fn write_key_v0(writer: &mut yasna::DERWriterSeq, key: &Rsa<Private>) {
+fn write_key_v0_rsa(writer: &mut yasna::DERWriterSeq, key: &Rsa<Private>) {
     writer.next().write_u32(0);
     // write OID
     writer.next().write_sequence(|writer| {
@@ -289,30 +295,113 @@ fn read_key(reader: &mut BERReaderSeq) -> Result<RsaPrivateKey, Error> {
     Ok(RsaPrivateKey::from_components(n, e, d, vec![p, q])?)
 }
 
-fn read_key_v0(reader: &mut BERReaderSeq) -> Result<key::KeyPair, Error> {
-    use crate::key::SignatureHash;
-    let oid = reader.next().read_sequence(|reader| {
-        let oid = reader.next().read_oid()?;
-        reader.next().read_null()?;
-        Ok(oid)
-    })?;
-    if oid.components().as_slice() == RSA {
-        let seq = &reader.next().read_bytes()?;
-        let rsa = yasna::parse_der(seq, |reader| {
-            reader.read_sequence(|reader| {
-                let version = reader.next().read_u32()?;
-                if version != 0 {
-                    return Ok(Err(Error::CouldNotReadKey));
-                }
-                Ok(read_key(reader))
-            })
-        })?;
-        Ok(key::KeyPair::RSA {
-            key: rsa?,
-            hash: SignatureHash::SHA2_256,
+fn write_key_v0_ec(writer: &mut yasna::DERWriterSeq, key: &crate::ec::PrivateKey) {
+    writer.next().write_u32(0);
+    writer.next().write_sequence(|writer| {
+        writer
+            .next()
+            .write_oid(&ObjectIdentifier::from_slice(EC_PUBLIC_KEY));
+        writer
+            .next()
+            .write_oid(&ObjectIdentifier::from_slice(match key {
+                crate::ec::PrivateKey::P256(_) => SECP256R1,
+                crate::ec::PrivateKey::P384(_) => SECP384R1,
+                crate::ec::PrivateKey::P521(_) => SECP521R1,
+            }))
+    });
+    let bytes = yasna::construct_der(|writer| {
+        #[allow(clippy::unwrap_used)] // key is known to be private
+        writer.write_sequence(|writer| {
+            writer.next().write_u32(1);
+            writer.next().write_bytes(&key.to_secret_bytes());
+            writer
+                .next()
+                .write_tagged(yasna::Tag::context(1), |writer| {
+                    writer.write_bitvec(&BitVec::from_bytes(&key.to_public_key().to_sec1_bytes()))
+                });
         })
-    } else {
-        Err(Error::CouldNotReadKey)
+    });
+    writer.next().write_bytes(&bytes);
+}
+
+// Utility enum used for reading v0 key.
+enum KeyType {
+    Unknown(ObjectIdentifier),
+    RSA,
+    EC(ObjectIdentifier),
+}
+
+fn read_key_v0(reader: &mut BERReaderSeq) -> Result<key::KeyPair, Error> {
+    let key_type = reader.next().read_sequence(|reader| {
+        let oid = reader.next().read_oid()?;
+        Ok(match oid.components().as_slice() {
+            RSA => {
+                reader.next().read_null()?;
+                KeyType::RSA
+            }
+            EC_PUBLIC_KEY => KeyType::EC(reader.next().read_oid()?),
+            _ => KeyType::Unknown(oid),
+        })
+    })?;
+    match key_type {
+        KeyType::Unknown(_) => Err(Error::CouldNotReadKey),
+        KeyType::RSA => {
+            let seq = &reader.next().read_bytes()?;
+            let rsa = yasna::parse_der(seq, |reader| {
+                reader.read_sequence(|reader| {
+                    let version = reader.next().read_u32()?;
+                    if version != 0 {
+                        return Ok(Err(Error::CouldNotReadKey));
+                    }
+                    Ok(read_key(reader))
+                })
+            })?;
+            Ok(key::KeyPair::RSA {
+                key: rsa?,
+                hash: SignatureHash::SHA2_256,
+            })
+        }
+        KeyType::EC(oid) => {
+            let private_key = reader.next().read_bytes()?;
+            let (version, secret_key, public_key) = yasna::parse_der(&private_key, |reader| {
+                reader.read_sequence(|reader| {
+                    // Per RFC 5915, section 3:
+                    // ECPrivateKey ::= SEQUENCE {
+                    //   version        INTEGER { ecPrivkeyVer1(1) } (ecPrivkeyVer1),
+                    //   privateKey     OCTET STRING,
+                    //   parameters [0] ECParameters {{ NamedCurve }} OPTIONAL,
+                    //   publicKey  [1] BIT STRING OPTIONAL
+                    // }
+                    let version = reader.next().read_u64()?;
+                    let secret_key = reader.next().read_bytes()?;
+                    let _named_curve = reader.read_optional(|reader| {
+                        reader.read_tagged(yasna::Tag::context(0), |reader| reader.read_oid())
+                    })?;
+                    let public_key = reader.read_optional(|reader| {
+                        reader.read_tagged(yasna::Tag::context(1), |reader| reader.read_bitvec())
+                    })?;
+                    Ok((version, secret_key, public_key))
+                })
+            })?;
+            if version != 1 {
+                return Err(Error::CouldNotReadKey);
+            }
+            let key = crate::ec::PrivateKey::new_from_secret_scalar(
+                match oid.components().as_slice() {
+                    SECP256R1 => crate::KEYTYPE_ECDSA_SHA2_NISTP256,
+                    SECP384R1 => crate::KEYTYPE_ECDSA_SHA2_NISTP384,
+                    SECP521R1 => crate::KEYTYPE_ECDSA_SHA2_NISTP521,
+                    _ => return Err(Error::CouldNotReadKey),
+                },
+                &secret_key,
+            )?;
+            if let Some(public_key) = public_key {
+                if key.to_public_key().to_sec1_bytes() != public_key.to_bytes() {
+                    return Err(Error::CouldNotReadKey);
+                }
+            }
+            Ok(key::KeyPair::EC { key })
+        }
     }
 }
 
@@ -329,6 +418,7 @@ fn test_read_write_pkcs8() {
     let key = decode_pkcs8(&ciphertext, Some(password)).unwrap();
     match key {
         key::KeyPair::Ed25519 { .. } => println!("Ed25519"),
+        key::KeyPair::EC { .. } => println!("EC"),
         key::KeyPair::RSA { .. } => println!("RSA"),
     }
 }
@@ -380,7 +470,8 @@ pub fn encode_pkcs8(key: &key::KeyPair) -> Vec<u8> {
     yasna::construct_der(|writer| {
         writer.write_sequence(|writer| match *key {
             key::KeyPair::Ed25519(ref pair) => write_key_v1(writer, pair),
-            key::KeyPair::RSA { ref key, .. } => write_key_v0(writer, key),
+            key::KeyPair::RSA { ref key, .. } => write_key_v0_rsa(writer, key),
+            key::KeyPair::EC { ref key, .. } => write_key_v0_ec(writer, key),
         })
     })
 }

@@ -105,6 +105,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AgentClient<S> {
         key: &key::KeyPair,
         constraints: &[Constraint],
     ) -> Result<(), Error> {
+        // See IETF draft-miller-ssh-agent-13, section 3.2 for format.
+        // https://datatracker.ietf.org/doc/html/draft-miller-ssh-agent
         self.buf.clear();
         self.buf.resize(4);
         if constraints.is_empty() {
@@ -164,6 +166,15 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AgentClient<S> {
                 self.buf
                     .extend_ssh_mpint(&primes.get(1).ok_or(Error::IndexOutOfBounds)?.to_bytes_be());
                 self.buf.extend_ssh_string(b"");
+            }
+            
+            key::KeyPair::EC { ref key } => {
+                self.buf.extend_ssh_string(key.algorithm().as_bytes());
+                self.buf.extend_ssh_string(key.ident().as_bytes());
+                self.buf
+                    .extend_ssh_string(&key.to_public_key().to_sec1_bytes());
+                self.buf.extend_ssh_mpint(&key.to_secret_bytes());
+                self.buf.extend_ssh_string(b""); // comment
             }
         }
         if !constraints.is_empty() {
@@ -316,21 +327,16 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AgentClient<S> {
                     b"ssh-ed25519" => keys.push(PublicKey::Ed25519(
                         ed25519_dalek::VerifyingKey::try_from(r.read_string()?)?,
                     )),
-                    b"ecdsa-sha2-nistp256" => {
+                    crate::KEYTYPE_ECDSA_SHA2_NISTP256
+                    | crate::KEYTYPE_ECDSA_SHA2_NISTP384
+                    | crate::KEYTYPE_ECDSA_SHA2_NISTP521 => {
                         let curve = r.read_string()?;
-                        if curve != b"nistp256" {
-                            return Err(Error::EcdsaKeyError(p256::elliptic_curve::Error));
+                        let sec1_bytes = r.read_string()?;
+                        let key = crate::ec::PublicKey::from_sec1_bytes(t, sec1_bytes)?;
+                        if curve != key.ident().as_bytes() {
+                            return Err(Error::CouldNotReadKey);
                         }
-                        let key = r.read_string()?;
-                        keys.push(PublicKey::P256(p256::PublicKey::from_sec1_bytes(key)?));
-                    }
-                    b"ecdsa-sha2-nistp512" => {
-                        let curve = r.read_string()?;
-                        if curve != b"nistp521" {
-                            return Err(Error::EcdsaKeyError(p521::elliptic_curve::Error));
-                        }
-                        let key = r.read_string()?;
-                        keys.push(PublicKey::P521(p521::PublicKey::from_sec1_bytes(key)?));
+                        keys.push(PublicKey::EC { key })
                     }
                     t => {
                         info!("Unsupported key type: {:?}", std::str::from_utf8(t))
@@ -599,7 +605,7 @@ fn key_blob(public: &key::PublicKey, buf: &mut CryptoVec) -> Result<(), Error> {
             #[allow(clippy::indexing_slicing)] // length is known
             BigEndian::write_u32(&mut buf[5..], (len1 - len0) as u32);
         }
-        PublicKey::P256(_) | PublicKey::P521(_) => {
+        PublicKey::EC { .. } => {
             buf.extend_ssh_string(&public.public_key_bytes());
         }
     }

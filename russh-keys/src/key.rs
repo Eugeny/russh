@@ -15,8 +15,6 @@
 use std::convert::TryFrom;
 
 use ed25519_dalek::{Signer, Verifier};
-use p256::elliptic_curve::generic_array::typenum::Unsigned;
-use p521::elliptic_curve::generic_array::GenericArray;
 use rand_core::OsRng;
 use russh_cryptovec::CryptoVec;
 use serde::{Deserialize, Serialize};
@@ -38,6 +36,7 @@ use {
     sha1::Sha1,
 };
 
+use crate::ec;
 use crate::encoding::{Encoding, Reader};
 pub use crate::signature::*;
 use crate::Error;
@@ -54,6 +53,8 @@ impl AsRef<str> for Name {
 
 /// The name of the ecdsa-sha2-nistp256 algorithm for SSH.
 pub const ECDSA_SHA2_NISTP256: Name = Name("ecdsa-sha2-nistp256");
+/// The name of the ecdsa-sha2-nistp384 algorithm for SSH.
+pub const ECDSA_SHA2_NISTP384: Name = Name("ecdsa-sha2-nistp384");
 /// The name of the ecdsa-sha2-nistp521 algorithm for SSH.
 pub const ECDSA_SHA2_NISTP521: Name = Name("ecdsa-sha2-nistp521");
 /// The name of the Ed25519 algorithm for SSH.
@@ -71,7 +72,7 @@ impl Name {
     /// Base name of the private key file for a key name.
     pub fn identity_file(&self) -> &'static str {
         match *self {
-            ECDSA_SHA2_NISTP256 | ECDSA_SHA2_NISTP521 => "id_ecdsa",
+            ECDSA_SHA2_NISTP256 | ECDSA_SHA2_NISTP384 | ECDSA_SHA2_NISTP521 => "id_ecdsa",
             ED25519 => "id_ed25519",
             RSA_SHA2_512 => "id_rsa",
             RSA_SHA2_256 => "id_rsa",
@@ -145,9 +146,7 @@ pub enum PublicKey {
         hash: SignatureHash,
     },
     #[doc(hidden)]
-    P256(p256::PublicKey),
-    #[doc(hidden)]
-    P521(p521::PublicKey),
+    EC { key: ec::PublicKey },
 }
 
 impl PartialEq for PublicKey {
@@ -155,8 +154,7 @@ impl PartialEq for PublicKey {
         match (self, other) {
             (Self::RSA { key: a, .. }, Self::RSA { key: b, .. }) => a == b,
             (Self::Ed25519(a), Self::Ed25519(b)) => a == b,
-            (Self::P256(a), Self::P256(b)) => a == b,
-            (Self::P521(a), Self::P521(b)) => a == b,
+            (Self::EC { key: a }, Self::EC { key: b }) => a == b,
             _ => false,
         }
     }
@@ -260,29 +258,24 @@ impl PublicKey {
                     })
                 }
             }
-            b"ecdsa-sha2-nistp256" => {
+            crate::KEYTYPE_ECDSA_SHA2_NISTP256
+            | crate::KEYTYPE_ECDSA_SHA2_NISTP384
+            | crate::KEYTYPE_ECDSA_SHA2_NISTP521 => {
                 let mut p = pubkey.reader(0);
                 let key_algo = p.read_string()?;
                 let curve = p.read_string()?;
-                if key_algo != b"ecdsa-sha2-nistp256" || curve != b"nistp256" {
+                let sec1_bytes = p.read_string()?;
+
+                if key_algo != algo {
                     return Err(Error::CouldNotReadKey);
                 }
-                let sec1_bytes = p.read_string()?;
-                let key = p256::PublicKey::from_sec1_bytes(sec1_bytes)
-                    .map_err(|_| Error::CouldNotReadKey)?;
-                Ok(PublicKey::P256(key))
-            }
-            b"ecdsa-sha2-nistp521" => {
-                let mut p = pubkey.reader(0);
-                let key_algo = p.read_string()?;
-                let curve = p.read_string()?;
-                if key_algo != b"ecdsa-sha2-nistp521" || curve != b"nistp521" {
+
+                let key = ec::PublicKey::from_sec1_bytes(key_algo, sec1_bytes)?;
+                if curve != key.ident().as_bytes() {
                     return Err(Error::CouldNotReadKey);
                 }
-                let sec1_bytes = p.read_string()?;
-                let key = p521::PublicKey::from_sec1_bytes(sec1_bytes)
-                    .map_err(|_| Error::CouldNotReadKey)?;
-                Ok(PublicKey::P521(key))
+
+                Ok(PublicKey::EC { key })
             }
             _ => Err(Error::CouldNotReadKey),
         }
@@ -293,8 +286,7 @@ impl PublicKey {
         match *self {
             PublicKey::Ed25519(_) => ED25519.0,
             PublicKey::RSA { ref hash, .. } => hash.name().0,
-            PublicKey::P256(_) => ECDSA_SHA2_NISTP256.0,
-            PublicKey::P521(_) => ECDSA_SHA2_NISTP521.0,
+            PublicKey::EC { ref key } => key.algorithm(),
         }
     }
 
@@ -308,7 +300,6 @@ impl PublicKey {
                 let sig = ed25519_dalek::Signature::from_bytes(&sig);
                 public.verify(buffer, &sig).is_ok()
             }
-
             #[cfg(feature = "openssl")]
             PublicKey::RSA { ref key, ref hash } => {
                 use openssl::sign::*;
@@ -328,58 +319,8 @@ impl PublicKey {
                 };
                 key.verify(pss, buffer, sig).is_ok()
             }
-            PublicKey::P256(ref public) => {
-                const FIELD_LEN: usize =
-                    <p256::NistP256 as p256::elliptic_curve::Curve>::FieldBytesSize::USIZE;
-                let mut reader = sig.reader(0);
-                let mut read_field = || -> Option<p256::FieldBytes> {
-                    let f = reader.read_mpint().ok()?;
-                    let f = f.strip_prefix(&[0]).unwrap_or(f);
-                    let mut result = [0; FIELD_LEN];
-                    if f.len() > FIELD_LEN {
-                        return None;
-                    }
-                    #[allow(clippy::indexing_slicing)] // length is known
-                    result[FIELD_LEN - f.len()..].copy_from_slice(f);
-                    Some(result.into())
-                };
-                let Some(r) = read_field() else { return false };
-                let Some(s) = read_field() else { return false };
-                let Ok(signature) = p256::ecdsa::Signature::from_scalars(r, s) else {
-                    return false;
-                };
-                p256::ecdsa::VerifyingKey::from(public)
-                    .verify(buffer, &signature)
-                    .is_ok()
-            }
-            PublicKey::P521(ref public) => {
-                const FIELD_LEN: usize =
-                    <p521::NistP521 as p256::elliptic_curve::Curve>::FieldBytesSize::USIZE;
-                let mut reader = sig.reader(0);
-                let mut read_field = || -> Option<p521::FieldBytes> {
-                    let f = reader.read_mpint().ok()?;
-                    let f = f.strip_prefix(&[0]).unwrap_or(f);
-                    let mut result = [0; FIELD_LEN];
-                    if f.len() > FIELD_LEN {
-                        return None;
-                    }
-                    #[allow(clippy::indexing_slicing)] // length is known
-                    result[FIELD_LEN - f.len()..].copy_from_slice(f);
-                    Some(GenericArray::clone_from_slice(&result))
-                };
-                let Some(r) = read_field() else { return false };
-                let Some(s) = read_field() else { return false };
-                let Ok(signature) = p521::ecdsa::Signature::from_scalars(r, s) else {
-                    return false;
-                };
-
-                // Length known
-                #[allow(clippy::unwrap_used)]
-                p521::ecdsa::VerifyingKey::from_sec1_bytes(&public.to_sec1_bytes())
-                    .unwrap()
-                    .verify(buffer, &signature)
-                    .is_ok()
-            }
+            
+            PublicKey::EC { ref key, .. } => ec_verify(key, buffer, sig).is_ok(),
         }
     }
 
@@ -428,6 +369,9 @@ pub enum KeyPair {
         key: RsaPrivateKey,
         hash: SignatureHash,
     },
+    EC {
+        key: ec::PrivateKey,
+    },
 }
 
 impl Clone for KeyPair {
@@ -441,6 +385,7 @@ impl Clone for KeyPair {
                 key: key.clone(),
                 hash: *hash,
             },
+            Self::EC { key } => Self::EC { key: key.clone() },
         }
     }
 }
@@ -454,6 +399,7 @@ impl std::fmt::Debug for KeyPair {
                 key.verifying_key().as_bytes()
             ),
             KeyPair::RSA { .. } => write!(f, "RSA {{ (hidden) }}"),
+            KeyPair::EC { .. } => write!(f, "EC {{ (hidden) }}"),
         }
     }
 }
@@ -487,6 +433,9 @@ impl KeyPair {
                     hash: *hash,
                 }
             }
+            KeyPair::EC { ref key } => PublicKey::EC {
+                key: key.to_public_key(),
+            },
         })
     }
 
@@ -495,6 +444,7 @@ impl KeyPair {
         match *self {
             KeyPair::Ed25519(_) => ED25519.0,
             KeyPair::RSA { ref hash, .. } => hash.name().0,
+            KeyPair::EC { ref key } => key.algorithm(),
         }
     }
 
@@ -527,6 +477,10 @@ impl KeyPair {
                 bytes: rsa_signature(hash, key, to_sign)?,
                 hash: *hash,
             }),
+            KeyPair::EC { ref key } => Ok(Signature::ECDSA {
+                algorithm: key.algorithm(),
+                signature: ec_signature(key, to_sign)?,
+            }),
         }
     }
 
@@ -555,6 +509,13 @@ impl KeyPair {
                 buffer.extend_ssh_string(name.0.as_bytes());
                 buffer.extend_ssh_string(&signature);
             }
+            KeyPair::EC { ref key } => {
+                let algorithm = key.algorithm().as_bytes();
+                let signature = ec_signature(key, to_sign.as_ref())?;
+                buffer.push_u32_be((algorithm.len() + signature.len() + 8) as u32);
+                buffer.extend_ssh_string(algorithm);
+                buffer.extend_ssh_string(&signature);
+            }
         }
         Ok(())
     }
@@ -579,6 +540,13 @@ impl KeyPair {
                 buffer.extend_ssh_string(name.0.as_bytes());
                 buffer.extend_ssh_string(&signature);
             }
+            KeyPair::EC { ref key } => {
+                let signature = ec_signature(key, buffer)?;
+                let algorithm = key.algorithm().as_bytes();
+                buffer.push_u32_be((algorithm.len() + signature.len() + 8) as u32);
+                buffer.extend_ssh_string(algorithm);
+                buffer.extend_ssh_string(&signature);
+            }
         }
         Ok(())
     }
@@ -591,6 +559,7 @@ impl KeyPair {
                 key: key.clone(),
                 hash,
             }),
+            KeyPair::EC { .. } => None,
         }
     }
 }
@@ -637,6 +606,19 @@ fn rsa_signature(hash: &SignatureHash, key: &RsaPrivateKey, b: &[u8]) -> Result<
     Ok(signing_key.to_vec())
 }
 
+fn ec_signature(key: &ec::PrivateKey, b: &[u8]) -> Result<Vec<u8>, Error> {
+    let (r, s) = key.try_sign(b)?;
+    let mut buf = Vec::new();
+    buf.extend_ssh_mpint(&r);
+    buf.extend_ssh_mpint(&s);
+    Ok(buf)
+}
+
+fn ec_verify(key: &ec::PublicKey, b: &[u8], sig: &[u8]) -> Result<(), Error> {
+    let mut reader = sig.reader(0);
+    key.verify(b, reader.read_mpint()?, reader.read_mpint()?)
+}
+
 /// Parse a public key from a byte slice.
 pub fn parse_public_key(p: &[u8], refer_hash: Option<SignatureHash>) -> Result<PublicKey, Error> {
     let mut pos = p.reader(0);
@@ -681,21 +663,22 @@ pub fn parse_public_key(p: &[u8], refer_hash: Option<SignatureHash>) -> Result<P
             });
         }
     }
-    if t == b"ecdsa-sha2-nistp256" {
-        if pos.read_string()? != b"nistp256" {
+    if t == crate::KEYTYPE_ECDSA_SHA2_NISTP256
+        || t == crate::KEYTYPE_ECDSA_SHA2_NISTP384
+        || t == crate::KEYTYPE_ECDSA_SHA2_NISTP521
+    {
+        let ident = pos.read_string()?;
+        let sec1_bytes = pos.read_string()?;
+        let key = ec::PublicKey::from_sec1_bytes(t, sec1_bytes)?;
+        if ident != key.ident().as_bytes() {
             return Err(Error::CouldNotReadKey);
         }
-        let sec1_bytes = pos.read_string()?;
-        let key = p256::PublicKey::from_sec1_bytes(sec1_bytes)?;
-        return Ok(PublicKey::P256(key));
-    }
-    if t == b"ecdsa-sha2-nistp521" {
-        if pos.read_string()? != b"nistp521" {
-            return Err(Error::CouldNotReadKey);
-        }
-        let sec1_bytes = pos.read_string()?;
-        let key = p521::PublicKey::from_sec1_bytes(sec1_bytes)?;
-        return Ok(PublicKey::P521(key));
+        return Ok(PublicKey::EC { key });
     }
     Err(Error::CouldNotReadKey)
+}
+
+/// Obtain a cryptographic-safe random number generator.
+pub fn safe_rng() -> impl rand::CryptoRng + rand::RngCore {
+    rand::thread_rng()
 }
