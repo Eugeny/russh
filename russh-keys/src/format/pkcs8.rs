@@ -284,14 +284,17 @@ fn read_key(reader: &mut BERReaderSeq) -> Result<Rsa<Private>, Error>{
     )?)
 }
 
+#[allow(unused_must_use)]
 #[cfg(not(feature = "openssl"))]
 fn read_key(reader: &mut BERReaderSeq) -> Result<RsaPrivateKey, Error> {
     let n = BigUint::from_bytes_be(&reader.next().read_biguint()?.to_bytes_be());
     let e = BigUint::from_bytes_be(&reader.next().read_biguint()?.to_bytes_be());
     let d = BigUint::from_bytes_be(&reader.next().read_biguint()?.to_bytes_be());
-    let _ = &reader.next().read_biguint()?.to_bytes_be();
     let p = BigUint::from_bytes_be(&reader.next().read_biguint()?.to_bytes_be());
     let q = BigUint::from_bytes_be(&reader.next().read_biguint()?.to_bytes_be());
+    &reader.next().read_biguint()?.to_bytes_be();
+    &reader.next().read_biguint()?.to_bytes_be();
+    &reader.next().read_biguint()?.to_bytes_be();
     Ok(RsaPrivateKey::from_components(n, e, d, vec![p, q])?)
 }
 
