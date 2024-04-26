@@ -26,10 +26,10 @@ use {
 #[cfg(not(feature = "openssl"))]
 use {
     rsa::{
-        pss::{Pss, SigningKey},
+        pkcs1v15::{Pkcs1v15Sign, SigningKey},
         sha2::Sha512,
         sha2::{Digest, Sha256},
-        signature::{RandomizedSigner, SignatureEncoding},
+        signature::SignatureEncoding,
         traits::PublicKeyParts,
         BigUint, RsaPrivateKey, RsaPublicKey,
     },
@@ -313,9 +313,9 @@ impl PublicKey {
             #[cfg(not(feature = "openssl"))]
             PublicKey::RSA { ref key, ref hash } => {
                 let pss = match hash {
-                    SignatureHash::SHA1 => Pss::new::<Sha1>(),
-                    SignatureHash::SHA2_256 => Pss::new::<Sha256>(),
-                    SignatureHash::SHA2_512 => Pss::new::<Sha512>(),
+                    SignatureHash::SHA1 => Pkcs1v15Sign::new::<Sha1>(),
+                    SignatureHash::SHA2_256 => Pkcs1v15Sign::new::<Sha256>(),
+                    SignatureHash::SHA2_512 => Pkcs1v15Sign::new::<Sha512>(),
                 };
                 key.verify(pss, buffer, sig).is_ok()
             }
@@ -591,16 +591,15 @@ fn rsa_signature(
 #[cfg(not(feature = "openssl"))]
 fn rsa_signature(hash: &SignatureHash, key: &RsaPrivateKey, b: &[u8]) -> Result<Vec<u8>, Error> {
     let private_key = key.clone();
-    let mut rng = OsRng;
 
     let signing_key = match hash {
         SignatureHash::SHA2_256 => {
-            SigningKey::<Sha256>::new(private_key).sign_with_rng(&mut rng, b)
+            SigningKey::<Sha256>::new(private_key).sign(b)
         }
         SignatureHash::SHA2_512 => {
-            SigningKey::<Sha512>::new(private_key).sign_with_rng(&mut rng, b)
+            SigningKey::<Sha512>::new(private_key).sign(b)
         }
-        SignatureHash::SHA1 => SigningKey::<Sha1>::new(private_key).sign_with_rng(&mut rng, b),
+        SignatureHash::SHA1 => SigningKey::<Sha1>::new(private_key).sign(b),
     };
 
     Ok(signing_key.to_vec())
