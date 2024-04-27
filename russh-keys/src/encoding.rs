@@ -41,6 +41,20 @@ pub trait Encoding {
     fn extend_list<A: Bytes, I: Iterator<Item = A>>(&mut self, list: I);
     /// Push an SSH-encoded empty list.
     fn write_empty_list(&mut self);
+    /// Push an SSH-encoded value.
+    fn extend_ssh<T: SshWrite>(&mut self, v: &T) {
+        v.write_ssh(self)
+    }
+    /// Push a nested SSH-encoded value.
+    fn extend_wrapped<F>(&mut self, write: F)
+    where
+        F: FnOnce(&mut Self);
+}
+
+/// Trait for writing value in SSH-encoded format.
+pub trait SshWrite {
+    /// Write the value.
+    fn write_ssh<E: Encoding + ?Sized>(&self, encoder: &mut E);
 }
 
 /// Encoding length of the given mpint.
@@ -109,6 +123,20 @@ impl Encoding for Vec<u8> {
     fn write_empty_list(&mut self) {
         self.extend([0, 0, 0, 0]);
     }
+
+    fn extend_wrapped<F>(&mut self, write: F)
+    where
+        F: FnOnce(&mut Self),
+    {
+        let len_offset = self.len();
+        #[allow(clippy::unwrap_used)] // writing into Vec<> can't panic
+        self.write_u32::<BigEndian>(0).unwrap();
+        let data_offset = self.len();
+        write(self);
+        let data_len = self.len() - data_offset;
+        #[allow(clippy::indexing_slicing)] // length is known
+        BigEndian::write_u32(&mut self[len_offset..], data_len as u32);
+    }
 }
 
 impl Encoding for CryptoVec {
@@ -162,6 +190,19 @@ impl Encoding for CryptoVec {
 
     fn write_empty_list(&mut self) {
         self.extend(&[0, 0, 0, 0]);
+    }
+
+    fn extend_wrapped<F>(&mut self, write: F)
+    where
+        F: FnOnce(&mut Self),
+    {
+        let len_offset = self.len();
+        self.push_u32_be(0);
+        let data_offset = self.len();
+        write(self);
+        let data_len = self.len() - data_offset;
+        #[allow(clippy::indexing_slicing)] // length is known
+        BigEndian::write_u32(&mut self[len_offset..], data_len as u32);
     }
 }
 
@@ -244,4 +285,14 @@ impl<'a> Position<'a> {
             Err(Error::IndexOutOfBounds)
         }
     }
+
+    pub fn read_ssh<T: SshRead<'a>>(&mut self) -> Result<T, Error> {
+        T::read_ssh(self)
+    }
+}
+
+/// Trait for reading value in SSH-encoded format.
+pub trait SshRead<'a>: Sized + 'a {
+    /// Read the value from a position.
+    fn read_ssh(pos: &mut Position<'a>) -> Result<Self, Error>;
 }

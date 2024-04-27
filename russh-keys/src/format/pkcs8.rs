@@ -4,26 +4,20 @@ use std::convert::TryFrom;
 use aes::cipher::{BlockDecryptMut, BlockEncryptMut, KeyIvInit};
 use bit_vec::BitVec;
 use block_padding::{NoPadding, Pkcs7};
-#[cfg(feature = "openssl")]
-use openssl::pkey::Private;
-#[cfg(feature = "openssl")]
-use openssl::rsa::Rsa;
 #[cfg(test)]
 use rand_core::OsRng;
 use yasna::BERReaderSeq;
 use {std, yasna};
 
 use super::Encryption;
-#[cfg(feature = "openssl")]
 use crate::key::SignatureHash;
-use crate::{key, Error};
+use crate::{key, protocol, Error};
 
 const PBES2: &[u64] = &[1, 2, 840, 113549, 1, 5, 13];
 const PBKDF2: &[u64] = &[1, 2, 840, 113549, 1, 5, 12];
 const HMAC_SHA256: &[u64] = &[1, 2, 840, 113549, 2, 9];
 const AES256CBC: &[u64] = &[2, 16, 840, 1, 101, 3, 4, 1, 42];
 const ED25519: &[u64] = &[1, 3, 101, 112];
-#[cfg(feature = "openssl")]
 const RSA: &[u64] = &[1, 2, 840, 113549, 1, 1, 1];
 const EC_PUBLIC_KEY: &[u64] = &[1, 2, 840, 10045, 2, 1];
 const SECP256R1: &[u64] = &[1, 2, 840, 10045, 3, 1, 7];
@@ -168,43 +162,46 @@ fn read_key_v1(reader: &mut BERReaderSeq) -> Result<key::KeyPair, Error> {
     }
 }
 
-#[cfg(feature = "openssl")]
-fn write_key_v0_rsa(writer: &mut yasna::DERWriterSeq, key: &Rsa<Private>) {
+fn write_key_v0_rsa(writer: &mut yasna::DERWriterSeq, key: &key::RsaPrivate) {
     writer.next().write_u32(0);
     // write OID
     writer.next().write_sequence(|writer| {
         writer.next().write_oid(&ObjectIdentifier::from_slice(RSA));
         writer.next().write_null()
     });
+    #[allow(clippy::unwrap_used)] // key is known to be private
+    let (sk, extra) = (
+        protocol::RsaPrivateKey::try_from(key).unwrap(),
+        key::RsaCrtExtra::try_from(key).unwrap(),
+    );
     let bytes = yasna::construct_der(|writer| {
-        #[allow(clippy::unwrap_used)] // key is known to be private
         writer.write_sequence(|writer| {
             writer.next().write_u32(0);
             use num_bigint::BigUint;
             writer
                 .next()
-                .write_biguint(&BigUint::from_bytes_be(&key.n().to_vec()));
+                .write_biguint(&BigUint::from_bytes_be(&sk.public_key.modulus));
             writer
                 .next()
-                .write_biguint(&BigUint::from_bytes_be(&key.e().to_vec()));
+                .write_biguint(&BigUint::from_bytes_be(&sk.public_key.public_exponent));
             writer
                 .next()
-                .write_biguint(&BigUint::from_bytes_be(&key.d().to_vec()));
+                .write_biguint(&BigUint::from_bytes_be(&sk.private_exponent));
             writer
                 .next()
-                .write_biguint(&BigUint::from_bytes_be(&key.p().unwrap().to_vec()));
+                .write_biguint(&BigUint::from_bytes_be(&sk.prime1));
             writer
                 .next()
-                .write_biguint(&BigUint::from_bytes_be(&key.q().unwrap().to_vec()));
+                .write_biguint(&BigUint::from_bytes_be(&sk.prime2));
             writer
                 .next()
-                .write_biguint(&BigUint::from_bytes_be(&key.dmp1().unwrap().to_vec()));
+                .write_biguint(&BigUint::from_bytes_be(&extra.dp));
             writer
                 .next()
-                .write_biguint(&BigUint::from_bytes_be(&key.dmq1().unwrap().to_vec()));
+                .write_biguint(&BigUint::from_bytes_be(&extra.dq));
             writer
                 .next()
-                .write_biguint(&BigUint::from_bytes_be(&key.iqmp().unwrap().to_vec()));
+                .write_biguint(&BigUint::from_bytes_be(&sk.coefficient));
         })
     });
     writer.next().write_bytes(&bytes);
@@ -242,7 +239,6 @@ fn write_key_v0_ec(writer: &mut yasna::DERWriterSeq, key: &crate::ec::PrivateKey
 // Utility enum used for reading v0 key.
 enum KeyType {
     Unknown(ObjectIdentifier),
-    #[cfg(feature = "openssl")]
     #[allow(clippy::upper_case_acronyms)]
     RSA,
     EC(ObjectIdentifier),
@@ -252,7 +248,6 @@ fn read_key_v0(reader: &mut BERReaderSeq) -> Result<key::KeyPair, Error> {
     let key_type = reader.next().read_sequence(|reader| {
         let oid = reader.next().read_oid()?;
         Ok(match oid.components().as_slice() {
-            #[cfg(feature = "openssl")]
             RSA => {
                 reader.next().read_null()?;
                 KeyType::RSA
@@ -263,35 +258,48 @@ fn read_key_v0(reader: &mut BERReaderSeq) -> Result<key::KeyPair, Error> {
     })?;
     match key_type {
         KeyType::Unknown(_) => Err(Error::CouldNotReadKey),
-        #[cfg(feature = "openssl")]
         KeyType::RSA => {
             let seq = &reader.next().read_bytes()?;
-            let rsa: Result<Rsa<Private>, Error> = yasna::parse_der(seq, |reader| {
+            let (sk, extra) = yasna::parse_der(seq, |reader| {
                 reader.read_sequence(|reader| {
                     let version = reader.next().read_u32()?;
                     if version != 0 {
                         return Ok(Err(Error::CouldNotReadKey));
                     }
-                    use openssl::bn::BigNum;
-                    let mut read_key = || -> Result<Rsa<Private>, Error> {
-                        Ok(Rsa::from_private_components(
-                            BigNum::from_slice(&reader.next().read_biguint()?.to_bytes_be())?,
-                            BigNum::from_slice(&reader.next().read_biguint()?.to_bytes_be())?,
-                            BigNum::from_slice(&reader.next().read_biguint()?.to_bytes_be())?,
-                            BigNum::from_slice(&reader.next().read_biguint()?.to_bytes_be())?,
-                            BigNum::from_slice(&reader.next().read_biguint()?.to_bytes_be())?,
-                            BigNum::from_slice(&reader.next().read_biguint()?.to_bytes_be())?,
-                            BigNum::from_slice(&reader.next().read_biguint()?.to_bytes_be())?,
-                            BigNum::from_slice(&reader.next().read_biguint()?.to_bytes_be())?,
-                        )?)
-                    };
-                    Ok(read_key())
+                    let (n, e, d, p, q, dmp1, dmq1, iqmp) = (
+                        reader.next().read_biguint()?.to_bytes_be(),
+                        reader.next().read_biguint()?.to_bytes_be(),
+                        reader.next().read_biguint()?.to_bytes_be(),
+                        reader.next().read_biguint()?.to_bytes_be(),
+                        reader.next().read_biguint()?.to_bytes_be(),
+                        reader.next().read_biguint()?.to_bytes_be(),
+                        reader.next().read_biguint()?.to_bytes_be(),
+                        reader.next().read_biguint()?.to_bytes_be(),
+                    );
+                    Ok(Ok((
+                        protocol::RsaPrivateKey {
+                            public_key: protocol::RsaPublicKey {
+                                modulus: n.into(),
+                                public_exponent: e.into(),
+                            },
+                            private_exponent: d.into(),
+                            prime1: p.into(),
+                            prime2: q.into(),
+                            coefficient: iqmp.into(),
+                            comment: Cow::Borrowed(b""),
+                        },
+                        key::RsaCrtExtra {
+                            dp: dmp1.into(),
+                            dq: dmq1.into(),
+                        },
+                    )))
                 })
-            })?;
-            Ok(key::KeyPair::RSA {
-                key: rsa?,
-                hash: SignatureHash::SHA2_256,
-            })
+            })??;
+            Ok(key::KeyPair::new_rsa_with_hash(
+                &sk,
+                Some(&extra),
+                SignatureHash::SHA2_256,
+            )?)
         }
         KeyType::EC(oid) => {
             let private_key = reader.next().read_bytes()?;
@@ -351,7 +359,6 @@ fn test_read_write_pkcs8() {
     match key {
         key::KeyPair::Ed25519 { .. } => println!("Ed25519"),
         key::KeyPair::EC { .. } => println!("EC"),
-        #[cfg(feature = "openssl")]
         key::KeyPair::RSA { .. } => println!("RSA"),
     }
 }
@@ -403,7 +410,6 @@ pub fn encode_pkcs8(key: &key::KeyPair) -> Vec<u8> {
     yasna::construct_der(|writer| {
         writer.write_sequence(|writer| match *key {
             key::KeyPair::Ed25519(ref pair) => write_key_v1(writer, pair),
-            #[cfg(feature = "openssl")]
             key::KeyPair::RSA { ref key, .. } => write_key_v0_rsa(writer, key),
             key::KeyPair::EC { ref key, .. } => write_key_v0_ec(writer, key),
         })

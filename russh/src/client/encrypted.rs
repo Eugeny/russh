@@ -672,9 +672,6 @@ impl Session {
                             match r.read_string() {
                                 Ok(key) => {
                                     let key2 = <&[u8]>::clone(&key);
-                                    #[cfg(not(feature = "openssl"))]
-                                    let key = parse_public_key(key).map_err(crate::Error::from);
-                                    #[cfg(feature = "openssl")]
                                     let key =
                                         parse_public_key(key, None).map_err(crate::Error::from);
                                     match key {
