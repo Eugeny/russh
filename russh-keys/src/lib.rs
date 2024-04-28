@@ -10,11 +10,11 @@
 //! opening key files, deciphering encrypted keys, and dealing with
 //! agents.
 //!
-//! The following example (which uses the `openssl` feature) shows how
-//! to do all these in a single example: start and SSH agent server,
-//! connect to it with a client, decipher an encrypted private key
-//! (the password is `b"blabla"`), send it to the agent, and ask the
-//! agent to sign a piece of data (`b"Please sign this"`, below).
+//! The following example shows how to do all these in a single example:
+//! start and SSH agent server, connect to it with a client, decipher
+//! an encrypted private key (the password is `b"blabla"`), send it to
+//! the agent, and ask the agent to sign a piece of data
+//! (`b"Please sign this"`, below).
 //!
 //!```
 //! use russh_keys::*;
@@ -30,7 +30,7 @@
 //!
 //! const PKCS8_ENCRYPTED: &'static str = "-----BEGIN ENCRYPTED PRIVATE KEY-----\nMIIFLTBXBgkqhkiG9w0BBQ0wSjApBgkqhkiG9w0BBQwwHAQITo1O0b8YrS0CAggA\nMAwGCCqGSIb3DQIJBQAwHQYJYIZIAWUDBAEqBBBtLH4T1KOfo1GGr7salhR8BIIE\n0KN9ednYwcTGSX3hg7fROhTw7JAJ1D4IdT1fsoGeNu2BFuIgF3cthGHe6S5zceI2\nMpkfwvHbsOlDFWMUIAb/VY8/iYxhNmd5J6NStMYRC9NC0fVzOmrJqE1wITqxtORx\nIkzqkgFUbaaiFFQPepsh5CvQfAgGEWV329SsTOKIgyTj97RxfZIKA+TR5J5g2dJY\nj346SvHhSxJ4Jc0asccgMb0HGh9UUDzDSql0OIdbnZW5KzYJPOx+aDqnpbz7UzY/\nP8N0w/pEiGmkdkNyvGsdttcjFpOWlLnLDhtLx8dDwi/sbEYHtpMzsYC9jPn3hnds\nTcotqjoSZ31O6rJD4z18FOQb4iZs3MohwEdDd9XKblTfYKM62aQJWH6cVQcg+1C7\njX9l2wmyK26Tkkl5Qg/qSfzrCveke5muZgZkFwL0GCcgPJ8RixSB4GOdSMa/hAMU\nkvFAtoV2GluIgmSe1pG5cNMhurxM1dPPf4WnD+9hkFFSsMkTAuxDZIdDk3FA8zof\nYhv0ZTfvT6V+vgH3Hv7Tqcxomy5Qr3tj5vvAqqDU6k7fC4FvkxDh2mG5ovWvc4Nb\nXv8sed0LGpYitIOMldu6650LoZAqJVv5N4cAA2Edqldf7S2Iz1QnA/usXkQd4tLa\nZ80+sDNv9eCVkfaJ6kOVLk/ghLdXWJYRLenfQZtVUXrPkaPpNXgD0dlaTN8KuvML\nUw/UGa+4ybnPsdVflI0YkJKbxouhp4iB4S5ACAwqHVmsH5GRnujf10qLoS7RjDAl\no/wSHxdT9BECp7TT8ID65u2mlJvH13iJbktPczGXt07nBiBse6OxsClfBtHkRLzE\nQF6UMEXsJnIIMRfrZQnduC8FUOkfPOSXc8r9SeZ3GhfbV/DmWZvFPCpjzKYPsM5+\nN8Bw/iZ7NIH4xzNOgwdp5BzjH9hRtCt4sUKVVlWfEDtTnkHNOusQGKu7HkBF87YZ\nRN/Nd3gvHob668JOcGchcOzcsqsgzhGMD8+G9T9oZkFCYtwUXQU2XjMN0R4VtQgZ\nrAxWyQau9xXMGyDC67gQ5xSn+oqMK0HmoW8jh2LG/cUowHFAkUxdzGadnjGhMOI2\nzwNJPIjF93eDF/+zW5E1l0iGdiYyHkJbWSvcCuvTwma9FIDB45vOh5mSR+YjjSM5\nnq3THSWNi7Cxqz12Q1+i9pz92T2myYKBBtu1WDh+2KOn5DUkfEadY5SsIu/Rb7ub\n5FBihk2RN3y/iZk+36I69HgGg1OElYjps3D+A9AjVby10zxxLAz8U28YqJZm4wA/\nT0HLxBiVw+rsHmLP79KvsT2+b4Diqih+VTXouPWC/W+lELYKSlqnJCat77IxgM9e\nYIhzD47OgWl33GJ/R10+RDoDvY4koYE+V5NLglEhbwjloo9Ryv5ywBJNS7mfXMsK\n/uf+l2AscZTZ1mhtL38efTQCIRjyFHc3V31DI0UdETADi+/Omz+bXu0D5VvX+7c6\nb1iVZKpJw8KUjzeUV8yOZhvGu3LrQbhkTPVYL555iP1KN0Eya88ra+FUKMwLgjYr\nJkUx4iad4dTsGPodwEP/Y9oX/Qk3ZQr+REZ8lg6IBoKKqqrQeBJ9gkm1jfKE6Xkc\nCog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux\n-----END ENCRYPTED PRIVATE KEY-----\n";
 //!
-//! #[cfg(all(unix, feature = "openssl"))]
+//! #[cfg(unix)]
 //! fn main() {
 //!    env_logger::try_init().unwrap_or(());
 //!    let dir = tempdir::TempDir::new("russh").unwrap();
@@ -58,7 +58,7 @@
 //!    }).unwrap()
 //! }
 //!
-//! #[cfg(any(not(unix), not(feature = "openssl")))]
+//! #[cfg(not(unix))]
 //! fn main() {}
 //!
 //! ```
@@ -80,10 +80,18 @@ use thiserror::Error;
 pub mod ec;
 pub mod encoding;
 pub mod key;
+pub mod protocol;
 pub mod signature;
 
 mod format;
 pub use format::*;
+
+#[cfg(feature = "openssl")]
+#[path = "backend_openssl.rs"]
+mod backend;
+#[cfg(not(feature = "openssl"))]
+#[path = "backend_rust.rs"]
+mod backend;
 
 /// A module to write SSH agent.
 pub mod agent;
@@ -139,6 +147,13 @@ pub enum Error {
     #[cfg(feature = "openssl")]
     #[error(transparent)]
     Openssl(#[from] openssl::error::ErrorStack),
+
+    #[cfg(not(feature = "openssl"))]
+    #[error("Rsa: {0}")]
+    Rsa(#[from] rsa::Error),
+    #[cfg(not(feature = "openssl"))]
+    #[error("Pkcs1: {0}")]
+    Pkcs1(#[from] pkcs1::Error),
 
     #[error(transparent)]
     Pad(#[from] PadError),
@@ -202,11 +217,7 @@ pub fn load_public_key<P: AsRef<Path>>(path: P) -> Result<key::PublicKey, Error>
 /// ```
 pub fn parse_public_key_base64(key: &str) -> Result<key::PublicKey, Error> {
     let base = BASE64_MIME.decode(key.as_bytes())?;
-    key::parse_public_key(
-        &base,
-        #[cfg(feature = "openssl")]
-        None,
-    )
+    key::parse_public_key(&base, None)
 }
 
 pub trait PublicKeyBase64 {
@@ -234,17 +245,13 @@ impl PublicKeyBase64 for key::PublicKey {
                     .unwrap();
                 s.extend_from_slice(publickey.as_bytes());
             }
-            #[cfg(feature = "openssl")]
             key::PublicKey::RSA { ref key, .. } => {
                 use encoding::Encoding;
                 let name = b"ssh-rsa";
                 #[allow(clippy::unwrap_used)] // Vec<>.write_all can't fail
                 s.write_u32::<BigEndian>(name.len() as u32).unwrap();
                 s.extend_from_slice(name);
-                #[allow(clippy::unwrap_used)] // TODO check
-                s.extend_ssh_mpint(&key.0.rsa().unwrap().e().to_vec());
-                #[allow(clippy::unwrap_used)] // TODO check
-                s.extend_ssh_mpint(&key.0.rsa().unwrap().n().to_vec());
+                s.extend_ssh(&protocol::RsaPublicKey::from(key));
             }
             key::PublicKey::EC { ref key } => {
                 write_ec_public_key(&mut s, key);
@@ -268,11 +275,9 @@ impl PublicKeyBase64 for key::KeyPair {
                 s.write_u32::<BigEndian>(public.len() as u32).unwrap();
                 s.extend_from_slice(public.as_slice());
             }
-            #[cfg(feature = "openssl")]
             key::KeyPair::RSA { ref key, .. } => {
                 use encoding::Encoding;
-                s.extend_ssh_mpint(&key.e().to_vec());
-                s.extend_ssh_mpint(&key.n().to_vec());
+                s.extend_ssh(&protocol::RsaPublicKey::from(key));
             }
             key::KeyPair::EC { ref key } => {
                 write_ec_public_key(&mut s, &key.to_public_key());
@@ -485,7 +490,7 @@ mod test {
     use std::fs::File;
     use std::io::Write;
 
-    #[cfg(all(unix, feature = "openssl"))]
+    #[cfg(unix)]
     use futures::Future;
 
     use super::*;
@@ -509,7 +514,6 @@ dP3jryYgvsCIBAA5jMWSjrmnOTXhidqcOy4xYCrAttzSnZ/cUadfBenL+DQq6neffw7j8r
 sJWR7W+cGvJ/vLsw==
 -----END OPENSSH PRIVATE KEY-----";
 
-    #[cfg(feature = "openssl")]
     const RSA_KEY: &str = "-----BEGIN OPENSSH PRIVATE KEY-----
 b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAABFwAAAAdzc2gtcn
 NhAAAAAwEAAQAAAQEAuSvQ9m76zhRB4m0BUKPf17lwccj7KQ1Qtse63AOqP/VYItqEH8un
@@ -551,7 +555,6 @@ QR+u0AypRPmzHnOPAAAAEXJvb3RAMTQwOTExNTQ5NDBkAQ==
     }
 
     #[test]
-    #[cfg(feature = "openssl")]
     fn test_decode_rsa_secret_key() {
         env_logger::try_init().unwrap_or(());
         decode_secret_key(RSA_KEY, None).unwrap();
@@ -625,7 +628,6 @@ Ve0k2ddxoEsSE15H4lgNHM2iuYKzIqZJOReHRCTff6QGgMYPDqDfFfL1Hc1Ntql0pwAAAA
     }
 
     #[test]
-    #[cfg(feature = "openssl")]
     fn test_fingerprint() {
         let key = parse_public_key_base64(
             "AAAAC3NzaC1lZDI1NTE5AAAAILagOJFgwaMNhBWQINinKOXmqS4Gh5NgxgriXwdOoINJ",
@@ -727,7 +729,6 @@ Ve0k2ddxoEsSE15H4lgNHM2iuYKzIqZJOReHRCTff6QGgMYPDqDfFfL1Hc1Ntql0pwAAAA
     }
 
     #[test]
-    #[cfg(feature = "openssl")]
     fn test_srhb() {
         env_logger::try_init().unwrap_or(());
         let key = "AAAAB3NzaC1yc2EAAAADAQABAAACAQC0Xtz3tSNgbUQAXem4d+d6hMx7S8Nwm/DOO2AWyWCru+n/+jQ7wz2b5+3oG2+7GbWZNGj8HCc6wJSA3jUsgv1N6PImIWclD14qvoqY3Dea1J0CJgXnnM1xKzBz9C6pDHGvdtySg+yzEO41Xt4u7HFn4Zx5SGuI2NBsF5mtMLZXSi33jCIWVIkrJVd7sZaY8jiqeVZBB/UvkLPWewGVuSXZHT84pNw4+S0Rh6P6zdNutK+JbeuO+5Bav4h9iw4t2sdRkEiWg/AdMoSKmo97Gigq2mKdW12ivnXxz3VfxrCgYJj9WwaUUWSfnAju5SiNly0cTEAN4dJ7yB0mfLKope1kRhPsNaOuUmMUqlu/hBDM/luOCzNjyVJ+0LLB7SV5vOiV7xkVd4KbEGKou8eeCR3yjFazUe/D1pjYPssPL8cJhTSuMc+/UC9zD8yeEZhB9V+vW4NMUR+lh5+XeOzenl65lWYd/nBZXLBbpUMf1AOfbz65xluwCxr2D2lj46iApSIpvE63i3LzFkbGl9GdUiuZJLMFJzOWdhGGc97cB5OVyf8umZLqMHjaImxHEHrnPh1MOVpv87HYJtSBEsN4/omINCMZrk++CRYAIRKRpPKFWV7NQHcvw3m7XLR3KaTYe+0/MINIZwGdou9fLUU3zSd521vDjA/weasH0CyDHq7sZw==";
@@ -736,7 +737,6 @@ Ve0k2ddxoEsSE15H4lgNHM2iuYKzIqZJOReHRCTff6QGgMYPDqDfFfL1Hc1Ntql0pwAAAA
     }
 
     #[test]
-    #[cfg(feature = "openssl")]
     fn test_nikao() {
         env_logger::try_init().unwrap_or(());
         let key = "-----BEGIN RSA PRIVATE KEY-----
@@ -771,7 +771,6 @@ QaChXiDsryJZwsRnruvMRX9nedtqHrgnIsJLTXjppIhGhq5Kg4RQfOU=
     }
 
     #[test]
-    #[cfg(feature = "openssl")]
     fn test_decode_pkcs8_rsa_secret_key() {
         // Generated using: ssh-keygen -t rsa -b 1024 -m pkcs8 -f $file
         let key = "-----BEGIN PRIVATE KEY-----
@@ -971,7 +970,6 @@ ZgmnWhuwhyxErC5UkMHiEvTOZllxBvefs7XeJqL11pqQIHY4Gb5OQGiCNHiRRjg0egAAAA
         ecdsa_sign_verify(key, public);
     }
 
-    #[cfg(feature = "openssl")]
     pub const PKCS8_RSA: &str = "-----BEGIN RSA PRIVATE KEY-----
 MIIEpAIBAAKCAQEAwBGetHjW+3bDQpVktdemnk7JXgu1NBWUM+ysifYLDBvJ9ttX
 GNZSyQKA4v/dNr0FhAJ8I9BuOTjYCy1YfKylhl5D/DiSSXFPsQzERMmGgAlYvU2U
@@ -1002,7 +1000,6 @@ xV/JrzLAwPoKk3bkqys3bUmgo6DxVC/6RmMwPQ0rmpw78kOgEej90g==
 ";
 
     #[test]
-    #[cfg(feature = "openssl")]
     fn test_loewenheim() -> Result<(), Error> {
         env_logger::try_init().unwrap_or(());
         let key = "-----BEGIN RSA PRIVATE KEY-----
@@ -1045,7 +1042,6 @@ KJaj7gc0n6gmKY6r0/Ddufy1JZ6eihBCSJ64RARBXeg2rZpyT+xxhMEZLK5meOeR
     }
 
     #[test]
-    #[cfg(feature = "openssl")]
     fn test_o01eg() {
         env_logger::try_init().unwrap_or(());
 
@@ -1083,14 +1079,12 @@ br8gXU8KyiY9sZVbmplRPF+ar462zcI2kt0a18mr0vbrdqp2eMjb37QDbVBJ+rPE
         decode_secret_key(key, Some("12345")).unwrap();
     }
     #[test]
-    #[cfg(feature = "openssl")]
     fn test_pkcs8() {
         env_logger::try_init().unwrap_or(());
         println!("test");
         decode_secret_key(PKCS8_RSA, Some("blabla")).unwrap();
     }
 
-    #[cfg(feature = "openssl")]
     const PKCS8_ENCRYPTED: &str = "-----BEGIN ENCRYPTED PRIVATE KEY-----
 MIIFLTBXBgkqhkiG9w0BBQ0wSjApBgkqhkiG9w0BBQwwHAQITo1O0b8YrS0CAggA
 MAwGCCqGSIb3DQIJBQAwHQYJYIZIAWUDBAEqBBBtLH4T1KOfo1GGr7salhR8BIIE
@@ -1123,7 +1117,6 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
 -----END ENCRYPTED PRIVATE KEY-----";
 
     #[test]
-    #[cfg(feature = "openssl")]
     fn test_gpg() {
         env_logger::try_init().unwrap_or(());
         let algo = [115, 115, 104, 45, 114, 115, 97];
@@ -1156,7 +1149,6 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
     }
 
     #[test]
-    #[cfg(feature = "openssl")]
     fn test_pkcs8_encrypted() {
         env_logger::try_init().unwrap_or(());
         println!("test");
@@ -1199,7 +1191,6 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
                 assert!(public.verify_detached(a, sig));
             }
             key::KeyPair::EC { .. } => {}
-            #[cfg(feature = "openssl")]
             _ => {}
         }
 
@@ -1217,14 +1208,14 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
     }
 
     #[tokio::test]
-    #[cfg(all(unix, feature = "openssl"))]
+    #[cfg(unix)]
     async fn test_client_agent_rsa() {
         let key = decode_secret_key(PKCS8_ENCRYPTED, Some("blabla")).unwrap();
         test_client_agent(key).await.expect("ssh-agent test failed")
     }
 
     #[tokio::test]
-    #[cfg(all(unix, feature = "openssl"))]
+    #[cfg(unix)]
     async fn test_client_agent_openssh_rsa() {
         let key = decode_secret_key(RSA_KEY, None).unwrap();
         test_client_agent(key).await.expect("ssh-agent test failed")
@@ -1232,7 +1223,6 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
 
     #[test]
     #[cfg(unix)]
-    #[cfg(feature = "openssl")]
     fn test_agent() {
         env_logger::try_init().unwrap_or(());
         let dir = tempdir::TempDir::new("russh").unwrap();

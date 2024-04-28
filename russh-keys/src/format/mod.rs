@@ -1,11 +1,6 @@
 use std::io::Write;
 
-#[cfg(not(feature = "openssl"))]
-use data_encoding::BASE64_MIME;
-#[cfg(feature = "openssl")]
 use data_encoding::{BASE64_MIME, HEXLOWER_PERMISSIVE};
-#[cfg(feature = "openssl")]
-use openssl::rsa::Rsa;
 
 use super::is_base64_char;
 use crate::{key, Error};
@@ -13,9 +8,7 @@ use crate::{key, Error};
 pub mod openssh;
 pub use self::openssh::*;
 
-#[cfg(feature = "openssl")]
 pub mod pkcs5;
-#[cfg(feature = "openssl")]
 pub use self::pkcs5::*;
 
 pub mod pkcs8;
@@ -33,10 +26,8 @@ pub enum Encryption {
 
 #[derive(Clone, Debug)]
 enum Format {
-    #[cfg(feature = "openssl")]
     Rsa,
     Openssh,
-    #[cfg(feature = "openssl")]
     Pkcs5Encrypted(Encryption),
     Pkcs8Encrypted,
     Pkcs8,
@@ -57,35 +48,22 @@ pub fn decode_secret_key(secret: &str, password: Option<&str>) -> Result<key::Ke
                 if l.chars().all(is_base64_char) {
                     sec.push_str(l)
                 } else if l.starts_with(AES_128_CBC) {
-                    #[cfg(feature = "openssl")]
-                    {
-                        let iv_: Vec<u8> = HEXLOWER_PERMISSIVE
-                            .decode(l.split_at(AES_128_CBC.len()).1.as_bytes())?;
-                        if iv_.len() != 16 {
-                            return Err(Error::CouldNotReadKey);
-                        }
-                        let mut iv = [0; 16];
-                        iv.clone_from_slice(&iv_);
-                        format = Some(Format::Pkcs5Encrypted(Encryption::Aes128Cbc(iv)))
+                    let iv_: Vec<u8> =
+                        HEXLOWER_PERMISSIVE.decode(l.split_at(AES_128_CBC.len()).1.as_bytes())?;
+                    if iv_.len() != 16 {
+                        return Err(Error::CouldNotReadKey);
                     }
+                    let mut iv = [0; 16];
+                    iv.clone_from_slice(&iv_);
+                    format = Some(Format::Pkcs5Encrypted(Encryption::Aes128Cbc(iv)))
                 }
             }
             if l == "-----BEGIN OPENSSH PRIVATE KEY-----" {
                 started = true;
                 format = Some(Format::Openssh);
             } else if l == "-----BEGIN RSA PRIVATE KEY-----" {
-                #[cfg(not(feature = "openssl"))]
-                {
-                    return Err(Error::UnsupportedKeyType {
-                        key_type_string: "rsa".to_owned(),
-                        key_type_raw: "rsa".as_bytes().to_vec(),
-                    });
-                }
-                #[cfg(feature = "openssl")]
-                {
-                    started = true;
-                    format = Some(Format::Rsa);
-                }
+                started = true;
+                format = Some(Format::Rsa);
             } else if l == "-----BEGIN ENCRYPTED PRIVATE KEY-----" {
                 started = true;
                 format = Some(Format::Pkcs8Encrypted);
@@ -100,9 +78,7 @@ pub fn decode_secret_key(secret: &str, password: Option<&str>) -> Result<key::Ke
     let secret = BASE64_MIME.decode(secret.as_bytes())?;
     match format {
         Some(Format::Openssh) => decode_openssh(&secret, password),
-        #[cfg(feature = "openssl")]
         Some(Format::Rsa) => decode_rsa(&secret),
-        #[cfg(feature = "openssl")]
         Some(Format::Pkcs5Encrypted(enc)) => decode_pkcs5(&secret, password, enc),
         Some(Format::Pkcs8Encrypted) | Some(Format::Pkcs8) => {
             self::pkcs8::decode_pkcs8(&secret, password.map(|x| x.as_bytes()))
@@ -132,10 +108,9 @@ pub fn encode_pkcs8_pem_encrypted<W: Write>(
     Ok(())
 }
 
-#[cfg(feature = "openssl")]
 fn decode_rsa(secret: &[u8]) -> Result<key::KeyPair, Error> {
     Ok(key::KeyPair::RSA {
-        key: Rsa::private_key_from_der(secret)?,
+        key: crate::backend::RsaPrivate::new_from_der(secret)?,
         hash: key::SignatureHash::SHA2_256,
     })
 }

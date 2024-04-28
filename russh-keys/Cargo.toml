@@ -39,6 +39,7 @@ ctr = "0.9"
 block-padding = { version = "0.3", features = ["std"] }
 byteorder = "1.4"
 data-encoding = "2.3"
+digest = "0.10"
 dirs = "5.0"
 ecdsa = "0.16"
 ed25519-dalek = { version= "2.0", features = ["rand_core"] }
@@ -55,12 +56,14 @@ p256 = "0.13"
 p384 = "0.13"
 p521 = "0.13"
 pbkdf2 = "0.11"
+pkcs1 = "0.7"
 rand = "0.8"
 rand_core = { version = "0.6.4", features = ["std"] }
+rsa = "0.9"
 russh-cryptovec = { version = "0.7.0", path = "../cryptovec" }
 serde = { version = "1.0", features = ["derive"] }
-sha1 = "0.10"
-sha2 = "0.10"
+sha1 = { version = "0.10", features = ["oid"] }
+sha2 = { version = "0.10", features = ["oid"] }
 thiserror = "1.0"
 tokio = { version = "1.17.0", features = ["io-util", "rt-multi-thread", "time", "net"] }
 tokio-stream = { version = "0.1", features = ["net"] }
