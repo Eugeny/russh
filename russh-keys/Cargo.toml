@@ -33,7 +33,6 @@ rust-version = "1.65"
 aes = "0.8"
 async-trait = "0.1.72"
 bcrypt-pbkdf = "0.10"
-bit-vec = "0.6"
 cbc = "0.1"
 ctr = "0.9"
 block-padding = { version = "0.3", features = ["std"] }
@@ -50,7 +49,6 @@ hmac = "0.12"
 inout = { version = "0.1", features = ["std"] }
 log = "0.4"
 md5 = "0.7"
-num-bigint = "0.4"
 num-integer = "0.1"
 openssl = { version = "0.10", optional = true }
 p256 = "0.13"
