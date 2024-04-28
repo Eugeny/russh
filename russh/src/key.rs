@@ -16,6 +16,7 @@ use russh_cryptovec::CryptoVec;
 use russh_keys::ec;
 use russh_keys::encoding::*;
 use russh_keys::key::*;
+use russh_keys::protocol;
 
 #[doc(hidden)]
 pub trait PubKey {
@@ -30,16 +31,11 @@ impl PubKey for PublicKey {
                 buffer.extend_ssh_string(ED25519.0.as_bytes());
                 buffer.extend_ssh_string(public.as_bytes());
             }
-            #[cfg(feature = "openssl")]
             PublicKey::RSA { ref key, .. } => {
-                #[allow(clippy::unwrap_used)] // type known
-                let rsa = key.0.rsa().unwrap();
-                let e = rsa.e().to_vec();
-                let n = rsa.n().to_vec();
-                buffer.push_u32_be((4 + SSH_RSA.0.len() + mpint_len(&n) + mpint_len(&e)) as u32);
-                buffer.extend_ssh_string(SSH_RSA.0.as_bytes());
-                buffer.extend_ssh_mpint(&e);
-                buffer.extend_ssh_mpint(&n);
+                buffer.extend_wrapped(|buffer| {
+                    buffer.extend_ssh_string(SSH_RSA.0.as_bytes());
+                    buffer.extend_ssh(&protocol::RsaPublicKey::from(key));
+                });
             }
             PublicKey::EC { ref key } => {
                 write_ec_public_key(buffer, key);
@@ -57,14 +53,11 @@ impl PubKey for KeyPair {
                 buffer.extend_ssh_string(ED25519.0.as_bytes());
                 buffer.extend_ssh_string(public.as_slice());
             }
-            #[cfg(feature = "openssl")]
             KeyPair::RSA { ref key, .. } => {
-                let e = key.e().to_vec();
-                let n = key.n().to_vec();
-                buffer.push_u32_be((4 + SSH_RSA.0.len() + mpint_len(&n) + mpint_len(&e)) as u32);
-                buffer.extend_ssh_string(SSH_RSA.0.as_bytes());
-                buffer.extend_ssh_mpint(&e);
-                buffer.extend_ssh_mpint(&n);
+                buffer.extend_wrapped(|buffer| {
+                    buffer.extend_ssh_string(SSH_RSA.0.as_bytes());
+                    buffer.extend_ssh(&protocol::RsaPublicKey::from(key));
+                });
             }
             KeyPair::EC { ref key } => {
                 write_ec_public_key(buffer, &key.to_public_key());

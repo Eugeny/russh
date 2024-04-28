@@ -4,8 +4,6 @@ use aes::cipher::block_padding::NoPadding;
 use aes::cipher::{BlockDecryptMut, KeyIvInit, StreamCipher};
 use bcrypt_pbkdf;
 use ctr::Ctr64BE;
-#[cfg(feature = "openssl")]
-use openssl::bn::BigNum;
 
 use crate::encoding::Reader;
 use crate::{ec, key, Error, KEYTYPE_ED25519, KEYTYPE_RSA};
@@ -48,37 +46,12 @@ pub fn decode_openssh(secret: &[u8], password: Option<&str>) -> Result<key::KeyP
                     seckey.get(..32).ok_or(Error::KeyIsCorrupt)?,
                 )?;
                 return Ok(key::KeyPair::Ed25519(secret));
-            } else if key_type == KEYTYPE_RSA && cfg!(feature = "openssl") {
-                #[cfg(feature = "openssl")]
-                {
-                    let n = BigNum::from_slice(position.read_string()?)?;
-                    let e = BigNum::from_slice(position.read_string()?)?;
-                    let d = BigNum::from_slice(position.read_string()?)?;
-                    let iqmp = BigNum::from_slice(position.read_string()?)?;
-                    let p = BigNum::from_slice(position.read_string()?)?;
-                    let q = BigNum::from_slice(position.read_string()?)?;
-
-                    let mut ctx = openssl::bn::BigNumContext::new()?;
-                    let un = openssl::bn::BigNum::from_u32(1)?;
-                    let mut p1 = openssl::bn::BigNum::new()?;
-                    let mut q1 = openssl::bn::BigNum::new()?;
-                    p1.checked_sub(&p, &un)?;
-                    q1.checked_sub(&q, &un)?;
-                    let mut dmp1 = openssl::bn::BigNum::new()?; // d mod p-1
-                    dmp1.checked_rem(&d, &p1, &mut ctx)?;
-                    let mut dmq1 = openssl::bn::BigNum::new()?; // d mod q-1
-                    dmq1.checked_rem(&d, &q1, &mut ctx)?;
-
-                    let key = openssl::rsa::RsaPrivateKeyBuilder::new(n, e, d)?
-                        .set_factors(p, q)?
-                        .set_crt_params(dmp1, dmq1, iqmp)?
-                        .build();
-                    key.check_key()?;
-                    return Ok(key::KeyPair::RSA {
-                        key,
-                        hash: key::SignatureHash::SHA2_512,
-                    });
-                }
+            } else if key_type == KEYTYPE_RSA {
+                return key::KeyPair::new_rsa_with_hash(
+                    &position.read_ssh()?,
+                    None,
+                    key::SignatureHash::SHA2_512,
+                );
             } else if key_type == crate::KEYTYPE_ECDSA_SHA2_NISTP256
                 || key_type == crate::KEYTYPE_ECDSA_SHA2_NISTP384
                 || key_type == crate::KEYTYPE_ECDSA_SHA2_NISTP521
