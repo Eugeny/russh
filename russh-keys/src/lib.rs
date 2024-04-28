@@ -126,8 +126,8 @@ pub enum Error {
     #[error("The server key changed at line {}", line)]
     KeyChanged { line: usize },
     /// The key uses an unsupported algorithm
-    #[error("Unknown key algorithm")]
-    UnknownAlgorithm(yasna::models::ObjectIdentifier),
+    #[error("Unknown key algorithm: {0}")]
+    UnknownAlgorithm(::pkcs8::ObjectIdentifier),
     /// Index out of bounds
     #[error("Index out of bounds")]
     IndexOutOfBounds,
@@ -136,6 +136,8 @@ pub enum Error {
     UnknownSignatureType { sig_type: String },
     #[error("Invalid signature")]
     InvalidSignature,
+    #[error("Invalid parameters")]
+    InvalidParameters,
     /// Agent protocol error
     #[error("Agent protocol error")]
     AgentProtocolError,
@@ -151,9 +153,6 @@ pub enum Error {
     #[cfg(not(feature = "openssl"))]
     #[error("Rsa: {0}")]
     Rsa(#[from] rsa::Error),
-    #[cfg(not(feature = "openssl"))]
-    #[error("Pkcs1: {0}")]
-    Pkcs1(#[from] pkcs1::Error),
 
     #[error(transparent)]
     Pad(#[from] PadError),
@@ -163,8 +162,17 @@ pub enum Error {
 
     #[error("Base64 decoding error: {0}")]
     Decode(#[from] data_encoding::DecodeError),
-    #[error("ASN1 decoding error: {0}")]
-    ASN1(yasna::ASN1Error),
+    #[error("Der: {0}")]
+    Der(#[from] der::Error),
+    #[error("Spki: {0}")]
+    Spki(#[from] spki::Error),
+    #[error("Pkcs1: {0}")]
+    Pkcs1(#[from] pkcs1::Error),
+    #[error("Pkcs8: {0}")]
+    Pkcs8(#[from] ::pkcs8::Error),
+    #[error("Sec1: {0}")]
+    Sec1(#[from] sec1::Error),
+
     #[error("Environment variable `{0}` not found")]
     EnvVar(&'static str),
     #[error(
@@ -172,12 +180,6 @@ pub enum Error {
          points to a nonexistent file or directory."
     )]
     BadAuthSock,
-}
-
-impl From<yasna::ASN1Error> for Error {
-    fn from(e: yasna::ASN1Error) -> Error {
-        Error::ASN1(e)
-    }
 }
 
 const KEYTYPE_ED25519: &[u8] = b"ssh-ed25519";
@@ -898,7 +900,7 @@ Ow==
             )
             .unwrap();
         let decoded_key = decode_secret_key(key, None).unwrap();
-        let encoded_key_bytes = pkcs8::encode_pkcs8(&decoded_key);
+        let encoded_key_bytes = pkcs8::encode_pkcs8(&decoded_key).unwrap();
         assert_eq!(original_key_bytes, encoded_key_bytes);
     }
 
