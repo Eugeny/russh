@@ -124,17 +124,11 @@ fn write_key_v1(writer: &mut yasna::DERWriterSeq, secret: &ed25519_dalek::Signin
             .next()
             .write_oid(&ObjectIdentifier::from_slice(ED25519));
     });
-    let seed = yasna::construct_der(|writer| {
-        writer.write_bytes(
-            [secret.to_bytes().as_slice(), public.as_bytes().as_slice()]
-                .concat()
-                .as_slice(),
-        )
-    });
+    let seed = yasna::construct_der(|writer| writer.write_bytes(secret.to_bytes().as_slice()));
     writer.next().write_bytes(&seed);
     writer
         .next()
-        .write_tagged(yasna::Tag::context(1), |writer| {
+        .write_tagged_implicit(yasna::Tag::context(1), |writer| {
             writer.write_bitvec(&BitVec::from_bytes(public.as_bytes()))
         })
 }
@@ -144,22 +138,27 @@ fn read_key_v1(reader: &mut BERReaderSeq) -> Result<key::KeyPair, Error> {
         .next()
         .read_sequence(|reader| reader.next().read_oid())?;
     if oid.components().as_slice() == ED25519 {
-        use ed25519_dalek::SigningKey;
-        let secret = {
-            let s = yasna::parse_der(&reader.next().read_bytes()?, |reader| reader.read_bytes())?;
-
-            s.get(..ed25519_dalek::SECRET_KEY_LENGTH)
-                .ok_or(Error::KeyIsCorrupt)
-                .and_then(|s| SigningKey::try_from(s).map_err(|_| Error::CouldNotReadKey))?
-        };
-        // Consume the public key
-        reader
-            .next()
-            .read_tagged(yasna::Tag::context(1), |reader| reader.read_bitvec())?;
-        Ok(key::KeyPair::Ed25519(secret))
+        let key = parse_ed25519_private_key(&reader.next().read_bytes()?)?;
+        let _attributes = reader.read_optional(|reader| {
+            reader.read_tagged_implicit(yasna::Tag::context(0), |reader| reader.read_der())
+        })?;
+        let _public_key = reader.read_optional(|reader| {
+            reader.read_tagged_implicit(yasna::Tag::context(1), |reader| reader.read_bitvec())
+        })?;
+        Ok(key)
     } else {
         Err(Error::CouldNotReadKey)
     }
+}
+
+fn parse_ed25519_private_key(der: &[u8]) -> Result<key::KeyPair, Error> {
+    use ed25519_dalek::SigningKey;
+    let secret_bytes = yasna::parse_der(der, |reader| reader.read_bytes())?;
+    let secret_key = SigningKey::from(
+        <&[u8; ed25519_dalek::SECRET_KEY_LENGTH]>::try_from(secret_bytes.as_slice())
+            .map_err(|_| Error::CouldNotReadKey)?,
+    );
+    Ok(key::KeyPair::Ed25519(secret_key))
 }
 
 fn write_key_v0_rsa(writer: &mut yasna::DERWriterSeq, key: &key::RsaPrivate) {
@@ -240,6 +239,8 @@ fn write_key_v0_ec(writer: &mut yasna::DERWriterSeq, key: &crate::ec::PrivateKey
 enum KeyType {
     Unknown(ObjectIdentifier),
     #[allow(clippy::upper_case_acronyms)]
+    ED25519,
+    #[allow(clippy::upper_case_acronyms)]
     RSA,
     EC(ObjectIdentifier),
 }
@@ -248,6 +249,7 @@ fn read_key_v0(reader: &mut BERReaderSeq) -> Result<key::KeyPair, Error> {
     let key_type = reader.next().read_sequence(|reader| {
         let oid = reader.next().read_oid()?;
         Ok(match oid.components().as_slice() {
+            ED25519 => KeyType::ED25519,
             RSA => {
                 reader.next().read_null()?;
                 KeyType::RSA
@@ -258,6 +260,7 @@ fn read_key_v0(reader: &mut BERReaderSeq) -> Result<key::KeyPair, Error> {
     })?;
     match key_type {
         KeyType::Unknown(_) => Err(Error::CouldNotReadKey),
+        KeyType::ED25519 => parse_ed25519_private_key(&reader.next().read_bytes()?),
         KeyType::RSA => {
             let seq = &reader.next().read_bytes()?;
             let (sk, extra) = yasna::parse_der(seq, |reader| {

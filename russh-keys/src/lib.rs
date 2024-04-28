@@ -554,6 +554,38 @@ QR+u0AypRPmzHnOPAAAAEXJvb3RAMTQwOTExNTQ5NDBkAQ==
         decode_secret_key(ED25519_AESCTR_KEY, Some("test")).unwrap();
     }
 
+    // Key from RFC 8410 Section 10.3. This is a key using PrivateKeyInfo structure.
+    const RFC8410_ED25519_PRIVATE_ONLY_KEY: &str = "-----BEGIN PRIVATE KEY-----
+MC4CAQAwBQYDK2VwBCIEINTuctv5E1hK1bbY8fdp+K06/nwoy/HU++CXqI9EdVhC
+-----END PRIVATE KEY-----";
+
+    #[test]
+    fn test_decode_rfc8410_ed25519_private_only_key() {
+        env_logger::try_init().unwrap_or(());
+        assert!(matches!(
+            decode_secret_key(RFC8410_ED25519_PRIVATE_ONLY_KEY, None),
+            Ok(key::KeyPair::Ed25519 { .. })
+        ));
+        // We always encode public key, skip test_decode_encode_symmetry.
+    }
+
+    // Key from RFC 8410 Section 10.3. This is a key using OneAsymmetricKey structure.
+    const RFC8410_ED25519_PRIVATE_PUBLIC_KEY: &str = "-----BEGIN PRIVATE KEY-----
+MHICAQEwBQYDK2VwBCIEINTuctv5E1hK1bbY8fdp+K06/nwoy/HU++CXqI9EdVhC
+oB8wHQYKKoZIhvcNAQkJFDEPDA1DdXJkbGUgQ2hhaXJzgSEAGb9ECWmEzf6FQbrB
+Z9w7lshQhqowtrbLDFw4rXAxZuE=
+-----END PRIVATE KEY-----";
+
+    #[test]
+    fn test_decode_rfc8410_ed25519_private_public_key() {
+        env_logger::try_init().unwrap_or(());
+        assert!(matches!(
+            decode_secret_key(RFC8410_ED25519_PRIVATE_PUBLIC_KEY, None),
+            Ok(key::KeyPair::Ed25519 { .. })
+        ));
+        // We can't encode attributes, skip test_decode_encode_symmetry.
+    }
+
     #[test]
     fn test_decode_rsa_secret_key() {
         env_logger::try_init().unwrap_or(());
