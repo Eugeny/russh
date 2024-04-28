@@ -88,7 +88,7 @@ pub fn decode_secret_key(secret: &str, password: Option<&str>) -> Result<key::Ke
 }
 
 pub fn encode_pkcs8_pem<W: Write>(key: &key::KeyPair, mut w: W) -> Result<(), Error> {
-    let x = self::pkcs8::encode_pkcs8(key);
+    let x = self::pkcs8::encode_pkcs8(key)?;
     w.write_all(b"-----BEGIN PRIVATE KEY-----\n")?;
     w.write_all(BASE64_MIME.encode(&x).as_bytes())?;
     w.write_all(b"\n-----END PRIVATE KEY-----\n")?;
