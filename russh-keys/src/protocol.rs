@@ -1,5 +1,7 @@
-use crate::encoding::{Encoding, Position, SshRead, SshWrite};
 use std::borrow::Cow;
+
+use crate::encoding::{Encoding, Position, SshRead, SshWrite};
+use crate::key::zeroize_cow;
 
 type Result<T> = std::result::Result<T, crate::Error>;
 
@@ -70,5 +72,16 @@ impl SshWrite for RsaPrivateKey<'_> {
         encoder.extend_ssh_mpint(&self.prime1);
         encoder.extend_ssh_mpint(&self.prime2);
         encoder.extend_ssh_string(&self.comment);
+    }
+}
+
+impl Drop for RsaPrivateKey<'_> {
+    fn drop(&mut self) {
+        // Private parts only.
+        zeroize_cow(&mut self.private_exponent);
+        zeroize_cow(&mut self.coefficient);
+        zeroize_cow(&mut self.prime1);
+        zeroize_cow(&mut self.prime2);
+        zeroize_cow(&mut self.comment);
     }
 }
