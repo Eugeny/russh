@@ -71,6 +71,7 @@ thiserror = "1.0"
 tokio = { version = "1.17.0", features = ["io-util", "rt-multi-thread", "time", "net"] }
 tokio-stream = { version = "0.1", features = ["net"] }
 typenum = "1.17"
+zeroize = "1.7"
 
 [features]
 vendored-openssl = ["openssl", "openssl/vendored"]

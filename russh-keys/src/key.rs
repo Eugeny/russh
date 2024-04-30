@@ -462,6 +462,13 @@ pub struct RsaCrtExtra<'a> {
     pub dq: Cow<'a, [u8]>,
 }
 
+impl Drop for RsaCrtExtra<'_> {
+    fn drop(&mut self) {
+        zeroize_cow(&mut self.dp);
+        zeroize_cow(&mut self.dq);
+    }
+}
+
 fn ec_signature(key: &ec::PrivateKey, b: &[u8]) -> Result<Vec<u8>, Error> {
     let (r, s) = key.try_sign(b)?;
     let mut buf = Vec::new();
@@ -512,4 +519,17 @@ pub fn parse_public_key(p: &[u8], prefer_hash: Option<SignatureHash>) -> Result<
 /// Obtain a cryptographic-safe random number generator.
 pub fn safe_rng() -> impl rand::CryptoRng + rand::RngCore {
     rand::thread_rng()
+}
+
+/// Zeroize `Cow` if value is owned.
+pub(crate) fn zeroize_cow<T>(v: &mut Cow<T>)
+where
+    T: ToOwned + ?Sized,
+    <T as ToOwned>::Owned: zeroize::Zeroize,
+{
+    use zeroize::Zeroize;
+    match v {
+        Cow::Owned(v) => v.zeroize(),
+        Cow::Borrowed(_) => (),
+    }
 }
