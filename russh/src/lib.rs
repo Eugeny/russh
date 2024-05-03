@@ -116,6 +116,7 @@ pub mod mac;
 
 mod compression;
 mod key;
+mod cert;
 mod msg;
 mod negotiation;
 mod ssh_read;

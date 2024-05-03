@@ -40,6 +40,8 @@ russh-cryptovec = { version = "0.7.0", path = "../cryptovec" }
 russh-keys = { version = "0.43.0", path = "../russh-keys" }
 sha1 = "0.10"
 sha2 = "0.10"
+ssh-encoding = { version = "0.2.0" }
+ssh-key = { workspace = true }
 hex-literal = "0.4"
 num-bigint = { version = "0.4", features = ["rand"] }
 subtle = "2.4"

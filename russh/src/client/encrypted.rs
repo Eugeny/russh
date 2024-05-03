@@ -20,6 +20,7 @@ use log::{debug, error, info, trace, warn};
 use russh_cryptovec::CryptoVec;
 use russh_keys::encoding::{Encoding, Reader};
 use russh_keys::key::parse_public_key;
+use ssh_key::Certificate;
 
 use crate::client::{Handler, Msg, Prompt, Reply, Session};
 use crate::key::PubKey;
@@ -326,6 +327,14 @@ impl Session {
                         // continue with userauth_pk_ok
                         match self.common.auth_method.take() {
                             Some(auth_method @ auth::Method::PublicKey { .. }) => {
+                                self.common.buffer.clear();
+                                enc.client_send_signature(
+                                    &self.common.auth_user,
+                                    &auth_method,
+                                    &mut self.common.buffer,
+                                )?
+                            }
+                            Some(auth_method @ auth::Method::OpenSSHCertificate { .. }) => {
                                 self.common.buffer.clear();
                                 enc.client_send_signature(
                                     &self.common.auth_user,
@@ -953,9 +962,20 @@ impl Encrypted {
                     self.write.extend_ssh_string(b"publickey");
                     self.write.push(0); // This is a probe
 
-                    debug!("write_auth_request: {:?}", key.name());
+                    debug!("write_auth_request: key - {:?}", key.name());
                     self.write.extend_ssh_string(key.name().as_bytes());
                     key.push_to(&mut self.write);
+                    true
+                }
+                auth::Method::OpenSSHCertificate { ref cert, .. } => {
+                    self.write.extend_ssh_string(user.as_bytes());
+                    self.write.extend_ssh_string(b"ssh-connection");
+                    self.write.extend_ssh_string(b"publickey");
+                    self.write.push(0); // This is a probe
+
+                    debug!("write_auth_request: cert - {:?}", cert.name());
+                    self.write.extend_ssh_string(cert.name().as_bytes());
+                    cert.push_to(&mut self.write);
                     true
                 }
                 auth::Method::FuturePublicKey { ref key, .. } => {
@@ -996,7 +1016,7 @@ impl Encrypted {
         buffer.extend_ssh_string(b"ssh-connection");
         buffer.extend_ssh_string(b"publickey");
         buffer.push(1);
-        buffer.extend_ssh_string(key.name().as_bytes());
+        buffer.extend_ssh_string(key.name().as_bytes()); // TODO
         key.push_to(buffer);
         i0
     }
@@ -1008,8 +1028,17 @@ impl Encrypted {
         buffer: &mut CryptoVec,
     ) -> Result<(), crate::Error> {
         match method {
-            auth::Method::PublicKey { ref key } => {
+            auth::Method::PublicKey { ref key, ..  } => {
                 let i0 = self.client_make_to_sign(user, key.as_ref(), buffer);
+                // Extend with self-signature.
+                key.add_self_signature(buffer)?;
+                push_packet!(self.write, {
+                    #[allow(clippy::indexing_slicing)] // length checked
+                    self.write.extend(&buffer[i0..]);
+                })
+            }
+            auth::Method::OpenSSHCertificate { ref key, ref cert  } => {
+                let i0 = self.client_make_to_sign(user, cert, buffer);
                 // Extend with self-signature.
                 key.add_self_signature(buffer)?;
                 push_packet!(self.write, {

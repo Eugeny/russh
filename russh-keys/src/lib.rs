@@ -75,6 +75,7 @@ use data_encoding::BASE64_MIME;
 use hmac::{Hmac, Mac};
 use log::debug;
 use sha1::Sha1;
+use ssh_key::Certificate;
 use thiserror::Error;
 
 pub mod ec;
@@ -319,6 +320,17 @@ pub fn load_secret_key<P: AsRef<Path>>(
     let mut secret = String::new();
     secret_file.read_to_string(&mut secret)?;
     decode_secret_key(&secret, password)
+}
+
+/// Load a openssh certificate
+pub fn load_openssh_certificate<P: AsRef<Path>>(
+    cert_: P,
+) -> Result<Certificate, ssh_key::Error> {
+    let mut cert_file = std::fs::File::open(cert_)?;
+    let mut cert = String::new();
+    cert_file.read_to_string(&mut cert)?;
+
+    Certificate::from_openssh(&cert)
 }
 
 fn is_base64_char(c: char) -> bool {
