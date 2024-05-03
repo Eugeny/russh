@@ -20,7 +20,6 @@ use log::{debug, error, info, trace, warn};
 use russh_cryptovec::CryptoVec;
 use russh_keys::encoding::{Encoding, Reader};
 use russh_keys::key::parse_public_key;
-use ssh_key::Certificate;
 
 use crate::client::{Handler, Msg, Prompt, Reply, Session};
 use crate::key::PubKey;

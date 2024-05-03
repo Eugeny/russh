@@ -53,7 +53,7 @@ impl Named for Certificate {
             Algorithm::Rsa { .. } => CERT_RSA,
             Algorithm::SkEcdsaSha2NistP256 => CERT_SK_ECDSA_SHA2_P256,
             Algorithm::SkEd25519 => CERT_SK_SSH_ED25519,
-            Algorithm::Other(algorithm) => NONE,
+            Algorithm::Other(_) => NONE,
             _ => NONE,
         }
     }
