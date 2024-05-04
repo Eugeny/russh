@@ -323,9 +323,7 @@ pub fn load_secret_key<P: AsRef<Path>>(
 }
 
 /// Load a openssh certificate
-pub fn load_openssh_certificate<P: AsRef<Path>>(
-    cert_: P,
-) -> Result<Certificate, ssh_key::Error> {
+pub fn load_openssh_certificate<P: AsRef<Path>>(cert_: P) -> Result<Certificate, ssh_key::Error> {
     let mut cert_file = std::fs::File::open(cert_)?;
     let mut cert = String::new();
     cert_file.read_to_string(&mut cert)?;

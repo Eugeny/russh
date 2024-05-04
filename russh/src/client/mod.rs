@@ -355,7 +355,7 @@ impl<H: Handler> Handle<H> {
         self.wait_recv_reply().await
     }
 
-    /// Perform public OpenSSH Certificate-based SSH authentication 
+    /// Perform public OpenSSH Certificate-based SSH authentication
     pub async fn authenticate_openssh_cert<U: Into<String>>(
         &mut self,
         user: U,

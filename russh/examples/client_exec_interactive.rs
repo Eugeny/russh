@@ -112,16 +112,16 @@ impl Session {
         // use publickey authentication, with or without certificate
         if openssh_cert.is_none() {
             let auth_res = session
-            .authenticate_publickey(user, Arc::new(key_pair))
-            .await?;
+                .authenticate_publickey(user, Arc::new(key_pair))
+                .await?;
 
             if !auth_res {
                 anyhow::bail!("Authentication (with publickey) failed");
             }
         } else {
             let auth_res = session
-            .authenticate_openssh_cert(user, Arc::new(key_pair), openssh_cert.unwrap())
-            .await?;
+                .authenticate_openssh_cert(user, Arc::new(key_pair), openssh_cert.unwrap())
+                .await?;
 
             if !auth_res {
                 anyhow::bail!("Authentication (with publickey+cert) failed");

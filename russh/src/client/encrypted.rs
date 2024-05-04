@@ -1027,7 +1027,7 @@ impl Encrypted {
         buffer: &mut CryptoVec,
     ) -> Result<(), crate::Error> {
         match method {
-            auth::Method::PublicKey { ref key, ..  } => {
+            auth::Method::PublicKey { ref key, .. } => {
                 let i0 = self.client_make_to_sign(user, key.as_ref(), buffer);
                 // Extend with self-signature.
                 key.add_self_signature(buffer)?;
@@ -1036,7 +1036,7 @@ impl Encrypted {
                     self.write.extend(&buffer[i0..]);
                 })
             }
-            auth::Method::OpenSSHCertificate { ref key, ref cert  } => {
+            auth::Method::OpenSSHCertificate { ref key, ref cert } => {
                 let i0 = self.client_make_to_sign(user, cert, buffer);
                 // Extend with self-signature.
                 key.add_self_signature(buffer)?;

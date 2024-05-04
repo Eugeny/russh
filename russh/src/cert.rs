@@ -1,8 +1,8 @@
+use crate::{key::PubKey, negotiation::Named};
 use russh_cryptovec::CryptoVec;
 use russh_keys::encoding::Encoding;
 use ssh_encoding::Encode;
 use ssh_key::{Algorithm, Certificate, EcdsaCurve};
-use crate::{key::PubKey, negotiation::Named};
 
 /// OpenSSH certificate for DSA public key
 const CERT_DSA: &str = "ssh-dss-cert-v01@openssh.com";

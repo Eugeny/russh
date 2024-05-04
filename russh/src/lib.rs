@@ -114,9 +114,9 @@ pub mod kex;
 /// MAC algorithm names
 pub mod mac;
 
+mod cert;
 mod compression;
 mod key;
-mod cert;
 mod msg;
 mod negotiation;
 mod ssh_read;
