@@ -12,8 +12,8 @@ rust-version = "1.65"
 
 [dependencies]
 dirs-next = "2.0"
-futures = "0.3"
-log = "0.4"
-thiserror = "1.0"
-tokio = {version = "1.0", features = ["io-util", "net", "macros", "process"]}
+futures = { workspace = true }
+log = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "net", "macros", "process"] }
 whoami = "1.2"
