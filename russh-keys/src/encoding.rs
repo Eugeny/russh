@@ -296,3 +296,19 @@ pub trait SshRead<'a>: Sized + 'a {
     /// Read the value from a position.
     fn read_ssh(pos: &mut Position<'a>) -> Result<Self, Error>;
 }
+
+impl<'a> ssh_encoding::Reader for Position<'a> {
+    fn read<'o>(&mut self, out: &'o mut [u8]) -> ssh_encoding::Result<&'o [u8]> {
+        out.copy_from_slice(
+            self.s
+                .get(self.position..(self.position + out.len()))
+                .ok_or(ssh_encoding::Error::Length)?,
+        );
+        self.position += out.len();
+        Ok(out)
+    }
+
+    fn remaining_len(&self) -> usize {
+        self.s.len() - self.position
+    }
+}

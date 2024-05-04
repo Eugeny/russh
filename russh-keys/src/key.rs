@@ -97,12 +97,11 @@ impl SignatureHash {
     }
 
     pub fn from_rsa_hostkey_algo(algo: &[u8]) -> Option<Self> {
-        if algo == b"rsa-sha2-256" {
-            Some(Self::SHA2_256)
-        } else if algo == b"rsa-sha2-512" {
-            Some(Self::SHA2_512)
-        } else {
-            Some(Self::SHA1)
+        match algo {
+            b"rsa-sha2-256" => Some(Self::SHA2_256),
+            b"rsa-sha2-512" => Some(Self::SHA2_512),
+            b"ssh-rsa" => Some(Self::SHA1),
+            _ => None,
         }
     }
 }
@@ -135,59 +134,12 @@ impl PartialEq for PublicKey {
 impl PublicKey {
     /// Parse a public key in SSH format.
     pub fn parse(algo: &[u8], pubkey: &[u8]) -> Result<Self, Error> {
-        match algo {
-            b"ssh-ed25519" => {
-                let mut p = pubkey.reader(0);
-                let key_algo = p.read_string()?;
-                let key_bytes = p.read_string()?;
-                if key_algo != b"ssh-ed25519" {
-                    return Err(Error::CouldNotReadKey);
-                }
-                let Ok(key_bytes) = <&[u8; ed25519_dalek::PUBLIC_KEY_LENGTH]>::try_from(key_bytes)
-                else {
-                    return Err(Error::CouldNotReadKey);
-                };
-                ed25519_dalek::VerifyingKey::from_bytes(key_bytes)
-                    .map(PublicKey::Ed25519)
-                    .map_err(Error::from)
-            }
-            b"ssh-rsa" | b"rsa-sha2-256" | b"rsa-sha2-512" => {
-                use log::debug;
-                let mut p = pubkey.reader(0);
-                let key_algo = p.read_string()?;
-                debug!("{:?}", std::str::from_utf8(key_algo));
-                if key_algo != b"ssh-rsa"
-                    && key_algo != b"rsa-sha2-256"
-                    && key_algo != b"rsa-sha2-512"
-                {
-                    return Err(Error::CouldNotReadKey);
-                }
-                Ok(PublicKey::new_rsa_with_hash(
-                    &p.read_ssh()?,
-                    SignatureHash::from_rsa_hostkey_algo(algo).unwrap_or(SignatureHash::SHA1),
-                )?)
-            }
-            crate::KEYTYPE_ECDSA_SHA2_NISTP256
-            | crate::KEYTYPE_ECDSA_SHA2_NISTP384
-            | crate::KEYTYPE_ECDSA_SHA2_NISTP521 => {
-                let mut p = pubkey.reader(0);
-                let key_algo = p.read_string()?;
-                let curve = p.read_string()?;
-                let sec1_bytes = p.read_string()?;
-
-                if key_algo != algo {
-                    return Err(Error::CouldNotReadKey);
-                }
-
-                let key = ec::PublicKey::from_sec1_bytes(key_algo, sec1_bytes)?;
-                if curve != key.ident().as_bytes() {
-                    return Err(Error::CouldNotReadKey);
-                }
-
-                Ok(PublicKey::EC { key })
-            }
-            _ => Err(Error::CouldNotReadKey),
+        use ssh_encoding::Decode;
+        let key_data = &ssh_key::public::KeyData::decode(&mut pubkey.reader(0))?;
+        if key_data.algorithm().as_str().as_bytes() != algo {
+            return Err(Error::KeyIsCorrupt);
         }
+        Self::try_from(key_data)
     }
 
     pub fn new_rsa_with_hash(
@@ -234,15 +186,9 @@ impl PublicKey {
         data_encoding::BASE64_NOPAD.encode(&hasher.finalize())
     }
 
-    pub fn set_algorithm(&mut self, algorithm: &[u8]) {
+    pub fn set_algorithm(&mut self, algorithm: SignatureHash) {
         if let PublicKey::RSA { ref mut hash, .. } = self {
-            if algorithm == b"rsa-sha2-512" {
-                *hash = SignatureHash::SHA2_512
-            } else if algorithm == b"rsa-sha2-256" {
-                *hash = SignatureHash::SHA2_256
-            } else if algorithm == b"ssh-rsa" {
-                *hash = SignatureHash::SHA1
-            }
+            *hash = algorithm;
         }
     }
 }
@@ -484,36 +430,10 @@ fn ec_verify(key: &ec::PublicKey, b: &[u8], sig: &[u8]) -> Result<(), Error> {
 
 /// Parse a public key from a byte slice.
 pub fn parse_public_key(p: &[u8], prefer_hash: Option<SignatureHash>) -> Result<PublicKey, Error> {
-    let mut pos = p.reader(0);
-    let t = pos.read_string()?;
-    if t == b"ssh-ed25519" {
-        if let Ok(pubkey) = pos.read_string() {
-            let Ok(pubkey) = <&[u8; ed25519_dalek::PUBLIC_KEY_LENGTH]>::try_from(pubkey) else {
-                return Err(Error::CouldNotReadKey);
-            };
-            let p = ed25519_dalek::VerifyingKey::from_bytes(pubkey).map_err(Error::from)?;
-            return Ok(PublicKey::Ed25519(p));
-        }
-    }
-    if t == b"ssh-rsa" {
-        return PublicKey::new_rsa_with_hash(
-            &pos.read_ssh()?,
-            prefer_hash.unwrap_or(SignatureHash::SHA2_256),
-        );
-    }
-    if t == crate::KEYTYPE_ECDSA_SHA2_NISTP256
-        || t == crate::KEYTYPE_ECDSA_SHA2_NISTP384
-        || t == crate::KEYTYPE_ECDSA_SHA2_NISTP521
-    {
-        let ident = pos.read_string()?;
-        let sec1_bytes = pos.read_string()?;
-        let key = ec::PublicKey::from_sec1_bytes(t, sec1_bytes)?;
-        if ident != key.ident().as_bytes() {
-            return Err(Error::CouldNotReadKey);
-        }
-        return Ok(PublicKey::EC { key });
-    }
-    Err(Error::CouldNotReadKey)
+    use ssh_encoding::Decode;
+    let mut key = PublicKey::try_from(&ssh_key::public::KeyData::decode(&mut p.reader(0))?)?;
+    key.set_algorithm(prefer_hash.unwrap_or(SignatureHash::SHA2_256));
+    Ok(key)
 }
 
 /// Obtain a cryptographic-safe random number generator.

@@ -15,8 +15,7 @@ use {std, tokio};
 
 use super::{msg, Constraint};
 use crate::encoding::{Encoding, Position, Reader};
-use crate::key::SignatureHash;
-use crate::{key, protocol, Error};
+use crate::{key, Error};
 
 #[derive(Clone)]
 #[allow(clippy::type_complexity)]
@@ -251,44 +250,22 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
         constrained: bool,
         writebuf: &mut CryptoVec,
     ) -> Result<bool, Error> {
-        let pos0 = r.position;
-        let t = r.read_string()?;
-        let (blob, key) = match t {
-            b"ssh-ed25519" => {
-                let _public = r.read_string()?;
-                let pos1 = r.position;
-                let concat = r.read_string()?;
-                let _comment = r.read_string()?;
-                #[allow(clippy::indexing_slicing)] // length checked before
-                let secret = ed25519_dalek::SigningKey::try_from(
-                    concat.get(..32).ok_or(Error::KeyIsCorrupt)?,
-                )
-                .map_err(|_| Error::KeyIsCorrupt)?;
+        let (blob, key_pair) = {
+            use ssh_encoding::{Decode, Encode};
 
-                writebuf.push(msg::SUCCESS);
+            let private_key = ssh_key::private::PrivateKey::new(
+                ssh_key::private::KeypairData::decode(&mut r)?,
+                "",
+            )?;
+            let _comment = r.read_string()?;
+            let key_pair = key::KeyPair::try_from(&private_key)?;
 
-                #[allow(clippy::indexing_slicing)] // positions checked before
-                (self.buf[pos0..pos1].to_vec(), key::KeyPair::Ed25519(secret))
-            }
-            b"ssh-rsa" => {
-                let key =
-                    key::KeyPair::new_rsa_with_hash(&r.read_ssh()?, None, SignatureHash::SHA2_256)?;
+            let mut blob = Vec::new();
+            private_key.public_key().key_data().encode(&mut blob)?;
 
-                let mut blob = Vec::new();
-                if let key::KeyPair::RSA { ref key, .. } = key {
-                    let public = protocol::RsaPublicKey::from(key);
-                    blob.extend_ssh_string(b"ssh-rsa");
-                    blob.extend_ssh(&public);
-                } else {
-                    return Err(Error::KeyIsCorrupt);
-                };
-
-                writebuf.push(msg::SUCCESS);
-
-                (blob, key)
-            }
-            _ => return Ok(false),
+            (blob, key_pair)
         };
+        writebuf.push(msg::SUCCESS);
         let mut w = self.keys.0.write().or(Err(Error::AgentFailure))?;
         let now = SystemTime::now();
         if constrained {
@@ -318,9 +295,9 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
                     return Ok(false);
                 }
             }
-            w.insert(blob, (Arc::new(key), now, c));
+            w.insert(blob, (Arc::new(key_pair), now, c));
         } else {
-            w.insert(blob, (Arc::new(key), now, Vec::new()));
+            w.insert(blob, (Arc::new(key_pair), now, Vec::new()));
         }
         Ok(true)
     }

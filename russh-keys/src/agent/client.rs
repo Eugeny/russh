@@ -1,7 +1,7 @@
 use std::convert::TryFrom;
 
 use byteorder::{BigEndian, ByteOrder};
-use log::{debug, info};
+use log::debug;
 use russh_cryptovec::CryptoVec;
 use tokio;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -249,34 +249,12 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AgentClient<S> {
             let mut r = self.buf.reader(1);
             let n = r.read_u32()?;
             for _ in 0..n {
-                let key = r.read_string()?;
-                let _ = r.read_string()?;
-                let mut r = key.reader(0);
-                let t = r.read_string()?;
-                debug!("t = {:?}", std::str::from_utf8(t));
-                match t {
-                    b"ssh-rsa" => keys.push(key::PublicKey::new_rsa_with_hash(
-                        &r.read_ssh()?,
-                        SignatureHash::SHA2_512,
-                    )?),
-                    b"ssh-ed25519" => keys.push(PublicKey::Ed25519(
-                        ed25519_dalek::VerifyingKey::try_from(r.read_string()?)?,
-                    )),
-                    crate::KEYTYPE_ECDSA_SHA2_NISTP256
-                    | crate::KEYTYPE_ECDSA_SHA2_NISTP384
-                    | crate::KEYTYPE_ECDSA_SHA2_NISTP521 => {
-                        let curve = r.read_string()?;
-                        let sec1_bytes = r.read_string()?;
-                        let key = crate::ec::PublicKey::from_sec1_bytes(t, sec1_bytes)?;
-                        if curve != key.ident().as_bytes() {
-                            return Err(Error::CouldNotReadKey);
-                        }
-                        keys.push(PublicKey::EC { key })
-                    }
-                    t => {
-                        info!("Unsupported key type: {:?}", std::str::from_utf8(t))
-                    }
-                }
+                let key_blob = r.read_string()?;
+                let _comment = r.read_string()?;
+                keys.push(key::parse_public_key(
+                    key_blob,
+                    Some(SignatureHash::SHA2_512),
+                )?);
             }
         }
 

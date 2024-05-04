@@ -426,7 +426,8 @@ impl Encrypted {
                     debug!("signature = {:?}", signature);
                     let mut s = signature.reader(0);
                     let algo_ = s.read_string().map_err(crate::Error::from)?;
-                    pubkey.set_algorithm(algo_);
+                    key::SignatureHash::from_rsa_hostkey_algo(algo_)
+                        .inspect(|hash| pubkey.set_algorithm(*hash));
                     debug!("algo_: {:?}", algo_);
                     let sig = s.read_string().map_err(crate::Error::from)?;
                     #[allow(clippy::indexing_slicing)] // length checked
