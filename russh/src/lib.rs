@@ -114,6 +114,7 @@ pub mod kex;
 /// MAC algorithm names
 pub mod mac;
 
+mod cert;
 mod compression;
 mod key;
 mod msg;

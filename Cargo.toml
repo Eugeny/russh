@@ -6,3 +6,6 @@ russh = { path = "russh" }
 russh-keys = { path = "russh-keys" }
 russh-cryptovec = { path = "cryptovec" }
 russh-config = { path = "russh-config" }
+
+[workspace.dependencies]
+ssh-key = { version = "0.6", features = ["ed25519", "rsa", "encryption"] }
