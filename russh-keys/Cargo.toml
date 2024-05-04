@@ -11,6 +11,8 @@ include = [
   "src/agent/msg.rs",
   "src/agent/server.rs",
   "src/agent/client.rs",
+  "src/backend_openssl.rs",
+  "src/backend_rust.rs",
   "src/bcrypt_pbkdf.rs",
   "src/blowfish.rs",
   "src/ec.rs",
@@ -20,13 +22,14 @@ include = [
   "src/format/pkcs5.rs",
   "src/format/pkcs8.rs",
   "src/key.rs",
+  "src/protocol.rs",
   "src/signature.rs",
 ]
 keywords = ["ssh"]
 license = "Apache-2.0"
 name = "russh-keys"
 repository = "https://github.com/warp-tech/russh"
-version = "0.43.0"
+version = "0.44.0-beta.1"
 rust-version = "1.65"
 
 [dependencies]
