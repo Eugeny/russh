@@ -256,6 +256,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "shoaibmerchant",
+      "name": "Shoaib Merchant",
+      "avatar_url": "https://avatars.githubusercontent.com/u/4598631?v=4",
+      "profile": "https://mecha.so",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,
