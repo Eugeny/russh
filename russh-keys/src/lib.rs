@@ -174,6 +174,11 @@ pub enum Error {
     #[error("Sec1: {0}")]
     Sec1(#[from] sec1::Error),
 
+    #[error("SshKey: {0}")]
+    SshKey(#[from] ssh_key::Error),
+    #[error("SshEncoding: {0}")]
+    SshEncoding(#[from] ssh_encoding::Error),
+
     #[error("Environment variable `{0}` not found")]
     EnvVar(&'static str),
     #[error(
@@ -183,8 +188,6 @@ pub enum Error {
     BadAuthSock,
 }
 
-const KEYTYPE_ED25519: &[u8] = b"ssh-ed25519";
-const KEYTYPE_RSA: &[u8] = b"ssh-rsa";
 const KEYTYPE_ECDSA_SHA2_NISTP256: &[u8] = ECDSA_SHA2_NISTP256.as_bytes();
 const KEYTYPE_ECDSA_SHA2_NISTP384: &[u8] = ECDSA_SHA2_NISTP384.as_bytes();
 const KEYTYPE_ECDSA_SHA2_NISTP521: &[u8] = ECDSA_SHA2_NISTP521.as_bytes();
