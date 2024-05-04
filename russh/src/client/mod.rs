@@ -49,6 +49,7 @@ use russh_cryptovec::CryptoVec;
 use russh_keys::encoding::Reader;
 use russh_keys::key::SignatureHash;
 use russh_keys::key::{self, parse_public_key, PublicKey};
+use ssh_key::Certificate;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadHalf, WriteHalf};
 use tokio::net::{TcpStream, ToSocketAddrs};
 use tokio::pin;
@@ -348,6 +349,24 @@ impl<H: Handler> Handle<H> {
             .send(Msg::Authenticate {
                 user,
                 method: auth::Method::PublicKey { key },
+            })
+            .await
+            .map_err(|_| crate::Error::SendError)?;
+        self.wait_recv_reply().await
+    }
+
+    /// Perform public OpenSSH Certificate-based SSH authentication 
+    pub async fn authenticate_openssh_cert<U: Into<String>>(
+        &mut self,
+        user: U,
+        key: Arc<key::KeyPair>,
+        cert: Certificate,
+    ) -> Result<bool, crate::Error> {
+        let user = user.into();
+        self.sender
+            .send(Msg::Authenticate {
+                user,
+                method: auth::Method::OpenSSHCertificate { key, cert },
             })
             .await
             .map_err(|_| crate::Error::SendError)?;
