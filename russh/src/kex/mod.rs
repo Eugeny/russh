@@ -17,6 +17,7 @@
 //! This module exports kex algorithm names for use with [Preferred].
 mod curve25519;
 mod dh;
+mod ecdh;
 mod none;
 use std::cell::RefCell;
 use std::collections::HashMap;
