@@ -1,7 +1,12 @@
 use byteorder::{BigEndian, ByteOrder};
+use elliptic_curve::ecdh::{EphemeralSecret, SharedSecret};
+use elliptic_curve::point::PointCompression;
+use elliptic_curve::sec1::{FromEncodedPoint, ModulusSize, ToEncodedPoint};
+use elliptic_curve::{AffinePoint, Curve, CurveArithmetic, FieldBytesSize};
 use log::debug;
-use p256::ecdh::{EphemeralSecret, SharedSecret};
-use p256::PublicKey;
+use p256::NistP256;
+use p384::NistP384;
+use p521::NistP521;
 use russh_cryptovec::CryptoVec;
 use russh_keys::encoding::Encoding;
 
@@ -14,7 +19,29 @@ pub struct EcdhNistP256KexType {}
 
 impl KexType for EcdhNistP256KexType {
     fn make(&self) -> Box<dyn KexAlgorithm + Send> {
-        Box::new(EcdhNistP256Kex {
+        Box::new(EcdhNistPKex::<NistP256> {
+            local_secret: None,
+            shared_secret: None,
+        }) as Box<dyn KexAlgorithm + Send>
+    }
+}
+
+pub struct EcdhNistP384KexType {}
+
+impl KexType for EcdhNistP384KexType {
+    fn make(&self) -> Box<dyn KexAlgorithm + Send> {
+        Box::new(EcdhNistPKex::<NistP384> {
+            local_secret: None,
+            shared_secret: None,
+        }) as Box<dyn KexAlgorithm + Send>
+    }
+}
+
+pub struct EcdhNistP521KexType {}
+
+impl KexType for EcdhNistP521KexType {
+    fn make(&self) -> Box<dyn KexAlgorithm + Send> {
+        Box::new(EcdhNistPKex::<NistP521> {
             local_secret: None,
             shared_secret: None,
         }) as Box<dyn KexAlgorithm + Send>
@@ -22,12 +49,12 @@ impl KexType for EcdhNistP256KexType {
 }
 
 #[doc(hidden)]
-pub struct EcdhNistP256Kex {
-    local_secret: Option<EphemeralSecret>,
-    shared_secret: Option<SharedSecret>,
+pub struct EcdhNistPKex<C: Curve + CurveArithmetic> {
+    local_secret: Option<EphemeralSecret<C>>,
+    shared_secret: Option<SharedSecret<C>>,
 }
 
-impl std::fmt::Debug for EcdhNistP256Kex {
+impl<C: Curve + CurveArithmetic> std::fmt::Debug for EcdhNistPKex<C> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(
             f,
@@ -39,7 +66,12 @@ impl std::fmt::Debug for EcdhNistP256Kex {
 // We used to support curve "NIST P-256" here, but the security of
 // that curve is controversial, see
 // http://safecurves.cr.yp.to/rigid.html
-impl KexAlgorithm for EcdhNistP256Kex {
+impl<C: Curve + CurveArithmetic> KexAlgorithm for EcdhNistPKex<C>
+where
+    C: PointCompression,
+    FieldBytesSize<C>: ModulusSize,
+    AffinePoint<C>: FromEncodedPoint<C> + ToEncodedPoint<C>,
+{
     fn skip_exchange(&self) -> bool {
         false
     }
@@ -60,11 +92,12 @@ impl KexAlgorithm for EcdhNistP256Kex {
                 return Err(crate::Error::Inconsistent);
             }
 
-            PublicKey::from_sec1_bytes(&payload[5..(5 + pubkey_len)])
+            elliptic_curve::PublicKey::<C>::from_sec1_bytes(&payload[5..(5 + pubkey_len)])
                 .map_err(|_| crate::Error::Inconsistent)?
         };
 
-        let server_secret = EphemeralSecret::random(&mut rand_core::OsRng);
+        let server_secret =
+            elliptic_curve::ecdh::EphemeralSecret::<C>::random(&mut rand_core::OsRng);
         let server_pubkey = server_secret.public_key();
 
         // fill exchange.
@@ -83,7 +116,8 @@ impl KexAlgorithm for EcdhNistP256Kex {
         client_ephemeral: &mut CryptoVec,
         buf: &mut CryptoVec,
     ) -> Result<(), crate::Error> {
-        let client_secret = EphemeralSecret::random(&mut rand_core::OsRng);
+        let client_secret =
+            elliptic_curve::ecdh::EphemeralSecret::<C>::random(&mut rand_core::OsRng);
         let client_pubkey = client_secret.public_key();
 
         // fill exchange.
@@ -99,8 +133,8 @@ impl KexAlgorithm for EcdhNistP256Kex {
 
     fn compute_shared_secret(&mut self, remote_pubkey_: &[u8]) -> Result<(), crate::Error> {
         let local_secret = self.local_secret.take().ok_or(crate::Error::KexInit)?;
-        let pubkey =
-            PublicKey::from_sec1_bytes(remote_pubkey_).map_err(|_| crate::Error::KexInit)?;
+        let pubkey = elliptic_curve::PublicKey::<C>::from_sec1_bytes(remote_pubkey_)
+            .map_err(|_| crate::Error::KexInit)?;
         self.shared_secret = Some(local_secret.diffie_hellman(&pubkey));
         Ok(())
     }

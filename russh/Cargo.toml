@@ -27,6 +27,7 @@ chacha20 = "0.9"
 ctr = "0.9"
 curve25519-dalek = "4.1.2"
 digest = { workspace = true }
+elliptic-curve = { version = "0.13", features = ["ecdh"] }
 flate2 = { version = "1.0", optional = true }
 futures = { workspace = true }
 generic-array = "0.14"
