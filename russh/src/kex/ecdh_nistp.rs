@@ -191,3 +191,39 @@ where
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_shared_secret() {
+        let mut party1 = EcdhNistPKex::<NistP256> {
+            local_secret: Some(EphemeralSecret::<NistP256>::random(&mut rand_core::OsRng)),
+            shared_secret: None,
+        };
+        let p1_pubkey = party1.local_secret.as_ref().unwrap().public_key();
+
+        let mut party2 = EcdhNistPKex::<NistP256> {
+            local_secret: Some(EphemeralSecret::<NistP256>::random(&mut rand_core::OsRng)),
+            shared_secret: None,
+        };
+        let p2_pubkey = party2.local_secret.as_ref().unwrap().public_key();
+
+        party1
+            .compute_shared_secret(&p2_pubkey.to_sec1_bytes())
+            .unwrap();
+
+        party2
+            .compute_shared_secret(&p1_pubkey.to_sec1_bytes())
+            .unwrap();
+
+        let p1_shared_secret = party1.shared_secret.unwrap();
+        let p2_shared_secret = party2.shared_secret.unwrap();
+
+        assert_eq!(
+            p1_shared_secret.raw_secret_bytes(),
+            p2_shared_secret.raw_secret_bytes()
+        )
+    }
+}
