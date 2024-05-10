@@ -265,6 +265,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "gleason-m",
+      "name": "Michael Gleason",
+      "avatar_url": "https://avatars.githubusercontent.com/u/86493344?v=4",
+      "profile": "https://github.com/gleason-m",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,
