@@ -89,6 +89,7 @@ where
                 return Err(crate::Error::Inconsistent);
             }
 
+            #[allow(clippy::indexing_slicing)] // length checked
             elliptic_curve::PublicKey::<C>::from_sec1_bytes(&payload[5..(5 + pubkey_len)])
                 .map_err(|_| crate::Error::Inconsistent)?
         };
@@ -154,7 +155,7 @@ where
         buffer.extend_ssh_string(&exchange.server_ephemeral);
 
         if let Some(ref shared) = self.shared_secret {
-            buffer.extend_ssh_mpint(&shared.raw_secret_bytes());
+            buffer.extend_ssh_mpint(shared.raw_secret_bytes());
         }
 
         use sha2::Digest;
