@@ -63,9 +63,6 @@ impl<C: Curve + CurveArithmetic> std::fmt::Debug for EcdhNistPKex<C> {
     }
 }
 
-// We used to support curve "NIST P-256" here, but the security of
-// that curve is controversial, see
-// http://safecurves.cr.yp.to/rigid.html
 impl<C: Curve + CurveArithmetic> KexAlgorithm for EcdhNistPKex<C>
 where
     C: PointCompression,
