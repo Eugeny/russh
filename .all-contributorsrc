@@ -274,6 +274,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "elegaanz",
+      "name": "Ana Gelez",
+      "avatar_url": "https://avatars.githubusercontent.com/u/16254623?v=4",
+      "profile": "https://ana.gelez.xyz",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,
