@@ -248,7 +248,15 @@ impl CryptoVec {
                 let next_capacity = size.next_power_of_two();
                 let old_ptr = self.p;
                 let next_layout = std::alloc::Layout::from_size_align_unchecked(next_capacity, 1);
-                self.p = std::alloc::alloc_zeroed(next_layout);
+                let new_ptr = std::alloc::alloc_zeroed(next_layout);
+                if new_ptr.is_null() {
+                    #[allow(clippy::panic)]
+                    {
+                        panic!("Realloc failed, pointer = {:?} {:?}", self, size)
+                    }
+                }
+
+                self.p = new_ptr;
                 mlock(self.p, next_capacity);
 
                 if self.capacity > 0 {
@@ -261,15 +269,8 @@ impl CryptoVec {
                     std::alloc::dealloc(old_ptr, layout);
                 }
 
-                if self.p.is_null() {
-                    #[allow(clippy::panic)]
-                    {
-                        panic!("Realloc failed, pointer = {:?} {:?}", self, size)
-                    }
-                } else {
-                    self.capacity = next_capacity;
-                    self.size = size;
-                }
+                self.capacity = next_capacity;
+                self.size = size;
             }
         }
     }
@@ -427,5 +428,25 @@ impl Drop for CryptoVec {
                 std::alloc::dealloc(self.p, layout);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // If `resize` is called with a size that is too large to be allocated, it
+    // should panic, and not segfault or fail silently.
+    #[test]
+    fn large_resize_panics() {
+        let result = std::panic::catch_unwind(|| {
+            let mut vec = CryptoVec::new();
+            // Write something into the vector, so that there is something to
+            // copy when reallocating, to test all code paths.
+            vec.push(42);
+
+            vec.resize(1_000_000_000_000)
+        });
+        assert!(result.is_err());
     }
 }
