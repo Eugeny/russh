@@ -136,7 +136,16 @@ impl PublicKey {
     pub fn parse(algo: &[u8], pubkey: &[u8]) -> Result<Self, Error> {
         use ssh_encoding::Decode;
         let key_data = &ssh_key::public::KeyData::decode(&mut pubkey.reader(0))?;
-        if key_data.algorithm().as_str().as_bytes() != algo {
+        let key_algo = key_data.algorithm();
+        let key_algo = key_algo.as_str().as_bytes();
+        if key_algo == b"ssh-rsa" {
+            if algo != SSH_RSA.as_ref().as_bytes()
+                && algo != RSA_SHA2_256.as_ref().as_bytes()
+                && algo != RSA_SHA2_512.as_ref().as_bytes()
+            {
+                return Err(Error::KeyIsCorrupt);
+            }
+        } else if key_algo != algo {
             return Err(Error::KeyIsCorrupt);
         }
         Self::try_from(key_data)
