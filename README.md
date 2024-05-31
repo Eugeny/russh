@@ -28,6 +28,9 @@ This is a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Éti
   * `diffie-hellman-group14-sha1` ✨
   * `diffie-hellman-group14-sha256` ✨
   * `diffie-hellman-group16-sha512` ✨
+  * `ecdh-sha2-nistp256` ✨
+  * `ecdh-sha2-nistp384` ✨
+  * `ecdh-sha2-nistp521` ✨
 * MACs:
   * `hmac-sha1` ✨
   * `hmac-sha2-256` ✨

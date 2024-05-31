@@ -30,11 +30,6 @@
 //! * [Writing SSH clients - the `russh::client` module](client)
 //! * [Writing SSH servers - the `russh::server` module](server)
 //!
-//! # Important crate features
-//!
-//! * RSA key support is gated behind the `openssl` feature (disabled by default).
-//! * Enabling that and disabling the `rs-crypto` feature (enabled by default) will leave you with a very basic, but pure-OpenSSL RSA+AES cipherset.
-//!
 //! # Using non-socket IO / writing tunnels
 //!
 //! The easy way to implement SSH tunnels, like `ProxyCommand` for
