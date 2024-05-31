@@ -1,6 +1,6 @@
 ///
 /// Run this example with:
-/// cargo run --all-features --example client_exec_simple -- -k <private key path> <host> <command>
+/// cargo run --example client_exec_simple -- -k <private key path> <host> <command>
 ///
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

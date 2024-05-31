@@ -1,3 +1,5 @@
+use std::marker::PhantomData;
+
 use byteorder::{BigEndian, ByteOrder};
 use elliptic_curve::ecdh::{EphemeralSecret, SharedSecret};
 use elliptic_curve::point::PointCompression;
@@ -9,6 +11,7 @@ use p384::NistP384;
 use p521::NistP521;
 use russh_cryptovec::CryptoVec;
 use russh_keys::encoding::Encoding;
+use sha2::{Digest, Sha256, Sha384, Sha512};
 
 use crate::kex::{compute_keys, KexAlgorithm, KexType};
 use crate::mac::{self};
@@ -19,9 +22,10 @@ pub struct EcdhNistP256KexType {}
 
 impl KexType for EcdhNistP256KexType {
     fn make(&self) -> Box<dyn KexAlgorithm + Send> {
-        Box::new(EcdhNistPKex::<NistP256> {
+        Box::new(EcdhNistPKex::<NistP256, Sha256> {
             local_secret: None,
             shared_secret: None,
+            _digest: PhantomData,
         }) as Box<dyn KexAlgorithm + Send>
     }
 }
@@ -30,9 +34,10 @@ pub struct EcdhNistP384KexType {}
 
 impl KexType for EcdhNistP384KexType {
     fn make(&self) -> Box<dyn KexAlgorithm + Send> {
-        Box::new(EcdhNistPKex::<NistP384> {
+        Box::new(EcdhNistPKex::<NistP384, Sha384> {
             local_secret: None,
             shared_secret: None,
+            _digest: PhantomData,
         }) as Box<dyn KexAlgorithm + Send>
     }
 }
@@ -41,20 +46,22 @@ pub struct EcdhNistP521KexType {}
 
 impl KexType for EcdhNistP521KexType {
     fn make(&self) -> Box<dyn KexAlgorithm + Send> {
-        Box::new(EcdhNistPKex::<NistP521> {
+        Box::new(EcdhNistPKex::<NistP521, Sha512> {
             local_secret: None,
             shared_secret: None,
+            _digest: PhantomData,
         }) as Box<dyn KexAlgorithm + Send>
     }
 }
 
 #[doc(hidden)]
-pub struct EcdhNistPKex<C: Curve + CurveArithmetic> {
+pub struct EcdhNistPKex<C: Curve + CurveArithmetic, D: Digest> {
     local_secret: Option<EphemeralSecret<C>>,
     shared_secret: Option<SharedSecret<C>>,
+    _digest: PhantomData<D>,
 }
 
-impl<C: Curve + CurveArithmetic> std::fmt::Debug for EcdhNistPKex<C> {
+impl<C: Curve + CurveArithmetic, D: Digest> std::fmt::Debug for EcdhNistPKex<C, D> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(
             f,
@@ -63,7 +70,7 @@ impl<C: Curve + CurveArithmetic> std::fmt::Debug for EcdhNistPKex<C> {
     }
 }
 
-impl<C: Curve + CurveArithmetic> KexAlgorithm for EcdhNistPKex<C>
+impl<C: Curve + CurveArithmetic, D: Digest> KexAlgorithm for EcdhNistPKex<C, D>
 where
     C: PointCompression,
     FieldBytesSize<C>: ModulusSize,
@@ -158,8 +165,7 @@ where
             buffer.extend_ssh_mpint(shared.raw_secret_bytes());
         }
 
-        use sha2::Digest;
-        let mut hasher = sha2::Sha256::new();
+        let mut hasher = D::new();
         hasher.update(&buffer);
 
         let mut res = CryptoVec::new();
@@ -176,7 +182,7 @@ where
         local_to_remote_mac: mac::Name,
         is_server: bool,
     ) -> Result<crate::kex::cipher::CipherPair, crate::Error> {
-        compute_keys::<sha2::Sha256>(
+        compute_keys::<D>(
             self.shared_secret
                 .as_ref()
                 .map(|x| x.raw_secret_bytes() as &[u8]),
@@ -196,15 +202,17 @@ mod tests {
 
     #[test]
     fn test_shared_secret() {
-        let mut party1 = EcdhNistPKex::<NistP256> {
+        let mut party1 = EcdhNistPKex::<NistP256, Sha256> {
             local_secret: Some(EphemeralSecret::<NistP256>::random(&mut rand_core::OsRng)),
             shared_secret: None,
+            _digest: PhantomData,
         };
         let p1_pubkey = party1.local_secret.as_ref().unwrap().public_key();
 
-        let mut party2 = EcdhNistPKex::<NistP256> {
+        let mut party2 = EcdhNistPKex::<NistP256, Sha256> {
             local_secret: Some(EphemeralSecret::<NistP256>::random(&mut rand_core::OsRng)),
             shared_secret: None,
+            _digest: PhantomData,
         };
         let p2_pubkey = party2.local_secret.as_ref().unwrap().public_key();
 

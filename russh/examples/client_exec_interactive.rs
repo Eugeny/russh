@@ -1,6 +1,6 @@
 ///
 /// Run this example with:
-/// cargo run --all-features --example client_exec_interactive -- -k <private key path> <host> <command>
+/// cargo run --example client_exec_interactive -- -k <private key path> <host> <command>
 ///
 use std::convert::TryFrom;
 use std::env;
