@@ -138,13 +138,12 @@ impl Named for () {
 }
 
 use russh_keys::key::ED25519;
-use russh_keys::key::SSH_RSA;
 
 impl Named for PublicKey {
     fn name(&self) -> &'static str {
         match self {
             PublicKey::Ed25519(_) => ED25519.0,
-            PublicKey::RSA { .. } => SSH_RSA.0,
+            PublicKey::RSA { ref hash, .. } => hash.name().0,
             PublicKey::EC { ref key } => key.algorithm(),
         }
     }
