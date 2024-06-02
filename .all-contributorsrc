@@ -283,6 +283,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "tomknig",
+      "name": "Tom König",
+      "avatar_url": "https://avatars.githubusercontent.com/u/3586316?v=4",
+      "profile": "https://github.com/tomknig",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,
