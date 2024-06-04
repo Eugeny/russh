@@ -1,5 +1,6 @@
-use std::sync::Arc;
+use std::{pin::Pin, sync::Arc};
 
+use futures::{Future, FutureExt as _};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::{Mutex, Notify};
@@ -486,6 +487,27 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + Sync + 'static> Channel<S> {
     /// Signal a remote process.
     pub async fn signal(&self, signal: Sig) -> Result<(), Error> {
         self.write_half.signal(signal).await
+    }
+
+    /// Get a `FnOnce` that can be used to send a signal through this channel
+    pub fn get_signal_sender(
+        &self,
+    ) -> impl FnOnce(Sig) -> Pin<Box<dyn Future<Output = Result<(), Error>> + std::marker::Send>>
+    {
+        let sender = self.write_half.sender.clone();
+        let id = self.write_half.id;
+
+        move |signal| {
+            async move {
+                sender
+                    .send((id, ChannelMsg::Signal { signal }).into())
+                    .await
+                    .map_err(|_| Error::SendError)?;
+
+                Ok(())
+            }
+            .boxed()
+        }
     }
 
     /// Request the start of a subsystem with the given name.
