@@ -48,8 +48,15 @@ impl super::Cipher for Clear {
 }
 
 impl super::OpeningKey for Key {
-    fn decrypt_packet_length(&self, _seqn: u32, packet_length: [u8; 4]) -> [u8; 4] {
-        packet_length
+    fn decrypt_packet_length(&self, _seqn: u32, packet_length: &[u8]) -> [u8; 4] {
+        // Fine because of self.packet_length_to_read_for_block_length()
+        #[allow(clippy::indexing_slicing)]
+        [
+            packet_length[0],
+            packet_length[1],
+            packet_length[2],
+            packet_length[3],
+        ]
     }
 
     fn tag_len(&self) -> usize {

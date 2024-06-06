@@ -97,9 +97,16 @@ impl super::OpeningKey for OpeningKey {
     fn decrypt_packet_length(
         &self,
         _sequence_number: u32,
-        encrypted_packet_length: [u8; 4],
+        encrypted_packet_length: &[u8],
     ) -> [u8; 4] {
-        encrypted_packet_length
+        // Fine because of self.packet_length_to_read_for_block_length()
+        #[allow(clippy::indexing_slicing)]
+        [
+            encrypted_packet_length[0],
+            encrypted_packet_length[1],
+            encrypted_packet_length[2],
+            encrypted_packet_length[3],
+        ]
     }
 
     fn tag_len(&self) -> usize {
