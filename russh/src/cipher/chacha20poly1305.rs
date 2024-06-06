@@ -141,7 +141,7 @@ impl super::OpeningKey for OpeningKey {
 
 impl super::SealingKey for SealingKey {
     fn padding_length(&self, payload: &[u8]) -> usize {
-        let block_size = 16;
+        let block_size = 8;
         let extra_len = super::PACKET_LENGTH_LEN + super::PADDING_LENGTH_LEN;
         let padding_len = if payload.len() + extra_len <= super::MINIMUM_PACKET_LEN {
             super::MINIMUM_PACKET_LEN - payload.len() - super::PADDING_LENGTH_LEN
