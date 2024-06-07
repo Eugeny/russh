@@ -292,6 +292,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "Barre",
+      "name": "Pierre Barre",
+      "avatar_url": "https://avatars.githubusercontent.com/u/45085843?v=4",
+      "profile": "https://www.legaltile.com/",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,
