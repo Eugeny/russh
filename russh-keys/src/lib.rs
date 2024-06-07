@@ -389,7 +389,7 @@ pub fn learn_known_hosts_path<P: AsRef<Path>>(
 }
 
 /// Get the server key that matches the one recorded in the user's known_hosts file.
-pub fn known_host_key(host: &str, port: u16) -> Result<Option<(usize, key::PublicKey)>, Error> {
+pub fn known_host_key(host: &str, port: u16) -> Result<Vec<(usize, key::PublicKey)>, Error> {
     known_host_key_path(host, port, known_hosts_path()?)
 }
 
@@ -398,11 +398,11 @@ pub fn known_host_key_path<P: AsRef<Path>>(
     host: &str,
     port: u16,
     path: P,
-) -> Result<Option<(usize, key::PublicKey)>, Error> {
+) -> Result<Vec<(usize, key::PublicKey)>, Error> {
     let mut f = if let Ok(f) = File::open(path) {
         BufReader::new(f)
     } else {
-        return Ok(None);
+        return Ok(vec![]);
     };
     let mut buffer = String::new();
 
@@ -413,6 +413,7 @@ pub fn known_host_key_path<P: AsRef<Path>>(
     };
     debug!("host_port = {:?}", host_port);
     let mut line = 1;
+    let mut matches = vec![];
     while f.read_line(&mut buffer)? > 0 {
         {
             if buffer.as_bytes().first() == Some(&b'#') {
@@ -427,14 +428,14 @@ pub fn known_host_key_path<P: AsRef<Path>>(
             if let (Some(h), Some(k)) = (hosts, key) {
                 debug!("{:?} {:?}", h, k);
                 if match_hostname(&host_port, h) {
-                    return Ok(Some((line, parse_public_key_base64(k)?)));
+                    matches.push((line, parse_public_key_base64(k)?));
                 }
             }
         }
         buffer.clear();
         line += 1;
     }
-    Ok(None)
+    Ok(matches)
 }
 
 fn match_hostname(host: &str, pattern: &str) -> bool {
@@ -471,15 +472,22 @@ pub fn check_known_hosts_path<P: AsRef<Path>>(
     pubkey: &key::PublicKey,
     path: P,
 ) -> Result<bool, Error> {
-    if let Some((line, recorded)) = known_host_key_path(host, port, path)? {
-        if recorded == *pubkey {
-            Ok(true)
-        } else {
-            Err(Error::KeyChanged { line })
-        }
-    } else {
-        Ok(false)
-    }
+    let check = known_host_key_path(host, port, path)?
+        .into_iter()
+        .map(
+            |(line, recorded)| match (pubkey.name() == recorded.name(), *pubkey == recorded) {
+                (true, true) => Ok(true),
+                (true, false) => Err(Error::KeyChanged { line }),
+                _ => Ok(false),
+            },
+        )
+        // If any Err was returned, we stop here
+        .collect::<Result<Vec<bool>, Error>>()?
+        .into_iter()
+        // Now we check the results for a match
+        .any(|x| x);
+
+    Ok(check)
 }
 
 #[cfg(target_os = "windows")]
