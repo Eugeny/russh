@@ -389,12 +389,12 @@ pub fn learn_known_hosts_path<P: AsRef<Path>>(
 }
 
 /// Get the server key that matches the one recorded in the user's known_hosts file.
-pub fn known_host_key(host: &str, port: u16) -> Result<Vec<(usize, key::PublicKey)>, Error> {
-    known_host_key_path(host, port, known_hosts_path()?)
+pub fn known_host_keys(host: &str, port: u16) -> Result<Vec<(usize, key::PublicKey)>, Error> {
+    known_host_keys_path(host, port, known_hosts_path()?)
 }
 
 /// Get the server key that matches the one recorded in `path`.
-pub fn known_host_key_path<P: AsRef<Path>>(
+pub fn known_host_keys_path<P: AsRef<Path>>(
     host: &str,
     port: u16,
     path: P,
@@ -472,7 +472,7 @@ pub fn check_known_hosts_path<P: AsRef<Path>>(
     pubkey: &key::PublicKey,
     path: P,
 ) -> Result<bool, Error> {
-    let check = known_host_key_path(host, port, path)?
+    let check = known_host_keys_path(host, port, path)?
         .into_iter()
         .map(
             |(line, recorded)| match (pubkey.name() == recorded.name(), *pubkey == recorded) {
