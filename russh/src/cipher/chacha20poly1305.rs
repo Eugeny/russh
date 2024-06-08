@@ -22,6 +22,7 @@ use chacha20::{ChaCha20Legacy, ChaCha20LegacyCore};
 use generic_array::typenum::{Unsigned, U16, U32, U8};
 use generic_array::GenericArray;
 use poly1305::Poly1305;
+use std::convert::TryInto;
 use subtle::ConstantTimeEq;
 
 use super::super::Error;
@@ -97,13 +98,8 @@ impl super::OpeningKey for OpeningKey {
         encrypted_packet_length: &[u8],
     ) -> [u8; 4] {
         // Fine because of self.packet_length_to_read_for_block_length()
-        #[allow(clippy::indexing_slicing)]
-        let mut encrypted_packet_length = [
-            encrypted_packet_length[0],
-            encrypted_packet_length[1],
-            encrypted_packet_length[2],
-            encrypted_packet_length[3],
-        ];
+        #[allow(clippy::unwrap_used, clippy::indexing_slicing)]
+        let mut encrypted_packet_length: [u8; 4] = encrypted_packet_length.try_into().unwrap();
 
         let nonce = make_counter(sequence_number);
         let mut cipher = ChaCha20Legacy::new(&self.k1, &nonce);

@@ -15,6 +15,8 @@
 
 // http://cvsweb.openbsd.org/cgi-bin/cvsweb/src/usr.bin/ssh/PROTOCOL.chacha20poly1305?annotate=HEAD
 
+use std::convert::TryInto;
+
 use aes_gcm::{AeadCore, AeadInPlace, Aes256Gcm, KeyInit, KeySizeUser};
 use digest::typenum::Unsigned;
 use generic_array::GenericArray;
@@ -100,13 +102,8 @@ impl super::OpeningKey for OpeningKey {
         encrypted_packet_length: &[u8],
     ) -> [u8; 4] {
         // Fine because of self.packet_length_to_read_for_block_length()
-        #[allow(clippy::indexing_slicing)]
-        [
-            encrypted_packet_length[0],
-            encrypted_packet_length[1],
-            encrypted_packet_length[2],
-            encrypted_packet_length[3],
-        ]
+        #[allow(clippy::unwrap_used, clippy::indexing_slicing)]
+        encrypted_packet_length.try_into().unwrap()
     }
 
     fn tag_len(&self) -> usize {

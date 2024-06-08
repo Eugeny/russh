@@ -14,6 +14,7 @@
 use aes::cipher::{IvSizeUser, KeyIvInit, KeySizeUser, StreamCipher};
 use generic_array::GenericArray;
 use rand::RngCore;
+use std::convert::TryInto;
 use std::marker::PhantomData;
 
 use super::super::Error;
@@ -99,25 +100,17 @@ impl<C: BlockStreamCipher + KeySizeUser + IvSizeUser> super::OpeningKey for Open
 
         if self.mac.is_etm() {
             // Fine because of self.packet_length_to_read_for_block_length()
-            #[allow(clippy::indexing_slicing)]
-            [
-                encrypted_packet_length[0],
-                encrypted_packet_length[1],
-                encrypted_packet_length[2],
-                encrypted_packet_length[3],
-            ]
+            #[allow(clippy::unwrap_used, clippy::indexing_slicing)]
+            encrypted_packet_length[..4].try_into().unwrap()
         } else {
             // Work around uncloneable Aes<>
             let mut cipher: C = unsafe { std::ptr::read(&self.cipher as *const C) };
 
             cipher.decrypt_data(&mut first_block);
 
-            [
-                first_block[0],
-                first_block[1],
-                first_block[2],
-                first_block[3],
-            ]
+            // Fine because of self.packet_length_to_read_for_block_length()
+            #[allow(clippy::unwrap_used, clippy::indexing_slicing)]
+            first_block[..4].try_into().unwrap()
         }
     }
 
