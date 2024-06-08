@@ -1,4 +1,5 @@
 # Russh
+
 [![Rust](https://github.com/warp-tech/russh/actions/workflows/rust.yml/badge.svg)](https://github.com/warp-tech/russh/actions/workflows/rust.yml)  <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
 [![All Contributors](https://img.shields.io/badge/all_contributors-34-orange.svg?style=flat-square)](#contributors-)
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
@@ -22,6 +23,9 @@ This is a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Éti
   * `aes256-ctr` ✨
   * `aes192-ctr` ✨
   * `aes128-ctr` ✨
+  * `aes256-cbc` ✨
+  * `aes192-cbc` ✨
+  * `aes128-cbc` ✨
 * Key exchanges:
   * `curve25519-sha256@libssh.org`
   * `diffie-hellman-group1-sha1` ✨
