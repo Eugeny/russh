@@ -20,7 +20,7 @@ vendored-openssl = ["openssl/vendored", "russh-keys/vendored-openssl"]
 [dependencies]
 aes = { workspace = true }
 aes-gcm = "0.10"
-cbc = { version = "0.1.2" }
+cbc = { version = "0.1" }
 async-trait = { workspace = true }
 bitflags = "2.0"
 byteorder = { workspace = true }
