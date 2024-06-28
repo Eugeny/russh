@@ -490,6 +490,12 @@ impl ChannelOpenFailure {
 /// The identifier of a channel.
 pub struct ChannelId(u32);
 
+impl From<ChannelId> for u32 {
+    fn from(c: ChannelId) -> u32 {
+        c.0
+    }
+}
+
 impl Display for ChannelId {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
