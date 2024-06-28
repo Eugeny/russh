@@ -10,6 +10,7 @@ use std::path::Path;
 
 use log::debug;
 use thiserror::*;
+use globset::Glob;
 
 #[derive(Debug, Error)]
 /// anyhow::Errors.
@@ -34,6 +35,7 @@ pub struct Config {
     pub port: u16,
     pub identity_file: Option<String>,
     pub proxy_command: Option<String>,
+    pub proxy_jump: Option<String>,
     pub add_keys_to_agent: AddKeysToAgent,
 }
 
@@ -45,22 +47,31 @@ impl Config {
             port: 22,
             identity_file: None,
             proxy_command: None,
+            proxy_jump: None,
             add_keys_to_agent: AddKeysToAgent::default(),
         }
     }
 }
 
 impl Config {
-    fn update_proxy_command(&mut self) {
-        if let Some(ref mut prox) = self.proxy_command {
-            *prox = prox.replace("%h", &self.host_name);
-            *prox = prox.replace("%p", &format!("{}", self.port));
-        }
+
+    // Look for any of the ssh_config(5) percent-style tokens and expand them
+    // based on current data in the struct, returning a new String. This function
+    // can be employed late/lazy eg just before establishing a stream using ProxyCommand
+    // but also can be used to modify Hostname as config parse time
+    fn expand_tokens(&self, original: &str) -> String {
+        let mut string = original.to_string();
+        string = string.replace("%u", &self.user);
+        string = string.replace("%h", &self.host_name); // remote hostname (from context "host")
+        string = string.replace("%H", &self.host_name); // remote hostname (from context "host")
+        string = string.replace("%p", &format!("{}", self.port)); // original typed hostname (from context "host")
+        string = string.replace("%%", "%");
+        string
     }
 
-    pub async fn stream(&mut self) -> Result<Stream, Error> {
-        self.update_proxy_command();
+    pub async fn stream(&self) -> Result<Stream, Error> {
         if let Some(ref proxy_command) = self.proxy_command {
+            let proxy_command = self.expand_tokens(proxy_command);
             let cmd: Vec<&str> = proxy_command.split(' ').collect();
             Stream::proxy_command(cmd.first().unwrap_or(&""), cmd.get(1..).unwrap_or(&[]))
                 .await
@@ -105,9 +116,9 @@ pub enum AddKeysToAgent {
 pub fn parse(file: &str, host: &str) -> Result<Config, Error> {
     let mut config: Option<Config> = None;
     for line in file.lines() {
-        let line = line.trim();
-        if let Some(n) = line.find(' ') {
-            let (key, value) = line.split_at(n);
+        let tokens = line.trim().splitn(2, ' ').collect::<Vec<&str>>();
+        if tokens.len() == 2 {
+            let (key, value) = (tokens[0], tokens[1]);
             let lower = key.to_lowercase();
             if let Some(ref mut config) = config {
                 match lower.as_str() {
@@ -117,8 +128,7 @@ pub fn parse(file: &str, host: &str) -> Result<Config, Error> {
                         config.user.push_str(value.trim_start());
                     }
                     "hostname" => {
-                        config.host_name.clear();
-                        config.host_name.push_str(value.trim_start())
+                        config.host_name = config.expand_tokens(value.trim_start())
                     }
                     "port" => {
                         if let Ok(port) = value.trim_start().parse() {
@@ -148,6 +158,7 @@ pub fn parse(file: &str, host: &str) -> Result<Config, Error> {
                         }
                     }
                     "proxycommand" => config.proxy_command = Some(value.trim_start().to_string()),
+                    "proxyjump" => config.proxy_jump = Some(value.trim_start().to_string()),
                     "addkeystoagent" => match value.to_lowercase().as_str() {
                         "yes" => config.add_keys_to_agent = AddKeysToAgent::Yes,
                         "confirm" => config.add_keys_to_agent = AddKeysToAgent::Confirm,
@@ -158,7 +169,9 @@ pub fn parse(file: &str, host: &str) -> Result<Config, Error> {
                         debug!("{:?}", key);
                     }
                 }
-            } else if lower.as_str() == "host" && value.trim_start() == host {
+            } else if lower.as_str() == "host" && value.split_whitespace().find(|x| {
+                check_host_against_glob_pattern(host, x)
+            }).is_some() {
                 let mut c = Config::default(host);
                 c.port = 22;
                 config = Some(c)
@@ -171,3 +184,16 @@ pub fn parse(file: &str, host: &str) -> Result<Config, Error> {
         Err(Error::HostNotFound)
     }
 }
+
+fn check_host_against_glob_pattern(candidate: &str, glob_pattern: &str) -> bool {
+    dbg!(candidate, glob_pattern);
+    match Glob::new(glob_pattern) {
+        Ok(glob) => {
+            glob.compile_matcher().is_match(candidate)
+        },
+        _ => {
+            false
+        }
+    }
+}
+
