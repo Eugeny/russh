@@ -8,9 +8,9 @@ use std::io::Read;
 use std::net::ToSocketAddrs;
 use std::path::Path;
 
+use globset::Glob;
 use log::debug;
 use thiserror::*;
-use globset::Glob;
 
 #[derive(Debug, Error)]
 /// anyhow::Errors.
@@ -54,7 +54,6 @@ impl Config {
 }
 
 impl Config {
-
     // Look for any of the ssh_config(5) percent-style tokens and expand them
     // based on current data in the struct, returning a new String. This function
     // can be employed late/lazy eg just before establishing a stream using ProxyCommand
@@ -118,7 +117,7 @@ pub fn parse(file: &str, host: &str) -> Result<Config, Error> {
     for line in file.lines() {
         let tokens = line.trim().splitn(2, ' ').collect::<Vec<&str>>();
         if tokens.len() == 2 {
-            let (key, value) = (tokens[0], tokens[1]);
+            let (key, value) = (tokens.first().unwrap_or(&""), tokens.get(1).unwrap_or(&""));
             let lower = key.to_lowercase();
             if let Some(ref mut config) = config {
                 match lower.as_str() {
@@ -127,9 +126,7 @@ pub fn parse(file: &str, host: &str) -> Result<Config, Error> {
                         config.user.clear();
                         config.user.push_str(value.trim_start());
                     }
-                    "hostname" => {
-                        config.host_name = config.expand_tokens(value.trim_start())
-                    }
+                    "hostname" => config.host_name = config.expand_tokens(value.trim_start()),
                     "port" => {
                         if let Ok(port) = value.trim_start().parse() {
                             config.port = port
@@ -169,9 +166,11 @@ pub fn parse(file: &str, host: &str) -> Result<Config, Error> {
                         debug!("{:?}", key);
                     }
                 }
-            } else if lower.as_str() == "host" && value.split_whitespace().find(|x| {
-                check_host_against_glob_pattern(host, x)
-            }).is_some() {
+            } else if lower.as_str() == "host"
+                && value
+                    .split_whitespace()
+                    .any(|x| check_host_against_glob_pattern(host, x))
+            {
                 let mut c = Config::default(host);
                 c.port = 22;
                 config = Some(c)
@@ -188,12 +187,7 @@ pub fn parse(file: &str, host: &str) -> Result<Config, Error> {
 fn check_host_against_glob_pattern(candidate: &str, glob_pattern: &str) -> bool {
     dbg!(candidate, glob_pattern);
     match Glob::new(glob_pattern) {
-        Ok(glob) => {
-            glob.compile_matcher().is_match(candidate)
-        },
-        _ => {
-            false
-        }
+        Ok(glob) => glob.compile_matcher().is_match(candidate),
+        _ => false,
     }
 }
-
