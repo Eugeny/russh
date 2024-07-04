@@ -310,6 +310,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "packetsource",
+      "name": "Adam Chappell",
+      "avatar_url": "https://avatars.githubusercontent.com/u/6276475?v=4",
+      "profile": "http://blog.packetsource.net/",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,
