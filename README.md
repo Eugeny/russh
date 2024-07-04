@@ -1,7 +1,7 @@
 # Russh
 
 [![Rust](https://github.com/warp-tech/russh/actions/workflows/rust.yml/badge.svg)](https://github.com/warp-tech/russh/actions/workflows/rust.yml)  <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
-[![All Contributors](https://img.shields.io/badge/all_contributors-34-orange.svg?style=flat-square)](#contributors-)
+[![All Contributors](https://img.shields.io/badge/all_contributors-35-orange.svg?style=flat-square)](#contributors-)
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
 
 Low-level Tokio SSH2 client and server implementation.
@@ -135,6 +135,7 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/tomknig"><img src="https://avatars.githubusercontent.com/u/3586316?v=4?s=100" width="100px;" alt="Tom König"/><br /><sub><b>Tom König</b></sub></a><br /><a href="https://github.com/warp-tech/russh/commits?author=tomknig" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://www.legaltile.com/"><img src="https://avatars.githubusercontent.com/u/45085843?v=4?s=100" width="100px;" alt="Pierre Barre"/><br /><sub><b>Pierre Barre</b></sub></a><br /><a href="https://github.com/warp-tech/russh/commits?author=Barre" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="http://skutnik.page"><img src="https://avatars.githubusercontent.com/u/22240065?v=4?s=100" width="100px;" alt="Jean-Baptiste Skutnik"/><br /><sub><b>Jean-Baptiste Skutnik</b></sub></a><br /><a href="https://github.com/warp-tech/russh/commits?author=spoutn1k" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="http://blog.packetsource.net/"><img src="https://avatars.githubusercontent.com/u/6276475?v=4?s=100" width="100px;" alt="Adam Chappell"/><br /><sub><b>Adam Chappell</b></sub></a><br /><a href="https://github.com/warp-tech/russh/commits?author=packetsource" title="Code">💻</a></td>
     </tr>
   </tbody>
 </table>
