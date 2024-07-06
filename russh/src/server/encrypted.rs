@@ -1027,11 +1027,38 @@ impl Session {
                         Ok(())
                     }
                     b"streamlocal-forward" => {
-                        // NEED HELP
+                        let server_socket_path =
+                            std::str::from_utf8(r.read_string().map_err(crate::Error::from)?)
+                                .map_err(crate::Error::from)?;
+                        debug!("handler.streamlocal_forward {:?}", server_socket_path);
+                        let mut client_socket_path = String::from(server_socket_path).clone();
+                        let result = handler
+                            .streamlocal_forward(server_socket_path, &mut client_socket_path, self)
+                            .await?;
+                        if let Some(ref mut enc) = self.common.encrypted {
+                            if result {
+                                push_packet!(enc.write, enc.write.push(msg::REQUEST_SUCCESS))
+                            } else {
+                                push_packet!(enc.write, enc.write.push(msg::REQUEST_FAILURE))
+                            }
+                        }
                         Ok(())
                     }
                     b"cancel-streamlocal-forward" => {
-                        // NEED HELP
+                        let socket_path =
+                            std::str::from_utf8(r.read_string().map_err(crate::Error::from)?)
+                                .map_err(crate::Error::from)?;
+                        debug!("handler.cancel_streamlocal_forward {:?}", socket_path);
+                        let result = handler
+                            .cancel_streamlocal_forward(socket_path, self)
+                            .await?;
+                        if let Some(ref mut enc) = self.common.encrypted {
+                            if result {
+                                push_packet!(enc.write, enc.write.push(msg::REQUEST_SUCCESS))
+                            } else {
+                                push_packet!(enc.write, enc.write.push(msg::REQUEST_FAILURE))
+                            }
+                        }
                         Ok(())
                     }
                     _ => {
@@ -1099,8 +1126,19 @@ impl Session {
                         let _ = return_channel.send(true);
                     }
                     Some(GlobalRequestResponse::StreamLocalForward(return_channel)) => {
-                        // NEED HELP: how to do this?
-                        let _ = return_channel.send(None);
+                        let mut r = buf.reader(1);
+                        let socket_path: Option<String> = match r.read_string() {
+                            Ok(socket_path) => Some(
+                                std::str::from_utf8(socket_path)
+                                    .map_err(crate::Error::from)?
+                                    .into(),
+                            ),
+                            Err(e) => {
+                                error!("Error parsing socket path for StreamLocalForward request: {e:?}");
+                                None
+                            }
+                        };
+                        let _ = return_channel.send(socket_path);
                     }
                     Some(GlobalRequestResponse::CancelStreamLocalForward(return_channel)) => {
                         let _ = return_channel.send(true);

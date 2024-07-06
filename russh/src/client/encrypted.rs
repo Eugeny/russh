@@ -862,8 +862,19 @@ impl Session {
                         let _ = return_channel.send(true);
                     }
                     Some(GlobalRequestResponse::StreamLocalForward(return_channel)) => {
-                        // NEED HELP: how to do this?
-                        let _ = return_channel.send(None);
+                        let mut r = buf.reader(1);
+                        let socket_path: Option<String> = match r.read_string() {
+                            Ok(socket_path) => Some(
+                                std::str::from_utf8(socket_path)
+                                    .map_err(crate::Error::from)?
+                                    .into(),
+                            ),
+                            Err(e) => {
+                                error!("Error parsing socket path for StreamLocalForward request: {e:?}");
+                                None
+                            }
+                        };
+                        let _ = return_channel.send(socket_path);
                     }
                     Some(GlobalRequestResponse::CancelStreamLocalForward(return_channel)) => {
                         let _ = return_channel.send(true);

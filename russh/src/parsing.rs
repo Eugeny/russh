@@ -34,6 +34,9 @@ impl OpenChannelMessage {
             }
             b"direct-tcpip" => ChannelType::DirectTcpip(TcpChannelInfo::new(r)?),
             b"forwarded-tcpip" => ChannelType::ForwardedTcpIp(TcpChannelInfo::new(r)?),
+            b"forwarded-streamlocal" => {
+                ChannelType::ForwardedStreamLocal(StreamLocalChannelInfo::new(r)?)
+            }
             b"auth-agent@openssh.com" => ChannelType::AgentForward,
             t => ChannelType::Unknown { typ: t.to_vec() },
         };
@@ -112,6 +115,23 @@ pub struct TcpChannelInfo {
 pub struct StreamLocalChannelInfo {
     pub client_socket_path: String,
     pub server_socket_path: String,
+}
+
+impl StreamLocalChannelInfo {
+    fn new(r: &mut Position) -> Result<Self, crate::Error> {
+        // NEED HELP: is this completely correct?
+        let client_socket_path = std::str::from_utf8(r.read_string().map_err(crate::Error::from)?)
+            .map_err(crate::Error::from)?
+            .to_owned();
+        let server_socket_path = std::str::from_utf8(r.read_string().map_err(crate::Error::from)?)
+            .map_err(crate::Error::from)?
+            .to_owned();
+
+        Ok(Self {
+            client_socket_path,
+            server_socket_path,
+        })
+    }
 }
 
 impl TcpChannelInfo {
