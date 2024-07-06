@@ -42,6 +42,11 @@ pub enum Msg {
         originator_port: u32,
         channel_ref: ChannelRef,
     },
+    ChannelOpenForwardedStreamLocal {
+        server_socket_path: String,
+        client_socket_path: String,
+        channel_ref: ChannelRef,
+    },
     ChannelOpenX11 {
         originator_address: String,
         originator_port: u32,
@@ -306,6 +311,27 @@ impl Handle {
             .await
     }
 
+    pub async fn channel_open_forwarded_streamlocal<A: Into<String>, B: Into<String>>(
+        &self,
+        server_socket_path: A,
+        client_socket_path: B,
+    ) -> Result<Channel<Msg>, Error> {
+        let (sender, receiver) = unbounded_channel();
+        let channel_ref = ChannelRef::new(sender);
+        let window_size_ref = channel_ref.window_size().clone();
+
+        self.sender
+            .send(Msg::ChannelOpenForwardedStreamLocal {
+                server_socket_path: server_socket_path.into(),
+                client_socket_path: client_socket_path.into(),
+                channel_ref,
+            })
+            .await
+            .map_err(|_| Error::SendError)?;
+        self.wait_channel_confirmation(receiver, window_size_ref)
+            .await
+    }
+
     pub async fn channel_open_x11<A: Into<String>>(
         &self,
         originator_address: A,
@@ -552,6 +578,10 @@ impl Session {
                         }
                         Some(Msg::ChannelOpenForwardedTcpIp { connected_address, connected_port, originator_address, originator_port, channel_ref }) => {
                             let id = self.channel_open_forwarded_tcpip(&connected_address, connected_port, &originator_address, originator_port)?;
+                            self.channels.insert(id, channel_ref);
+                        }
+                        Some(Msg::ChannelOpenForwardedStreamLocal { server_socket_path, client_socket_path, channel_ref }) => {
+                            let id = self.channel_open_forwarded_streamlocal(&server_socket_path, &client_socket_path)?;
                             self.channels.insert(id, channel_ref);
                         }
                         Some(Msg::ChannelOpenX11 { originator_address, originator_port, channel_ref }) => {
@@ -953,6 +983,18 @@ impl Session {
             write.push_u32_be(connected_port); // sender channel id.
             write.extend_ssh_string(originator_address.as_bytes());
             write.push_u32_be(originator_port); // sender channel id.
+        })
+    }
+
+    pub fn channel_open_forwarded_streamlocal(
+        &mut self,
+        server_socket_path: &str,
+        client_socket_path: &str,
+    ) -> Result<ChannelId, Error> {
+        self.channel_open_generic(b"forwarded-streamlocal", |write| {
+            // NEED HELP: is this correct?
+            write.extend_ssh_string(server_socket_path.as_bytes());
+            write.extend_ssh_string(client_socket_path.as_bytes());
         })
     }
 
