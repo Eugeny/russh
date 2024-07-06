@@ -162,6 +162,16 @@ pub enum Msg {
         address: String,
         port: u32,
     },
+    StreamLocalForward {
+        /// Provide a channel for the reply result to request a reply from the server
+        reply_channel: Option<oneshot::Sender<Option<String>>>,
+        socket_path: String,
+    },
+    CancelStreamLocalForward {
+        /// Provide a channel for the reply result to request a reply from the server
+        reply_channel: Option<oneshot::Sender<bool>>,
+        socket_path: String,
+    },
     Close {
         id: ChannelId,
     },
@@ -573,6 +583,7 @@ impl<H: Handler> Handle<H> {
         }
     }
 
+    // Requests the server to close a TCP/IP forward channel
     pub async fn cancel_tcpip_forward<A: Into<String>>(
         &self,
         address: A,
@@ -593,6 +604,54 @@ impl<H: Handler> Handle<H> {
             Ok(false) => Err(crate::Error::RequestDenied),
             Err(e) => {
                 error!("Unable to receive CancelTcpIpForward result: {e:?}");
+                Err(crate::Error::Disconnect)
+            }
+        }
+    }
+
+    // Requests the server to open a UDS forward channel
+    pub async fn streamlocal_forward<A: Into<String>>(
+        &mut self,
+        socket_path: A,
+    ) -> Result<String, crate::Error> {
+        let (reply_send, reply_recv) = oneshot::channel();
+        self.sender
+            .send(Msg::StreamLocalForward {
+                reply_channel: Some(reply_send),
+                socket_path: socket_path.into(),
+            })
+            .await
+            .map_err(|_| crate::Error::SendError)?;
+
+        match reply_recv.await {
+            Ok(Some(returned_socket_path)) => Ok(returned_socket_path),
+            Ok(None) => Err(crate::Error::RequestDenied),
+            Err(e) => {
+                error!("Unable to receive StreamLocalForward result: {e:?}");
+                Err(crate::Error::Disconnect)
+            }
+        }
+    }
+
+    // Requests the server to close a UDS forward channel
+    pub async fn cancel_streamlocal_forward<A: Into<String>>(
+        &self,
+        socket_path: A,
+    ) -> Result<(), crate::Error> {
+        let (reply_send, reply_recv) = oneshot::channel();
+        self.sender
+            .send(Msg::CancelStreamLocalForward {
+                reply_channel: Some(reply_send),
+                socket_path: socket_path.into(),
+            })
+            .await
+            .map_err(|_| crate::Error::SendError)?;
+
+        match reply_recv.await {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(crate::Error::RequestDenied),
+            Err(e) => {
+                error!("Unable to receive CancelStreamLocalForward result: {e:?}");
                 Err(crate::Error::Disconnect)
             }
         }
@@ -1052,6 +1111,14 @@ impl Session {
                 address,
                 port,
             } => self.cancel_tcpip_forward(reply_channel, &address, port),
+            Msg::StreamLocalForward {
+                reply_channel,
+                socket_path,
+            } => self.streamlocal_forward(reply_channel, &socket_path),
+            Msg::CancelStreamLocalForward {
+                reply_channel,
+                socket_path,
+            } => self.cancel_streamlocal_forward(reply_channel, &socket_path),
             Msg::Disconnect {
                 reason,
                 description,
@@ -1553,6 +1620,7 @@ pub trait Handler: Sized + Send {
         Ok(())
     }
 
+    // Called when the server opens a channel for a new remote UDS forwarding connection
     #[allow(unused_variables)]
     async fn server_channel_open_forwarded_streamlocal(
         &mut self,

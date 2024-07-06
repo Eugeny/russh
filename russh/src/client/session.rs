@@ -294,7 +294,7 @@ impl Session {
 
     /// Requests cancellation of TCP/IP forwarding from the server
     ///
-    /// If `want_reply` is `true`, returns a oneshot receiveing the server's reply:
+    /// If `want_reply` is `true`, returns a oneshot receiving the server's reply:
     /// `true` for a success message, or `false` for failure
     pub fn cancel_tcpip_forward(
         &mut self,
@@ -319,6 +319,10 @@ impl Session {
         }
     }
 
+    /// Requests a UDS forwarding from the server, `socket path` being the server side socket path.
+    ///
+    /// If `reply_channel` is not None, sets want_reply and returns the server's response via the channel,
+    /// [`Some<String>`] for a success message with the client side socket path, [`None`] for failure.
     pub fn streamlocal_forward(
         &mut self,
         reply_channel: Option<oneshot::Sender<Option<String>>>,
@@ -340,6 +344,10 @@ impl Session {
         }
     }
 
+    /// Requests cancellation of UDS forwarding from the server
+    ///
+    /// If `want_reply` is true, returns a oneshot receiving the server's reply:
+    /// `true` for a success message and `false` for failure.
     pub fn cancel_streamlocal_forward(
         &mut self,
         reply_channel: Option<oneshot::Sender<bool>>,
