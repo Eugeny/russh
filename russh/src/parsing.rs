@@ -93,6 +93,7 @@ pub enum ChannelType {
     },
     DirectTcpip(TcpChannelInfo),
     ForwardedTcpIp(TcpChannelInfo),
+    ForwardedStreamLocal(StreamLocalChannelInfo),
     AgentForward,
     Unknown {
         typ: Vec<u8>,
@@ -105,6 +106,12 @@ pub struct TcpChannelInfo {
     pub port_to_connect: u32,
     pub originator_address: String,
     pub originator_port: u32,
+}
+
+#[derive(Debug)]
+pub struct StreamLocalChannelInfo {
+    pub client_socket_path: String,
+    pub server_socket_path: String,
 }
 
 impl TcpChannelInfo {

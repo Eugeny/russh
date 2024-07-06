@@ -59,6 +59,16 @@ pub enum Msg {
         address: String,
         port: u32,
     },
+    StreamLocalForward {
+        // Provide a channel for the reply result to request a reply from the server
+        reply_channel: Option<oneshot::Sender<Option<String>>>,
+        socket_path: String,
+    },
+    CancelStreamLocalForward {
+        // Provide a channel for the reply result to request a reply from the server
+        reply_channel: Option<oneshot::Sender<bool>>,
+        socket_path: String,
+    },
     Disconnect {
         reason: crate::Disconnect,
         description: String,
@@ -176,6 +186,27 @@ impl Handle {
             Err(e) => {
                 error!("Unable to receive TcpIpForward result: {e:?}");
                 Err(()) // crate::Error::Disconnect
+            }
+        }
+    }
+
+    // Notifies the client that it can open UDS forwarding channels for a given UDS
+    pub async fn forward_streamlocal(&self, socket_path: String) -> Result<String, ()> {
+        let (reply_send, reply_recv) = oneshot::channel();
+        self.sender
+            .send(Msg::StreamLocalForward {
+                reply_channel: Some(reply_send),
+                socket_path,
+            })
+            .await
+            .map_err(|_| ())?;
+
+        match reply_recv.await {
+            Ok(Some(socket_path)) => Ok(socket_path),
+            Ok(None) => Err(()),
+            Err(e) => {
+                error!("Unable to receive StreamLocalForward result: {e:?}");
+                Err(())
             }
         }
     }
@@ -532,6 +563,12 @@ impl Session {
                         }
                         Some(Msg::CancelTcpIpForward { address, port, reply_channel }) => {
                             self.cancel_tcpip_forward(&address, port, reply_channel);
+                        }
+                        Some(Msg::StreamLocalForward { socket_path, reply_channel }) => {
+                            self.streamlocal_forward(&socket_path, reply_channel);
+                        }
+                        Some(Msg::CancelStreamLocalForward { socket_path, reply_channel }) => {
+                            self.cancel_streamlocal_forward(&socket_path, reply_channel);
                         }
                         Some(Msg::Disconnect {reason, description, language_tag}) => {
                             self.common.disconnect(reason, &description, &language_tag);
@@ -1024,6 +1061,48 @@ impl Session {
                 enc.write.push(want_reply as u8);
                 enc.write.extend_ssh_string(address.as_bytes());
                 enc.write.push_u32_be(port);
+            });
+        }
+    }
+
+    pub fn streamlocal_forward(
+        &mut self,
+        socket_path: &str,
+        reply_channel: Option<oneshot::Sender<Option<String>>>,
+    ) {
+        if let Some(ref mut enc) = self.common.encrypted {
+            let want_reply = reply_channel.is_some();
+            if let Some(reply_channel) = reply_channel {
+                self.open_global_requests.push_back(
+                    crate::session::GlobalRequestResponse::StreamLocalForward(reply_channel),
+                );
+            }
+            push_packet!(enc.write, {
+                enc.write.push(msg::GLOBAL_REQUEST);
+                enc.write.extend_ssh_string(b"streamlocal-forward");
+                enc.write.push(want_reply as u8);
+                enc.write.extend_ssh_string(socket_path.as_bytes());
+            })
+        }
+    }
+
+    pub fn cancel_streamlocal_forward(
+        &mut self,
+        socket_path: &str,
+        reply_channel: Option<oneshot::Sender<bool>>,
+    ) {
+        if let Some(ref mut enc) = self.common.encrypted {
+            let want_reply = reply_channel.is_some();
+            if let Some(reply_channel) = reply_channel {
+                self.open_global_requests.push_back(
+                    crate::session::GlobalRequestResponse::CancelStreamLocalForward(reply_channel),
+                );
+            }
+            push_packet!(enc.write, {
+                enc.write.push(msg::GLOBAL_REQUEST);
+                enc.write.extend_ssh_string(b"cancel-streamlocal-forward");
+                enc.write.push(want_reply as u8);
+                enc.write.extend_ssh_string(socket_path.as_bytes());
             });
         }
     }

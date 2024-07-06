@@ -319,6 +319,48 @@ impl Session {
         }
     }
 
+    pub fn streamlocal_forward(
+        &mut self,
+        reply_channel: Option<oneshot::Sender<Option<String>>>,
+        socket_path: &str,
+    ) {
+        if let Some(ref mut enc) = self.common.encrypted {
+            let want_reply = reply_channel.is_some();
+            if let Some(reply_channel) = reply_channel {
+                self.open_global_requests.push_back(
+                    crate::session::GlobalRequestResponse::StreamLocalForward(reply_channel),
+                );
+            }
+            push_packet!(enc.write, {
+                enc.write.push(msg::GLOBAL_REQUEST);
+                enc.write.extend_ssh_string(b"streamlocal-forward");
+                enc.write.push(want_reply as u8);
+                enc.write.extend_ssh_string(socket_path.as_bytes());
+            });
+        }
+    }
+
+    pub fn cancel_streamlocal_forward(
+        &mut self,
+        reply_channel: Option<oneshot::Sender<bool>>,
+        socket_path: &str,
+    ) {
+        if let Some(ref mut enc) = self.common.encrypted {
+            let want_reply = reply_channel.is_some();
+            if let Some(reply_channel) = reply_channel {
+                self.open_global_requests.push_back(
+                    crate::session::GlobalRequestResponse::CancelStreamLocalForward(reply_channel),
+                );
+            }
+            push_packet!(enc.write, {
+                enc.write.push(msg::GLOBAL_REQUEST);
+                enc.write.extend_ssh_string(b"cancel-streamlocal-forward");
+                enc.write.push(want_reply as u8);
+                enc.write.extend_ssh_string(socket_path.as_bytes());
+            });
+        }
+    }
+
     pub fn send_keepalive(&mut self, want_reply: bool) {
         self.open_global_requests
             .push_back(crate::session::GlobalRequestResponse::Keepalive);

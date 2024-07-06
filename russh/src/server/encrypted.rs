@@ -1026,6 +1026,14 @@ impl Session {
                         }
                         Ok(())
                     }
+                    b"streamlocal-forward" => {
+                        // NEED HELP
+                        Ok(())
+                    }
+                    b"cancel-streamlocal-forward" => {
+                        // NEED HELP
+                        Ok(())
+                    }
                     _ => {
                         if let Some(ref mut enc) = self.common.encrypted {
                             push_packet!(enc.write, {
@@ -1090,6 +1098,13 @@ impl Session {
                     Some(GlobalRequestResponse::CancelTcpIpForward(return_channel)) => {
                         let _ = return_channel.send(true);
                     }
+                    Some(GlobalRequestResponse::StreamLocalForward(return_channel)) => {
+                        // NEED HELP: how to do this?
+                        let _ = return_channel.send(None);
+                    }
+                    Some(GlobalRequestResponse::CancelStreamLocalForward(return_channel)) => {
+                        let _ = return_channel.send(true);
+                    }
                     None => {
                         error!("Received global request failure for unknown request!")
                     }
@@ -1106,6 +1121,12 @@ impl Session {
                         let _ = return_channel.send(None);
                     }
                     Some(GlobalRequestResponse::CancelTcpIpForward(return_channel)) => {
+                        let _ = return_channel.send(false);
+                    }
+                    Some(GlobalRequestResponse::StreamLocalForward(return_channel)) => {
+                        let _ = return_channel.send(None);
+                    }
+                    Some(GlobalRequestResponse::CancelStreamLocalForward(return_channel)) => {
                         let _ = return_channel.send(false);
                     }
                     None => {
@@ -1205,6 +1226,21 @@ impl Session {
                         d.port_to_connect,
                         &d.originator_address,
                         d.originator_port,
+                        self,
+                    )
+                    .await;
+                if let Ok(allowed) = &mut result {
+                    self.channels.insert(sender_channel, reference);
+                    self.finalize_channel_open(&msg, channel_params, *allowed);
+                }
+                result
+            }
+            ChannelType::ForwardedStreamLocal(d) => {
+                let mut result = handler
+                    .channel_open_forwarded_streamlocal(
+                        channel,
+                        &d.server_socket_path,
+                        &d.client_socket_path,
                         self,
                     )
                     .await;

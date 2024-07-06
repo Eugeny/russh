@@ -1553,6 +1553,17 @@ pub trait Handler: Sized + Send {
         Ok(())
     }
 
+    #[allow(unused_variables)]
+    async fn server_channel_open_forwarded_streamlocal(
+        &mut self,
+        channel: Channel<Msg>,
+        remote_socket_path: &str,
+        local_socket_path: &str,
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
     /// Called when the server opens an agent forwarding channel
     #[allow(unused_variables)]
     async fn server_channel_open_agent_forward(

@@ -625,4 +625,6 @@ pub(crate) enum GlobalRequestResponse {
     TcpIpForward(oneshot::Sender<Option<u32>>),
     /// request was for CancelTcpIpForward, sends true for success or false for failure
     CancelTcpIpForward(oneshot::Sender<bool>),
+    StreamLocalForward(oneshot::Sender<Option<String>>),
+    CancelStreamLocalForward(oneshot::Sender<bool>),
 }
