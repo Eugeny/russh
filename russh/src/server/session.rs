@@ -1121,7 +1121,8 @@ impl Session {
             }
             push_packet!(enc.write, {
                 enc.write.push(msg::GLOBAL_REQUEST);
-                enc.write.extend_ssh_string(b"streamlocal-forward");
+                enc.write
+                    .extend_ssh_string(b"streamlocal-forward@openssh.com");
                 enc.write.push(want_reply as u8);
                 enc.write.extend_ssh_string(socket_path.as_bytes());
             })
@@ -1142,7 +1143,8 @@ impl Session {
             }
             push_packet!(enc.write, {
                 enc.write.push(msg::GLOBAL_REQUEST);
-                enc.write.extend_ssh_string(b"cancel-streamlocal-forward");
+                enc.write
+                    .extend_ssh_string(b"cancel-streamlocal-forward@openssh.com");
                 enc.write.push(want_reply as u8);
                 enc.write.extend_ssh_string(socket_path.as_bytes());
             });

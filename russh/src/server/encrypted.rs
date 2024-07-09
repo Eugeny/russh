@@ -1026,7 +1026,7 @@ impl Session {
                         }
                         Ok(())
                     }
-                    b"streamlocal-forward" => {
+                    b"streamlocal-forward@openssh.com" => {
                         let server_socket_path =
                             std::str::from_utf8(r.read_string().map_err(crate::Error::from)?)
                                 .map_err(crate::Error::from)?;
@@ -1044,7 +1044,7 @@ impl Session {
                         }
                         Ok(())
                     }
-                    b"cancel-streamlocal-forward" => {
+                    b"cancel-streamlocal-forward@openssh.com" => {
                         let socket_path =
                             std::str::from_utf8(r.read_string().map_err(crate::Error::from)?)
                                 .map_err(crate::Error::from)?;
