@@ -14,6 +14,7 @@
 //!
 //! This module exports cipher names for use with [Preferred].
 use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::marker::PhantomData;
 
 use digest::typenum::{U20, U32, U64};
@@ -52,6 +53,13 @@ impl AsRef<str> for Name {
     }
 }
 
+impl TryFrom<&str> for Name {
+    type Error = ();
+    fn try_from(s: &str) -> Result<Name, ()> {
+        MACS.keys().find(|x| x.0 == s).map(|x| **x).ok_or(())
+    }
+}
+
 /// `none`
 pub const NONE: Name = Name("none");
 /// `hmac-sha1`
@@ -81,6 +89,16 @@ static _HMAC_SHA256_ETM: CryptoEtmMacAlgorithm<Hmac<Sha256>, U32> =
 static _HMAC_SHA512_ETM: CryptoEtmMacAlgorithm<Hmac<Sha512>, U64> =
     CryptoEtmMacAlgorithm(PhantomData, PhantomData);
 
+pub const ALL_MAC_ALGORITHMS: &[&Name] = &[
+    &NONE,
+    &HMAC_SHA1,
+    &HMAC_SHA256,
+    &HMAC_SHA512,
+    &HMAC_SHA1_ETM,
+    &HMAC_SHA256_ETM,
+    &HMAC_SHA512_ETM,
+];
+
 pub(crate) static MACS: Lazy<HashMap<&'static Name, &(dyn MacAlgorithm + Send + Sync)>> =
     Lazy::new(|| {
         let mut h: HashMap<&'static Name, &(dyn MacAlgorithm + Send + Sync)> = HashMap::new();
@@ -91,5 +109,6 @@ pub(crate) static MACS: Lazy<HashMap<&'static Name, &(dyn MacAlgorithm + Send + 
         h.insert(&HMAC_SHA1_ETM, &_HMAC_SHA1_ETM);
         h.insert(&HMAC_SHA256_ETM, &_HMAC_SHA256_ETM);
         h.insert(&HMAC_SHA512_ETM, &_HMAC_SHA512_ETM);
+        assert_eq!(h.len(), ALL_MAC_ALGORITHMS.len());
         h
     });

@@ -56,6 +56,16 @@ pub const NONE: Name = Name("none");
 
 pub const SSH_RSA: Name = Name("ssh-rsa");
 
+pub static ALL_KEY_TYPES: &[&Name] = &[
+    &NONE,
+    &SSH_RSA,
+    &RSA_SHA2_256,
+    &RSA_SHA2_512,
+    &ECDSA_SHA2_NISTP256,
+    &ECDSA_SHA2_NISTP384,
+    &ECDSA_SHA2_NISTP521,
+];
+
 impl Name {
     /// Base name of the private key file for a key name.
     pub fn identity_file(&self) -> &'static str {
@@ -66,6 +76,17 @@ impl Name {
             RSA_SHA2_256 => "id_rsa",
             _ => unreachable!(),
         }
+    }
+}
+
+impl TryFrom<&str> for Name {
+    type Error = ();
+    fn try_from(s: &str) -> Result<Name, ()> {
+        ALL_KEY_TYPES
+            .iter()
+            .find(|x| x.0 == s)
+            .map(|x| **x)
+            .ok_or(())
     }
 }
 

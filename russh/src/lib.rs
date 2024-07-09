@@ -108,9 +108,10 @@ pub mod cipher;
 pub mod kex;
 /// MAC algorithm names
 pub mod mac;
+/// Compression algorithm names
+pub mod compression;
 
 mod cert;
-mod compression;
 mod key;
 mod msg;
 mod negotiation;

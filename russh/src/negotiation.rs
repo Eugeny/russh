@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 // Copyright 2016 Pierre-Étienne Meunier
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -22,7 +23,7 @@ use russh_keys::key;
 use russh_keys::key::{KeyPair, PublicKey};
 
 use crate::cipher::CIPHERS;
-use crate::compression::*;
+use crate::compression;
 use crate::kex::{EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT, EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER};
 use crate::server::Config;
 use crate::{cipher, kex, mac, msg, Error};
@@ -44,25 +45,26 @@ pub struct Names {
 #[derive(Debug, Clone)]
 pub struct Preferred {
     /// Preferred key exchange algorithms.
-    pub kex: &'static [kex::Name],
+    pub kex: Cow<'static, [kex::Name]>,
     /// Preferred host & public key algorithms.
-    pub key: &'static [key::Name],
+    pub key: Cow<'static, [key::Name]>,
     /// Preferred symmetric ciphers.
-    pub cipher: &'static [cipher::Name],
+    pub cipher: Cow<'static, [cipher::Name]>,
     /// Preferred MAC algorithms.
-    pub mac: &'static [mac::Name],
+    pub mac: Cow<'static, [mac::Name]>,
     /// Preferred compression algorithms.
-    pub compression: &'static [&'static str],
+    pub compression: Cow<'static, [compression::Name]>,
 }
 
 impl Preferred {
     pub(crate) fn possible_host_key_algos_for_keys(
         &self,
         available_host_keys: &[KeyPair],
-    ) -> Vec<&'static key::Name> {
+    ) -> Vec<key::Name> {
         self.key
             .iter()
             .filter(|n| available_host_keys.iter().any(|k| k.name() == n.0))
+            .copied()
             .collect::<Vec<_>>()
     }
 }
@@ -95,27 +97,35 @@ const HMAC_ORDER: &[mac::Name] = &[
     mac::HMAC_SHA1,
 ];
 
+const COMPRESSION_ORDER: &[compression::Name] = &[
+    compression::NONE,
+    #[cfg(feature = "flate2")]
+    compression::ZLIB,
+    #[cfg(feature = "flate2")]
+    compression::ZLIB_LEGACY,
+];
+
 impl Preferred {
     pub const DEFAULT: Preferred = Preferred {
-        kex: SAFE_KEX_ORDER,
-        key: &[
+        kex: Cow::Borrowed(SAFE_KEX_ORDER),
+        key: Cow::Borrowed(&[
             key::ED25519,
             key::ECDSA_SHA2_NISTP256,
             key::ECDSA_SHA2_NISTP521,
             key::RSA_SHA2_256,
             key::RSA_SHA2_512,
-        ],
-        cipher: CIPHER_ORDER,
-        mac: HMAC_ORDER,
-        compression: &["none", "zlib", "zlib@openssh.com"],
+        ]),
+        cipher: Cow::Borrowed(CIPHER_ORDER),
+        mac: Cow::Borrowed(HMAC_ORDER),
+        compression: Cow::Borrowed(COMPRESSION_ORDER),
     };
 
     pub const COMPRESSED: Preferred = Preferred {
-        kex: SAFE_KEX_ORDER,
+        kex: Cow::Borrowed(SAFE_KEX_ORDER),
         key: Preferred::DEFAULT.key,
-        cipher: CIPHER_ORDER,
-        mac: HMAC_ORDER,
-        compression: &["zlib", "zlib@openssh.com", "none"],
+        cipher: Cow::Borrowed(CIPHER_ORDER),
+        mac: Cow::Borrowed(HMAC_ORDER),
+        compression: Cow::Borrowed(COMPRESSION_ORDER),
     };
 }
 
@@ -162,7 +172,7 @@ impl Named for KeyPair {
 pub(crate) trait Select {
     fn is_server() -> bool;
 
-    fn select<S: AsRef<str> + Copy>(a: &[S], b: &[u8]) -> Option<(bool, S)>;
+    fn select<S: AsRef<str> + Clone>(a: &[S], b: &[u8]) -> Option<(bool, S)>;
 
     /// `available_host_keys`, if present, is used to limit the host key algorithms to the ones we have keys for.
     fn read_kex(
@@ -175,7 +185,7 @@ pub(crate) trait Select {
         // Key exchange
 
         let kex_string = r.read_string()?;
-        let (kex_both_first, kex_algorithm) = Self::select(pref.kex, kex_string).ok_or_else(||
+        let (kex_both_first, kex_algorithm) = Self::select(&pref.kex, kex_string).ok_or_else(||
         {
             debug!(
                 "Could not find common kex algorithm, other side only supports {:?}, we only support {:?}",
@@ -210,7 +220,7 @@ pub(crate) trait Select {
         let key_string: &[u8] = r.read_string()?;
         let possible_host_key_algos = match available_host_keys {
             Some(available_host_keys) => pref.possible_host_key_algos_for_keys(available_host_keys),
-            None => pref.key.iter().collect::<Vec<_>>(),
+            None => pref.key.iter().map(ToOwned::to_owned).collect::<Vec<_>>(),
         };
 
         let (key_both_first, key_algorithm) =
@@ -227,7 +237,7 @@ pub(crate) trait Select {
 
         let cipher_string = r.read_string()?;
         let (_cipher_both_first, cipher) =
-            Self::select(pref.cipher, cipher_string).ok_or_else(|| {
+            Self::select(&pref.cipher, cipher_string).ok_or_else(|| {
                 debug!(
                 "Could not find common cipher, other side only supports {:?}, we only support {:?}",
                 from_utf8(cipher_string),
@@ -242,14 +252,14 @@ pub(crate) trait Select {
 
         let need_mac = CIPHERS.get(&cipher).map(|x| x.needs_mac()).unwrap_or(false);
 
-        let client_mac = if let Some((_, m)) = Self::select(pref.mac, r.read_string()?) {
+        let client_mac = if let Some((_, m)) = Self::select(&pref.mac, r.read_string()?) {
             m
         } else if need_mac {
             return Err(Error::NoCommonMac);
         } else {
             mac::NONE
         };
-        let server_mac = if let Some((_, m)) = Self::select(pref.mac, r.read_string()?) {
+        let server_mac = if let Some((_, m)) = Self::select(&pref.mac, r.read_string()?) {
             m
         } else if need_mac {
             return Err(Error::NoCommonMac);
@@ -262,16 +272,16 @@ pub(crate) trait Select {
         debug!("kex {}", line!());
         // client-to-server compression.
         let client_compression =
-            if let Some((_, c)) = Self::select(pref.compression, r.read_string()?) {
-                Compression::from_string(c)
+            if let Some((_, c)) = Self::select(&pref.compression, r.read_string()?) {
+                compression::Compression::new(&c)
             } else {
                 return Err(Error::NoCommonCompression);
             };
         debug!("kex {}", line!());
         // server-to-client compression.
         let server_compression =
-            if let Some((_, c)) = Self::select(pref.compression, r.read_string()?) {
-                Compression::from_string(c)
+            if let Some((_, c)) = Self::select(&pref.compression, r.read_string()?) {
+                compression::Compression::new(&c)
             } else {
                 return Err(Error::NoCommonCompression);
             };
@@ -282,7 +292,7 @@ pub(crate) trait Select {
         let follows = r.read_byte()? != 0;
         Ok(Names {
             kex: kex_algorithm,
-            key: *key_algorithm,
+            key: key_algorithm,
             cipher,
             client_mac,
             server_mac,
@@ -303,12 +313,12 @@ impl Select for Server {
         true
     }
 
-    fn select<S: AsRef<str> + Copy>(server_list: &[S], client_list: &[u8]) -> Option<(bool, S)> {
+    fn select<S: AsRef<str> + Clone>(server_list: &[S], client_list: &[u8]) -> Option<(bool, S)> {
         let mut both_first_choice = true;
         for c in client_list.split(|&x| x == b',') {
-            for &s in server_list {
+            for s in server_list {
                 if c == s.as_ref().as_bytes() {
-                    return Some((both_first_choice, s));
+                    return Some((both_first_choice, s.clone()));
                 }
                 both_first_choice = false
             }
@@ -322,12 +332,12 @@ impl Select for Client {
         false
     }
 
-    fn select<S: AsRef<str> + Copy>(client_list: &[S], server_list: &[u8]) -> Option<(bool, S)> {
+    fn select<S: AsRef<str> + Clone>(client_list: &[S], server_list: &[u8]) -> Option<(bool, S)> {
         let mut both_first_choice = true;
-        for &c in client_list {
+        for c in client_list {
             for s in server_list.split(|&x| x == b',') {
                 if s == c.as_ref().as_bytes() {
-                    return Some((both_first_choice, c));
+                    return Some((both_first_choice, c.clone()));
                 }
                 both_first_choice = false
             }
