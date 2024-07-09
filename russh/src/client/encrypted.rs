@@ -812,8 +812,7 @@ impl Session {
                             client
                                 .server_channel_open_forwarded_streamlocal(
                                     channel,
-                                    &d.server_socket_path,
-                                    &d.client_socket_path,
+                                    &d.socket_path,
                                     self,
                                 )
                                 .await?;

@@ -328,8 +328,7 @@ pub trait Handler: Sized {
     async fn channel_open_forwarded_streamlocal(
         &mut self,
         channel: Channel<Msg>,
-        server_socket_path: &str,
-        client_socket_path: &str,
+        socket_path: &str,
         session: &mut Session,
     ) -> Result<bool, Self::Error> {
         Ok(false)

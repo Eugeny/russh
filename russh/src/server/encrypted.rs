@@ -1275,12 +1275,7 @@ impl Session {
             }
             ChannelType::ForwardedStreamLocal(d) => {
                 let mut result = handler
-                    .channel_open_forwarded_streamlocal(
-                        channel,
-                        &d.server_socket_path,
-                        &d.client_socket_path,
-                        self,
-                    )
+                    .channel_open_forwarded_streamlocal(channel, &d.socket_path, self)
                     .await;
                 if let Ok(allowed) = &mut result {
                     self.channels.insert(sender_channel, reference);
