@@ -580,8 +580,8 @@ impl Session {
                             let id = self.channel_open_forwarded_tcpip(&connected_address, connected_port, &originator_address, originator_port)?;
                             self.channels.insert(id, channel_ref);
                         }
-                        Some(Msg::ChannelOpenForwardedStreamLocal { server_socket_path, client_socket_path, channel_ref }) => {
-                            let id = self.channel_open_forwarded_streamlocal(&server_socket_path, &client_socket_path)?;
+                        Some(Msg::ChannelOpenForwardedStreamLocal { server_socket_path, client_socket_path: _, channel_ref }) => {
+                            let id = self.channel_open_forwarded_streamlocal(&server_socket_path)?;
                             self.channels.insert(id, channel_ref);
                         }
                         Some(Msg::ChannelOpenX11 { originator_address, originator_port, channel_ref }) => {
@@ -988,13 +988,11 @@ impl Session {
 
     pub fn channel_open_forwarded_streamlocal(
         &mut self,
-        server_socket_path: &str,
         client_socket_path: &str,
     ) -> Result<ChannelId, Error> {
         self.channel_open_generic(b"forwarded-streamlocal", |write| {
-            // NEED HELP: is this correct?
-            write.extend_ssh_string(server_socket_path.as_bytes());
             write.extend_ssh_string(client_socket_path.as_bytes());
+            write.extend_ssh_string(b"");
         })
     }
 
