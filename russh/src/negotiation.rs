@@ -35,8 +35,8 @@ pub struct Names {
     pub cipher: cipher::Name,
     pub client_mac: mac::Name,
     pub server_mac: mac::Name,
-    pub server_compression: Compression,
-    pub client_compression: Compression,
+    pub server_compression: compression::Compression,
+    pub client_compression: compression::Compression,
     pub ignore_guessed: bool,
     pub strict_kex: bool,
 }
