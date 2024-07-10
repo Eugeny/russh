@@ -104,12 +104,12 @@ mod auth;
 
 /// Cipher names
 pub mod cipher;
+/// Compression algorithm names
+pub mod compression;
 /// Key exchange algorithm names
 pub mod kex;
 /// MAC algorithm names
 pub mod mac;
-/// Compression algorithm names
-pub mod compression;
 
 mod cert;
 mod key;
