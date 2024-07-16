@@ -4,32 +4,11 @@ description = "Deal with SSH keys: load them, decrypt them, call an SSH agent."
 documentation = "https://docs.rs/russh-keys"
 edition = "2018"
 homepage = "https://github.com/warp-tech/russh"
-include = [
-  "Cargo.toml",
-  "src/lib.rs",
-  "src/agent/mod.rs",
-  "src/agent/msg.rs",
-  "src/agent/server.rs",
-  "src/agent/client.rs",
-  "src/backend_openssl.rs",
-  "src/backend_rust.rs",
-  "src/bcrypt_pbkdf.rs",
-  "src/blowfish.rs",
-  "src/ec.rs",
-  "src/encoding.rs",
-  "src/format/mod.rs",
-  "src/format/openssh.rs",
-  "src/format/pkcs5.rs",
-  "src/format/pkcs8.rs",
-  "src/key.rs",
-  "src/protocol.rs",
-  "src/signature.rs",
-]
 keywords = ["ssh"]
 license = "Apache-2.0"
 name = "russh-keys"
 repository = "https://github.com/warp-tech/russh"
-version = "0.44.0-beta.4"
+version = "0.44.0-beta.5"
 rust-version = "1.65"
 
 [dependencies]
