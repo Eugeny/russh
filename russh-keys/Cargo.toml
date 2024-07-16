@@ -81,10 +81,12 @@ tokio = { workspace = true, features = [
 ] }
 tokio-stream = { version = "0.1", features = ["net"] }
 typenum = "1.17"
+yasna = { version = "0.5.0", features = ["bit-vec", "num-bigint"], optional = true }
 zeroize = "1.7"
 
 [features]
 vendored-openssl = ["openssl", "openssl/vendored"]
+legacy-ed25519-pkcs8-parser = ["yasna"]
 
 [dev-dependencies]
 env_logger = "0.10"
