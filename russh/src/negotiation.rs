@@ -23,10 +23,9 @@ use russh_keys::key;
 use russh_keys::key::{KeyPair, PublicKey};
 
 use crate::cipher::CIPHERS;
-use crate::compression;
 use crate::kex::{EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT, EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER};
 use crate::server::Config;
-use crate::{cipher, kex, mac, msg, Error};
+use crate::{cipher, compression, kex, mac, msg, Error};
 
 #[derive(Debug, Clone)]
 pub struct Names {

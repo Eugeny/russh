@@ -1,16 +1,13 @@
 use std::convert::TryFrom;
 
-use crate::{
-    ec,
-    key::{KeyPair, PublicKey, SignatureHash},
-    protocol, Error,
+use ssh_key::private::{
+    EcdsaKeypair, Ed25519Keypair, KeypairData, PrivateKey, RsaKeypair, RsaPrivateKey,
 };
+use ssh_key::public::{Ed25519PublicKey, KeyData, RsaPublicKey};
+use ssh_key::{Algorithm, HashAlg};
 
-use ssh_key::{
-    private::{EcdsaKeypair, Ed25519Keypair, KeypairData, PrivateKey, RsaKeypair, RsaPrivateKey},
-    public::{Ed25519PublicKey, KeyData, RsaPublicKey},
-    Algorithm, HashAlg,
-};
+use crate::key::{KeyPair, PublicKey, SignatureHash};
+use crate::{ec, protocol, Error};
 
 /// Decode a secret key given in the OpenSSH format, deciphering it if
 /// needed using the supplied password.

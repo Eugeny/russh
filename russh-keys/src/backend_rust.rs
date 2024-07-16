@@ -1,11 +1,10 @@
 use std::convert::TryFrom;
 
+use rsa::traits::{PrivateKeyParts, PublicKeyParts};
+use rsa::BigUint;
+
 use crate::key::{RsaCrtExtra, SignatureHash};
 use crate::{protocol, Error};
-use rsa::{
-    traits::{PrivateKeyParts, PublicKeyParts},
-    BigUint,
-};
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct RsaPublic {

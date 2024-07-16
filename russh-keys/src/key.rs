@@ -15,19 +15,15 @@
 use std::borrow::Cow;
 use std::convert::{TryFrom, TryInto};
 
+pub use backend::{RsaPrivate, RsaPublic};
 use ed25519_dalek::{Signer, Verifier};
 use rand_core::OsRng;
 use russh_cryptovec::CryptoVec;
 use serde::{Deserialize, Serialize};
 
-use crate::backend;
-use crate::ec;
 use crate::encoding::{Encoding, Reader};
-use crate::protocol;
 pub use crate::signature::*;
-use crate::Error;
-
-pub use backend::{RsaPrivate, RsaPublic};
+use crate::{backend, ec, protocol, Error};
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 /// Name of a public key algorithm.
