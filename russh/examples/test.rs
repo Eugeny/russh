@@ -3,9 +3,9 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use log::debug;
+use russh::keys::*;
 use russh::server::{Auth, Msg, Server as _, Session};
 use russh::*;
-use russh_keys::*;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

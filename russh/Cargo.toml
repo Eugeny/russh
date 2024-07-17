@@ -16,6 +16,7 @@ rust-version = "1.65"
 default = ["flate2"]
 openssl = ["russh-keys/openssl", "dep:openssl"]
 vendored-openssl = ["openssl/vendored", "russh-keys/vendored-openssl"]
+legacy-ed25519-pkcs8-parser = ["russh-keys/legacy-ed25519-pkcs8-parser"]
 
 [dependencies]
 aes = { workspace = true }

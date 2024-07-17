@@ -45,9 +45,6 @@ use async_trait::async_trait;
 use futures::task::{Context, Poll};
 use futures::Future;
 use log::{debug, error, info, trace};
-use russh_cryptovec::CryptoVec;
-use russh_keys::encoding::Reader;
-use russh_keys::key::{self, parse_public_key, PublicKey, SignatureHash};
 use ssh_key::Certificate;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadHalf, WriteHalf};
 use tokio::net::{TcpStream, ToSocketAddrs};
@@ -60,6 +57,8 @@ use tokio::sync::{oneshot, Mutex};
 use crate::channels::{Channel, ChannelMsg, ChannelRef};
 use crate::cipher::{self, clear, CipherPair, OpeningKey};
 use crate::key::PubKey;
+use crate::keys::encoding::Reader;
+use crate::keys::key::{self, parse_public_key, PublicKey, SignatureHash};
 use crate::session::{
     CommonSession, EncryptedState, Exchange, GlobalRequestResponse, Kex, KexDhDone, KexInit,
     NewKeys,
@@ -67,8 +66,8 @@ use crate::session::{
 use crate::ssh_read::SshRead;
 use crate::sshbuffer::{SSHBuffer, SshId};
 use crate::{
-    auth, msg, negotiation, strict_kex_violation, ChannelId, ChannelOpenFailure, Disconnect,
-    Limits, Sig,
+    auth, msg, negotiation, strict_kex_violation, ChannelId, ChannelOpenFailure, CryptoVec,
+    Disconnect, Limits, Sig,
 };
 
 mod encrypted;
@@ -1265,7 +1264,7 @@ impl KexDhDone {
                     debug!("sig_type: {:?}", sig_type);
                     sig_reader.read_string().map_err(crate::Error::from)?
                 };
-                use russh_keys::key::Verify;
+                use crate::keys::key::Verify;
                 debug!("signature: {:?}", signature);
                 if !pubkey.verify_server_auth(hash.as_ref(), signature) {
                     debug!("wrong server sig");

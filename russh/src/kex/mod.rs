@@ -31,13 +31,12 @@ use dh::{
 use digest::Digest;
 use ecdh_nistp::{EcdhNistP256KexType, EcdhNistP384KexType, EcdhNistP521KexType};
 use once_cell::sync::Lazy;
-use russh_cryptovec::CryptoVec;
-use russh_keys::encoding::Encoding;
 
-use crate::cipher;
 use crate::cipher::CIPHERS;
+use crate::keys::encoding::Encoding;
 use crate::mac::{self, MACS};
 use crate::session::Exchange;
+use crate::{cipher, CryptoVec};
 
 pub(crate) trait KexType {
     fn make(&self) -> Box<dyn KexAlgorithm + Send>;

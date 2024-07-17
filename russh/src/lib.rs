@@ -111,6 +111,9 @@ pub mod kex;
 /// MAC algorithm names
 pub mod mac;
 
+/// Re-export of the `russh-keys` crate.
+pub use russh_keys as keys;
+
 mod cert;
 mod key;
 mod msg;

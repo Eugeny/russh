@@ -7,9 +7,9 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::Terminal;
+use russh::keys::key::PublicKey;
 use russh::server::*;
 use russh::{Channel, ChannelId};
-use russh_keys::key::PublicKey;
 use tokio::sync::Mutex;
 
 type SshTerminal = Terminal<CrosstermBackend<TerminalHandle>>;

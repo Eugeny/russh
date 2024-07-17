@@ -2,9 +2,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use russh::keys::*;
 use russh::server::{Msg, Server as _, Session};
 use russh::*;
-use russh_keys::*;
 use tokio::sync::Mutex;
 
 #[tokio::main]

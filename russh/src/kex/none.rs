@@ -1,6 +1,5 @@
-use russh_cryptovec::CryptoVec;
-
 use super::{KexAlgorithm, KexType};
+use crate::CryptoVec;
 
 pub struct NoneKexType {}
 

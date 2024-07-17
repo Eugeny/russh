@@ -2,7 +2,6 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
 use log::debug;
-use russh_keys::encoding::{Encoding, Reader};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc::{unbounded_channel, Receiver, Sender, UnboundedReceiver};
 use tokio::sync::{oneshot, Mutex};
@@ -10,6 +9,7 @@ use tokio::sync::{oneshot, Mutex};
 use super::*;
 use crate::channels::{Channel, ChannelMsg, ChannelRef};
 use crate::kex::EXTENSION_SUPPORT_AS_CLIENT;
+use crate::keys::encoding::{Encoding, Reader};
 use crate::msg;
 
 /// A connected server session. This type is unique to a client.

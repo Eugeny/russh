@@ -2,9 +2,9 @@ use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::Arc;
 
 use rand::RngCore;
+use russh::keys::key;
 use russh::server::{self, Auth, Msg, Server as _, Session};
 use russh::{client, Channel};
-use russh_keys::key;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 pub const WINDOW_SIZE: u32 = 8 * 2048;

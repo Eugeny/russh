@@ -10,8 +10,8 @@ use anyhow::Result;
 use async_trait::async_trait;
 use clap::Parser;
 use log::info;
+use russh::keys::*;
 use russh::*;
-use russh_keys::*;
 use tokio::io::AsyncWriteExt;
 use tokio::net::ToSocketAddrs;
 

@@ -1,7 +1,5 @@
-use russh_cryptovec::CryptoVec;
-use russh_keys::encoding::{Encoding, Position};
-
-use crate::msg;
+use crate::keys::encoding::{Encoding, Position};
+use crate::{msg, CryptoVec};
 
 #[derive(Debug)]
 pub struct OpenChannelMessage {

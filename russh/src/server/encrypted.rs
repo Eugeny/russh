@@ -18,14 +18,14 @@ use auth::*;
 use byteorder::{BigEndian, ByteOrder};
 use log::{debug, error, info, trace, warn};
 use negotiation::Select;
-use russh_keys::encoding::{Encoding, Position, Reader};
-use russh_keys::key;
-use russh_keys::key::Verify;
 use tokio::time::Instant;
 use {msg, negotiation};
 
 use super::super::*;
 use super::*;
+use crate::keys::encoding::{Encoding, Position, Reader};
+use crate::keys::key;
+use crate::keys::key::Verify;
 use crate::msg::SSH_OPEN_ADMINISTRATIVELY_PROHIBITED;
 use crate::parsing::{ChannelOpenConfirmation, ChannelType, OpenChannelMessage};
 

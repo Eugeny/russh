@@ -17,15 +17,14 @@ use std::str::from_utf8;
 
 use log::debug;
 use rand::RngCore;
-use russh_cryptovec::CryptoVec;
-use russh_keys::encoding::{Encoding, Reader};
-use russh_keys::key;
-use russh_keys::key::{KeyPair, PublicKey};
 
 use crate::cipher::CIPHERS;
 use crate::kex::{EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT, EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER};
+use crate::keys::encoding::{Encoding, Reader};
+use crate::keys::key;
+use crate::keys::key::{KeyPair, PublicKey};
 use crate::server::Config;
-use crate::{cipher, compression, kex, mac, msg, Error};
+use crate::{cipher, compression, kex, mac, msg, CryptoVec, Error};
 
 #[derive(Debug, Clone)]
 pub struct Names {
@@ -146,7 +145,7 @@ impl Named for () {
     }
 }
 
-use russh_keys::key::ED25519;
+use crate::keys::key::ED25519;
 
 impl Named for PublicKey {
     fn name(&self) -> &'static str {

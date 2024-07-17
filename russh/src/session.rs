@@ -19,14 +19,15 @@ use std::num::Wrapping;
 
 use byteorder::{BigEndian, ByteOrder};
 use log::{debug, trace};
-use russh_cryptovec::CryptoVec;
-use russh_keys::encoding::Encoding;
 use tokio::sync::oneshot;
 
 use crate::cipher::SealingKey;
 use crate::kex::KexAlgorithm;
+use crate::keys::encoding::Encoding;
 use crate::sshbuffer::SSHBuffer;
-use crate::{auth, cipher, mac, msg, negotiation, ChannelId, ChannelParams, Disconnect, Limits};
+use crate::{
+    auth, cipher, mac, msg, negotiation, ChannelId, ChannelParams, CryptoVec, Disconnect, Limits,
+};
 
 #[derive(Debug)]
 pub(crate) struct Encrypted {

@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-use russh_cryptovec::CryptoVec;
-use russh_keys::encoding::*;
-use russh_keys::key::*;
-use russh_keys::{ec, protocol};
+use crate::keys::encoding::*;
+use crate::keys::key::*;
+use crate::keys::{ec, protocol};
+use crate::CryptoVec;
 
 #[doc(hidden)]
 pub trait PubKey {

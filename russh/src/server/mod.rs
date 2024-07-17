@@ -38,13 +38,13 @@ use std::task::{Context, Poll};
 use async_trait::async_trait;
 use futures::future::Future;
 use log::{debug, error};
-use russh_keys::key;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, ToSocketAddrs};
 use tokio::pin;
 use tokio::task::JoinHandle;
 
 use crate::cipher::{clear, CipherPair, OpeningKey};
+use crate::keys::key;
 use crate::session::*;
 use crate::ssh_read::*;
 use crate::sshbuffer::*;

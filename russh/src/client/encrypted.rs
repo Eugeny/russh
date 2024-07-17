@@ -17,18 +17,17 @@ use std::convert::TryInto;
 use std::num::Wrapping;
 
 use log::{debug, error, info, trace, warn};
-use russh_cryptovec::CryptoVec;
-use russh_keys::encoding::{Encoding, Reader};
-use russh_keys::key::parse_public_key;
 
 use crate::client::{Handler, Msg, Prompt, Reply, Session};
 use crate::key::PubKey;
+use crate::keys::encoding::{Encoding, Reader};
+use crate::keys::key::parse_public_key;
 use crate::negotiation::{Named, Select};
 use crate::parsing::{ChannelOpenConfirmation, ChannelType, OpenChannelMessage};
 use crate::session::{Encrypted, EncryptedState, GlobalRequestResponse, Kex, KexInit};
 use crate::{
     auth, msg, negotiation, strict_kex_violation, Channel, ChannelId, ChannelMsg,
-    ChannelOpenFailure, ChannelParams, Sig,
+    ChannelOpenFailure, ChannelParams, CryptoVec, Sig,
 };
 
 thread_local! {

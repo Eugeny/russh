@@ -16,11 +16,12 @@
 use std::sync::Arc;
 
 use bitflags::bitflags;
-use russh_cryptovec::CryptoVec;
-use russh_keys::{encoding, key};
 use ssh_key::Certificate;
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite};
+
+use crate::keys::{encoding, key};
+use crate::CryptoVec;
 
 bitflags! {
     /// Set of authentication methods, represented by bit flags.
