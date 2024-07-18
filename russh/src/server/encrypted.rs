@@ -519,14 +519,11 @@ impl Encrypted {
                     Ok(())
                 }
             }
-            Err(e) => {
-                if let russh_keys::Error::CouldNotReadKey = e {
-                    reject_auth_request(until, &mut self.write, auth_request).await;
-                    Ok(())
-                } else {
-                    Err(crate::Error::from(e).into())
-                }
+            Err(russh_keys::Error::CouldNotReadKey) | Err(russh_keys::Error::KeyIsCorrupt) => {
+                reject_auth_request(until, &mut self.write, auth_request).await;
+                Ok(())
             }
+            Err(e) => Err(crate::Error::from(e).into()),
         }
     }
 }
