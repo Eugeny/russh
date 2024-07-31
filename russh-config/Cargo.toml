@@ -11,7 +11,7 @@ version = "0.7.1"
 rust-version = "1.65"
 
 [dependencies]
-dirs-next = "2.0"
+home = "0.5"
 futures = { workspace = true }
 globset = "0.4.14"
 log = { workspace = true }
