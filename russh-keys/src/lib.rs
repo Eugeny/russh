@@ -503,7 +503,7 @@ pub fn check_known_hosts_path<P: AsRef<Path>>(
 
 #[cfg(target_os = "windows")]
 fn known_hosts_path() -> Result<PathBuf, Error> {
-    if let Some(home_dir) = dirs::home_dir() {
+    if let Some(home_dir) = home::home_dir() {
         Ok(home_dir.join("ssh").join("known_hosts"))
     } else {
         Err(Error::NoHomeDir)
@@ -512,7 +512,7 @@ fn known_hosts_path() -> Result<PathBuf, Error> {
 
 #[cfg(not(target_os = "windows"))]
 fn known_hosts_path() -> Result<PathBuf, Error> {
-    if let Some(home_dir) = dirs::home_dir() {
+    if let Some(home_dir) = home::home_dir() {
         Ok(home_dir.join(".ssh").join("known_hosts"))
     } else {
         Err(Error::NoHomeDir)
