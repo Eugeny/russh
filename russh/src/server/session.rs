@@ -44,7 +44,6 @@ pub enum Msg {
     },
     ChannelOpenForwardedStreamLocal {
         server_socket_path: String,
-        client_socket_path: String,
         channel_ref: ChannelRef,
     },
     ChannelOpenX11 {
@@ -185,6 +184,27 @@ impl Handle {
         }
     }
 
+    /// Notifies the client that it can no longer open TCP/IP forwarding channel for a port.
+    pub async fn cancel_forward_tcpip(&self, address: String, port: u32) -> Result<(), ()> {
+        let (reply_send, reply_recv) = oneshot::channel();
+        self.sender
+            .send(Msg::CancelTcpIpForward {
+                reply_channel: Some(reply_send),
+                address,
+                port,
+            })
+            .await
+            .map_err(|_| ())?;
+        match reply_recv.await {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(()), // crate::Error::RequestDenied
+            Err(e) => {
+                error!("Unable to receive CancelTcpIpForward result: {e:?}");
+                Err(()) // crate::Error::Disconnect
+            }
+        }
+    }
+
     /// Request a session channel (the most basic type of
     /// channel). This function returns `Ok(..)` immediately if the
     /// connection is authenticated, but the channel only becomes
@@ -259,10 +279,9 @@ impl Handle {
             .await
     }
 
-    pub async fn channel_open_forwarded_streamlocal<A: Into<String>, B: Into<String>>(
+    pub async fn channel_open_forwarded_streamlocal<A: Into<String>>(
         &self,
         server_socket_path: A,
-        client_socket_path: B,
     ) -> Result<Channel<Msg>, Error> {
         let (sender, receiver) = unbounded_channel();
         let channel_ref = ChannelRef::new(sender);
@@ -271,7 +290,6 @@ impl Handle {
         self.sender
             .send(Msg::ChannelOpenForwardedStreamLocal {
                 server_socket_path: server_socket_path.into(),
-                client_socket_path: client_socket_path.into(),
                 channel_ref,
             })
             .await
@@ -528,7 +546,7 @@ impl Session {
                             let id = self.channel_open_forwarded_tcpip(&connected_address, connected_port, &originator_address, originator_port)?;
                             self.channels.insert(id, channel_ref);
                         }
-                        Some(Msg::ChannelOpenForwardedStreamLocal { server_socket_path, client_socket_path: _, channel_ref }) => {
+                        Some(Msg::ChannelOpenForwardedStreamLocal { server_socket_path, channel_ref }) => {
                             let id = self.channel_open_forwarded_streamlocal(&server_socket_path)?;
                             self.channels.insert(id, channel_ref);
                         }
@@ -930,10 +948,10 @@ impl Session {
 
     pub fn channel_open_forwarded_streamlocal(
         &mut self,
-        client_socket_path: &str,
+        socket_path: &str,
     ) -> Result<ChannelId, Error> {
-        self.channel_open_generic(b"forwarded-streamlocal", |write| {
-            write.extend_ssh_string(client_socket_path.as_bytes());
+        self.channel_open_generic(b"forwarded-streamlocal@openssh.com", |write| {
+            write.extend_ssh_string(socket_path.as_bytes());
             write.extend_ssh_string(b"");
         })
     }

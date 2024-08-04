@@ -1028,9 +1028,8 @@ impl Session {
                             std::str::from_utf8(r.read_string().map_err(crate::Error::from)?)
                                 .map_err(crate::Error::from)?;
                         debug!("handler.streamlocal_forward {:?}", server_socket_path);
-                        let mut client_socket_path = String::from(server_socket_path).clone();
                         let result = handler
-                            .streamlocal_forward(server_socket_path, &mut client_socket_path, self)
+                            .streamlocal_forward(server_socket_path, self)
                             .await?;
                         if let Some(ref mut enc) = self.common.encrypted {
                             if result {
@@ -1246,15 +1245,15 @@ impl Session {
                 }
                 result
             }
-            ChannelType::ForwardedStreamLocal(d) => {
-                let mut result = handler
-                    .channel_open_forwarded_streamlocal(channel, &d.socket_path, self)
-                    .await;
-                if let Ok(allowed) = &mut result {
-                    self.channels.insert(sender_channel, reference);
-                    self.finalize_channel_open(&msg, channel_params, *allowed);
+            ChannelType::ForwardedStreamLocal(_) => {
+                if let Some(ref mut enc) = self.common.encrypted {
+                    msg.fail(
+                        &mut enc.write,
+                        msg::SSH_OPEN_ADMINISTRATIVELY_PROHIBITED,
+                        b"Unsupported channel type",
+                    );
                 }
-                result
+                Ok(false)
             }
             ChannelType::AgentForward => {
                 if let Some(ref mut enc) = self.common.encrypted {

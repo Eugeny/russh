@@ -324,16 +324,6 @@ pub trait Handler: Sized {
         Ok(false)
     }
 
-    #[allow(unused_variables)]
-    async fn channel_open_forwarded_streamlocal(
-        &mut self,
-        channel: Channel<Msg>,
-        socket_path: &str,
-        session: &mut Session,
-    ) -> Result<bool, Self::Error> {
-        Ok(false)
-    }
-
     /// Called when the client confirmed our request to open a
     /// channel. A channel can only be written to after receiving this
     /// message (this library panics otherwise).
@@ -537,8 +527,7 @@ pub trait Handler: Sized {
     #[allow(unused_variables)]
     async fn streamlocal_forward(
         &mut self,
-        server_socket_path: &str,
-        client_socket_path: &mut str,
+        socket_path: &str,
         session: &mut Session,
     ) -> Result<bool, Self::Error> {
         Ok(false)
