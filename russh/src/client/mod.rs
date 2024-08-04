@@ -162,7 +162,7 @@ pub enum Msg {
     },
     StreamLocalForward {
         /// Provide a channel for the reply result to request a reply from the server
-        reply_channel: Option<oneshot::Sender<Option<String>>>,
+        reply_channel: Option<oneshot::Sender<bool>>,
         socket_path: String,
     },
     CancelStreamLocalForward {
@@ -611,7 +611,7 @@ impl<H: Handler> Handle<H> {
     pub async fn streamlocal_forward<A: Into<String>>(
         &mut self,
         socket_path: A,
-    ) -> Result<String, crate::Error> {
+    ) -> Result<(), crate::Error> {
         let (reply_send, reply_recv) = oneshot::channel();
         self.sender
             .send(Msg::StreamLocalForward {
@@ -622,8 +622,8 @@ impl<H: Handler> Handle<H> {
             .map_err(|_| crate::Error::SendError)?;
 
         match reply_recv.await {
-            Ok(Some(returned_socket_path)) => Ok(returned_socket_path),
-            Ok(None) => Err(crate::Error::RequestDenied),
+            Ok(true) => Ok(()),
+            Ok(false) => Err(crate::Error::RequestDenied),
             Err(e) => {
                 error!("Unable to receive StreamLocalForward result: {e:?}");
                 Err(crate::Error::Disconnect)

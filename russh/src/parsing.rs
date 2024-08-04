@@ -32,7 +32,7 @@ impl OpenChannelMessage {
             }
             b"direct-tcpip" => ChannelType::DirectTcpip(TcpChannelInfo::new(r)?),
             b"forwarded-tcpip" => ChannelType::ForwardedTcpIp(TcpChannelInfo::new(r)?),
-            b"forwarded-streamlocal" => {
+            b"forwarded-streamlocal@openssh.com" => {
                 ChannelType::ForwardedStreamLocal(StreamLocalChannelInfo::new(r)?)
             }
             b"auth-agent@openssh.com" => ChannelType::AgentForward,
