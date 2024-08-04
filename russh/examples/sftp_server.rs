@@ -5,9 +5,9 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use log::{error, info, LevelFilter};
+use russh::keys::key::KeyPair;
 use russh::server::{Auth, Msg, Server as _, Session};
 use russh::{Channel, ChannelId};
-use russh_keys::key::KeyPair;
 use russh_sftp::protocol::{File, FileAttributes, Handle, Name, Status, StatusCode, Version};
 use tokio::sync::Mutex;
 

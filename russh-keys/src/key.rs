@@ -15,19 +15,15 @@
 use std::borrow::Cow;
 use std::convert::{TryFrom, TryInto};
 
+pub use backend::{RsaPrivate, RsaPublic};
 use ed25519_dalek::{Signer, Verifier};
 use rand_core::OsRng;
 use russh_cryptovec::CryptoVec;
 use serde::{Deserialize, Serialize};
 
-use crate::backend;
-use crate::ec;
 use crate::encoding::{Encoding, Reader};
-use crate::protocol;
 pub use crate::signature::*;
-use crate::Error;
-
-pub use backend::{RsaPrivate, RsaPublic};
+use crate::{backend, ec, protocol, Error};
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 /// Name of a public key algorithm.
@@ -56,6 +52,16 @@ pub const NONE: Name = Name("none");
 
 pub const SSH_RSA: Name = Name("ssh-rsa");
 
+pub static ALL_KEY_TYPES: &[&Name] = &[
+    &NONE,
+    &SSH_RSA,
+    &RSA_SHA2_256,
+    &RSA_SHA2_512,
+    &ECDSA_SHA2_NISTP256,
+    &ECDSA_SHA2_NISTP384,
+    &ECDSA_SHA2_NISTP521,
+];
+
 impl Name {
     /// Base name of the private key file for a key name.
     pub fn identity_file(&self) -> &'static str {
@@ -66,6 +72,17 @@ impl Name {
             RSA_SHA2_256 => "id_rsa",
             _ => unreachable!(),
         }
+    }
+}
+
+impl TryFrom<&str> for Name {
+    type Error = ();
+    fn try_from(s: &str) -> Result<Name, ()> {
+        ALL_KEY_TYPES
+            .iter()
+            .find(|x| x.0 == s)
+            .map(|x| **x)
+            .ok_or(())
     }
 }
 

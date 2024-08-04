@@ -1,12 +1,12 @@
 use std::cell::RefCell;
 
 use log::debug;
-use russh_keys::encoding::{Encoding, Reader};
 
 use super::*;
 use crate::cipher::SealingKey;
 use crate::kex::KEXES;
 use crate::key::PubKey;
+use crate::keys::encoding::{Encoding, Reader};
 use crate::negotiation::Select;
 use crate::{msg, negotiation};
 

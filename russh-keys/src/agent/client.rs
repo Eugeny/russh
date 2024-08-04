@@ -9,8 +9,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use super::{msg, Constraint};
 use crate::encoding::{Encoding, Reader};
 use crate::key::{PublicKey, SignatureHash};
-use crate::protocol;
-use crate::{key, Error, PublicKeyBase64};
+use crate::{key, protocol, Error, PublicKeyBase64};
 
 /// SSH agent client.
 pub struct AgentClient<S: AsyncRead + AsyncWrite> {

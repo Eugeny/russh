@@ -3,13 +3,12 @@ use curve25519_dalek::constants::ED25519_BASEPOINT_TABLE;
 use curve25519_dalek::montgomery::MontgomeryPoint;
 use curve25519_dalek::scalar::Scalar;
 use log::debug;
-use russh_cryptovec::CryptoVec;
-use russh_keys::encoding::Encoding;
 
 use super::{compute_keys, KexAlgorithm, KexType};
+use crate::keys::encoding::Encoding;
 use crate::mac::{self};
 use crate::session::Exchange;
-use crate::{cipher, msg};
+use crate::{cipher, msg, CryptoVec};
 
 pub struct Curve25519KexType {}
 

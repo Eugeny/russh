@@ -1,13 +1,12 @@
 use std::convert::TryFrom;
 
+use openssl::bn::{BigNum, BigNumContext, BigNumRef};
+use openssl::hash::MessageDigest;
+use openssl::pkey::{PKey, Private, Public};
+use openssl::rsa::Rsa;
+
 use crate::key::{RsaCrtExtra, SignatureHash};
 use crate::{protocol, Error};
-use openssl::{
-    bn::{BigNum, BigNumContext, BigNumRef},
-    hash::MessageDigest,
-    pkey::{PKey, Private, Public},
-    rsa::Rsa,
-};
 
 #[derive(Clone)]
 pub struct RsaPublic {

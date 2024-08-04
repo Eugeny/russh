@@ -4,14 +4,13 @@ use std::sync::Arc;
 use std::task::{ready, Context, Poll};
 
 use futures::FutureExt;
-use russh_cryptovec::CryptoVec;
 use tokio::io::AsyncWrite;
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{self, OwnedPermit};
 use tokio::sync::{Mutex, OwnedMutexGuard};
 
 use super::ChannelMsg;
-use crate::ChannelId;
+use crate::{ChannelId, CryptoVec};
 
 type BoxedThreadsafeFuture<T> = Pin<Box<dyn Sync + Send + std::future::Future<Output = T>>>;
 type OwnedPermitFuture<S> =

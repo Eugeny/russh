@@ -11,11 +11,12 @@
 // limitations under the License.
 //
 
+use std::convert::TryInto;
+use std::marker::PhantomData;
+
 use aes::cipher::{IvSizeUser, KeyIvInit, KeySizeUser, StreamCipher};
 use generic_array::GenericArray;
 use rand::RngCore;
-use std::convert::TryInto;
-use std::marker::PhantomData;
 
 use super::super::Error;
 use super::PACKET_LENGTH_LEN;

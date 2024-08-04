@@ -1,6 +1,7 @@
+use elliptic_curve::{Curve, CurveArithmetic, FieldBytes, FieldBytesSize};
+
 use crate::key::safe_rng;
 use crate::Error;
-use elliptic_curve::{Curve, CurveArithmetic, FieldBytes, FieldBytesSize};
 
 // p521::{SigningKey, VerifyingKey} are wrapped versions and do not provide PartialEq and Eq, hence
 // we make our own type alias here.

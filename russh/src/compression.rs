@@ -1,3 +1,5 @@
+use std::convert::TryFrom;
+
 #[derive(Debug, Clone)]
 pub enum Compression {
     None,
@@ -19,10 +21,43 @@ pub enum Decompress {
     Zlib(flate2::Decompress),
 }
 
+#[derive(Debug, PartialEq, Eq, Copy, Clone, Hash)]
+pub struct Name(&'static str);
+impl AsRef<str> for Name {
+    fn as_ref(&self) -> &str {
+        self.0
+    }
+}
+
+impl TryFrom<&str> for Name {
+    type Error = ();
+    fn try_from(s: &str) -> Result<Name, ()> {
+        ALL_COMPRESSION_ALGORITHMS
+            .iter()
+            .find(|x| x.0 == s)
+            .map(|x| **x)
+            .ok_or(())
+    }
+}
+
+pub const NONE: Name = Name("none");
+#[cfg(feature = "flate2")]
+pub const ZLIB: Name = Name("zlib");
+#[cfg(feature = "flate2")]
+pub const ZLIB_LEGACY: Name = Name("zlib@openssh.com");
+
+pub const ALL_COMPRESSION_ALGORITHMS: &[&Name] = &[
+    &NONE,
+    #[cfg(feature = "flate2")]
+    &ZLIB,
+    #[cfg(feature = "flate2")]
+    &ZLIB_LEGACY,
+];
+
 #[cfg(feature = "flate2")]
 impl Compression {
-    pub fn from_string(s: &str) -> Self {
-        if s == "zlib" || s == "zlib@openssh.com" {
+    pub fn new(name: &Name) -> Self {
+        if name == &ZLIB || name == &ZLIB_LEGACY {
             Compression::Zlib
         } else {
             Compression::None
@@ -56,7 +91,7 @@ impl Compression {
 
 #[cfg(not(feature = "flate2"))]
 impl Compression {
-    pub fn from_string(_: &str) -> Self {
+    pub fn new(_name: &Name) -> Self {
         Compression::None
     }
 

@@ -14,7 +14,9 @@
 
 //!
 //! This module exports cipher names for use with [Preferred].
+use std::borrow::Borrow;
 use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::num::Wrapping;
@@ -97,6 +99,19 @@ static _AES_192_CBC: SshBlockCipher<CbcWrapper<Aes192>> = SshBlockCipher(Phantom
 static _AES_256_CBC: SshBlockCipher<CbcWrapper<Aes256>> = SshBlockCipher(PhantomData);
 static _CHACHA20_POLY1305: SshChacha20Poly1305Cipher = SshChacha20Poly1305Cipher {};
 
+pub static ALL_CIPHERS: &[&Name] = &[
+    &CLEAR,
+    &NONE,
+    &AES_128_CTR,
+    &AES_192_CTR,
+    &AES_256_CTR,
+    &AES_256_GCM,
+    &AES_128_CBC,
+    &AES_192_CBC,
+    &AES_256_CBC,
+    &CHACHA20_POLY1305,
+];
+
 pub(crate) static CIPHERS: Lazy<HashMap<&'static Name, &(dyn Cipher + Send + Sync)>> =
     Lazy::new(|| {
         let mut h: HashMap<&'static Name, &(dyn Cipher + Send + Sync)> = HashMap::new();
@@ -110,6 +125,7 @@ pub(crate) static CIPHERS: Lazy<HashMap<&'static Name, &(dyn Cipher + Send + Syn
         h.insert(&AES_192_CBC, &_AES_192_CBC);
         h.insert(&AES_256_CBC, &_AES_256_CBC);
         h.insert(&CHACHA20_POLY1305, &_CHACHA20_POLY1305);
+        assert_eq!(h.len(), ALL_CIPHERS.len());
         h
     });
 
@@ -118,6 +134,19 @@ pub struct Name(&'static str);
 impl AsRef<str> for Name {
     fn as_ref(&self) -> &str {
         self.0
+    }
+}
+
+impl Borrow<str> for &Name {
+    fn borrow(&self) -> &str {
+        self.0
+    }
+}
+
+impl TryFrom<&str> for Name {
+    type Error = ();
+    fn try_from(s: &str) -> Result<Name, ()> {
+        CIPHERS.keys().find(|x| x.0 == s).map(|x| **x).ok_or(())
     }
 }
 

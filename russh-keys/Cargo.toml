@@ -4,32 +4,11 @@ description = "Deal with SSH keys: load them, decrypt them, call an SSH agent."
 documentation = "https://docs.rs/russh-keys"
 edition = "2018"
 homepage = "https://github.com/warp-tech/russh"
-include = [
-  "Cargo.toml",
-  "src/lib.rs",
-  "src/agent/mod.rs",
-  "src/agent/msg.rs",
-  "src/agent/server.rs",
-  "src/agent/client.rs",
-  "src/backend_openssl.rs",
-  "src/backend_rust.rs",
-  "src/bcrypt_pbkdf.rs",
-  "src/blowfish.rs",
-  "src/ec.rs",
-  "src/encoding.rs",
-  "src/format/mod.rs",
-  "src/format/openssh.rs",
-  "src/format/pkcs5.rs",
-  "src/format/pkcs8.rs",
-  "src/key.rs",
-  "src/protocol.rs",
-  "src/signature.rs",
-]
 keywords = ["ssh"]
 license = "Apache-2.0"
 name = "russh-keys"
 repository = "https://github.com/warp-tech/russh"
-version = "0.44.0-beta.2"
+version = "0.44.0"
 rust-version = "1.65"
 
 [dependencies]
@@ -43,7 +22,7 @@ byteorder = { workspace = true }
 data-encoding = "2.3"
 digest = { workspace = true }
 der = "0.7"
-dirs = "5.0"
+home = "0.5"
 ecdsa = "0.16"
 ed25519-dalek = { version = "2.0", features = ["rand_core", "pkcs8"] }
 elliptic-curve = "0.13"
@@ -81,10 +60,12 @@ tokio = { workspace = true, features = [
 ] }
 tokio-stream = { version = "0.1", features = ["net"] }
 typenum = "1.17"
+yasna = { version = "0.5.0", features = ["bit-vec", "num-bigint"], optional = true }
 zeroize = "1.7"
 
 [features]
 vendored-openssl = ["openssl", "openssl/vendored"]
+legacy-ed25519-pkcs8-parser = ["yasna"]
 
 [dev-dependencies]
 env_logger = "0.10"

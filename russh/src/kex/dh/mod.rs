@@ -6,15 +6,14 @@ use digest::Digest;
 use groups::DH;
 use log::debug;
 use num_bigint::BigUint;
-use russh_cryptovec::CryptoVec;
-use russh_keys::encoding::Encoding;
 use sha1::Sha1;
 use sha2::{Sha256, Sha512};
 
 use self::groups::{DhGroup, DH_GROUP1, DH_GROUP14, DH_GROUP16};
 use super::{compute_keys, KexAlgorithm, KexType};
+use crate::keys::encoding::Encoding;
 use crate::session::Exchange;
-use crate::{cipher, mac, msg};
+use crate::{cipher, mac, msg, CryptoVec};
 
 pub struct DhGroup1Sha1KexType {}
 

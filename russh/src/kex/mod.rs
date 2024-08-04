@@ -21,6 +21,7 @@ mod ecdh_nistp;
 mod none;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::fmt::Debug;
 
 use curve25519::Curve25519KexType;
@@ -30,13 +31,12 @@ use dh::{
 use digest::Digest;
 use ecdh_nistp::{EcdhNistP256KexType, EcdhNistP384KexType, EcdhNistP521KexType};
 use once_cell::sync::Lazy;
-use russh_cryptovec::CryptoVec;
-use russh_keys::encoding::Encoding;
 
-use crate::cipher;
 use crate::cipher::CIPHERS;
+use crate::keys::encoding::Encoding;
 use crate::mac::{self, MACS};
 use crate::session::Exchange;
+use crate::{cipher, CryptoVec};
 
 pub(crate) trait KexType {
     fn make(&self) -> Box<dyn KexAlgorithm + Send>;
@@ -87,6 +87,13 @@ impl AsRef<str> for Name {
     }
 }
 
+impl TryFrom<&str> for Name {
+    type Error = ();
+    fn try_from(s: &str) -> Result<Name, ()> {
+        KEXES.keys().find(|x| x.0 == s).map(|x| **x).ok_or(())
+    }
+}
+
 /// `curve25519-sha256`
 pub const CURVE25519: Name = Name("curve25519-sha256");
 /// `curve25519-sha256@libssh.org`
@@ -126,6 +133,19 @@ const _ECDH_SHA2_NISTP384: EcdhNistP384KexType = EcdhNistP384KexType {};
 const _ECDH_SHA2_NISTP521: EcdhNistP521KexType = EcdhNistP521KexType {};
 const _NONE: none::NoneKexType = none::NoneKexType {};
 
+pub const ALL_KEX_ALGORITHMS: &[&Name] = &[
+    &CURVE25519,
+    &CURVE25519_PRE_RFC_8731,
+    &DH_G1_SHA1,
+    &DH_G14_SHA1,
+    &DH_G14_SHA256,
+    &DH_G16_SHA512,
+    &ECDH_SHA2_NISTP256,
+    &ECDH_SHA2_NISTP384,
+    &ECDH_SHA2_NISTP521,
+    &NONE,
+];
+
 pub(crate) static KEXES: Lazy<HashMap<&'static Name, &(dyn KexType + Send + Sync)>> =
     Lazy::new(|| {
         let mut h: HashMap<&'static Name, &(dyn KexType + Send + Sync)> = HashMap::new();
@@ -139,6 +159,7 @@ pub(crate) static KEXES: Lazy<HashMap<&'static Name, &(dyn KexType + Send + Sync
         h.insert(&ECDH_SHA2_NISTP384, &_ECDH_SHA2_NISTP384);
         h.insert(&ECDH_SHA2_NISTP521, &_ECDH_SHA2_NISTP521);
         h.insert(&NONE, &_NONE);
+        assert_eq!(ALL_KEX_ALGORITHMS.len(), h.len());
         h
     });
 

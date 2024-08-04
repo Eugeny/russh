@@ -86,7 +86,7 @@ impl Config {
 }
 
 pub fn parse_home(host: &str) -> Result<Config, Error> {
-    let mut home = if let Some(home) = dirs_next::home_dir() {
+    let mut home = if let Some(home) = home::home_dir() {
         home
     } else {
         return Err(Error::NoHome);
@@ -135,7 +135,7 @@ pub fn parse(file: &str, host: &str) -> Result<Config, Error> {
                     "identityfile" => {
                         let id = value.trim_start();
                         if id.starts_with("~/") {
-                            if let Some(mut home) = dirs_next::home_dir() {
+                            if let Some(mut home) = home::home_dir() {
                                 home.push(id.split_at(2).1);
                                 config.identity_file = Some(
                                     home.to_str()

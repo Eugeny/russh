@@ -1,7 +1,9 @@
 use std::convert::{TryFrom, TryInto};
 
-use crate::{ec, key, key::SignatureHash, protocol, Error};
 use pkcs8::{EncodePrivateKey, PrivateKeyInfo, SecretDocument};
+
+use crate::key::SignatureHash;
+use crate::{ec, key, protocol, Error};
 
 /// Decode a PKCS#8-encoded private key.
 pub fn decode_pkcs8(ciphertext: &[u8], password: Option<&[u8]>) -> Result<key::KeyPair, Error> {

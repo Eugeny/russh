@@ -15,6 +15,8 @@
 
 // http://cvsweb.openbsd.org/cgi-bin/cvsweb/src/usr.bin/ssh/PROTOCOL.chacha20poly1305?annotate=HEAD
 
+use std::convert::TryInto;
+
 use aes::cipher::{BlockSizeUser, StreamCipherSeek};
 use byteorder::{BigEndian, ByteOrder};
 use chacha20::cipher::{KeyInit, KeyIvInit, StreamCipher};
@@ -22,7 +24,6 @@ use chacha20::{ChaCha20Legacy, ChaCha20LegacyCore};
 use generic_array::typenum::{Unsigned, U16, U32, U8};
 use generic_array::GenericArray;
 use poly1305::Poly1305;
-use std::convert::TryInto;
 use subtle::ConstantTimeEq;
 
 use super::super::Error;

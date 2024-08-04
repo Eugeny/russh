@@ -1,11 +1,10 @@
 use log::error;
-use russh_cryptovec::CryptoVec;
-use russh_keys::encoding::Encoding;
 use tokio::sync::oneshot;
 
 use crate::client::Session;
+use crate::keys::encoding::Encoding;
 use crate::session::EncryptedState;
-use crate::{msg, ChannelId, Disconnect, Pty, Sig};
+use crate::{msg, ChannelId, CryptoVec, Disconnect, Pty, Sig};
 
 impl Session {
     fn channel_open_generic<F>(

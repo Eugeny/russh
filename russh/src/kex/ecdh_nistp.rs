@@ -9,14 +9,13 @@ use log::debug;
 use p256::NistP256;
 use p384::NistP384;
 use p521::NistP521;
-use russh_cryptovec::CryptoVec;
-use russh_keys::encoding::Encoding;
 use sha2::{Digest, Sha256, Sha384, Sha512};
 
 use crate::kex::{compute_keys, KexAlgorithm, KexType};
+use crate::keys::encoding::Encoding;
 use crate::mac::{self};
 use crate::session::Exchange;
-use crate::{cipher, msg};
+use crate::{cipher, msg, CryptoVec};
 
 pub struct EcdhNistP256KexType {}
 
