@@ -25,6 +25,7 @@ use aes::{Aes128, Aes192, Aes256};
 use byteorder::{BigEndian, ByteOrder};
 use cbc::CbcWrapper;
 use ctr::Ctr128BE;
+use des::TdesEde3;
 use log::debug;
 use once_cell::sync::Lazy;
 use tokio::io::{AsyncRead, AsyncReadExt};
@@ -70,6 +71,8 @@ pub(crate) trait Cipher {
 
 /// `clear`
 pub const CLEAR: Name = Name("clear");
+/// `3des-cbc`
+pub const TRIPLE_DES_CBC: Name = Name("3des-cbc");
 /// `aes128-ctr`
 pub const AES_128_CTR: Name = Name("aes128-ctr");
 /// `aes192-ctr`
@@ -90,6 +93,7 @@ pub const CHACHA20_POLY1305: Name = Name("chacha20-poly1305@openssh.com");
 pub const NONE: Name = Name("none");
 
 static _CLEAR: Clear = Clear {};
+static _3DES_CBC: SshBlockCipher<CbcWrapper<TdesEde3>> = SshBlockCipher(PhantomData);
 static _AES_128_CTR: SshBlockCipher<Ctr128BE<Aes128>> = SshBlockCipher(PhantomData);
 static _AES_192_CTR: SshBlockCipher<Ctr128BE<Aes192>> = SshBlockCipher(PhantomData);
 static _AES_256_CTR: SshBlockCipher<Ctr128BE<Aes256>> = SshBlockCipher(PhantomData);
@@ -102,6 +106,7 @@ static _CHACHA20_POLY1305: SshChacha20Poly1305Cipher = SshChacha20Poly1305Cipher
 pub static ALL_CIPHERS: &[&Name] = &[
     &CLEAR,
     &NONE,
+    &TRIPLE_DES_CBC,
     &AES_128_CTR,
     &AES_192_CTR,
     &AES_256_CTR,
@@ -117,6 +122,7 @@ pub(crate) static CIPHERS: Lazy<HashMap<&'static Name, &(dyn Cipher + Send + Syn
         let mut h: HashMap<&'static Name, &(dyn Cipher + Send + Sync)> = HashMap::new();
         h.insert(&CLEAR, &_CLEAR);
         h.insert(&NONE, &_CLEAR);
+        h.insert(&TRIPLE_DES_CBC, &_3DES_CBC);
         h.insert(&AES_128_CTR, &_AES_128_CTR);
         h.insert(&AES_192_CTR, &_AES_192_CTR);
         h.insert(&AES_256_CTR, &_AES_256_CTR);

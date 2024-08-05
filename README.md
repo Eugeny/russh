@@ -26,6 +26,7 @@ This is a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Éti
   * `aes256-cbc` ✨
   * `aes192-cbc` ✨
   * `aes128-cbc` ✨
+  * `3des-cbc` ✨
 * Key exchanges:
   * `curve25519-sha256@libssh.org`
   * `diffie-hellman-group1-sha1` ✨
