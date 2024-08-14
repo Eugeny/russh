@@ -246,7 +246,13 @@ pub(crate) async fn read<'a, R: AsyncRead + Unpin>(
             buffer.buffer.extend(&len);
             debug!("reading, seqn = {:?}", seqn);
             let len = cipher.decrypt_packet_length(seqn, &len);
-            buffer.len = BigEndian::read_u32(&len) as usize + cipher.tag_len();
+            let len = BigEndian::read_u32(&len) as usize;
+
+            if len > MAXIMUM_PACKET_LEN {
+                return Err(Error::PacketSize(len));
+            }
+
+            buffer.len = len + cipher.tag_len();
             debug!("reading, clear len = {:?}", buffer.len);
         }
     }
@@ -284,5 +290,6 @@ pub(crate) async fn read<'a, R: AsyncRead + Unpin>(
 pub(crate) const PACKET_LENGTH_LEN: usize = 4;
 
 const MINIMUM_PACKET_LEN: usize = 16;
+const MAXIMUM_PACKET_LEN: usize = 256 * 1024;
 
 const PADDING_LENGTH_LEN: usize = 1;
