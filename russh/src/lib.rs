@@ -221,6 +221,10 @@ pub enum Error {
     #[error("Wrong server signature")]
     WrongServerSig,
 
+    /// Excessive packet size.
+    #[error("Bad packet size: {0}")]
+    PacketSize(usize),
+
     /// Message received/sent on unopened channel.
     #[error("Channel not open")]
     WrongChannel,
