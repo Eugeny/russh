@@ -1,5 +1,6 @@
 [workspace]
 members = ["russh-keys", "russh", "russh-config", "cryptovec", "pageant"]
+default-members = ["russh-keys", "russh", "russh-config", "cryptovec"]
 
 [patch.crates-io]
 russh = { path = "russh" }

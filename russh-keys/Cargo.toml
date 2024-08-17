@@ -72,6 +72,8 @@ anyhow = "*"
 env_logger = "0.10"
 tempdir = "0.3"
 tokio = { workspace = true, features = ["test-util", "macros", "process"] }
+
+[target.'cfg(windows)'.dependencies]
 pageant = { version = "0.0.1-beta.1", path = "../pageant" }
 
 [package.metadata.docs.rs]

@@ -31,7 +31,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AgentClient<S> {
 
 #[cfg(unix)]
 impl AgentClient<tokio::net::UnixStream> {
-    /// Build a future that connects to an SSH agent via the provided
+    /// Connect to an SSH agent via the provided
     /// stream (on Unix, usually a Unix-domain socket).
     pub async fn connect_uds<P: AsRef<std::path::Path>>(path: P) -> Result<Self, Error> {
         let stream = tokio::net::UnixStream::connect(path).await?;
@@ -41,8 +41,8 @@ impl AgentClient<tokio::net::UnixStream> {
         })
     }
 
-    /// Build a future that connects to an SSH agent via the provided
-    /// stream (on Unix, usually a Unix-domain socket).
+    /// Connect to an SSH agent specified by the SSH_AUTH_SOCK
+    /// environment variable.
     pub async fn connect_env() -> Result<Self, Error> {
         let var = if let Ok(var) = std::env::var("SSH_AUTH_SOCK") {
             var
@@ -55,6 +55,12 @@ impl AgentClient<tokio::net::UnixStream> {
             }
             owise => owise,
         }
+    }
+
+    /// Connect to a running Pageant instance
+    #[cfg(target_os = "windows")]
+    pub async fn connect_pageant() -> Result<Self, Error> {
+        Self::connect(pageant::PageantStream::new().map_err(|e| Error::Pageant(e)))
     }
 }
 
