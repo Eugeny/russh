@@ -58,7 +58,7 @@ tokio = { workspace = true, features = [
   "time",
   "net",
 ] }
-tokio-stream = { version = "0.1", features = ["net"] }
+tokio-stream = { workspace = true }
 typenum = "1.17"
 yasna = { version = "0.5.0", features = ["bit-vec", "num-bigint"], optional = true }
 zeroize = "1.7"
@@ -68,9 +68,11 @@ vendored-openssl = ["openssl", "openssl/vendored"]
 legacy-ed25519-pkcs8-parser = ["yasna"]
 
 [dev-dependencies]
+anyhow = "*"
 env_logger = "0.10"
 tempdir = "0.3"
 tokio = { workspace = true, features = ["test-util", "macros", "process"] }
+pageant = { version = "0.0.1-beta.1", path = "../pageant" }
 
 [package.metadata.docs.rs]
 features = ["openssl"]

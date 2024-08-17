@@ -23,3 +23,4 @@ ssh-encoding = "0.2"
 ssh-key = { version = "0.6", features = ["ed25519", "rsa", "encryption"] }
 thiserror = "1.0"
 tokio = { version = "1.17.0" }
+tokio-stream = { version = "0.1", features = ["net", "sync"] }

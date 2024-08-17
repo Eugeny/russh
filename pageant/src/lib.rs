@@ -1,12 +1,16 @@
+use delegate::delegate;
+use std::io::IoSlice;
 use std::mem::size_of;
-
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use thiserror::Error;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, DuplexStream, ReadBuf, Sink};
+use bytes::BytesMut;
 use windows::core::HSTRING;
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND, INVALID_HANDLE_VALUE, LPARAM, WPARAM};
 use windows::Win32::Security::{
     GetTokenInformation, InitializeSecurityDescriptor, SetSecurityDescriptorOwner, TokenUser,
-    PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES, SECURITY_DESCRIPTOR, SID_AND_ATTRIBUTES,
-    TOKEN_QUERY, TOKEN_USER,
+    PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES, SECURITY_DESCRIPTOR, TOKEN_QUERY, TOKEN_USER,
 };
 use windows::Win32::System::DataExchange::COPYDATASTRUCT;
 use windows::Win32::System::Memory::{
@@ -37,11 +41,68 @@ impl Error {
     }
 }
 
-pub struct Pageant {}
+pub struct PageantStream {
+    stream: DuplexStream,
+}
 
-impl Pageant {
-    pub async fn new() -> Result<Pageant, Error> {
-        Ok(Self {})
+impl PageantStream {
+    pub async fn new() -> Result<Self, Error> {
+        let (one, mut two) = tokio::io::duplex(_AGENT_MAX_MSGLEN * 100);
+
+        let cookie = rand::random::<u64>().to_string();
+        tokio::spawn(async move {
+            let mut buf = BytesMut::new();
+            while let Ok(n) = two.read_buf(&mut buf).await {
+                if n == 0 {
+                    break;
+                }
+                let msg = buf.split().freeze();
+                let response = _query_pageant_direct(cookie.clone(), &msg).unwrap();
+                two.write_all(&response).await?
+            }
+            std::io::Result::Ok(())
+        });
+
+        Ok(Self { stream: one })
+    }
+}
+
+impl AsyncRead for PageantStream {
+    delegate! {
+        to Pin::new(&mut self.stream) {
+            fn poll_read(
+                mut self: Pin<&mut Self>,
+                cx: &mut Context<'_>,
+                buf: &mut ReadBuf<'_>,
+            ) -> Poll<Result<(), std::io::Error>>;
+
+        }
+    }
+}
+
+impl AsyncWrite for PageantStream {
+    delegate! {
+        to Pin::new(&mut self.stream) {
+            fn poll_write(
+                mut self: Pin<&mut Self>,
+                cx: &mut Context<'_>,
+                buf: &[u8],
+            ) -> Poll<Result<usize, std::io::Error>>;
+
+            fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), std::io::Error>>;
+
+            fn poll_write_vectored(
+                mut self: Pin<&mut Self>,
+                cx: &mut Context<'_>,
+                bufs: &[IoSlice<'_>],
+            ) -> Poll<Result<usize, std::io::Error>>;
+
+            fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), std::io::Error>>;
+        }
+
+        to Pin::new(&self.stream) {
+            fn is_write_vectored(&self) -> bool;
+        }
     }
 }
 
