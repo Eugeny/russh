@@ -19,7 +19,7 @@ bytes = "1.7"
 delegate = "0.12"
 
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.58.0", features = [
+windows = { version = "0.58", features = [
     "Win32_UI_WindowsAndMessaging",
     "Win32_System_Memory",
     "Win32_Security",

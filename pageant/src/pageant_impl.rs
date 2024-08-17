@@ -71,6 +71,12 @@ impl PageantStream {
     }
 }
 
+impl Default for PageantStream {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AsyncRead for PageantStream {
     delegate! {
         to Pin::new(&mut self.stream) {
