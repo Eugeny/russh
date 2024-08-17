@@ -190,6 +190,10 @@ pub enum Error {
     #[error("ASN1 decoding error: {0}")]
     #[cfg(feature = "legacy-ed25519-pkcs8-parser")]
     LegacyASN1(::yasna::ASN1Error),
+
+    #[cfg(target_os = "windows")]
+    #[error("Pageant: {0}")]
+    Pageant(#[from] pageant::Error),
 }
 
 #[cfg(feature = "legacy-ed25519-pkcs8-parser")]
