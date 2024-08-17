@@ -67,14 +67,13 @@ zeroize = "1.7"
 vendored-openssl = ["openssl", "openssl/vendored"]
 legacy-ed25519-pkcs8-parser = ["yasna"]
 
+[target.'cfg(windows)'.dependencies]
+pageant = { version = "0.0.1-beta.1", path = "../pageant" }
+
 [dev-dependencies]
-anyhow = "*"
 env_logger = "0.10"
 tempdir = "0.3"
 tokio = { workspace = true, features = ["test-util", "macros", "process"] }
-
-[target.'cfg(windows)'.dependencies]
-pageant = { version = "0.0.1-beta.1", path = "../pageant" }
 
 [package.metadata.docs.rs]
 features = ["openssl"]

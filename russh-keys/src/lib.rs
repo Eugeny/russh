@@ -193,7 +193,7 @@ pub enum Error {
 
     #[cfg(target_os = "windows")]
     #[error("Pageant: {0}")]
-    SshEncoding(#[from] pageant::Error),
+    Pageant(#[from] pageant::Error),
 }
 
 #[cfg(feature = "legacy-ed25519-pkcs8-parser")]
