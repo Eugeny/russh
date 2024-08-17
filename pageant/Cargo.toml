@@ -22,6 +22,6 @@ windows = { version = "0.58.0", features = [
 ] }
 thiserror = { workspace = true }
 rand = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "rt"] }
 bytes = "1.7"
 delegate = "0.12"

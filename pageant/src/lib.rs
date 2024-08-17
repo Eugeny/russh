@@ -1,11 +1,18 @@
-use delegate::delegate;
+//! # Pageant SSH agent transport protocol implementation
+//!
+//! This crate provides a [PageantStream] type that implements [AsyncRead] and [AsyncWrite] traits and can be used to talk to a running Pageant instance.
+//!
+//! This crate only implements the transport, not the actual SSH agent protocol.
+
 use std::io::IoSlice;
 use std::mem::size_of;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use thiserror::Error;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, DuplexStream, ReadBuf, Sink};
+
 use bytes::BytesMut;
+use delegate::delegate;
+use thiserror::Error;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, DuplexStream, ReadBuf};
 use windows::core::HSTRING;
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND, INVALID_HANDLE_VALUE, LPARAM, WPARAM};
 use windows::Win32::Security::{
@@ -41,12 +48,15 @@ impl Error {
     }
 }
 
+/// Pageant transport stream. Implements [AsyncRead] and [AsyncWrite].
+///
+/// The stream has a unique cookie and requests made in the same stream are considered the same "session".
 pub struct PageantStream {
     stream: DuplexStream,
 }
 
 impl PageantStream {
-    pub async fn new() -> Result<Self, Error> {
+    pub fn new() -> Self {
         let (one, mut two) = tokio::io::duplex(_AGENT_MAX_MSGLEN * 100);
 
         let cookie = rand::random::<u64>().to_string();
@@ -57,13 +67,13 @@ impl PageantStream {
                     break;
                 }
                 let msg = buf.split().freeze();
-                let response = _query_pageant_direct(cookie.clone(), &msg).unwrap();
+                let response = query_pageant_direct(cookie.clone(), &msg).unwrap();
                 two.write_all(&response).await?
             }
             std::io::Result::Ok(())
         });
 
-        Ok(Self { stream: one })
+        Self { stream: one }
     }
 }
 
@@ -107,7 +117,6 @@ impl AsyncWrite for PageantStream {
 }
 
 struct MemoryMap {
-    name: String,
     filemap: HANDLE,
     view: MEMORY_MAPPED_VIEW_ADDRESS,
     length: usize,
@@ -135,7 +144,6 @@ impl MemoryMap {
         }
         let view = unsafe { MapViewOfFile(filemap, FILE_MAP_WRITE, 0, 0, 0) };
         Ok(Self {
-            name,
             filemap,
             view,
             length,
@@ -173,15 +181,15 @@ impl MemoryMap {
             );
         }
         self.pos += n;
-        return out;
+        out
     }
 }
 
 impl Drop for MemoryMap {
     fn drop(&mut self) {
         unsafe {
-            UnmapViewOfFile(self.view);
-            CloseHandle(self.filemap);
+            let _ = UnmapViewOfFile(self.view);
+            let _ = CloseHandle(self.filemap);
         }
     }
 }
@@ -197,7 +205,8 @@ fn find_pageant_window() -> Result<HWND, Error> {
 const _AGENT_COPYDATA_ID: u64 = 0x804E50BA;
 const _AGENT_MAX_MSGLEN: usize = 8192;
 
-pub fn _query_pageant_direct(cookie: String, msg: &[u8]) -> Result<Vec<u8>, Error> {
+/// Send a one-off query to Pageant and return a response.
+pub fn query_pageant_direct(cookie: String, msg: &[u8]) -> Result<Vec<u8>, Error> {
     let hwnd = find_pageant_window()?;
     let map_name = format!("PageantRequest{cookie}");
 
@@ -213,7 +222,6 @@ pub fn _query_pageant_direct(cookie: String, msg: &[u8]) -> Result<Vec<u8>, Erro
         let _ = GetTokenInformation(process_token, TokenUser, None, 0, &mut info_size);
 
         let mut buffer = vec![0; info_size as usize];
-        let user: TOKEN_USER;
         GetTokenInformation(
             process_token,
             TokenUser,
@@ -221,15 +229,17 @@ pub fn _query_pageant_direct(cookie: String, msg: &[u8]) -> Result<Vec<u8>, Erro
             buffer.len() as u32,
             &mut info_size,
         )?;
-        user = *(buffer.as_ptr() as *const _);
+        let user: TOKEN_USER = *(buffer.as_ptr() as *const _);
         let _ = CloseHandle(process_token);
         user
     };
 
     let mut sd = SECURITY_DESCRIPTOR::default();
-    let mut sa = SECURITY_ATTRIBUTES::default();
-    sa.lpSecurityDescriptor = &mut sd as *mut _ as *mut _;
-    sa.bInheritHandle = true.into();
+    let sa = SECURITY_ATTRIBUTES {
+        lpSecurityDescriptor: &mut sd as *mut _ as *mut _,
+        bInheritHandle: true.into(),
+        ..Default::default()
+    };
 
     let psd = PSECURITY_DESCRIPTOR(&mut sd as *mut _ as *mut _);
 

@@ -11,7 +11,7 @@ env:
 
 jobs:
   Build:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
 
     steps:
     - uses: actions/checkout@v2
@@ -28,7 +28,7 @@ jobs:
         package: russh
 
   Formatting:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
 
     steps:
     - uses: actions/checkout@v2
@@ -40,7 +40,7 @@ jobs:
       run: cargo fmt --check
 
   Clippy:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
 
     steps:
     - uses: actions/checkout@v2
@@ -55,7 +55,7 @@ jobs:
       run: cargo clippy --all-features -- -D warnings
 
   Test:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
 
     steps:
     - uses: actions/checkout@v2
