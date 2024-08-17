@@ -56,11 +56,13 @@ impl AgentClient<tokio::net::UnixStream> {
             owise => owise,
         }
     }
+}
 
+#[cfg(target_os = "windows")]
+impl AgentClient<pageant::PageantStream> {
     /// Connect to a running Pageant instance
-    #[cfg(target_os = "windows")]
-    pub async fn connect_pageant() -> Result<Self, Error> {
-        Self::connect(pageant::PageantStream::new().map_err(|e| Error::Pageant(e)))
+    pub async fn connect_pageant() -> Self {
+        Self::connect(pageant::PageantStream::new())
     }
 }
 
