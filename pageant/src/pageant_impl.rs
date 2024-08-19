@@ -205,6 +205,10 @@ fn find_pageant_window() -> Result<HWND, Error> {
 const _AGENT_COPYDATA_ID: u64 = 0x804E50BA;
 const _AGENT_MAX_MSGLEN: usize = 8192;
 
+pub fn is_pageant_running() -> bool {
+    find_pageant_window().is_ok()
+}
+
 /// Send a one-off query to Pageant and return a response.
 pub fn query_pageant_direct(cookie: String, msg: &[u8]) -> Result<Vec<u8>, Error> {
     let hwnd = find_pageant_window()?;
