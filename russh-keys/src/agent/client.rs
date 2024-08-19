@@ -11,14 +11,29 @@ use crate::encoding::{Encoding, Reader};
 use crate::key::{PublicKey, SignatureHash};
 use crate::{key, protocol, Error, PublicKeyBase64};
 
+pub trait AgentStream: AsyncRead + AsyncWrite {}
+
+impl<S: AsyncRead + AsyncWrite> AgentStream for S {}
+
 /// SSH agent client.
-pub struct AgentClient<S: AsyncRead + AsyncWrite> {
+pub struct AgentClient<S: AgentStream> {
     stream: S,
     buf: CryptoVec,
 }
 
+impl<S: AgentStream + Send + Unpin + 'static> AgentClient<S> {
+    /// Wraps the internal stream in a Box<dyn _>, allowing different client
+    /// implementations to have the same type
+    pub fn dynamic(self) -> AgentClient<Box<dyn AgentStream + Send + Unpin>> {
+        AgentClient {
+            stream: Box::new(self.stream),
+            buf: self.buf,
+        }
+    }
+}
+
 // https://tools.ietf.org/html/draft-miller-ssh-agent-00#section-4.1
-impl<S: AsyncRead + AsyncWrite + Unpin> AgentClient<S> {
+impl<S: AgentStream + Unpin> AgentClient<S> {
     /// Build a future that connects to an SSH agent via the provided
     /// stream (on Unix, usually a Unix-domain socket).
     pub fn connect(stream: S) -> Self {
@@ -58,7 +73,10 @@ impl AgentClient<tokio::net::UnixStream> {
     }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(windows)]
+const ERROR_PIPE_BUSY: u32 = 231u32;
+
+#[cfg(windows)]
 impl AgentClient<pageant::PageantStream> {
     /// Connect to a running Pageant instance
     pub async fn connect_pageant() -> Self {
@@ -66,16 +84,28 @@ impl AgentClient<pageant::PageantStream> {
     }
 }
 
-#[cfg(not(unix))]
-impl AgentClient<tokio::net::TcpStream> {
-    /// Build a future that connects to an SSH agent via the provided
-    /// stream (on Unix, usually a Unix-domain socket).
-    pub async fn connect_env() -> Result<Self, Error> {
-        Err(Error::AgentFailure)
+#[cfg(windows)]
+impl AgentClient<tokio::net::windows::named_pipe::NamedPipeClient> {
+    /// Connect to an SSH agent via a Windows named pipe
+    pub async fn connect_named_pipe<P: AsRef<std::ffi::OsStr>>(path: P) -> Result<Self, Error> {
+        let stream = loop {
+            match tokio::net::windows::named_pipe::ClientOptions::new().open(path.as_ref()) {
+                Ok(client) => break client,
+                Err(e) if e.raw_os_error() == Some(ERROR_PIPE_BUSY as i32) => (),
+                Err(e) => return Err(e.into()),
+            }
+
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+        };
+
+        Ok(AgentClient {
+            stream,
+            buf: CryptoVec::new(),
+        })
     }
 }
 
-impl<S: AsyncRead + AsyncWrite + Unpin> AgentClient<S> {
+impl<S: AgentStream + Unpin> AgentClient<S> {
     async fn read_response(&mut self) -> Result<(), Error> {
         // Writing the message
         self.stream.write_all(&self.buf).await?;
