@@ -1023,6 +1023,40 @@ impl Session {
                         }
                         Ok(())
                     }
+                    b"streamlocal-forward@openssh.com" => {
+                        let server_socket_path =
+                            std::str::from_utf8(r.read_string().map_err(crate::Error::from)?)
+                                .map_err(crate::Error::from)?;
+                        debug!("handler.streamlocal_forward {:?}", server_socket_path);
+                        let result = handler
+                            .streamlocal_forward(server_socket_path, self)
+                            .await?;
+                        if let Some(ref mut enc) = self.common.encrypted {
+                            if result {
+                                push_packet!(enc.write, enc.write.push(msg::REQUEST_SUCCESS))
+                            } else {
+                                push_packet!(enc.write, enc.write.push(msg::REQUEST_FAILURE))
+                            }
+                        }
+                        Ok(())
+                    }
+                    b"cancel-streamlocal-forward@openssh.com" => {
+                        let socket_path =
+                            std::str::from_utf8(r.read_string().map_err(crate::Error::from)?)
+                                .map_err(crate::Error::from)?;
+                        debug!("handler.cancel_streamlocal_forward {:?}", socket_path);
+                        let result = handler
+                            .cancel_streamlocal_forward(socket_path, self)
+                            .await?;
+                        if let Some(ref mut enc) = self.common.encrypted {
+                            if result {
+                                push_packet!(enc.write, enc.write.push(msg::REQUEST_SUCCESS))
+                            } else {
+                                push_packet!(enc.write, enc.write.push(msg::REQUEST_FAILURE))
+                            }
+                        }
+                        Ok(())
+                    }
                     _ => {
                         if let Some(ref mut enc) = self.common.encrypted {
                             push_packet!(enc.write, {
@@ -1087,7 +1121,7 @@ impl Session {
                     Some(GlobalRequestResponse::CancelTcpIpForward(return_channel)) => {
                         let _ = return_channel.send(true);
                     }
-                    None => {
+                    _ => {
                         error!("Received global request failure for unknown request!")
                     }
                 }
@@ -1105,7 +1139,7 @@ impl Session {
                     Some(GlobalRequestResponse::CancelTcpIpForward(return_channel)) => {
                         let _ = return_channel.send(false);
                     }
-                    None => {
+                    _ => {
                         error!("Received global request failure for unknown request!")
                     }
                 }
@@ -1210,6 +1244,16 @@ impl Session {
                     self.finalize_channel_open(&msg, channel_params, *allowed);
                 }
                 result
+            }
+            ChannelType::ForwardedStreamLocal(_) => {
+                if let Some(ref mut enc) = self.common.encrypted {
+                    msg.fail(
+                        &mut enc.write,
+                        msg::SSH_OPEN_ADMINISTRATIVELY_PROHIBITED,
+                        b"Unsupported channel type",
+                    );
+                }
+                Ok(false)
             }
             ChannelType::AgentForward => {
                 if let Some(ref mut enc) = self.common.encrypted {

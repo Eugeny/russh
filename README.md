@@ -17,6 +17,7 @@ This is a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Éti
 * `direct-tcpip` (local port forwarding)
 * `forward-tcpip` (remote port forwarding) ✨
 * `direct-streamlocal` (local UNIX socket forwarding, client only) ✨
+* `forward-streamlocal` (remote UNIX socket forwarding) ✨
 * Ciphers:
   * `chacha20-poly1305@openssh.com`
   * `aes256-gcm@openssh.com` ✨

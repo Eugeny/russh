@@ -293,7 +293,7 @@ impl Session {
 
     /// Requests cancellation of TCP/IP forwarding from the server
     ///
-    /// If `want_reply` is `true`, returns a oneshot receiveing the server's reply:
+    /// If `reply_channel` is not None, sets want_reply and returns the server's response via the channel,
     /// `true` for a success message, or `false` for failure
     pub fn cancel_tcpip_forward(
         &mut self,
@@ -314,6 +314,58 @@ impl Session {
                 enc.write.push(want_reply as u8);
                 enc.write.extend_ssh_string(address.as_bytes());
                 enc.write.push_u32_be(port);
+            });
+        }
+    }
+
+    /// Requests a UDS forwarding from the server, `socket path` being the server side socket path.
+    ///
+    /// If `reply_channel` is not None, sets want_reply and returns the server's response via the channel,
+    /// `true` for a success message, or `false` for failure
+    pub fn streamlocal_forward(
+        &mut self,
+        reply_channel: Option<oneshot::Sender<bool>>,
+        socket_path: &str,
+    ) {
+        if let Some(ref mut enc) = self.common.encrypted {
+            let want_reply = reply_channel.is_some();
+            if let Some(reply_channel) = reply_channel {
+                self.open_global_requests.push_back(
+                    crate::session::GlobalRequestResponse::StreamLocalForward(reply_channel),
+                );
+            }
+            push_packet!(enc.write, {
+                enc.write.push(msg::GLOBAL_REQUEST);
+                enc.write
+                    .extend_ssh_string(b"streamlocal-forward@openssh.com");
+                enc.write.push(want_reply as u8);
+                enc.write.extend_ssh_string(socket_path.as_bytes());
+            });
+        }
+    }
+
+    /// Requests cancellation of UDS forwarding from the server
+    ///
+    /// If `reply_channel` is not None, sets want_reply and returns the server's response via the channel,
+    /// `true` for a success message and `false` for failure.
+    pub fn cancel_streamlocal_forward(
+        &mut self,
+        reply_channel: Option<oneshot::Sender<bool>>,
+        socket_path: &str,
+    ) {
+        if let Some(ref mut enc) = self.common.encrypted {
+            let want_reply = reply_channel.is_some();
+            if let Some(reply_channel) = reply_channel {
+                self.open_global_requests.push_back(
+                    crate::session::GlobalRequestResponse::CancelStreamLocalForward(reply_channel),
+                );
+            }
+            push_packet!(enc.write, {
+                enc.write.push(msg::GLOBAL_REQUEST);
+                enc.write
+                    .extend_ssh_string(b"cancel-streamlocal-forward@openssh.com");
+                enc.write.push(want_reply as u8);
+                enc.write.extend_ssh_string(socket_path.as_bytes());
             });
         }
     }

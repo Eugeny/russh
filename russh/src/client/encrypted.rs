@@ -805,6 +805,17 @@ impl Session {
                                 )
                                 .await?
                         }
+                        ChannelType::ForwardedStreamLocal(d) => {
+                            confirm();
+                            let channel = self.accept_server_initiated_channel(id, &msg);
+                            client
+                                .server_channel_open_forwarded_streamlocal(
+                                    channel,
+                                    &d.socket_path,
+                                    self,
+                                )
+                                .await?;
+                        }
                         ChannelType::AgentForward => {
                             confirm();
                             client.server_channel_open_agent_forward(id, self).await?
@@ -848,6 +859,12 @@ impl Session {
                     Some(GlobalRequestResponse::CancelTcpIpForward(return_channel)) => {
                         let _ = return_channel.send(true);
                     }
+                    Some(GlobalRequestResponse::StreamLocalForward(return_channel)) => {
+                        let _ = return_channel.send(true);
+                    }
+                    Some(GlobalRequestResponse::CancelStreamLocalForward(return_channel)) => {
+                        let _ = return_channel.send(true);
+                    }
                     None => {
                         error!("Received global request failure for unknown request!")
                     }
@@ -864,6 +881,12 @@ impl Session {
                         let _ = return_channel.send(None);
                     }
                     Some(GlobalRequestResponse::CancelTcpIpForward(return_channel)) => {
+                        let _ = return_channel.send(false);
+                    }
+                    Some(GlobalRequestResponse::StreamLocalForward(return_channel)) => {
+                        let _ = return_channel.send(false);
+                    }
+                    Some(GlobalRequestResponse::CancelStreamLocalForward(return_channel)) => {
                         let _ = return_channel.send(false);
                     }
                     None => {

@@ -523,6 +523,24 @@ pub trait Handler: Sized {
     ) -> Result<bool, Self::Error> {
         Ok(false)
     }
+
+    #[allow(unused_variables)]
+    async fn streamlocal_forward(
+        &mut self,
+        socket_path: &str,
+        session: &mut Session,
+    ) -> Result<bool, Self::Error> {
+        Ok(false)
+    }
+
+    #[allow(unused_variables)]
+    async fn cancel_streamlocal_forward(
+        &mut self,
+        socket_path: &str,
+        session: &mut Session,
+    ) -> Result<bool, Self::Error> {
+        Ok(false)
+    }
 }
 
 #[async_trait]
