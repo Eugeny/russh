@@ -24,11 +24,15 @@ pub struct AgentClient<S: AgentStream> {
 impl<S: AgentStream + Send + Unpin + 'static> AgentClient<S> {
     /// Wraps the internal stream in a Box<dyn _>, allowing different client
     /// implementations to have the same type
-    pub fn dynamic(self) -> AgentClient<Box<dyn AgentStream + Send + Unpin>> {
+    pub fn dynamic(self) -> AgentClient<Box<dyn AgentStream + Send + Unpin + 'static>> {
         AgentClient {
             stream: Box::new(self.stream),
             buf: self.buf,
         }
+    }
+
+    pub fn into_inner(self) -> Box<dyn AgentStream + Send + Unpin + 'static> {
+        Box::new(self.stream)
     }
 }
 
