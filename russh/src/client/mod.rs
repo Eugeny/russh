@@ -1633,25 +1633,40 @@ pub trait Handler: Sized + Send {
     #[allow(unused_variables)]
     async fn server_channel_open_agent_forward(
         &mut self,
-        channel: ChannelId,
+        channel: Channel<Msg>,
         session: &mut Session,
     ) -> Result<(), Self::Error> {
         Ok(())
     }
 
-    /// Called when the server gets an unknown channel. It may return `true`,
-    /// if the channel of unknown type should be handled. If it returns `false`,
-    /// the channel will not be created and an error will be sent to the server.
+    /// Called when the server attempts to open a channel of unknown type. It may return `true`,
+    /// if the channel of unknown type should be accepted. In this case,
+    /// [Handler::server_channel_open_unknown] will be called soon after. If it returns `false`,
+    /// the channel will not be created and a rejection message will be sent to the server.
     #[allow(unused_variables)]
-    fn server_channel_handle_unknown(&self, channel: ChannelId, channel_type: &[u8]) -> bool {
+    async fn should_accept_unknown_server_channel(
+        &mut self,
+        id: ChannelId,
+        channel_type: &[u8],
+    ) -> bool {
         false
+    }
+
+    /// Called when the server opens an unknown channel.
+    #[allow(unused_variables)]
+    async fn server_channel_open_unknown(
+        &mut self,
+        channel: Channel<Msg>,
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        Ok(())
     }
 
     /// Called when the server opens a session channel.
     #[allow(unused_variables)]
     async fn server_channel_open_session(
         &mut self,
-        channel: ChannelId,
+        channel: Channel<Msg>,
         session: &mut Session,
     ) -> Result<(), Self::Error> {
         Ok(())
@@ -1661,7 +1676,7 @@ pub trait Handler: Sized + Send {
     #[allow(unused_variables)]
     async fn server_channel_open_direct_tcpip(
         &mut self,
-        channel: ChannelId,
+        channel: Channel<Msg>,
         host_to_connect: &str,
         port_to_connect: u32,
         originator_address: &str,
