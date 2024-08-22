@@ -778,10 +778,12 @@ where
         session_sender,
     );
     session.read_ssh_id(sshid)?;
-    let (encrypted_signal, encrypted_recv) = tokio::sync::oneshot::channel();
-    let join = tokio::spawn(session.run(stream, handler, Some(encrypted_signal)));
+    let (kex_done_signal, kex_done_signal_rx) = oneshot::channel();
+    let join = tokio::spawn(session.run(stream, handler, Some(kex_done_signal)));
 
-    if encrypted_recv.await.is_err() {
+    if kex_done_signal_rx.await.is_err() {
+        // kex_done_signal Sender is dropped when the session
+        // fails before a succesful key exchange
         join.await.map_err(crate::Error::Join)??;
         return Err(H::Error::from(crate::Error::Disconnect));
     }
@@ -829,7 +831,7 @@ impl Session {
         mut self,
         stream: SshRead<R>,
         mut handler: H,
-        encrypted_signal: Option<tokio::sync::oneshot::Sender<()>>,
+        mut kex_done_signal: Option<oneshot::Sender<()>>,
     ) -> Result<(), H::Error> {
         let (stream_read, mut stream_write) = stream.split();
         let result = self
@@ -837,7 +839,7 @@ impl Session {
                 stream_read,
                 &mut stream_write,
                 &mut handler,
-                encrypted_signal,
+                &mut kex_done_signal,
             )
             .await;
         trace!("disconnected");
@@ -852,9 +854,18 @@ impl Session {
                 Ok(())
             }
             Err(e) => {
-                handler.disconnected(DisconnectReason::Error(e)).await?;
-                //Err(e)
-                Ok(())
+                if kex_done_signal.is_some() {
+                    // The kex signal has not been consumed yet,
+                    // so we can send return the concrete error to be propagated
+                    // into the JoinHandle and returned from `connect_stream`
+                    Err(e)
+                } else {
+                    // The kex signal has been consumed, so no one is
+                    // awaiting the result of this coroutine
+                    // We're better off passing the error into the Handler
+                    handler.disconnected(DisconnectReason::Error(e)).await?;
+                    Err(H::Error::from(crate::Error::Disconnect))
+                }
             }
         }
     }
@@ -864,7 +875,7 @@ impl Session {
         stream_read: SshRead<ReadHalf<R>>,
         stream_write: &mut WriteHalf<R>,
         handler: &mut H,
-        mut encrypted_signal: Option<tokio::sync::oneshot::Sender<()>>,
+        kex_done_signal: &mut Option<tokio::sync::oneshot::Sender<()>>,
     ) -> Result<RemoteDisconnectInfo, H::Error> {
         let mut result: Result<RemoteDisconnectInfo, H::Error> =
             Err(crate::Error::Disconnect.into());
@@ -934,7 +945,7 @@ impl Session {
                             result = self.process_disconnect(buf);
                         } else {
                             self.common.received_data = true;
-                            reply( self,handler, &mut encrypted_signal, &mut buffer.seqn, buf).await?;
+                            reply(self, handler, kex_done_signal, &mut buffer.seqn, buf).await?;
                         }
                     }
 
@@ -1349,7 +1360,7 @@ impl KexDhDone {
 async fn reply<H: Handler>(
     session: &mut Session,
     handler: &mut H,
-    sender: &mut Option<tokio::sync::oneshot::Sender<()>>,
+    kex_done_signal: &mut Option<tokio::sync::oneshot::Sender<()>>,
     seqn: &mut Wrapping<u32>,
     buf: &[u8],
 ) -> Result<(), H::Error> {
@@ -1392,7 +1403,7 @@ async fn reply<H: Handler>(
                         done.compute_keys(CryptoVec::new(), false)?,
                     );
 
-                    if let Some(sender) = sender.take() {
+                    if let Some(sender) = kex_done_signal.take() {
                         sender.send(()).unwrap_or(());
                     }
                 } else {
@@ -1430,7 +1441,7 @@ async fn reply<H: Handler>(
             if buf.first() != Some(&msg::NEWKEYS) {
                 return Err(crate::Error::Kex.into());
             }
-            if let Some(sender) = sender.take() {
+            if let Some(sender) = kex_done_signal.take() {
                 sender.send(()).unwrap_or(());
             }
             session
