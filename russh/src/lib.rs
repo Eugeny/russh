@@ -155,6 +155,15 @@ pub mod server;
 /// Client side of this library.
 pub mod client;
 
+#[derive(Debug)]
+pub enum AlgorithmKind {
+    Kex,
+    Key,
+    Cipher,
+    Compression,
+    Mac,
+}
+
 #[derive(Debug, Error)]
 pub enum Error {
     /// The key file could not be parsed.
@@ -169,25 +178,13 @@ pub enum Error {
     #[error("Unknown algorithm")]
     UnknownAlgo,
 
-    /// No common key exchange algorithm.
-    #[error("No common key exchange algorithm")]
-    NoCommonKexAlgo,
-
-    /// No common signature algorithm.
-    #[error("No common key algorithm")]
-    NoCommonKeyAlgo,
-
-    /// No common cipher.
-    #[error("No common key cipher")]
-    NoCommonCipher,
-
-    /// No common compression algorithm.
-    #[error("No common compression algorithm")]
-    NoCommonCompression,
-
-    /// No common MAC algorithm.
-    #[error("No common MAC algorithm")]
-    NoCommonMac,
+    /// No common algorithm found during key exchange.
+    #[error("No common algorithm")]
+    NoCommonAlgo {
+        kind: AlgorithmKind,
+        ours: Vec<String>,
+        theirs: Vec<String>,
+    },
 
     /// Invalid SSH version string.
     #[error("invalid SSH version string")]
