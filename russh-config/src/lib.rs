@@ -113,15 +113,20 @@ pub enum AddKeysToAgent {
 }
 
 pub fn parse(file: &str, host: &str) -> Result<Config, Error> {
-    let mut config: Option<Config> = None;
+    let mut config = Config::default(host);
+    let mut matches_current = false;
     for line in file.lines() {
         let tokens = line.trim().splitn(2, ' ').collect::<Vec<&str>>();
         if tokens.len() == 2 {
             let (key, value) = (tokens.first().unwrap_or(&""), tokens.get(1).unwrap_or(&""));
             let lower = key.to_lowercase();
-            if let Some(ref mut config) = config {
+            if lower.as_str() == "host" {
+                matches_current = value
+                    .split_whitespace()
+                    .any(|x| check_host_against_glob_pattern(host, x));
+            }
+            if matches_current {
                 match lower.as_str() {
-                    "host" => break,
                     "user" => {
                         config.user.clear();
                         config.user.push_str(value.trim_start());
@@ -166,22 +171,10 @@ pub fn parse(file: &str, host: &str) -> Result<Config, Error> {
                         debug!("{:?}", key);
                     }
                 }
-            } else if lower.as_str() == "host"
-                && value
-                    .split_whitespace()
-                    .any(|x| check_host_against_glob_pattern(host, x))
-            {
-                let mut c = Config::default(host);
-                c.port = 22;
-                config = Some(c)
             }
         }
     }
-    if let Some(config) = config {
-        Ok(config)
-    } else {
-        Err(Error::HostNotFound)
-    }
+    Ok(config)
 }
 
 fn check_host_against_glob_pattern(candidate: &str, glob_pattern: &str) -> bool {
