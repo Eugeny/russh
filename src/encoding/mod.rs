@@ -16,7 +16,7 @@
 use byteorder::{BigEndian, ByteOrder, WriteBytesExt};
 use russh_cryptovec::CryptoVec;
 
-use crate::Error;
+use anyhow::Error;
 
 #[doc(hidden)]
 pub trait Bytes {
@@ -247,7 +247,7 @@ impl<'a> Position<'a> {
             self.position += len;
             Ok(result)
         } else {
-            Err(Error::IndexOutOfBounds)
+            Err(SSHParseError::IndexOutOfBounds.into())
         }
     }
     /// Read a `u32` from this reader.
@@ -258,7 +258,7 @@ impl<'a> Position<'a> {
             self.position += 4;
             Ok(u)
         } else {
-            Err(Error::IndexOutOfBounds)
+            Err(SSHParseError::IndexOutOfBounds.into())
         }
     }
     /// Read one byte from this reader.
@@ -269,7 +269,7 @@ impl<'a> Position<'a> {
             self.position += 1;
             Ok(u)
         } else {
-            Err(Error::IndexOutOfBounds)
+            Err(SSHParseError::IndexOutOfBounds.into())
         }
     }
 
@@ -282,7 +282,7 @@ impl<'a> Position<'a> {
             self.position += len;
             Ok(result)
         } else {
-            Err(Error::IndexOutOfBounds)
+            Err(SSHParseError::IndexOutOfBounds.into())
         }
     }
 
@@ -312,3 +312,10 @@ impl<'a> ssh_encoding::Reader for Position<'a> {
         self.s.len() - self.position
     }
 }
+
+#[derive(Debug, thiserror::Error)]
+pub enum SSHParseError {
+    #[error("Index out of bounds")]
+    IndexOutOfBounds
+}
+
