@@ -25,7 +25,7 @@ jobs:
     - name: Check semver compatibility (russh)
       uses: obi1kenobi/cargo-semver-checks-action@v2
       with:
-        package: russh
+        package: bitwarden-russh
 
   Formatting:
     runs-on: ubuntu-latest
