@@ -4,14 +4,14 @@ use std::collections::HashMap;
 use std::marker::Sync;
 use std::sync::{Arc, RwLock};
 
+use crate::encoding::{Encoding, Position, Reader};
 use byteorder::{BigEndian, ByteOrder};
 use futures::stream::{Stream, StreamExt};
 use russh_cryptovec::CryptoVec;
 use ssh_key::{HashAlg, SigningKey};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::select;
 use tokio_util::sync::CancellationToken;
-use crate::encoding::{Encoding, Reader, Position};
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::msg;
 use anyhow::Error;
@@ -43,7 +43,12 @@ pub trait Agent: Clone + Send + 'static {
     }
 }
 
-pub async fn serve<S, L, A>(mut listener: L, agent: A, keys: KeyStore, cancellation_token: CancellationToken) -> Result<(), Error>
+pub async fn serve<S, L, A>(
+    mut listener: L,
+    agent: A,
+    keys: KeyStore,
+    cancellation_token: CancellationToken,
+) -> Result<(), Error>
 where
     S: AsyncRead + AsyncWrite + Send + Sync + Unpin + 'static,
     L: Stream<Item = tokio::io::Result<S>> + Unpin,
@@ -59,7 +64,7 @@ where
                 buf.resize(4);
                 let keys = keys.clone();
                 let agent = agent.clone();
-        
+
                 tokio::spawn(async move {
                     let _ = Connection {
                         keys,
@@ -115,16 +120,16 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
         match r.read_byte() {
             Ok(REQUEST_IDENTITIES) => {
                 if let Ok(keys) = self.keys.0.read() {
-                writebuf.push(msg::IDENTITIES_ANSWER);
-                writebuf.push_u32_be(keys.len() as u32);
-                for (public_key_bytes, key) in keys.iter() {
-                    writebuf.extend_ssh_string(public_key_bytes);
-                    writebuf.extend_ssh_string(key.name.as_bytes());
-                }
+                    writebuf.push(msg::IDENTITIES_ANSWER);
+                    writebuf.push_u32_be(keys.len() as u32);
+                    for (public_key_bytes, key) in keys.iter() {
+                        writebuf.extend_ssh_string(public_key_bytes);
+                        writebuf.extend_ssh_string(key.name.as_bytes());
+                    }
                 } else {
                     writebuf.push(msg::FAILURE)
                 }
-        }
+            }
             Ok(SIGN_REQUEST) => {
                 let agent = self.agent.take().ok_or(SSHAgentError::AgentFailure)?;
                 let (agent, signed) = self.try_sign(agent, r, writebuf).await?;
@@ -191,9 +196,13 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
 
                 let sig_name = match sig.algorithm() {
                     ssh_key::Algorithm::Ed25519 => "ssh-ed25519",
-                    ssh_key::Algorithm::Rsa { hash: None }=> "ssh-rsa",
-                    ssh_key::Algorithm::Rsa { hash: Some(HashAlg::Sha256) } => "rsa-sha2-256",
-                    ssh_key::Algorithm::Rsa { hash: Some(HashAlg::Sha512) } => "rsa-sha2-512",
+                    ssh_key::Algorithm::Rsa { hash: None } => "ssh-rsa",
+                    ssh_key::Algorithm::Rsa {
+                        hash: Some(HashAlg::Sha256),
+                    } => "rsa-sha2-256",
+                    ssh_key::Algorithm::Rsa {
+                        hash: Some(HashAlg::Sha512),
+                    } => "rsa-sha2-512",
                     _ => {
                         println!("Unsupported signing algorithm");
                         writebuf.push(msg::FAILURE);
@@ -217,7 +226,6 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
         }
     }
 }
-
 
 #[derive(Debug, thiserror::Error)]
 pub enum SSHAgentError {

@@ -316,6 +316,5 @@ impl<'a> ssh_encoding::Reader for Position<'a> {
 #[derive(Debug, thiserror::Error)]
 pub enum SSHParseError {
     #[error("Index out of bounds")]
-    IndexOutOfBounds
+    IndexOutOfBounds,
 }
-
