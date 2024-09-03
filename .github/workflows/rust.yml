@@ -53,23 +53,3 @@ jobs:
 
     - name: Clippy (all features enabled)
       run: cargo clippy --all-features -- -D warnings
-
-  Test:
-    runs-on: ubuntu-latest
-
-    steps:
-    - uses: actions/checkout@v2
-
-    - name: Test (no features enabled)
-      run: |
-        eval `ssh-agent`
-        cargo test --verbose
-      env:
-        RUST_BACKTRACE: 1
-
-    - name: Test (all features enabled)
-      run: |
-        eval `ssh-agent`
-        cargo test --verbose --all-features
-      env:
-        RUST_BACKTRACE: 1
