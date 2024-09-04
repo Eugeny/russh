@@ -1,5 +1,3 @@
-// based on: https://github.com/Eugeny/russh/blob/main/russh-keys/src/agent/server.rs
-
 use std::collections::HashMap;
 use std::marker::Sync;
 use std::sync::{Arc, RwLock};
