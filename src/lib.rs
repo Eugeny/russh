@@ -1,3 +1,3 @@
-mod encoding;
-mod msg;
-mod ssh_agent;
+pub mod encoding;
+pub mod msg;
+pub mod ssh_agent;
