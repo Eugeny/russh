@@ -52,11 +52,14 @@ impl server::Server for Server {
         self.id += 1;
         s
     }
+    fn handle_session_error(&mut self, _error: <Self::Handler as russh::server::Handler>::Error) {
+        eprintln!("Session error: {:#?}", _error);
+    }
 }
 
 #[async_trait]
 impl server::Handler for Server {
-    type Error = anyhow::Error;
+    type Error = russh::Error;
 
     async fn channel_open_session(
         &mut self,
@@ -84,6 +87,11 @@ impl server::Handler for Server {
         data: &[u8],
         session: &mut Session,
     ) -> Result<(), Self::Error> {
+        // Sending Ctrl+C ends the session and disconnects the client
+        if data == [3] {
+            return Err(russh::Error::Disconnect);
+        }
+        
         let data = CryptoVec::from(format!("Got data: {}\r\n", String::from_utf8_lossy(data)));
         self.post(data.clone()).await;
         session.data(channel, data);
