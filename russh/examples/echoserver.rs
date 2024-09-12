@@ -91,7 +91,7 @@ impl server::Handler for Server {
         if data == [3] {
             return Err(russh::Error::Disconnect);
         }
-        
+
         let data = CryptoVec::from(format!("Got data: {}\r\n", String::from_utf8_lossy(data)));
         self.post(data.clone()).await;
         session.data(channel, data);
