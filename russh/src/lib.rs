@@ -45,7 +45,7 @@
 //! relatively simple: clients and servers open *channels*, which are
 //! just integers used to handle multiple requests in parallel in a
 //! single connection. Once a client has obtained a `ChannelId` by
-//! calling one the many `channel_open_…` methods of
+//! calling one of the many `channel_open_…` methods of
 //! `client::Connection`, the client may send exec requests and data
 //! to the server.
 //!
