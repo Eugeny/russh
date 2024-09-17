@@ -300,7 +300,7 @@ impl<H: Handler> Handle<H> {
     /// complete Keyboard-Interactive based SSH authentication.
     ///
     /// * `responses` - The responses to each prompt. The number of responses must match the number
-    /// of prompts. If a prompt has an empty string, then the response should be an empty string.
+    ///   of prompts. If a prompt has an empty string, then the response should be an empty string.
     pub async fn authenticate_keyboard_interactive_respond(
         &mut self,
         responses: Vec<String>,

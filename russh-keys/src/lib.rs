@@ -960,7 +960,7 @@ ocyR
     fn test_decode_encode_symmetry(key: &str) {
         let original_key_bytes = data_encoding::BASE64_MIME
             .decode(
-                &key.lines()
+                key.lines()
                     .filter(|line| !line.starts_with("-----"))
                     .collect::<Vec<&str>>()
                     .join("")
@@ -1013,7 +1013,7 @@ ocyR
             sig.extend_ssh_string(&[0]);
             sig.extend_ssh_string(&[0]);
             let public = key.clone_public_key().unwrap();
-            assert_eq!(false, public.verify_detached(buf, &sig));
+            assert!(!public.verify_detached(buf, &sig));
         }
     }
 
@@ -1369,12 +1369,9 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
             let (_, buf) = client.sign_request(&public, buf).await;
             let buf = buf?;
             let (a, b) = buf.split_at(len);
-            match key {
-                key::KeyPair::Ed25519 { .. } => {
-                    let sig = &b[b.len() - 64..];
-                    assert!(public.verify_detached(a, sig));
-                }
-                _ => {}
+            if let key::KeyPair::Ed25519 { .. } = key {
+                let sig = &b[b.len() - 64..];
+                assert!(public.verify_detached(a, sig));
             }
             Ok::<(), Error>(())
         })

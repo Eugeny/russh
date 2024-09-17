@@ -208,10 +208,10 @@ pub(crate) trait SealingKey {
 
         // Maximum packet length:
         // https://tools.ietf.org/html/rfc4253#section-6.1
-        assert!(packet_length <= std::u32::MAX as usize);
+        assert!(packet_length <= u32::MAX as usize);
         buffer.buffer.push_u32_be(packet_length as u32);
 
-        assert!(padding_length <= std::u8::MAX as usize);
+        assert!(padding_length <= u8::MAX as usize);
         buffer.buffer.push(padding_length as u8);
         buffer.buffer.extend(payload);
         self.fill_padding(buffer.buffer.resize_mut(padding_length));

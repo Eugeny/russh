@@ -30,7 +30,7 @@ impl SshId {
     pub(crate) fn as_kex_hash_bytes(&self) -> &[u8] {
         match self {
             Self::Standard(s) => s.as_bytes(),
-            Self::Raw(s) => s.trim_end_matches(|c| c == '\n' || c == '\r').as_bytes(),
+            Self::Raw(s) => s.trim_end_matches(['\n', '\r']).as_bytes(),
         }
     }
 
