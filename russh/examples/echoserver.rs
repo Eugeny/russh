@@ -17,7 +17,7 @@ async fn main() {
         inactivity_timeout: Some(std::time::Duration::from_secs(3600)),
         auth_rejection_time: std::time::Duration::from_secs(3),
         auth_rejection_time_initial: Some(std::time::Duration::from_secs(0)),
-        keys: vec![russh_keys::key::KeyPair::generate_ed25519().unwrap()],
+        keys: vec![russh_keys::key::KeyPair::generate_ed25519()],
         ..Default::default()
     };
     let config = Arc::new(config);

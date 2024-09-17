@@ -181,7 +181,7 @@ async fn main() {
     let config = russh::server::Config {
         auth_rejection_time: Duration::from_secs(3),
         auth_rejection_time_initial: Some(Duration::from_secs(0)),
-        keys: vec![KeyPair::generate_ed25519().unwrap()],
+        keys: vec![KeyPair::generate_ed25519()],
         ..Default::default()
     };
 
