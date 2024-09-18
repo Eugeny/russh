@@ -26,6 +26,9 @@ pub struct Session {
 }
 #[derive(Debug)]
 pub enum Msg {
+    ChannelOpenAgent {
+        channel_ref: ChannelRef,
+    },
     ChannelOpenSession {
         channel_ref: ChannelRef,
     },
@@ -204,6 +207,23 @@ impl Handle {
                 Err(()) // crate::Error::Disconnect
             }
         }
+    }
+
+    /// Open an agent forwarding channel. This can be used once the client has
+    /// confirmed that it allows agent forwarding. See
+    /// [PROTOCOL.agent](https://datatracker.ietf.org/doc/html/draft-miller-ssh-agent).
+    pub async fn channel_open_agent(&self) -> Result<Channel<Msg>, Error> {
+        let (sender, receiver) = unbounded_channel();
+        let channel_ref = ChannelRef::new(sender);
+        let window_size_ref = channel_ref.window_size().clone();
+
+        self.sender
+            .send(Msg::ChannelOpenAgent { channel_ref })
+            .await
+            .map_err(|_| Error::SendError)?;
+
+        self.wait_channel_confirmation(receiver, window_size_ref)
+            .await
     }
 
     /// Request a session channel (the most basic type of
@@ -534,6 +554,10 @@ impl Session {
                         }
                         Some(Msg::Channel(id, ChannelMsg::WindowAdjusted { new_size })) => {
                             debug!("window adjusted to {:?} for channel {:?}", new_size, id);
+                        }
+                        Some(Msg::ChannelOpenAgent { channel_ref }) => {
+                            let id = self.channel_open_agent()?;
+                            self.channels.insert(id, channel_ref);
                         }
                         Some(Msg::ChannelOpenSession { channel_ref }) => {
                             let id = self.channel_open_session()?;
