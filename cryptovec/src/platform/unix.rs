@@ -1,7 +1,6 @@
 use crate::CryptoVec;
-use libc::{mlock, munlock, c_void};
+use libc::{c_void, mlock, munlock};
 use std::alloc;
-
 
 /// Unlock memory on drop for Unix-based systems.
 pub fn munlock(ptr: *const u8, len: usize) {
@@ -12,7 +11,7 @@ pub fn munlock(ptr: *const u8, len: usize) {
     }
 }
 
-pub fn mlock (ptr: *const u8, len: usize) {
+pub fn mlock(ptr: *const u8, len: usize) {
     unsafe {
         if mlock(ptr as *const c_void, len) != 0 {
             panic!("Failed to lock memory.");

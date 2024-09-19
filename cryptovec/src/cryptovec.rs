@@ -547,5 +547,4 @@ mod test {
         crypto_vec.resize_mut(4).clone_from_slice(b"test");
         assert_eq!(crypto_vec.as_ref(), b"test");
     }
-
 }
