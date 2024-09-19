@@ -1,13 +1,8 @@
-
-
 #[cfg(not(target_arch = "wasm32"))]
 pub use std_time::Instant;
 
-
 #[cfg(target_arch = "wasm32")]
 pub use wasm::Instant;
-
-
 
 mod wasm {
     #[derive(Debug, Clone, Copy)]
@@ -23,13 +18,15 @@ mod wasm {
         }
 
         pub fn duration_since(&self, earlier: Instant) -> std::time::Duration {
-            (self.inner - earlier.inner).to_std().expect("Duration is negative")
+            (self.inner - earlier.inner)
+                .to_std()
+                .expect("Duration is negative")
         }
     }
 }
 
 mod std_time {
-    
+
     #[derive(Debug, Clone, Copy)]
     pub struct Instant {
         inner: std::time::Instant,
