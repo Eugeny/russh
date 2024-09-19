@@ -1,3 +1,5 @@
+/// This file is a copy of the `ReusableBoxFuture` type from the `tokio-util` crate.
+
 use std::alloc::Layout;
 use std::fmt;
 use std::future::{self, Future};
