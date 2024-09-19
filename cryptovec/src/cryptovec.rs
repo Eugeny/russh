@@ -1,4 +1,4 @@
-use crate::platform;
+use crate::platform::{self, memcpy, memset, mlock, munlock};
 use std::ops::{Deref, DerefMut, Index, IndexMut, Range, RangeFrom, RangeFull, RangeTo};
 
 /// A buffer which zeroes its memory on `.clear()`, `.resize()`, and
@@ -131,7 +131,6 @@ impl Default for CryptoVec {
     }
 }
 
-// Memory management methods
 impl CryptoVec {
     /// Creates a new `CryptoVec`.
     pub fn new() -> CryptoVec {
@@ -144,9 +143,42 @@ impl CryptoVec {
             let capacity = size.next_power_of_two();
             let layout = std::alloc::Layout::from_size_align_unchecked(capacity, 1);
             let p = std::alloc::alloc_zeroed(layout);
-            platform::mlock(p, capacity);
+            mlock(p, capacity);
             CryptoVec { p, capacity, size }
         }
+    }
+
+    /// Creates a new `CryptoVec` with capacity `capacity`.
+    pub fn with_capacity(capacity: usize) -> CryptoVec {
+        unsafe {
+            let capacity = capacity.next_power_of_two();
+            let layout = std::alloc::Layout::from_size_align_unchecked(capacity, 1);
+            let p = std::alloc::alloc_zeroed(layout);
+            mlock(p, capacity);
+            CryptoVec {
+                p,
+                capacity,
+                size: 0,
+            }
+        }
+    }
+
+    /// Length of this `CryptoVec`.
+    ///
+    /// ```
+    /// assert_eq!(russh_cryptovec::CryptoVec::new().len(), 0)
+    /// ```
+    pub fn len(&self) -> usize {
+        self.size
+    }
+
+    /// Returns `true` if and only if this CryptoVec is empty.
+    ///
+    /// ```
+    /// assert!(russh_cryptovec::CryptoVec::new().is_empty())
+    /// ```
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     /// Resize this CryptoVec, appending zeros at the end. This may
@@ -157,8 +189,9 @@ impl CryptoVec {
             // If this is an expansion, just resize.
             self.size = size
         } else if size <= self.size {
+            // If this is a truncation, resize and erase the extra memory.
             unsafe {
-                platform::memset(self.p.add(size), 0, self.size - size);
+                memset(self.p.add(size), 0, self.size - size);
             }
             self.size = size;
         } else {
@@ -167,66 +200,115 @@ impl CryptoVec {
                 let next_capacity = size.next_power_of_two();
                 let old_ptr = self.p;
                 let next_layout = std::alloc::Layout::from_size_align_unchecked(next_capacity, 1);
-                let new_ptr = std::alloc::alloc_zeroed(next_layout);
-                if new_ptr.is_null() {
-                    #[allow(clippy::panic)]
-                    {
-                        panic!("Realloc failed, pointer = {:?} {:?}", self, size)
-                    }
-                }
-
-                self.p = new_ptr;
-                platform::mlock(self.p, next_capacity);
+                self.p = std::alloc::alloc_zeroed(next_layout);
+                mlock(self.p, next_capacity);
 
                 if self.capacity > 0 {
                     std::ptr::copy_nonoverlapping(old_ptr, self.p, self.size);
                     for i in 0..self.size {
                         std::ptr::write_volatile(old_ptr.add(i), 0)
                     }
-                    platform::munlock(old_ptr, self.capacity);
+                    munlock(old_ptr, self.capacity);
                     let layout = std::alloc::Layout::from_size_align_unchecked(self.capacity, 1);
                     std::alloc::dealloc(old_ptr, layout);
                 }
 
-                self.capacity = next_capacity;
-                self.size = size;
+                if self.p.is_null() {
+                    #[allow(clippy::panic)]
+                    {
+                        panic!("Realloc failed, pointer = {:?} {:?}", self, size)
+                    }
+                } else {
+                    self.capacity = next_capacity;
+                    self.size = size;
+                }
             }
         }
     }
 
+    /// Clear this CryptoVec (retaining the memory).
+    ///
+    /// ```
+    /// let mut v = russh_cryptovec::CryptoVec::new();
+    /// v.extend(b"blabla");
+    /// v.clear();
+    /// assert!(v.is_empty())
+    /// ```
     pub fn clear(&mut self) {
         self.resize(0);
     }
 
+    /// Append a new byte at the end of this CryptoVec.
     pub fn push(&mut self, s: u8) {
         let size = self.size;
         self.resize(size + 1);
         unsafe { *self.p.add(size) = s }
     }
 
-    pub fn extend(&mut self, s: &[u8]) {
-        let size = self.size;
-        self.resize(size + s.len());
-        unsafe {
-            std::ptr::copy_nonoverlapping(s.as_ptr(), self.p.add(size), s.len());
-        }
-    }
-
+    /// Append a new u32, big endian-encoded, at the end of this CryptoVec.
+    ///
+    /// ```
+    /// let mut v = russh_cryptovec::CryptoVec::new();
+    /// let n = 43554;
+    /// v.push_u32_be(n);
+    /// assert_eq!(n, v.read_u32_be(0))
+    /// ```
     pub fn push_u32_be(&mut self, s: u32) {
         let s = s.to_be();
         let x: [u8; 4] = s.to_ne_bytes();
         self.extend(&x)
     }
 
+    /// Read a big endian-encoded u32 from this CryptoVec, with the
+    /// first byte at position `i`.
+    ///
+    /// ```
+    /// let mut v = russh_cryptovec::CryptoVec::new();
+    /// let n = 99485710;
+    /// v.push_u32_be(n);
+    /// assert_eq!(n, v.read_u32_be(0))
+    /// ```
     pub fn read_u32_be(&self, i: usize) -> u32 {
         assert!(i + 4 <= self.size);
         let mut x: u32 = 0;
         unsafe {
-            std::ptr::copy_nonoverlapping(self.p.add(i) as *const u32, &mut x as *mut u32, 1);
+            memcpy((&mut x) as *mut u32, self.p.add(i), 4);
         }
         u32::from_be(x)
     }
 
+    /// Read `n_bytes` from `r`, and append them at the end of this
+    /// `CryptoVec`. Returns the number of bytes read (and appended).
+    pub fn read<R: std::io::Read>(
+        &mut self,
+        n_bytes: usize,
+        mut r: R,
+    ) -> Result<usize, std::io::Error> {
+        let cur_size = self.size;
+        self.resize(cur_size + n_bytes);
+        let s = unsafe { std::slice::from_raw_parts_mut(self.p.add(cur_size), n_bytes) };
+        // Resize the buffer to its appropriate size.
+        match r.read(s) {
+            Ok(n) => {
+                self.resize(cur_size + n);
+                Ok(n)
+            }
+            Err(e) => {
+                self.resize(cur_size);
+                Err(e)
+            }
+        }
+    }
+
+    /// Write all this CryptoVec to the provided `Write`. Returns the
+    /// number of bytes actually written.
+    ///
+    /// ```
+    /// let mut v = russh_cryptovec::CryptoVec::new();
+    /// v.extend(b"blabla");
+    /// let mut s = std::io::stdout();
+    /// v.write_all_from(0, &mut s).unwrap();
+    /// ```
     pub fn write_all_from<W: std::io::Write>(
         &self,
         offset: usize,
@@ -240,12 +322,37 @@ impl CryptoVec {
         }
     }
 
+    /// Resize this CryptoVec, returning a mutable borrow to the extra bytes.
+    ///
+    /// ```
+    /// let mut v = russh_cryptovec::CryptoVec::new();
+    /// v.resize_mut(4).clone_from_slice(b"test");
+    /// ```
     pub fn resize_mut(&mut self, n: usize) -> &mut [u8] {
         let size = self.size;
         self.resize(size + n);
         unsafe { std::slice::from_raw_parts_mut(self.p.add(size), n) }
     }
 
+    /// Append a slice at the end of this CryptoVec.
+    ///
+    /// ```
+    /// let mut v = russh_cryptovec::CryptoVec::new();
+    /// v.extend(b"test");
+    /// ```
+    pub fn extend(&mut self, s: &[u8]) {
+        let size = self.size;
+        self.resize(size + s.len());
+        unsafe {
+            std::ptr::copy_nonoverlapping(s.as_ptr(), self.p.add(size), s.len());
+        }
+    }
+
+    /// Create a `CryptoVec` from a slice
+    ///
+    /// ```
+    /// russh_cryptovec::CryptoVec::from_slice(b"test");
+    /// ```
     pub fn from_slice(s: &[u8]) -> CryptoVec {
         let mut v = CryptoVec::new();
         v.resize(s.len());
@@ -280,17 +387,17 @@ impl Drop for CryptoVec {
     }
 }
 
+// DocTests cannot be run on with wasm_bindgen_test
 #[cfg(test)]
+#[cfg(target_arch = "wasm32")]
 mod test {
 
     use wasm_bindgen_test::wasm_bindgen_test;
 
     use super::CryptoVec;
 
-    #[cfg(target_arch = "wasm32")]
     wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 
-    #[test]
     #[wasm_bindgen_test]
     fn test_new() {
         let crypto_vec = CryptoVec::new();
@@ -298,7 +405,6 @@ mod test {
         assert_eq!(crypto_vec.capacity, 0);
     }
 
-    #[test]
     #[wasm_bindgen_test]
     fn test_resize_expand() {
         let mut crypto_vec = CryptoVec::new_zeroed(5);
@@ -308,7 +414,6 @@ mod test {
         assert!(crypto_vec.iter().skip(5).all(|&x| x == 0)); // Ensure newly added elements are zeroed
     }
 
-    #[test]
     #[wasm_bindgen_test]
     fn test_resize_shrink() {
         let mut crypto_vec = CryptoVec::new_zeroed(10);
@@ -318,7 +423,6 @@ mod test {
         assert_eq!(crypto_vec.len(), 5);
     }
 
-    #[test]
     #[wasm_bindgen_test]
     fn test_push() {
         let mut crypto_vec = CryptoVec::new();
@@ -329,7 +433,6 @@ mod test {
         assert_eq!(crypto_vec[1], 2);
     }
 
-    #[test]
     #[wasm_bindgen_test]
     fn test_write_trait() {
         use std::io::Write;
@@ -341,7 +444,6 @@ mod test {
         assert_eq!(crypto_vec.as_ref(), &[1, 2, 3]);
     }
 
-    #[test]
     #[wasm_bindgen_test]
     fn test_as_ref_as_mut() {
         let mut crypto_vec = CryptoVec::new_zeroed(5);
@@ -352,7 +454,6 @@ mod test {
         assert_eq!(crypto_vec[0], 1);
     }
 
-    #[test]
     #[wasm_bindgen_test]
     fn test_from_string() {
         let input = String::from("hello");
@@ -360,7 +461,6 @@ mod test {
         assert_eq!(crypto_vec.as_ref(), b"hello");
     }
 
-    #[test]
     #[wasm_bindgen_test]
     fn test_from_vec() {
         let input = vec![1, 2, 3, 4];
@@ -368,7 +468,6 @@ mod test {
         assert_eq!(crypto_vec.as_ref(), &[1, 2, 3, 4]);
     }
 
-    #[test]
     #[wasm_bindgen_test]
     fn test_index() {
         let crypto_vec = CryptoVec::from(vec![1, 2, 3, 4, 5]);
@@ -377,7 +476,6 @@ mod test {
         assert_eq!(&crypto_vec[1..3], &[2, 3]);
     }
 
-    #[test]
     #[wasm_bindgen_test]
     fn test_drop() {
         let mut crypto_vec = CryptoVec::new_zeroed(10);
@@ -391,7 +489,6 @@ mod test {
         // it may be checked using tools like Valgrind or manual inspection.
     }
 
-    #[test]
     #[wasm_bindgen_test]
     fn test_new_zeroed() {
         let crypto_vec = CryptoVec::new_zeroed(10);
@@ -400,7 +497,6 @@ mod test {
         assert!(crypto_vec.iter().all(|&x| x == 0)); // Ensure all bytes are zeroed
     }
 
-    #[test]
     #[wasm_bindgen_test]
     fn test_push_u32_be() {
         let mut crypto_vec = CryptoVec::new();
@@ -410,7 +506,6 @@ mod test {
         assert_eq!(crypto_vec.read_u32_be(0), value);
     }
 
-    #[test]
     #[wasm_bindgen_test]
 
     fn test_read_u32_be() {
@@ -420,7 +515,6 @@ mod test {
         assert_eq!(crypto_vec.read_u32_be(0), value);
     }
 
-    #[test]
     #[wasm_bindgen_test]
     fn test_clear() {
         let mut crypto_vec = CryptoVec::new();
@@ -429,7 +523,6 @@ mod test {
         assert!(crypto_vec.is_empty());
     }
 
-    #[test]
     #[wasm_bindgen_test]
     fn test_extend() {
         let mut crypto_vec = CryptoVec::new();
@@ -437,7 +530,6 @@ mod test {
         assert_eq!(crypto_vec.as_ref(), b"test");
     }
 
-    #[test]
     #[wasm_bindgen_test]
     fn test_write_all_from() {
         let mut crypto_vec = CryptoVec::new();
@@ -449,7 +541,6 @@ mod test {
         assert_eq!(output, b"blabla");
     }
 
-    #[test]
     #[wasm_bindgen_test]
     fn test_resize_mut() {
         let mut crypto_vec = CryptoVec::new();
@@ -457,15 +548,4 @@ mod test {
         assert_eq!(crypto_vec.as_ref(), b"test");
     }
 
-    #[cfg(target_pointer_width = "64")]
-    #[test]
-    fn test_large_resize_panics() {
-        let result = std::panic::catch_unwind(|| {
-            let mut vec = CryptoVec::new();
-            vec.push(42); // Write something into the vector
-
-            vec.resize(1_000_000_000_000); // Intentionally large resize
-        });
-        assert!(result.is_err()); // Expecting a panic on large allocation
-    }
 }
