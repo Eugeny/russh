@@ -780,7 +780,8 @@ impl Session {
         }
     }
 
-    /// Send a "failure" reply to a global request.
+    /// Send a "failure" reply to a channel request. Always call this function
+    /// if the request failed (it checks whether the client expects an answer).
     pub fn channel_failure(&mut self, channel: ChannelId) {
         if let Some(ref mut enc) = self.common.encrypted {
             if let Some(channel) = enc.channels.get_mut(&channel) {
@@ -825,9 +826,8 @@ impl Session {
         self.common.byte(channel, msg::CHANNEL_EOF);
     }
 
-    /// Send data to a channel. On session channels, `extended` can be
-    /// used to encode standard error by passing `Some(1)`, and stdout
-    /// by passing `None`.
+    /// Send data to a channel. On session channels, this generally
+    /// refers to stdout.
     ///
     /// The number of bytes added to the "sending pipeline" (to be
     /// processed by the event loop) is returned.
@@ -840,8 +840,7 @@ impl Session {
     }
 
     /// Send data to a channel. On session channels, `extended` can be
-    /// used to encode standard error by passing `Some(1)`, and stdout
-    /// by passing `None`.
+    /// used to encode standard error by passing `1`.
     ///
     /// The number of bytes added to the "sending pipeline" (to be
     /// processed by the event loop) is returned.

@@ -822,7 +822,7 @@ impl Session {
 
                         debug!("handler.pty_request {:?}", channel_num);
                         #[allow(clippy::indexing_slicing)] // `modes` length checked
-                        handler
+                        let response = handler
                             .pty_request(
                                 channel_num,
                                 term,
@@ -833,7 +833,13 @@ impl Session {
                                 &modes[0..i],
                                 self,
                             )
-                            .await
+                            .await?;
+                        if response {
+                            self.channel_success(channel_num);
+                        } else {
+                            self.channel_failure(channel_num);
+                        }
+                        Ok(())
                     }
                     b"x11-req" => {
                         let single_connection = r.read_byte().map_err(crate::Error::from)? != 0;
@@ -855,7 +861,7 @@ impl Session {
                             });
                         }
                         debug!("handler.x11_request {:?}", channel_num);
-                        handler
+                        let response = handler
                             .x11_request(
                                 channel_num,
                                 single_connection,
@@ -864,7 +870,13 @@ impl Session {
                                 x11_screen_number,
                                 self,
                             )
-                            .await
+                            .await?;
+                        if response {
+                            self.channel_success(channel_num);
+                        } else {
+                            self.channel_failure(channel_num);
+                        }
+                        Ok(())
                     }
                     b"env" => {
                         let env_variable =
@@ -883,23 +895,34 @@ impl Session {
                         }
 
                         debug!("handler.env_request {:?}", channel_num);
-                        handler
+                        let response = handler
                             .env_request(channel_num, env_variable, env_value, self)
-                            .await
+                            .await?;
+                        if response {
+                            self.channel_success(channel_num);
+                        } else {
+                            self.channel_failure(channel_num);
+                        }
+                        Ok(())
                     }
                     b"shell" => {
                         if let Some(chan) = self.channels.get(&channel_num) {
                             let _ = chan.send(ChannelMsg::RequestShell { want_reply: true });
                         }
                         debug!("handler.shell_request {:?}", channel_num);
-                        handler.shell_request(channel_num, self).await
+                        let response = handler.shell_request(channel_num, self).await?;
+                        if response {
+                            self.channel_success(channel_num);
+                        } else {
+                            self.channel_failure(channel_num);
+                        }
+                        Ok(())
                     }
                     b"auth-agent-req@openssh.com" => {
                         if let Some(chan) = self.channels.get(&channel_num) {
                             let _ = chan.send(ChannelMsg::AgentForward { want_reply: true });
                         }
                         debug!("handler.agent_request {:?}", channel_num);
-
                         let response = handler.agent_request(channel_num, self).await?;
                         if response {
                             self.request_success()
@@ -917,7 +940,13 @@ impl Session {
                             });
                         }
                         debug!("handler.exec_request {:?}", channel_num);
-                        handler.exec_request(channel_num, req, self).await
+                        let response = handler.exec_request(channel_num, req, self).await?;
+                        if response {
+                            self.channel_success(channel_num);
+                        } else {
+                            self.channel_failure(channel_num);
+                        }
+                        Ok(())
                     }
                     b"subsystem" => {
                         let name =
@@ -931,7 +960,13 @@ impl Session {
                             });
                         }
                         debug!("handler.subsystem_request {:?}", channel_num);
-                        handler.subsystem_request(channel_num, name, self).await
+                        let response = handler.subsystem_request(channel_num, name, self).await?;
+                        if response {
+                            self.channel_success(channel_num);
+                        } else {
+                            self.channel_failure(channel_num);
+                        }
+                        Ok(())
                     }
                     b"window-change" => {
                         let col_width = r.read_u32().map_err(crate::Error::from)?;

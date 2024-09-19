@@ -76,19 +76,22 @@ impl russh::server::Handler for SshSession {
         channel_id: ChannelId,
         name: &str,
         session: &mut Session,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<bool, Self::Error> {
         info!("subsystem: {}", name);
 
-        if name == "sftp" {
-            let channel = self.get_channel(channel_id).await;
-            let sftp = SftpSession::default();
-            session.channel_success(channel_id);
-            russh_sftp::server::run(channel.into_stream(), sftp).await;
-        } else {
-            session.channel_failure(channel_id);
+        if name != "sftp" {
+            return Ok(false);
         }
 
-        Ok(())
+        let channel = self.get_channel(channel_id).await;
+        let sftp = SftpSession::default();
+        session.channel_success(channel_id);
+
+        tokio::spawn(async move {
+            russh_sftp::server::run(channel.into_stream(), sftp).await;
+        });
+
+        Ok(true)
     }
 }
 
