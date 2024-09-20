@@ -69,11 +69,7 @@ impl KexInit {
         write_buffer: &mut SSHBuffer,
     ) -> Result<(), crate::Error> {
         self.exchange.client_kex_init.clear();
-        negotiation::write_kex(
-            &config.preferred,
-            &mut self.exchange.client_kex_init,
-            None,
-        )?;
+        negotiation::write_kex(&config.preferred, &mut self.exchange.client_kex_init, None)?;
         self.sent = true;
         cipher.write(&self.exchange.client_kex_init, write_buffer);
         Ok(())

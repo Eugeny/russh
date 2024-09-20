@@ -1,7 +1,7 @@
-use winapi::shared::{basetsd::SIZE_T, minwindef::LPVOID};
-use winapi::um::memoryapi::{VirtualLock, VirtualUnlock};
-
 use libc::c_void;
+use winapi::shared::basetsd::SIZE_T;
+use winapi::shared::minwindef::LPVOID;
+use winapi::um::memoryapi::{VirtualLock, VirtualUnlock};
 
 /// Unlock memory on drop for Windows.
 pub fn munlock(ptr: *const u8, len: usize) {

@@ -9,15 +9,13 @@ mod unix;
 mod wasm;
 
 // Re-export functions based on the platform
-#[cfg(windows)]
-pub use windows::{memcpy, memset, mlock, munlock};
-
 #[cfg(not(windows))]
 #[cfg(not(target_arch = "wasm32"))]
 pub use unix::{memcpy, memset, mlock, munlock};
-
 #[cfg(target_arch = "wasm32")]
 pub use wasm::{memcpy, memset, mlock, munlock};
+#[cfg(windows)]
+pub use windows::{memcpy, memset, mlock, munlock};
 
 #[cfg(test)]
 mod tests {

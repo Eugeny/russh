@@ -1,5 +1,6 @@
-use crate::platform::{self, memcpy, memset, mlock, munlock};
 use std::ops::{Deref, DerefMut, Index, IndexMut, Range, RangeFrom, RangeFull, RangeTo};
+
+use crate::platform::{self, memcpy, memset, mlock, munlock};
 
 /// A buffer which zeroes its memory on `.clear()`, `.resize()`, and
 /// reallocations, to avoid copying secrets around.

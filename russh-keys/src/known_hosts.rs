@@ -3,11 +3,12 @@ use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
-use crate::{key, Error, PublicKeyBase64};
 use data_encoding::BASE64_MIME;
 use hmac::{Hmac, Mac};
 use log::debug;
 use sha1::Sha1;
+
+use crate::{key, Error, PublicKeyBase64};
 
 /// Check whether the host is known, from its standard location.
 pub fn check_known_hosts(host: &str, port: u16, pubkey: &key::PublicKey) -> Result<bool, Error> {
@@ -188,10 +189,10 @@ pub fn write_public_key_base64<W: Write>(
 
 #[cfg(test)]
 mod test {
-    use crate::parse_public_key_base64;
     use std::fs::File;
 
     use super::*;
+    use crate::parse_public_key_base64;
 
     #[test]
     fn test_check_known_hosts() {
