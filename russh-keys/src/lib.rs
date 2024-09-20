@@ -353,9 +353,6 @@ fn is_base64_char(c: char) -> bool {
 
 #[cfg(test)]
 mod test {
-    use std::fs::File;
-    use std::io::Write;
-
     #[cfg(unix)]
     use futures::Future;
     use log::debug;
