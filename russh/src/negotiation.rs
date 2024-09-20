@@ -23,6 +23,7 @@ use crate::kex::{EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT, EXTENSION_OPENSSH_STRIC
 use crate::keys::encoding::{Encoding, Reader};
 use crate::keys::key;
 use crate::keys::key::{KeyPair, PublicKey};
+#[cfg(not(target_arch = "wasm32"))]
 use crate::server::Config;
 use crate::{cipher, compression, kex, mac, msg, AlgorithmKind, CryptoVec, Error};
 
@@ -378,6 +379,7 @@ impl Select for Client {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn write_kex(
     prefs: &Preferred,
     buf: &mut CryptoVec,
@@ -416,6 +418,41 @@ pub fn write_kex(
     } else {
         buf.extend_list(prefs.key.iter());
     }
+
+    buf.extend_list(prefs.cipher.iter()); // cipher client to server
+    buf.extend_list(prefs.cipher.iter()); // cipher server to client
+
+    buf.extend_list(prefs.mac.iter()); // mac client to server
+    buf.extend_list(prefs.mac.iter()); // mac server to client
+    buf.extend_list(prefs.compression.iter()); // compress client to server
+    buf.extend_list(prefs.compression.iter()); // compress server to client
+
+    buf.write_empty_list(); // languages client to server
+    buf.write_empty_list(); // languagesserver to client
+
+    buf.push(0); // doesn't follow
+    buf.extend(&[0, 0, 0, 0]); // reserved
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn write_kex(prefs: &Preferred, buf: &mut CryptoVec) -> Result<(), Error> {
+    // buf.clear();
+    buf.push(msg::KEXINIT);
+
+    let mut cookie = [0; 16];
+    rand::thread_rng().fill_bytes(&mut cookie);
+
+    buf.extend(&cookie); // cookie
+    buf.extend_list(prefs.kex.iter().filter(|k| {
+        !({
+            [
+                crate::kex::EXTENSION_SUPPORT_AS_SERVER,
+                crate::kex::EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER,
+            ]
+        })
+        .contains(*k)
+    })); // kex algo
 
     buf.extend_list(prefs.cipher.iter()); // cipher client to server
     buf.extend_list(prefs.cipher.iter()); // cipher server to client

@@ -18,7 +18,6 @@ use std::sync::Arc;
 use bitflags::bitflags;
 use ssh_key::Certificate;
 use thiserror::Error;
-use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::keys::{encoding, key};
 use crate::CryptoVec;
@@ -59,7 +58,8 @@ pub enum AgentAuthError {
     Key(#[from] russh_keys::Error),
 }
 
-impl<R: AsyncRead + AsyncWrite + Unpin + Send + 'static> Signer
+#[cfg(not(target_arch = "wasm32"))]
+impl<R: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static> Signer
     for russh_keys::agent::client::AgentClient<R>
 {
     type Error = AgentAuthError;
@@ -128,14 +128,17 @@ impl MethodSet {
 #[derive(Debug)]
 pub struct AuthRequest {
     pub methods: MethodSet,
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub partial_success: bool,
     pub current: Option<CurrentRequest>,
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub rejection_count: usize,
 }
 
 #[doc(hidden)]
 #[derive(Debug)]
 pub enum CurrentRequest {
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     PublicKey {
         #[allow(dead_code)]
         key: CryptoVec,
@@ -144,6 +147,7 @@ pub enum CurrentRequest {
         sent_pk_ok: bool,
     },
     KeyboardInteractive {
+        #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
         submethods: String,
     },
 }

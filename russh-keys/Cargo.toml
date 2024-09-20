@@ -22,7 +22,6 @@ byteorder = { workspace = true }
 data-encoding = "2.3"
 digest = { workspace = true }
 der = "0.7"
-home = "0.5"
 ecdsa = "0.16"
 ed25519-dalek = { version = "2.0", features = ["rand_core", "pkcs8"] }
 elliptic-curve = "0.13"
@@ -52,6 +51,16 @@ spki = "0.7"
 ssh-encoding = { workspace = true }
 ssh-key = { workspace = true }
 thiserror = { workspace = true }
+typenum = "1.17"
+yasna = { version = "0.5.0", features = ["bit-vec", "num-bigint"], optional = true }
+zeroize = "1.7"
+getrandom = { version = "0.2.15", features = ["js"] }
+
+[features]
+vendored-openssl = ["openssl", "openssl/vendored"]
+legacy-ed25519-pkcs8-parser = ["yasna"]
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { workspace = true, features = [
   "io-util",
   "rt-multi-thread",
@@ -59,13 +68,8 @@ tokio = { workspace = true, features = [
   "net",
 ] }
 tokio-stream = { workspace = true }
-typenum = "1.17"
-yasna = { version = "0.5.0", features = ["bit-vec", "num-bigint"], optional = true }
-zeroize = "1.7"
+home = "0.5"
 
-[features]
-vendored-openssl = ["openssl", "openssl/vendored"]
-legacy-ed25519-pkcs8-parser = ["yasna"]
 
 [target.'cfg(windows)'.dependencies]
 pageant = { version = "0.0.1-beta.3", path = "../pageant" }
@@ -77,3 +81,4 @@ tokio = { workspace = true, features = ["test-util", "macros", "process"] }
 
 [package.metadata.docs.rs]
 features = ["openssl"]
+

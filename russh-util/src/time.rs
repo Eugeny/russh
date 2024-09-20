@@ -4,6 +4,7 @@ pub use std::time::Instant;
 #[cfg(target_arch = "wasm32")]
 pub use wasm::Instant;
 
+#[cfg(target_arch = "wasm32")]
 mod wasm {
     #[derive(Debug, Clone, Copy)]
     pub struct Instant {

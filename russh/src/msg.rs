@@ -13,6 +13,10 @@
 // limitations under the License.
 //
 // https://tools.ietf.org/html/rfc4253#section-12
+
+#[cfg(not(target_arch = "wasm32"))]
+pub use server::*;
+
 pub const DISCONNECT: u8 = 1;
 #[allow(dead_code)]
 pub const IGNORE: u8 = 2;
@@ -21,7 +25,6 @@ pub const UNIMPLEMENTED: u8 = 3;
 #[allow(dead_code)]
 pub const DEBUG: u8 = 4;
 
-pub const SERVICE_REQUEST: u8 = 5;
 pub const SERVICE_ACCEPT: u8 = 6;
 pub const EXT_INFO: u8 = 7;
 pub const KEXINIT: u8 = 20;
@@ -36,10 +39,7 @@ pub const USERAUTH_REQUEST: u8 = 50;
 pub const USERAUTH_FAILURE: u8 = 51;
 pub const USERAUTH_SUCCESS: u8 = 52;
 pub const USERAUTH_BANNER: u8 = 53;
-pub const USERAUTH_PK_OK: u8 = 60;
 
-// https://tools.ietf.org/html/rfc4256#section-5
-pub const USERAUTH_INFO_REQUEST: u8 = 60;
 pub const USERAUTH_INFO_RESPONSE: u8 = 61;
 
 // some numbers have same meaning
@@ -62,9 +62,17 @@ pub const CHANNEL_REQUEST: u8 = 98;
 pub const CHANNEL_SUCCESS: u8 = 99;
 pub const CHANNEL_FAILURE: u8 = 100;
 
-pub const SSH_OPEN_ADMINISTRATIVELY_PROHIBITED: u8 = 1;
 #[allow(dead_code)]
 pub const SSH_OPEN_CONNECT_FAILED: u8 = 2;
 pub const SSH_OPEN_UNKNOWN_CHANNEL_TYPE: u8 = 3;
 #[allow(dead_code)]
 pub const SSH_OPEN_RESOURCE_SHORTAGE: u8 = 4;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod server {
+    // https://tools.ietf.org/html/rfc4256#section-5
+    pub const USERAUTH_INFO_REQUEST: u8 = 60;
+    pub const USERAUTH_PK_OK: u8 = 60;
+    pub const SERVICE_REQUEST: u8 = 5;
+    pub const SSH_OPEN_ADMINISTRATIVELY_PROHIBITED: u8 = 1;
+}
