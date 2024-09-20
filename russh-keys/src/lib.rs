@@ -91,7 +91,6 @@ mod backend;
 mod backend;
 
 /// OpenSSH agent protocol implementation
-#[cfg(not(target_arch = "wasm32"))]
 pub mod agent;
 
 #[cfg(not(target_arch = "wasm32"))]

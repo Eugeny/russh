@@ -18,6 +18,7 @@ use std::sync::Arc;
 use bitflags::bitflags;
 use ssh_key::Certificate;
 use thiserror::Error;
+use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::keys::{encoding, key};
 use crate::CryptoVec;
@@ -58,8 +59,7 @@ pub enum AgentAuthError {
     Key(#[from] russh_keys::Error),
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-impl<R: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static> Signer
+impl<R: AsyncRead + AsyncWrite + Unpin + Send + 'static> Signer
     for russh_keys::agent::client::AgentClient<R>
 {
     type Error = AgentAuthError;

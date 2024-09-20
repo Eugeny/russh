@@ -43,6 +43,7 @@ rand = { workspace = true }
 rand_core = { version = "0.6.4", features = ["std"] }
 rsa = "0.9"
 russh-cryptovec = { version = "0.7.0", path = "../cryptovec" }
+russh-util = { version = "0.1.0", path = "../russh-util" }
 sec1 = { version = "0.7", features = ["pkcs8"] }
 serde = { version = "1.0", features = ["derive"] }
 sha1 = { workspace = true }
@@ -55,6 +56,10 @@ typenum = "1.17"
 yasna = { version = "0.5.0", features = ["bit-vec", "num-bigint"], optional = true }
 zeroize = "1.7"
 getrandom = { version = "0.2.15", features = ["js"] }
+tokio = { workspace = true, features = [
+  "io-util",
+  "time",
+] }
 
 [features]
 vendored-openssl = ["openssl", "openssl/vendored"]
@@ -81,4 +86,3 @@ tokio = { workspace = true, features = ["test-util", "macros", "process"] }
 
 [package.metadata.docs.rs]
 features = ["openssl"]
-
