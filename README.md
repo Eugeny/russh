@@ -75,6 +75,7 @@ This is a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Éti
 ### Panics
 
 * When the Rust allocator fails to allocate memory during a CryptoVec being resized.
+* When `mlock`/`munlock` fails to protect sensitive data in memory.
 
 ### Unsafe code
 
