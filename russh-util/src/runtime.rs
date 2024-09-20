@@ -1,5 +1,3 @@
-use std::io::ErrorKind;
-use std::ops::Deref;
 use std::{
     future::Future,
     pin::Pin,
@@ -7,30 +5,15 @@ use std::{
 };
 
 #[derive(Debug)]
-pub struct JoinError(Box<dyn std::error::Error + Send + Sync>);
-
-impl Deref for JoinError {
-    type Target = dyn std::error::Error + Send + Sync;
-
-    fn deref(&self) -> &Self::Target {
-        &*self.0
-    }
-}
+pub struct JoinError;
 
 impl std::fmt::Display for JoinError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
+        write!(f, "JoinError")
     }
 }
 
-impl Default for JoinError {
-    fn default() -> Self {
-        Self(Box::new(std::io::Error::new(
-            ErrorKind::Other,
-            "aborted".to_string(),
-        )))
-    }
-}
+impl std::error::Error for JoinError {}
 
 pub struct JoinHandle<T>
 where
@@ -75,7 +58,7 @@ where
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match Pin::new(&mut self.handle).poll(cx) {
             Poll::Ready(Ok(val)) => Poll::Ready(Ok(val)),
-            Poll::Ready(Err(_)) => Poll::Ready(Err(JoinError::default())),
+            Poll::Ready(Err(_)) => Poll::Ready(Err(JoinError)),
             Poll::Pending => Poll::Pending,
         }
     }

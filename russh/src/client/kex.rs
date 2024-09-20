@@ -72,7 +72,6 @@ impl KexInit {
         negotiation::write_kex(
             &config.preferred,
             &mut self.exchange.client_kex_init,
-            #[cfg(not(target_arch = "wasm32"))]
             None,
         )?;
         self.sent = true;

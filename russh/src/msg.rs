@@ -69,7 +69,7 @@ pub const SSH_OPEN_UNKNOWN_CHANNEL_TYPE: u8 = 3;
 pub const SSH_OPEN_RESOURCE_SHORTAGE: u8 = 4;
 
 #[cfg(not(target_arch = "wasm32"))]
-pub mod server {
+mod server {
     // https://tools.ietf.org/html/rfc4256#section-5
     pub const USERAUTH_INFO_REQUEST: u8 = 60;
     pub const USERAUTH_PK_OK: u8 = 60;

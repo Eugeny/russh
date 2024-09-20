@@ -296,10 +296,6 @@ pub enum Error {
     #[error(transparent)]
     Join(#[from] russh_util::runtime::JoinError),
 
-    #[cfg(not(target_arch = "wasm32"))]
-    #[error(transparent)]
-    TokioJoin(#[from] tokio::task::JoinError),
-
     #[error(transparent)]
     #[cfg(feature = "openssl")]
     Openssl(#[from] openssl::error::ErrorStack),
