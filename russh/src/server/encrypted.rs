@@ -519,7 +519,9 @@ impl Encrypted {
                     Ok(())
                 }
             }
-            Err(russh_keys::Error::CouldNotReadKey) | Err(russh_keys::Error::KeyIsCorrupt) => {
+            Err(russh_keys::Error::CouldNotReadKey)
+            | Err(russh_keys::Error::KeyIsCorrupt)
+            | Err(russh_keys::Error::UnsupportedKeyType { .. }) => {
                 reject_auth_request(until, &mut self.write, auth_request).await;
                 Ok(())
             }
