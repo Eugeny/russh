@@ -47,7 +47,6 @@ use futures::Future;
 use log::{debug, error, info, trace};
 use ssh_key::Certificate;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadHalf, WriteHalf};
-use tokio::net::{TcpStream, ToSocketAddrs};
 use tokio::pin;
 use tokio::sync::mpsc::{
     channel, unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender,
@@ -222,7 +221,7 @@ pub enum DisconnectReason<E: From<crate::Error> + Send> {
 pub struct Handle<H: Handler> {
     sender: Sender<Msg>,
     receiver: UnboundedReceiver<Reply>,
-    join: tokio::task::JoinHandle<Result<(), H::Error>>,
+    join: russh_util::runtime::JoinHandle<Result<(), H::Error>>,
 }
 
 impl<H: Handler> Drop for Handle<H> {
@@ -709,12 +708,13 @@ impl<H: Handler> Future for Handle<H> {
 /// commands, etc. The future will resolve to an error if the connection fails.
 /// This function creates a connection to the `addr` specified using a
 /// [`tokio::net::TcpStream`] and then calls [`connect_stream`] under the hood.
-pub async fn connect<H: Handler + Send + 'static, A: ToSocketAddrs>(
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn connect<H: Handler + Send + 'static, A: tokio::net::ToSocketAddrs>(
     config: Arc<Config>,
     addrs: A,
     handler: H,
 ) -> Result<Handle<H>, H::Error> {
-    let socket = TcpStream::connect(addrs)
+    let socket = tokio::net::TcpStream::connect(addrs)
         .await
         .map_err(crate::Error::from)?;
     connect_stream(config, socket, handler).await
@@ -779,7 +779,7 @@ where
     );
     session.read_ssh_id(sshid)?;
     let (kex_done_signal, kex_done_signal_rx) = oneshot::channel();
-    let join = tokio::spawn(session.run(stream, handler, Some(kex_done_signal)));
+    let join = russh_util::runtime::spawn(session.run(stream, handler, Some(kex_done_signal)));
 
     if kex_done_signal_rx.await.is_err() {
         // kex_done_signal Sender is dropped when the session

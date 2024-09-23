@@ -23,8 +23,15 @@ use crate::kex::{EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT, EXTENSION_OPENSSH_STRIC
 use crate::keys::encoding::{Encoding, Reader};
 use crate::keys::key;
 use crate::keys::key::{KeyPair, PublicKey};
+#[cfg(not(target_arch = "wasm32"))]
 use crate::server::Config;
 use crate::{cipher, compression, kex, mac, msg, AlgorithmKind, CryptoVec, Error};
+
+#[cfg(target_arch = "wasm32")]
+/// WASM-only stub
+pub struct Config {
+    keys: Vec<KeyPair>,
+}
 
 #[derive(Debug, Clone)]
 pub struct Names {
