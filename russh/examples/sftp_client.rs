@@ -1,10 +1,9 @@
-use std::sync::Arc;
-
 use async_trait::async_trait;
 use log::{error, info, LevelFilter};
-use russh::keys::*;
 use russh::*;
-use russh_sftp::client::SftpSession;
+use russh_keys::*;
+use russh_sftp::{client::SftpSession, protocol::OpenFlags};
+use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
 struct Client;
@@ -43,7 +42,11 @@ async fn main() {
     let mut session = russh::client::connect(Arc::new(config), ("localhost", 22), sh)
         .await
         .unwrap();
-    if session.authenticate_password("root", "pass").await.unwrap() {
+    if session
+        .authenticate_password("root", "password")
+        .await
+        .unwrap()
+    {
         let channel = session.channel_open_session().await.unwrap();
         channel.request_subsystem(true, "sftp").await.unwrap();
         let sftp = SftpSession::new(channel.into_stream()).await.unwrap();
@@ -72,7 +75,13 @@ async fn main() {
 
         // interaction with i/o
         let filename = "test_new.txt";
-        let mut file = sftp.create(filename).await.unwrap();
+        let mut file = sftp
+            .open_with_flags(
+                filename,
+                OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE | OpenFlags::READ,
+            )
+            .await
+            .unwrap();
         info!("metadata by handle: {:?}", file.metadata().await.unwrap());
 
         file.write_all(b"magic text").await.unwrap();
