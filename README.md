@@ -86,6 +86,23 @@ This is a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Éti
 * [russh-sftp](https://crates.io/crates/russh-sftp) - server-side and client-side SFTP subsystem support for `russh` - see `russh/examples/sftp_server.rs` or `russh/examples/sftp_client.rs`.
 * [async-ssh2-tokio](https://crates.io/crates/async-ssh2-tokio) - simple high-level API for running commands over SSH.
 
+## Adopters
+
+* [HexPatch](https://github.com/Etto48/HexPatch) - A binary patcher and editor written in Rust with terminal user interface (TUI).
+  * Uses `russh::client` and `russh_sftp::client` to allow remote editing of files.
+* [kartoffels](https://github.com/Patryk27/kartoffels) - A game where you're given a potato and your job is to implement a firmware for it
+  * Uses `russh:server` to deliver the game, using `ratatui` as the rendering engine.
+* [kty](https://github.com/grampelberg/kty) - The terminal for Kubernetes.
+  * Uses `russh::server` to deliver the `ratatui` based TUI and `russh_sftp::server` to provide `scp` based file management.
+* [lapdev](https://github.com/lapce/lapdev) - Self-Hosted Remote Dev Environment
+  * Uses `russh::server` to construct a proxy into your development environment.
+* [medusa](https://github.com/evilsocket/medusa) - A fast and secure multi protocol honeypot.
+  * Uses `russh::server` to be the basis of the honyepot.
+* [rebels-in-the-sky](https://github.com/ricott1/rebels-in-the-sky) - P2P terminal game about spacepirates playing basketball across the galaxy
+  * Uses `russh::server` to deliver the game, using `ratatui` as the rendering engine.
+* [warpgate](https://github.com/warp-tech/warpgate) - Smart SSH, HTTPS and MySQL bastion that requires no additional client-side software
+  * Uses `russh::server` in addition to `russh::client` as part of the smart SSH functionality.
+
 ## Contributors ✨
 
 Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/docs/en/emoji-key)):
