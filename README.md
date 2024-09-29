@@ -1,7 +1,7 @@
 # Russh
 
 [![Rust](https://github.com/warp-tech/russh/actions/workflows/rust.yml/badge.svg)](https://github.com/warp-tech/russh/actions/workflows/rust.yml)  <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
-[![All Contributors](https://img.shields.io/badge/all_contributors-40-orange.svg?style=flat-square)](#contributors-)
+[![All Contributors](https://img.shields.io/badge/all_contributors-41-orange.svg?style=flat-square)](#contributors-)
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
 
 Low-level Tokio SSH2 client and server implementation.
@@ -75,6 +75,7 @@ This is a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Éti
 ### Panics
 
 * When the Rust allocator fails to allocate memory during a CryptoVec being resized.
+* When `mlock`/`munlock` fails to protect sensitive data in memory.
 
 ### Unsafe code
 
@@ -84,6 +85,23 @@ This is a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Éti
 
 * [russh-sftp](https://crates.io/crates/russh-sftp) - server-side and client-side SFTP subsystem support for `russh` - see `russh/examples/sftp_server.rs` or `russh/examples/sftp_client.rs`.
 * [async-ssh2-tokio](https://crates.io/crates/async-ssh2-tokio) - simple high-level API for running commands over SSH.
+
+## Adopters
+
+* [HexPatch](https://github.com/Etto48/HexPatch) - A binary patcher and editor written in Rust with terminal user interface (TUI).
+  * Uses `russh::client` and `russh_sftp::client` to allow remote editing of files.
+* [kartoffels](https://github.com/Patryk27/kartoffels) - A game where you're given a potato and your job is to implement a firmware for it
+  * Uses `russh:server` to deliver the game, using `ratatui` as the rendering engine.
+* [kty](https://github.com/grampelberg/kty) - The terminal for Kubernetes.
+  * Uses `russh::server` to deliver the `ratatui` based TUI and `russh_sftp::server` to provide `scp` based file management.
+* [lapdev](https://github.com/lapce/lapdev) - Self-Hosted Remote Dev Environment
+  * Uses `russh::server` to construct a proxy into your development environment.
+* [medusa](https://github.com/evilsocket/medusa) - A fast and secure multi protocol honeypot.
+  * Uses `russh::server` to be the basis of the honyepot.
+* [rebels-in-the-sky](https://github.com/ricott1/rebels-in-the-sky) - P2P terminal game about spacepirates playing basketball across the galaxy
+  * Uses `russh::server` to deliver the game, using `ratatui` as the rendering engine.
+* [warpgate](https://github.com/warp-tech/warpgate) - Smart SSH, HTTPS and MySQL bastion that requires no additional client-side software
+  * Uses `russh::server` in addition to `russh::client` as part of the smart SSH functionality.
 
 ## Contributors ✨
 
@@ -145,6 +163,7 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
       <td align="center" valign="top" width="14.28%"><a href="http://saunter.org"><img src="https://avatars.githubusercontent.com/u/47992?v=4?s=100" width="100px;" alt="Thomas Rampelberg"/><br /><sub><b>Thomas Rampelberg</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=grampelberg" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://belak.io"><img src="https://avatars.githubusercontent.com/u/107097?v=4?s=100" width="100px;" alt="Kaleb Elwert"/><br /><sub><b>Kaleb Elwert</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=belak" title="Documentation">📖</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://garyguo.net"><img src="https://avatars.githubusercontent.com/u/4065244?v=4?s=100" width="100px;" alt="Gary Guo"/><br /><sub><b>Gary Guo</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=nbdd0121" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/irvingoujAtDevolution"><img src="https://avatars.githubusercontent.com/u/139169536?v=4?s=100" width="100px;" alt="irvingouj @ Devolutions"/><br /><sub><b>irvingouj @ Devolutions</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=irvingoujAtDevolution" title="Code">💻</a></td>
     </tr>
   </tbody>
 </table>

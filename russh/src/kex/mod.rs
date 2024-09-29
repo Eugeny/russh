@@ -51,6 +51,7 @@ impl Debug for dyn KexAlgorithm + Send {
 pub(crate) trait KexAlgorithm {
     fn skip_exchange(&self) -> bool;
 
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     fn server_dh(&mut self, exchange: &mut Exchange, payload: &[u8]) -> Result<(), crate::Error>;
 
     fn client_dh(

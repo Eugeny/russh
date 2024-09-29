@@ -38,10 +38,10 @@ use std::task::{Context, Poll};
 use async_trait::async_trait;
 use futures::future::Future;
 use log::{debug, error};
+use russh_util::runtime::JoinHandle;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, ToSocketAddrs};
 use tokio::pin;
-use tokio::task::JoinHandle;
 
 use crate::cipher::{clear, CipherPair, OpeningKey};
 use crate::keys::key;
@@ -577,7 +577,7 @@ pub trait Server {
                             let config = config.clone();
                             let  handler = self.new_client(socket.peer_addr().ok());
                             let error_tx = error_tx.clone();
-                            tokio::spawn(async move {
+                            russh_util::runtime::spawn(async move {
                                 let session = match run_stream(config, socket,  handler).await {
                                     Ok(s) => s,
                                     Err(e) => {
@@ -698,7 +698,7 @@ where
         channels: HashMap::new(),
         open_global_requests: VecDeque::new(),
     };
-    let join = tokio::spawn(session.run(stream, handler));
+    let join = russh_util::runtime::spawn(session.run(stream, handler));
 
     Ok(RunningSession { handle, join })
 }

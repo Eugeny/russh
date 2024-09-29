@@ -45,7 +45,7 @@ pub(crate) struct Encrypted {
     pub last_channel_id: Wrapping<u32>,
     pub write: CryptoVec,
     pub write_cursor: usize,
-    pub last_rekey: std::time::Instant,
+    pub last_rekey: russh_util::time::Instant,
     pub server_compression: crate::compression::Compression,
     pub client_compression: crate::compression::Compression,
     pub compress: crate::compression::Compress,
@@ -59,6 +59,7 @@ pub(crate) struct CommonSession<Config> {
     pub config: Config,
     pub encrypted: Option<Encrypted>,
     pub auth_method: Option<auth::Method>,
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub(crate) auth_attempts: usize,
     pub write_buffer: SSHBuffer,
     pub kex: Option<Kex>,
@@ -125,7 +126,7 @@ impl<C> CommonSession<C> {
             last_channel_id: Wrapping(1),
             write: CryptoVec::new(),
             write_cursor: 0,
-            last_rekey: std::time::Instant::now(),
+            last_rekey: russh_util::time::Instant::now(),
             server_compression: newkeys.names.server_compression,
             client_compression: newkeys.names.client_compression,
             compress: crate::compression::Compress::None,
@@ -157,6 +158,7 @@ impl<C> CommonSession<C> {
     }
 
     /// Send a single byte message onto the channel.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn byte(&mut self, channel: ChannelId, msg: u8) {
         if let Some(ref mut enc) = self.encrypted {
             enc.byte(channel, msg)
@@ -425,7 +427,7 @@ impl Encrypted {
             return Ok(false);
         }
 
-        let now = std::time::Instant::now();
+        let now = russh_util::time::Instant::now();
         let dur = now.duration_since(self.last_rekey);
         Ok(write_buffer.bytes >= limits.rekey_write_limit || dur >= limits.rekey_time_limit)
     }
@@ -502,6 +504,7 @@ pub(crate) enum Kex {
     Init(KexInit),
 
     /// Algorithms have been determined, the DH algorithm should run.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     Dh(KexDh),
 
     /// The kex has run.
@@ -551,6 +554,7 @@ impl KexInit {
 }
 
 #[derive(Debug)]
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub(crate) struct KexDh {
     pub exchange: Exchange,
     pub names: negotiation::Names,

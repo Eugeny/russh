@@ -121,7 +121,7 @@ impl Session {
                         return Err(crate::Error::Kex.into());
                     }
                     self.common.write_buffer.bytes = 0;
-                    enc.last_rekey = std::time::Instant::now();
+                    enc.last_rekey = russh_util::time::Instant::now();
 
                     // Ok, NEWKEYS received, now encrypted.
                     enc.flush_all_pending();

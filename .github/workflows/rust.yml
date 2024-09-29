@@ -27,6 +27,18 @@ jobs:
       with:
         package: russh
 
+  Build-WASM:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Install target
+      run: rustup target add wasm32-wasip1
+
+    - name: Build (all features enabled)
+      run: cargo build --verbose --target wasm32-wasip1 -p russh
+
   Formatting:
     runs-on: ubuntu-latest
 

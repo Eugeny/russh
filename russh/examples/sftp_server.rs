@@ -1,14 +1,12 @@
-use std::collections::HashMap;
-use std::net::SocketAddr;
-use std::sync::Arc;
-use std::time::Duration;
-
 use async_trait::async_trait;
 use log::{error, info, LevelFilter};
-use russh::keys::key::KeyPair;
-use russh::server::{Auth, Msg, Server as _, Session};
-use russh::{Channel, ChannelId};
+use russh::{
+    server::{Auth, Msg, Server as _, Session},
+    Channel, ChannelId,
+};
+use russh_keys::key::KeyPair;
 use russh_sftp::protocol::{File, FileAttributes, Handle, Name, Status, StatusCode, Version};
+use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::Duration};
 use tokio::sync::Mutex;
 
 #[derive(Clone)]
@@ -69,6 +67,17 @@ impl russh::server::Handler for SshSession {
             clients.insert(channel.id(), channel);
         }
         Ok(true)
+    }
+
+    async fn channel_eof(
+        &mut self,
+        channel: ChannelId,
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        // After a client has sent an EOF, indicating that they don't want
+        // to send more data in this session, the channel can be closed.
+        session.close(channel);
+        Ok(())
     }
 
     async fn subsystem_request(
@@ -143,31 +152,20 @@ impl russh_sftp::server::Handler for SftpSession {
             return Ok(Name {
                 id,
                 files: vec![
-                    File {
-                        filename: "foo".to_string(),
-                        longname: "".to_string(),
-                        attrs: FileAttributes::default(),
-                    },
-                    File {
-                        filename: "bar".to_string(),
-                        longname: "".to_string(),
-                        attrs: FileAttributes::default(),
-                    },
+                    File::new("foo", FileAttributes::default()),
+                    File::new("bar", FileAttributes::default()),
                 ],
             });
         }
-        Ok(Name { id, files: vec![] })
+        // If all files have been sent to the client, respond with an EOF
+        Err(StatusCode::Eof)
     }
 
     async fn realpath(&mut self, id: u32, path: String) -> Result<Name, Self::Error> {
         info!("realpath: {}", path);
         Ok(Name {
             id,
-            files: vec![File {
-                filename: "/".to_string(),
-                longname: "".to_string(),
-                attrs: FileAttributes::default(),
-            }],
+            files: vec![File::dummy("/")],
         })
     }
 }

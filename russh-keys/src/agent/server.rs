@@ -66,7 +66,7 @@ where
     while let Some(Ok(stream)) = listener.next().await {
         let mut buf = CryptoVec::new();
         buf.resize(4);
-        tokio::spawn(
+        russh_util::runtime::spawn(
             (Connection {
                 lock: lock.clone(),
                 keys: keys.clone(),
@@ -276,7 +276,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
                     c.push(Constraint::KeyLifetime { seconds });
                     let blob = blob.clone();
                     let keys = self.keys.clone();
-                    tokio::spawn(async move {
+                    russh_util::runtime::spawn(async move {
                         sleep(Duration::from_secs(seconds as u64)).await;
                         if let Ok(mut keys) = keys.0.write() {
                             let delete = if let Some(&(_, time, _)) = keys.get(&blob) {

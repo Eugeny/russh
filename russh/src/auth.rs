@@ -128,14 +128,17 @@ impl MethodSet {
 #[derive(Debug)]
 pub struct AuthRequest {
     pub methods: MethodSet,
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub partial_success: bool,
     pub current: Option<CurrentRequest>,
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub rejection_count: usize,
 }
 
 #[doc(hidden)]
 #[derive(Debug)]
 pub enum CurrentRequest {
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     PublicKey {
         #[allow(dead_code)]
         key: CryptoVec,
@@ -144,6 +147,7 @@ pub enum CurrentRequest {
         sent_pk_ok: bool,
     },
     KeyboardInteractive {
+        #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
         submethods: String,
     },
 }
