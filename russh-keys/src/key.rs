@@ -54,6 +54,7 @@ pub const SSH_RSA: Name = Name("ssh-rsa");
 
 pub static ALL_KEY_TYPES: &[&Name] = &[
     &NONE,
+    &ED25519,
     &SSH_RSA,
     &RSA_SHA2_256,
     &RSA_SHA2_512,
