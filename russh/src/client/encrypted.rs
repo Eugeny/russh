@@ -26,8 +26,8 @@ use crate::negotiation::{Named, Select};
 use crate::parsing::{ChannelOpenConfirmation, ChannelType, OpenChannelMessage};
 use crate::session::{Encrypted, EncryptedState, GlobalRequestResponse, Kex, KexInit};
 use crate::{
-    auth, msg, negotiation, Channel, ChannelId, ChannelMsg,
-    ChannelOpenFailure, ChannelParams, CryptoVec, Sig,
+    auth, msg, negotiation, Channel, ChannelId, ChannelMsg, ChannelOpenFailure, ChannelParams,
+    CryptoVec, Sig,
 };
 
 thread_local! {
