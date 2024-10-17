@@ -373,6 +373,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "Tehforsch",
+      "name": "Toni Peter",
+      "avatar_url": "https://avatars.githubusercontent.com/u/4614215?v=4",
+      "profile": "http://tonipeter.de",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,
