@@ -144,7 +144,7 @@ fn test_read_write_pkcs8() {
     }
 }
 
-/// Encode a password-protected PKCS#8-encoded private key.
+/// Encode into a password-protected PKCS#8-encoded private key.
 pub fn encode_pkcs8_encrypted(
     pass: &[u8],
     rounds: u32,
@@ -168,7 +168,7 @@ pub fn encode_pkcs8_encrypted(
     Ok(doc.as_bytes().to_vec())
 }
 
-/// Encode a Decode a PKCS#8-encoded private key.
+/// Encode into a PKCS#8-encoded private key.
 pub fn encode_pkcs8(key: &key::KeyPair) -> Result<Vec<u8>, Error> {
     let v = match *key {
         key::KeyPair::Ed25519(ref pair) => pair.to_pkcs8_der()?,
