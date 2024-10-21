@@ -155,13 +155,11 @@ impl<'a> From<&RsaPrivate> for protocol::RsaPublicKey<'a> {
     }
 }
 
-impl TryFrom<&RsaPrivate> for RsaPublic {
-    type Error = Error;
-
-    fn try_from(key: &RsaPrivate) -> Result<Self, Self::Error> {
-        Ok(Self {
+impl From<&RsaPrivate> for RsaPublic {
+    fn from(key: &RsaPrivate) -> Self {
+        Self {
             key: key.key.to_public_key(),
-        })
+        }
     }
 }
 

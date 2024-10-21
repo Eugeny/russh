@@ -45,7 +45,7 @@
 //!        russh_keys::agent::server::serve(tokio_stream::wrappers::UnixListenerStream::new(listener), X {}).await
 //!    });
 //!    let key = decode_secret_key(PKCS8_ENCRYPTED, Some("blabla")).unwrap();
-//!    let public = key.clone_public_key().unwrap();
+//!    let public = key.clone_public_key();
 //!    core.block_on(async move {
 //!        let stream = tokio::net::UnixStream::connect(&agent_path).await?;
 //!        let mut client = agent::client::AgentClient::connect(stream);
@@ -758,7 +758,7 @@ ocyR
         }
         // Verify using public key derived from the secret key.
         {
-            let public = key.clone_public_key().unwrap();
+            let public = key.clone_public_key();
             assert!(public.verify_detached(buf, sig.as_ref()));
         }
         // Sanity check that it uses a different random number.
@@ -787,7 +787,7 @@ ocyR
             let mut sig = Vec::new();
             sig.extend_ssh_string(&[0]);
             sig.extend_ssh_string(&[0]);
-            let public = key.clone_public_key().unwrap();
+            let public = key.clone_public_key();
             assert!(!public.verify_detached(buf, &sig));
         }
     }
@@ -911,7 +911,7 @@ KJaj7gc0n6gmKY6r0/Ddufy1JZ6eihBCSJ64RARBXeg2rZpyT+xxhMEZLK5meOeR
 -----END RSA PRIVATE KEY-----
 ";
         let key = decode_secret_key(key, Some("passphrase")).unwrap();
-        let public = key.clone_public_key()?;
+        let public = key.clone_public_key();
         let buf = b"blabla";
         let sig = key.sign_detached(buf).unwrap();
         assert!(public.verify_detached(buf, sig.as_ref()));
@@ -1052,7 +1052,7 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
 
-        let public = key.clone_public_key()?;
+        let public = key.clone_public_key();
         let stream = tokio::net::UnixStream::connect(&agent_path).await?;
         let mut client = agent::client::AgentClient::connect(stream);
         client.add_identity(&key, &[]).await?;
@@ -1132,7 +1132,7 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
         });
         let key = decode_secret_key(PKCS8_ENCRYPTED, Some("blabla")).unwrap();
         core.block_on(async move {
-            let public = key.clone_public_key()?;
+            let public = key.clone_public_key();
             let stream = tokio::net::UnixStream::connect(&agent_path).await?;
             let mut client = agent::client::AgentClient::connect(stream);
             client

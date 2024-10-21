@@ -13,7 +13,7 @@
 // limitations under the License.
 //
 use std::borrow::Cow;
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryFrom;
 
 pub use backend::{RsaPrivate, RsaPublic};
 use ed25519_dalek::{Signer, Verifier};
@@ -291,17 +291,17 @@ impl KeyPair {
     }
 
     /// Copy the public key of this algorithm.
-    pub fn clone_public_key(&self) -> Result<PublicKey, Error> {
-        Ok(match self {
+    pub fn clone_public_key(&self) -> PublicKey {
+        match self {
             KeyPair::Ed25519(ref key) => PublicKey::Ed25519(key.verifying_key()),
             KeyPair::RSA { ref key, ref hash } => PublicKey::RSA {
-                key: key.try_into()?,
+                key: key.into(),
                 hash: *hash,
             },
             KeyPair::EC { ref key } => PublicKey::EC {
                 key: key.to_public_key(),
             },
-        })
+        }
     }
 
     /// Name of this key algorithm.
