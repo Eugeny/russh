@@ -150,10 +150,10 @@ impl KeyDerivation {
         match *self {
             KeyDerivation::Pbkdf2 { ref salt, rounds } => {
                 pbkdf2::pbkdf2::<hmac::Hmac<sha2::Sha256>>(password, salt, rounds as u32, key)
+                    .map_err(|_| Error::InvalidParameters)
                 // pbkdf2_hmac(password, salt, rounds as usize, digest, key)?
             }
         }
-        Ok(())
     }
 }
 fn asn1_read_pbes2(
