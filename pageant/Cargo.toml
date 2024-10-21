@@ -15,7 +15,7 @@ thiserror = { workspace = true }
 rand = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "rt"] }
 bytes = "1.7"
-delegate = "0.12"
+delegate = "0.13"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.58", features = [

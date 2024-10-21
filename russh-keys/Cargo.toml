@@ -35,7 +35,7 @@ openssl = { workspace = true, optional = true }
 p256 = "0.13"
 p384 = "0.13"
 p521 = "0.13"
-pbkdf2 = "0.11"
+pbkdf2 = "0.12"
 pkcs1 = "0.7"
 pkcs5 = "0.7"
 pkcs8 = { version = "0.10", features = ["pkcs5", "encryption"] }
@@ -80,7 +80,7 @@ home = "0.5"
 pageant = { version = "0.0.1-beta.3", path = "../pageant" }
 
 [dev-dependencies]
-env_logger = "0.10"
+env_logger = "0.11"
 tempdir = "0.3"
 tokio = { workspace = true, features = ["test-util", "macros", "process"] }
 
