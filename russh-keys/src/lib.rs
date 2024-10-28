@@ -279,6 +279,9 @@ impl PublicKeyBase64 for key::PublicKey {
             key::PublicKey::EC { ref key } => {
                 write_ec_public_key(&mut s, key);
             }
+            key::PublicKey::Certificate(ref cert_data) => {
+                s.extend(cert_data.pubkey.public_key_bytes());
+            }
         }
         s
     }

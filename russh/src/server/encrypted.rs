@@ -404,13 +404,38 @@ impl Encrypted {
         } else {
             unreachable!()
         };
+
         let is_real = r.read_byte().map_err(crate::Error::from)?;
         let pubkey_algo = r.read_string().map_err(crate::Error::from)?;
         let pubkey_key = r.read_string().map_err(crate::Error::from)?;
+        
         debug!("algo: {:?}, key: {:?}", pubkey_algo, pubkey_key);
+        
+        // Parse the public key or certificate
         match key::PublicKey::parse(pubkey_algo, pubkey_key) {
             Ok(mut pubkey) => {
                 debug!("is_real = {:?}", is_real);
+
+                // Handle certificates specifically
+                if let key::PublicKey::Certificate(ref cert) = pubkey {
+                    // Validate certificate expiration
+                    let now = Instant::now().elapsed().as_secs();
+                    if now < cert.valid_after || now > cert.valid_before {
+                        warn!("Certificate is expired or not yet valid");
+                        reject_auth_request(until, &mut self.write, auth_request).await;
+                        return Ok(());
+                    }
+                    
+                    // Verify the certificate’s signature
+                    if !cert.signature_key.verify_detached(&pubkey_key, &cert.signature) {
+                        warn!("Certificate signature is invalid");
+                        reject_auth_request(until, &mut self.write, auth_request).await;
+                        return Ok(());
+                    }
+
+                    // Use certificate's public key for authentication
+                    pubkey = *cert.pubkey.clone();
+                }
 
                 if is_real != 0 {
                     let pos0 = r.position;
@@ -423,15 +448,13 @@ impl Encrypted {
                     };
 
                     let signature = r.read_string().map_err(crate::Error::from)?;
-                    debug!("signature = {:?}", signature);
                     let mut s = signature.reader(0);
                     let algo_ = s.read_string().map_err(crate::Error::from)?;
                     if let Some(hash) = key::SignatureHash::from_rsa_hostkey_algo(algo_) {
                         pubkey.set_algorithm(hash);
                     }
-                    debug!("algo_: {:?}", algo_);
                     let sig = s.read_string().map_err(crate::Error::from)?;
-                    #[allow(clippy::indexing_slicing)] // length checked
+                    #[allow(clippy::indexing_slicing)]
                     let init = &buf[0..pos0];
 
                     let is_valid = if sent_pk_ok && user == auth_user {
@@ -444,6 +467,7 @@ impl Encrypted {
                     } else {
                         false
                     };
+
                     if is_valid {
                         let session_id = self.session_id.as_ref();
                         #[allow(clippy::blocks_in_conditions)]
@@ -452,7 +476,6 @@ impl Encrypted {
                             buf.clear();
                             buf.extend_ssh_string(session_id);
                             buf.extend(init);
-                            // Verify signature.
                             pubkey.verify_client_auth(&buf, sig)
                         }) {
                             debug!("signature verified");
