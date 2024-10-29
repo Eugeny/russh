@@ -110,11 +110,11 @@ pub mod compression;
 pub mod kex;
 /// MAC algorithm names
 pub mod mac;
+mod cert;
 
 /// Re-export of the `russh-keys` crate.
 pub use russh_keys as keys;
 
-mod cert;
 mod key;
 mod msg;
 mod negotiation;
@@ -308,6 +308,12 @@ pub enum Error {
         message_type: u8,
         sequence_number: usize,
     },
+
+    #[error("SshKey: {0}")]
+    SshKey(#[from] ssh_key::Error),
+
+    #[error("SshEncoding: {0}")]
+    SshEncoding(#[from] ssh_encoding::Error),
 }
 
 pub(crate) fn strict_kex_violation(message_type: u8, sequence_number: usize) -> crate::Error {

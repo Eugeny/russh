@@ -1,12 +1,18 @@
 use std::convert::{TryFrom, TryInto};
 
-use pkcs8::{EncodePrivateKey, PrivateKeyInfo, SecretDocument};
+use p256::NistP256;
+use p384::NistP384;
+use p521::NistP521;
+use pkcs8::{AssociatedOid, EncodePrivateKey, PrivateKeyInfo, SecretDocument};
+use ssh_key::private::{EcdsaKeypair, Ed25519Keypair, Ed25519PrivateKey, KeypairData};
 
-use crate::key::SignatureHash;
-use crate::{ec, key, protocol, Error};
+use crate::{key, Error};
 
 /// Decode a PKCS#8-encoded private key.
-pub fn decode_pkcs8(ciphertext: &[u8], password: Option<&[u8]>) -> Result<key::KeyPair, Error> {
+pub fn decode_pkcs8(
+    ciphertext: &[u8],
+    password: Option<&[u8]>,
+) -> Result<ssh_key::PrivateKey, Error> {
     let doc = SecretDocument::try_from(ciphertext)?;
     let doc = if let Some(password) = password {
         doc.decode_msg::<pkcs8::EncryptedPrivateKeyInfo>()?
@@ -14,133 +20,66 @@ pub fn decode_pkcs8(ciphertext: &[u8], password: Option<&[u8]>) -> Result<key::K
     } else {
         doc
     };
-    key::KeyPair::try_from(doc.decode_msg::<PrivateKeyInfo>()?)
+    Ok(pkcs8_pki_into_keypair_data(doc.decode_msg::<PrivateKeyInfo>()?)?.try_into()?)
 }
 
-impl<'a> TryFrom<PrivateKeyInfo<'a>> for key::KeyPair {
-    type Error = Error;
-
-    fn try_from(pki: PrivateKeyInfo<'a>) -> Result<Self, Self::Error> {
-        match pki.algorithm.oid {
-            ed25519_dalek::pkcs8::ALGORITHM_OID => Ok(key::KeyPair::Ed25519(
-                ed25519_dalek::pkcs8::KeypairBytes::try_from(pki)?
-                    .secret_key
-                    .into(),
-            )),
-            pkcs1::ALGORITHM_OID => {
-                let sk = &pkcs1::RsaPrivateKey::try_from(pki.private_key)?;
-                key::KeyPair::new_rsa_with_hash(
-                    &sk.into(),
-                    Some(&sk.into()),
-                    SignatureHash::SHA2_256,
-                )
-            }
-            sec1::ALGORITHM_OID => Ok(key::KeyPair::EC {
-                key: pki.try_into()?,
-            }),
-            oid => Err(Error::UnknownAlgorithm(oid)),
+fn pkcs8_pki_into_keypair_data<'a>(pki: PrivateKeyInfo<'a>) -> Result<KeypairData, Error> {
+    match pki.algorithm.oid {
+        ed25519_dalek::pkcs8::ALGORITHM_OID => {
+            let kpb = ed25519_dalek::pkcs8::KeypairBytes::try_from(pki)?;
+            let pk = Ed25519PrivateKey::from_bytes(&kpb.secret_key);
+            Ok(KeypairData::Ed25519(Ed25519Keypair {
+                public: pk.clone().into(),
+                private: pk,
+            }))
         }
-    }
-}
-
-impl<'a> From<&pkcs1::RsaPrivateKey<'a>> for protocol::RsaPrivateKey<'a> {
-    fn from(sk: &pkcs1::RsaPrivateKey<'a>) -> Self {
-        Self {
-            public_key: protocol::RsaPublicKey {
-                public_exponent: sk.public_exponent.as_bytes().into(),
-                modulus: sk.modulus.as_bytes().into(),
-            },
-            private_exponent: sk.private_exponent.as_bytes().into(),
-            prime1: sk.prime1.as_bytes().into(),
-            prime2: sk.prime2.as_bytes().into(),
-            coefficient: sk.coefficient.as_bytes().into(),
-            comment: b"".as_slice().into(),
+        pkcs1::ALGORITHM_OID => {
+            let sk = &pkcs1::RsaPrivateKey::try_from(pki.private_key)?;
+            let pk = rsa::RsaPrivateKey::from_components(
+                rsa::BigUint::from_bytes_be(sk.modulus.as_bytes()),
+                rsa::BigUint::from_bytes_be(sk.public_exponent.as_bytes()),
+                rsa::BigUint::from_bytes_be(sk.private_exponent.as_bytes()),
+                vec![
+                    rsa::BigUint::from_bytes_be(sk.prime1.as_bytes()),
+                    rsa::BigUint::from_bytes_be(sk.prime2.as_bytes()),
+                ],
+            )?;
+            Ok(KeypairData::Rsa(pk.try_into()?))
         }
-    }
-}
-
-impl<'a> From<&pkcs1::RsaPrivateKey<'a>> for key::RsaCrtExtra<'a> {
-    fn from(sk: &pkcs1::RsaPrivateKey<'a>) -> Self {
-        Self {
-            dp: sk.exponent1.as_bytes().into(),
-            dq: sk.exponent2.as_bytes().into(),
+        sec1::ALGORITHM_OID => {
+            let sk = &sec1::EcPrivateKey::try_from(pki.private_key)?;
+            dbg!(sk.private_key);
+            dbg!(sk.public_key);
+            dbg!(sk.parameters);
+            dbg!(sk.parameters.and_then(|x| x.named_curve()));
+            Ok(KeypairData::Ecdsa(
+                match pki.algorithm.parameters_oid()? {
+                    NistP256::OID => {
+                        let sk = p256::SecretKey::try_from(pki)?;
+                        EcdsaKeypair::NistP256 {
+                            public: sk.public_key().into(),
+                            private: sk.into(),
+                        }
+                    }
+                    NistP384::OID => {
+                        let sk = p384::SecretKey::try_from(pki)?;
+                        EcdsaKeypair::NistP384 {
+                            public: sk.public_key().into(),
+                            private: sk.into(),
+                        }
+                    }
+                    NistP521::OID => {
+                        let sk = p521::SecretKey::try_from(pki)?;
+                        EcdsaKeypair::NistP521 {
+                            public: sk.public_key().into(),
+                            private: sk.into(),
+                        }
+                    }
+                    oid => return Err(Error::UnknownAlgorithm(oid)),
+                },
+            ))
         }
-    }
-}
-
-// Note: It's infeasible to implement `EncodePrivateKey` because that is bound to `pkcs8::Result`.
-impl TryFrom<&key::RsaPrivate> for SecretDocument {
-    type Error = Error;
-
-    fn try_from(key: &key::RsaPrivate) -> Result<Self, Self::Error> {
-        use der::Encode;
-        use pkcs1::UintRef;
-
-        let sk = protocol::RsaPrivateKey::try_from(key)?;
-        let extra = key::RsaCrtExtra::try_from(key)?;
-
-        let rsa_private_key = pkcs1::RsaPrivateKey {
-            modulus: UintRef::new(&sk.public_key.modulus)?,
-            public_exponent: UintRef::new(&sk.public_key.public_exponent)?,
-            private_exponent: UintRef::new(&sk.private_exponent)?,
-            prime1: UintRef::new(&sk.prime1)?,
-            prime2: UintRef::new(&sk.prime2)?,
-            exponent1: UintRef::new(&extra.dp)?,
-            exponent2: UintRef::new(&extra.dq)?,
-            coefficient: UintRef::new(&sk.coefficient)?,
-            other_prime_infos: None,
-        };
-        let pki = PrivateKeyInfo {
-            algorithm: spki::AlgorithmIdentifier {
-                oid: pkcs1::ALGORITHM_OID,
-                parameters: Some(der::asn1::Null.into()),
-            },
-            private_key: &rsa_private_key.to_der()?,
-            public_key: None,
-        };
-        Ok(Self::try_from(pki)?)
-    }
-}
-
-impl TryFrom<PrivateKeyInfo<'_>> for ec::PrivateKey {
-    type Error = Error;
-
-    fn try_from(pki: PrivateKeyInfo<'_>) -> Result<Self, Self::Error> {
-        use pkcs8::AssociatedOid;
-        match pki.algorithm.parameters_oid()? {
-            p256::NistP256::OID => Ok(ec::PrivateKey::P256(pki.try_into()?)),
-            p384::NistP384::OID => Ok(ec::PrivateKey::P384(pki.try_into()?)),
-            p521::NistP521::OID => Ok(ec::PrivateKey::P521(pki.try_into()?)),
-            oid => Err(Error::UnknownAlgorithm(oid)),
-        }
-    }
-}
-
-impl EncodePrivateKey for ec::PrivateKey {
-    fn to_pkcs8_der(&self) -> pkcs8::Result<SecretDocument> {
-        match self {
-            ec::PrivateKey::P256(key) => key.to_pkcs8_der(),
-            ec::PrivateKey::P384(key) => key.to_pkcs8_der(),
-            ec::PrivateKey::P521(key) => key.to_pkcs8_der(),
-        }
-    }
-}
-
-#[test]
-fn test_read_write_pkcs8() {
-    let secret = ed25519_dalek::SigningKey::generate(&mut key::safe_rng());
-    assert_eq!(
-        secret.verifying_key().as_bytes(),
-        ed25519_dalek::VerifyingKey::from(&secret).as_bytes()
-    );
-    let key = key::KeyPair::Ed25519(secret);
-    let password = b"blabla";
-    let ciphertext = encode_pkcs8_encrypted(password, 100, &key).unwrap();
-    let key = decode_pkcs8(&ciphertext, Some(password)).unwrap();
-    match key {
-        key::KeyPair::Ed25519 { .. } => println!("Ed25519"),
-        key::KeyPair::EC { .. } => println!("EC"),
-        key::KeyPair::RSA { .. } => println!("RSA"),
+        oid => Err(Error::UnknownAlgorithm(oid)),
     }
 }
 
@@ -169,11 +108,47 @@ pub fn encode_pkcs8_encrypted(
 }
 
 /// Encode into a PKCS#8-encoded private key.
-pub fn encode_pkcs8(key: &key::KeyPair) -> Result<Vec<u8>, Error> {
-    let v = match *key {
-        key::KeyPair::Ed25519(ref pair) => pair.to_pkcs8_der()?,
-        key::KeyPair::RSA { ref key, .. } => SecretDocument::try_from(key)?,
-        key::KeyPair::EC { ref key, .. } => key.to_pkcs8_der()?,
+pub fn encode_pkcs8(key: &ssh_key::PrivateKey) -> Result<Vec<u8>, Error> {
+    let v = match key.key_data() {
+        ssh_key::private::KeypairData::Ed25519(ref pair) => {
+            let sk: ed25519_dalek::SigningKey = pair.try_into()?;
+            sk.to_pkcs8_der()?
+        }
+        ssh_key::private::KeypairData::Rsa(ref pair) => {
+            // TODO: Implementation in ssh-key 0.6.7 is broken (fixed in 0.7.0-pre)
+            let sk = rsa::RsaPrivateKey::from_components(
+                rsa::BigUint::try_from(&pair.public.n)?,
+                rsa::BigUint::try_from(&pair.public.e)?,
+                rsa::BigUint::try_from(&pair.private.d )?,
+                vec![
+                    rsa::BigUint::try_from(&pair.private.p)?,
+                    rsa::BigUint::try_from(&pair.private.q)?,
+                ],
+            )?;
+            sk.to_pkcs8_der()?
+        }
+        ssh_key::private::KeypairData::Ecdsa(ref pair) => match pair {
+            EcdsaKeypair::NistP256 { private, .. } => {
+                let sk = p256::SecretKey::from_bytes(private.as_slice().try_into().unwrap())?;
+                sk.to_pkcs8_der()?
+            }
+            EcdsaKeypair::NistP384 { private, .. } => {
+                let sk = p384::SecretKey::from_bytes(private.as_slice().try_into().unwrap())?;
+                sk.to_pkcs8_der()?
+            }
+            EcdsaKeypair::NistP521 { private, .. } => {
+                let sk = p521::SecretKey::from_bytes(private.as_slice().try_into().unwrap())?;
+                sk.to_pkcs8_der()?
+            }
+        },
+        _ => {
+            let algo = key.algorithm();
+            let kt = algo.as_str();
+            return Err(Error::UnsupportedKeyType {
+                key_type_string: kt.into(),
+                key_type_raw: kt.as_bytes().into(),
+            });
+        }
     }
     .as_bytes()
     .to_vec();

@@ -48,6 +48,7 @@ russh-cryptovec = { version = "0.7.0", path = "../cryptovec" }
 russh-keys = { version = "0.46.0-beta.2", path = "../russh-keys" }
 sha1 = { workspace = true }
 sha2 = { workspace = true }
+signature = { workspace = true }
 ssh-encoding = { workspace = true }
 ssh-key = { workspace = true }
 subtle = "2.4"

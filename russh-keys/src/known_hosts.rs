@@ -8,7 +8,7 @@ use hmac::{Hmac, Mac};
 use log::debug;
 use sha1::Sha1;
 
-use crate::{key, Error, PublicKeyBase64};
+use crate::{key, Error};
 
 /// Check whether the host is known, from its standard location.
 pub fn check_known_hosts(host: &str, port: u16, pubkey: &key::PublicKey) -> Result<bool, Error> {
@@ -24,13 +24,16 @@ pub fn check_known_hosts_path<P: AsRef<Path>>(
 ) -> Result<bool, Error> {
     let check = known_host_keys_path(host, port, path)?
         .into_iter()
-        .map(
-            |(line, recorded)| match (pubkey.name() == recorded.name(), *pubkey == recorded) {
+        .map(|(line, recorded)| {
+            match (
+                pubkey.algorithm() == recorded.algorithm(),
+                *pubkey == recorded,
+            ) {
                 (true, true) => Ok(true),
                 (true, false) => Err(Error::KeyChanged { line }),
                 _ => Ok(false),
-            },
-        )
+            }
+        })
         // If any Err was returned, we stop here
         .collect::<Result<Vec<bool>, Error>>()?
         .into_iter()
@@ -172,18 +175,8 @@ pub fn learn_known_hosts_path<P: AsRef<Path>>(
     } else {
         write!(file, "{} ", host)?
     }
-    write_public_key_base64(&mut file, pubkey)?;
+    file.write_all(pubkey.to_openssh()?.as_bytes())?;
     file.write_all(b"\n")?;
-    Ok(())
-}
-
-/// Write a public key onto the provided `Write`, encoded in base-64.
-pub fn write_public_key_base64<W: Write>(
-    mut w: W,
-    publickey: &key::PublicKey,
-) -> Result<(), Error> {
-    let pk = publickey.public_key_base64();
-    writeln!(w, "{} {}", publickey.name(), pk)?;
     Ok(())
 }
 

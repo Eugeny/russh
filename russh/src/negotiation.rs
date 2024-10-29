@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 // Copyright 2016 Pierre-Étienne Meunier
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,15 +12,16 @@ use std::borrow::Cow;
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
+use std::borrow::Cow;
 use std::str::from_utf8;
 
 use log::debug;
 use rand::RngCore;
+use ssh_key::{Algorithm, Certificate, EcdsaCurve, HashAlg};
 
 use crate::cipher::CIPHERS;
 use crate::kex::{EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT, EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER};
 use crate::keys::encoding::{Encoding, Reader};
-use crate::keys::key;
 use crate::keys::key::{KeyPair, PublicKey};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::server::Config;
@@ -36,7 +36,7 @@ pub struct Config {
 #[derive(Debug, Clone)]
 pub struct Names {
     pub kex: kex::Name,
-    pub key: key::Name,
+    pub key: Algorithm,
     pub cipher: cipher::Name,
     pub client_mac: mac::Name,
     pub server_mac: mac::Name,
@@ -52,7 +52,7 @@ pub struct Preferred {
     /// Preferred key exchange algorithms.
     pub kex: Cow<'static, [kex::Name]>,
     /// Preferred host & public key algorithms.
-    pub key: Cow<'static, [key::Name]>,
+    pub key: Cow<'static, [Algorithm]>,
     /// Preferred symmetric ciphers.
     pub cipher: Cow<'static, [cipher::Name]>,
     /// Preferred MAC algorithms.
@@ -65,11 +65,11 @@ impl Preferred {
     pub(crate) fn possible_host_key_algos_for_keys(
         &self,
         available_host_keys: &[KeyPair],
-    ) -> Vec<key::Name> {
+    ) -> Vec<Algorithm> {
         self.key
             .iter()
-            .filter(|n| available_host_keys.iter().any(|k| k.name() == n.0))
-            .copied()
+            .filter(|n| available_host_keys.iter().any(|k| k.algorithm() == **n))
+            .cloned()
             .collect::<Vec<_>>()
     }
 }
@@ -114,11 +114,23 @@ impl Preferred {
     pub const DEFAULT: Preferred = Preferred {
         kex: Cow::Borrowed(SAFE_KEX_ORDER),
         key: Cow::Borrowed(&[
-            key::ED25519,
-            key::ECDSA_SHA2_NISTP256,
-            key::ECDSA_SHA2_NISTP521,
-            key::RSA_SHA2_256,
-            key::RSA_SHA2_512,
+            Algorithm::Ed25519,
+            Algorithm::Ecdsa {
+                curve: EcdsaCurve::NistP256,
+            },
+            Algorithm::Ecdsa {
+                curve: EcdsaCurve::NistP384,
+            },
+            Algorithm::Ecdsa {
+                curve: EcdsaCurve::NistP521,
+            },
+            Algorithm::Rsa {
+                hash: Some(HashAlg::Sha512),
+            },
+            Algorithm::Rsa {
+                hash: Some(HashAlg::Sha256),
+            },
+            Algorithm::Rsa { hash: None },
         ]),
         cipher: Cow::Borrowed(CIPHER_ORDER),
         mac: Cow::Borrowed(HMAC_ORDER),
@@ -141,37 +153,32 @@ impl Default for Preferred {
 }
 
 /// Named algorithms.
-pub trait Named {
+pub trait Named<'a> {
     /// The name of this algorithm.
-    fn name(&self) -> &'static str;
+    fn name(&'a self) -> impl AsRef<str> + 'a;
 }
 
-impl Named for () {
-    fn name(&self) -> &'static str {
+impl Named<'static> for () {
+    fn name(&'static self) -> impl AsRef<str> + 'static {
         ""
     }
 }
 
-use crate::keys::key::ED25519;
-
-impl Named for PublicKey {
-    fn name(&self) -> &'static str {
-        match self {
-            PublicKey::Ed25519(_) => ED25519.0,
-            PublicKey::RSA { ref hash, .. } => hash.name().0,
-            PublicKey::EC { ref key } => key.algorithm(),
-            PublicKey::Certificate(ref cert_data) => cert_data.pubkey.name(),
-        }
+impl<'a> Named<'a> for PublicKey {
+    fn name(&'a self) -> impl AsRef<str> + 'a {
+        self.algorithm()
     }
 }
 
-impl Named for KeyPair {
-    fn name(&self) -> &'static str {
-        match self {
-            KeyPair::Ed25519 { .. } => ED25519.0,
-            KeyPair::RSA { ref hash, .. } => hash.name().0,
-            KeyPair::EC { ref key } => key.algorithm(),
-        }
+impl<'a> Named<'a> for KeyPair {
+    fn name(&'a self) -> impl AsRef<str> + 'a {
+        self.algorithm()
+    }
+}
+
+impl<'a> Named<'a> for Certificate {
+    fn name(&'a self) -> impl AsRef<str> + 'a {
+        self.algorithm()
     }
 }
 
@@ -419,7 +426,7 @@ pub fn write_kex(
             prefs
                 .key
                 .iter()
-                .filter(|name| server_config.keys.iter().any(|k| k.name() == name.0)),
+                .filter(|algo| server_config.keys.iter().any(|k| k.algorithm() == **algo)),
         );
     } else {
         buf.extend_list(prefs.key.iter());

@@ -10,6 +10,8 @@ use crate::keys::encoding::{Encoding, Reader};
 use crate::negotiation::Select;
 use crate::{msg, negotiation};
 
+use russh_keys::add_signature;
+
 thread_local! {
     static HASH_BUF: RefCell<CryptoVec> = RefCell::new(CryptoVec::new());
 }
@@ -33,7 +35,7 @@ impl KexInit {
             }
             let mut key = 0;
             #[allow(clippy::indexing_slicing)] // length checked
-            while key < config.keys.len() && config.keys[key].name() != algo.key.as_ref() {
+            while key < config.keys.len() && config.keys[key].algorithm() != algo.key {
                 key += 1
             }
             let next_kex = if key < config.keys.len() {
@@ -128,7 +130,9 @@ impl KexDh {
                 debug!("signing with key {:?}", kexdhdone.key);
                 debug!("hash: {:?}", hash);
                 debug!("key: {:?}", config.keys[kexdhdone.key]);
-                config.keys[kexdhdone.key].add_signature(&mut buffer, &hash)?;
+
+                add_signature(&config.keys[kexdhdone.key], &hash, &mut buffer)?;
+
                 cipher.write(&buffer, write_buffer);
                 cipher.write(&[msg::NEWKEYS], write_buffer);
                 Ok(hash)

@@ -1,10 +1,10 @@
 use async_trait::async_trait;
 use log::{error, info, LevelFilter};
+use rand_core::OsRng;
 use russh::{
     server::{Auth, Msg, Server as _, Session},
     Channel, ChannelId,
 };
-use russh_keys::key::KeyPair;
 use russh_sftp::protocol::{File, FileAttributes, Handle, Name, Status, StatusCode, Version};
 use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::Duration};
 use tokio::sync::Mutex;
@@ -179,7 +179,9 @@ async fn main() {
     let config = russh::server::Config {
         auth_rejection_time: Duration::from_secs(3),
         auth_rejection_time_initial: Some(Duration::from_secs(0)),
-        keys: vec![KeyPair::generate_ed25519()],
+        keys: vec![
+            russh_keys::key::KeyPair::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap(),
+        ],
         ..Default::default()
     };
 

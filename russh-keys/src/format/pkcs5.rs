@@ -28,7 +28,7 @@ pub fn decode_pkcs5(
             }
             Encryption::Aes256Cbc(_) => unimplemented!(),
         };
-        super::decode_rsa(&sec)
+        super::decode_rsa(&sec).map(Into::into)
     } else {
         Err(Error::KeyIsEncrypted)
     }

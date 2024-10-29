@@ -4,6 +4,8 @@ use std::convert::TryFrom;
 use aes::cipher::{BlockDecryptMut, KeyIvInit};
 use aes::*;
 use block_padding::Pkcs7;
+use ssh_key::private::{Ed25519Keypair, Ed25519PrivateKey, KeypairData};
+use ssh_key::PrivateKey;
 use yasna::BERReaderSeq;
 
 use super::Encryption;
@@ -50,7 +52,7 @@ pub fn decode_pkcs8(ciphertext: &[u8], password: Option<&[u8]>) -> Result<key::K
     })?
 }
 
-fn read_key_v1(reader: &mut BERReaderSeq) -> Result<key::KeyPair, Error> {
+fn read_key_v1(reader: &mut BERReaderSeq) -> Result<PrivateKey, Error> {
     let oid = reader
         .next()
         .read_sequence(|reader| reader.next().read_oid())?;
@@ -67,7 +69,15 @@ fn read_key_v1(reader: &mut BERReaderSeq) -> Result<key::KeyPair, Error> {
         reader
             .next()
             .read_tagged(yasna::Tag::context(1), |reader| reader.read_bitvec())?;
-        Ok(key::KeyPair::Ed25519(secret))
+
+        let pk = Ed25519PrivateKey::from(&secret);
+        Ok(PrivateKey::new(
+            KeypairData::Ed25519(Ed25519Keypair {
+                public: pk.clone().into(),
+                private: pk,
+            }),
+            "",
+        )?)
     } else {
         Err(Error::CouldNotReadKey)
     }

@@ -2,9 +2,11 @@ use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::Arc;
 
 use rand::RngCore;
+use rand_core::OsRng;
 use russh::keys::key;
 use russh::server::{self, Auth, Msg, Server as _, Session};
 use russh::{client, Channel};
+use ssh_key::PrivateKey;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 pub const WINDOW_SIZE: u32 = 8 * 2048;
@@ -30,7 +32,7 @@ async fn test_reader_and_writer() -> Result<(), anyhow::Error> {
 
 async fn stream(addr: SocketAddr, data: &[u8]) -> Result<(), anyhow::Error> {
     let config = Arc::new(client::Config::default());
-    let key = Arc::new(russh_keys::key::KeyPair::generate_ed25519());
+    let key = Arc::new(PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap());
 
     let mut session = russh::client::connect(config, addr, Client).await?;
     let mut channel = match session.authenticate_publickey("user", key).await {
@@ -84,7 +86,7 @@ struct Server;
 impl Server {
     async fn run(addr: SocketAddr) {
         let config = Arc::new(server::Config {
-            keys: vec![russh_keys::key::KeyPair::generate_ed25519()],
+            keys: vec![PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap()],
             window_size: WINDOW_SIZE,
             ..Default::default()
         });

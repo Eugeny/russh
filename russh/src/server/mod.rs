@@ -39,6 +39,7 @@ use async_trait::async_trait;
 use futures::future::Future;
 use log::{debug, error};
 use russh_util::runtime::JoinHandle;
+use ssh_key::Certificate;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, ToSocketAddrs};
 use tokio::pin;
@@ -222,6 +223,23 @@ pub trait Handler: Sized {
         &mut self,
         user: &str,
         public_key: &key::PublicKey,
+    ) -> Result<Auth, Self::Error> {
+        Ok(Auth::Reject {
+            proceed_with_methods: None,
+        })
+    }
+
+    /// Check authentication using an OpenSSH certificate. This method
+    /// is called after the signature has been verified and key
+    /// ownership has been confirmed.
+    /// Russh guarantees that rejection happens in constant time
+    /// `config.auth_rejection_time`, except if this method takes more
+    /// time than that.
+    #[allow(unused_variables)]
+    async fn auth_openssh_certificate(
+        &mut self,
+        user: &str,
+        certificate: &Certificate,
     ) -> Result<Auth, Self::Error> {
         Ok(Auth::Reject {
             proceed_with_methods: None,

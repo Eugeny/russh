@@ -1,6 +1,9 @@
+use std::convert::TryInto;
 use std::io::Write;
 
 use data_encoding::{BASE64_MIME, HEXLOWER_PERMISSIVE};
+use pkcs1::DecodeRsaPrivateKey;
+use ssh_key::private::RsaKeypair;
 
 use super::is_base64_char;
 use crate::{key, Error};
@@ -82,7 +85,7 @@ pub fn decode_secret_key(secret: &str, password: Option<&str>) -> Result<key::Ke
     let secret = BASE64_MIME.decode(secret.as_bytes())?;
     match format {
         Some(Format::Openssh) => decode_openssh(&secret, password),
-        Some(Format::Rsa) => decode_rsa(&secret),
+        Some(Format::Rsa) => Ok(decode_rsa(&secret)?.into()),
         Some(Format::Pkcs5Encrypted(enc)) => decode_pkcs5(&secret, password, enc),
         Some(Format::Pkcs8Encrypted) | Some(Format::Pkcs8) => {
             let result = self::pkcs8::decode_pkcs8(&secret, password.map(|x| x.as_bytes()));
@@ -123,9 +126,6 @@ pub fn encode_pkcs8_pem_encrypted<W: Write>(
     Ok(())
 }
 
-fn decode_rsa(secret: &[u8]) -> Result<key::KeyPair, Error> {
-    Ok(key::KeyPair::RSA {
-        key: crate::backend::RsaPrivate::new_from_der(secret)?,
-        hash: key::SignatureHash::SHA2_256,
-    })
+fn decode_rsa(secret: &[u8]) -> Result<RsaKeypair, Error> {
+    Ok(rsa::RsaPrivateKey::from_pkcs1_der(secret)?.try_into()?)
 }
