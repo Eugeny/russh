@@ -102,6 +102,8 @@ This is a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Éti
   * Uses `russh::server` to deliver the game, using `ratatui` as the rendering engine.
 * [warpgate](https://github.com/warp-tech/warpgate) - Smart SSH, HTTPS and MySQL bastion that requires no additional client-side software
   * Uses `russh::server` in addition to `russh::client` as part of the smart SSH functionality.
+* [Devolutions Gateway](https://github.com/Devolutions/devolutions-gateway/) - Establish a secure entry point for internal or external segmented networks that require authorized just-in-time (JIT) access.
+  * Uses `russh::client` for the web-based SSH client of the standalone web application.
 
 ## Contributors ✨
 
