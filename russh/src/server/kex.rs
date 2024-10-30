@@ -111,7 +111,12 @@ impl KexDh {
                 debug!("server kexdhdone.exchange = {:?}", kexdhdone.exchange);
 
                 let mut pubkey_vec = CryptoVec::new();
-                pubkey_vec.extend_ssh_string(config.keys[kexdhdone.key].to_bytes()?.as_slice());
+                pubkey_vec.extend_ssh_string(
+                    config.keys[kexdhdone.key]
+                        .public_key()
+                        .to_bytes()?
+                        .as_slice(),
+                );
 
                 let hash = kexdhdone.kex.compute_exchange_hash(
                     &pubkey_vec,
@@ -121,7 +126,12 @@ impl KexDh {
                 debug!("exchange hash: {:?}", hash);
                 buffer.clear();
                 buffer.push(msg::KEX_ECDH_REPLY);
-                buffer.extend_ssh_string(config.keys[kexdhdone.key].to_bytes()?.as_slice());
+                buffer.extend_ssh_string(
+                    config.keys[kexdhdone.key]
+                        .public_key()
+                        .to_bytes()?
+                        .as_slice(),
+                );
                 // Server ephemeral
                 buffer.extend_ssh_string(&kexdhdone.exchange.server_ephemeral);
                 // Hash signature
