@@ -1,7 +1,7 @@
 # Russh
 
 [![Rust](https://github.com/warp-tech/russh/actions/workflows/rust.yml/badge.svg)](https://github.com/warp-tech/russh/actions/workflows/rust.yml)  <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
-[![All Contributors](https://img.shields.io/badge/all_contributors-42-orange.svg?style=flat-square)](#contributors-)
+[![All Contributors](https://img.shields.io/badge/all_contributors-43-orange.svg?style=flat-square)](#contributors-)
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
 
 Low-level Tokio SSH2 client and server implementation.
@@ -167,6 +167,9 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
       <td align="center" valign="top" width="14.28%"><a href="https://garyguo.net"><img src="https://avatars.githubusercontent.com/u/4065244?v=4?s=100" width="100px;" alt="Gary Guo"/><br /><sub><b>Gary Guo</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=nbdd0121" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/irvingoujAtDevolution"><img src="https://avatars.githubusercontent.com/u/139169536?v=4?s=100" width="100px;" alt="irvingouj @ Devolutions"/><br /><sub><b>irvingouj @ Devolutions</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=irvingoujAtDevolution" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="http://tonipeter.de"><img src="https://avatars.githubusercontent.com/u/4614215?v=4?s=100" width="100px;" alt="Toni Peter"/><br /><sub><b>Toni Peter</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=Tehforsch" title="Code">💻</a></td>
+    </tr>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/Nathy-bajo"><img src="https://avatars.githubusercontent.com/u/73991674?v=4?s=100" width="100px;" alt="Nathaniel Bajo"/><br /><sub><b>Nathaniel Bajo</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=Nathy-bajo" title="Code">💻</a></td>
     </tr>
   </tbody>
 </table>
