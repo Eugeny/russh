@@ -134,6 +134,8 @@ pub enum Error {
     /// Index out of bounds
     #[error("Index out of bounds")]
     IndexOutOfBounds,
+    #[error("UTF-8 conversion error: {0}")]
+    Utf8Error(#[from] std::string::FromUtf8Error),
     /// Unknown signature type
     #[error("Unknown signature type: {}", sig_type)]
     UnknownSignatureType { sig_type: String },

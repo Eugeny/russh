@@ -408,9 +408,9 @@ impl Encrypted {
         let is_real = r.read_byte().map_err(crate::Error::from)?;
         let pubkey_algo = r.read_string().map_err(crate::Error::from)?;
         let pubkey_key = r.read_string().map_err(crate::Error::from)?;
-        
+
         debug!("algo: {:?}, key: {:?}", pubkey_algo, pubkey_key);
-        
+
         // Parse the public key or certificate
         match key::PublicKey::parse(pubkey_algo, pubkey_key) {
             Ok(mut pubkey) => {
@@ -425,9 +425,12 @@ impl Encrypted {
                         reject_auth_request(until, &mut self.write, auth_request).await;
                         return Ok(());
                     }
-                    
+
                     // Verify the certificate’s signature
-                    if !cert.signature_key.verify_detached(&pubkey_key, &cert.signature) {
+                    if !cert
+                        .signature_key
+                        .verify_detached(pubkey_key, &cert.signature)
+                    {
                         warn!("Certificate signature is invalid");
                         reject_auth_request(until, &mut self.write, auth_request).await;
                         return Ok(());

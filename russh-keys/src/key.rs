@@ -136,7 +136,9 @@ pub enum PublicKey {
         hash: SignatureHash,
     },
     #[doc(hidden)]
-    EC { key: ec::PublicKey },
+    EC {
+        key: ec::PublicKey,
+    },
 }
 
 // Struct to store OpenSSH certificate properties
@@ -150,7 +152,7 @@ pub struct CertificateData {
     pub principals: Vec<String>,
     pub critical_options: Vec<u8>, // Additional options for certificate control
     pub signature_key: Box<PublicKey>, // The CA key that signed the certificate
-    pub signature: Vec<u8>, // Signature on the certificate itself
+    pub signature: Vec<u8>,        // Signature on the certificate itself
 }
 
 impl PartialEq for PublicKey {
@@ -167,9 +169,10 @@ impl PartialEq for PublicKey {
 impl PublicKey {
     /// Parse either a regular public key or an OpenSSH certificate.
     pub fn parse(algo: &[u8], pubkey: &[u8]) -> Result<Self, Error> {
-
         // Check if the key is a certificate
-        if algo == b"ssh-rsa-cert-v01@openssh.com" || algo == b"ecdsa-sha2-nistp256-cert-v01@openssh.com" {
+        if algo == b"ssh-rsa-cert-v01@openssh.com"
+            || algo == b"ecdsa-sha2-nistp256-cert-v01@openssh.com"
+        {
             return Self::parse_certificate(algo, pubkey);
         }
         use ssh_encoding::Decode;
@@ -194,14 +197,14 @@ impl PublicKey {
         let _ = algo;
         let mut reader = cert_data.reader(0);
 
-        let pubkey = PublicKey::parse(reader.read_string().unwrap(), reader.read_string().unwrap())?;
-        let serial = reader.read_u64().unwrap();
-        let valid_after = reader.read_u64().unwrap();
-        let valid_before = reader.read_u64().unwrap();
-        let key_id = String::from_utf8(reader.read_string().unwrap().to_vec()).unwrap();
+        let pubkey = PublicKey::parse(reader.read_string()?, reader.read_string()?)?;
+        let serial = reader.read_u64()?;
+        let valid_after = reader.read_u64()?;
+        let valid_before = reader.read_u64()?;
+        let key_id = String::from_utf8(reader.read_string()?.to_vec()).map_err(Error::Utf8Error)?;
         let principals = vec![]; // Parse principals from reader
-        let signature_key = PublicKey::parse(reader.read_string().unwrap(), reader.read_string().unwrap())?;
-        let signature = reader.read_string().unwrap().to_vec();
+        let signature_key = PublicKey::parse(reader.read_string()?, reader.read_string()?)?;
+        let signature = reader.read_string()?.to_vec();
 
         Ok(PublicKey::Certificate(CertificateData {
             pubkey: Box::new(pubkey),
@@ -214,7 +217,7 @@ impl PublicKey {
             signature_key: Box::new(signature_key),
             signature,
         }))
-    } 
+    }
 
     pub fn new_rsa_with_hash(
         pk: &protocol::RsaPublicKey<'_>,
