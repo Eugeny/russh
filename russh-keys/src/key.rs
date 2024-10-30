@@ -14,7 +14,7 @@
 //
 use ssh_encoding::Decode;
 use ssh_key::public::KeyData;
-use ssh_key::PublicKey;
+use ssh_key::{Algorithm, EcdsaCurve, HashAlg, PublicKey};
 
 use crate::encoding::Reader;
 use crate::Error;
@@ -46,3 +46,26 @@ pub fn parse_public_key(p: &[u8]) -> Result<PublicKey, Error> {
 pub fn safe_rng() -> impl rand::CryptoRng + rand::RngCore {
     rand::thread_rng()
 }
+
+pub const ALL_KEY_TYPES: &[Algorithm] = &[
+    Algorithm::Dsa,
+    Algorithm::Ecdsa {
+        curve: EcdsaCurve::NistP256,
+    },
+    Algorithm::Ecdsa {
+        curve: EcdsaCurve::NistP384,
+    },
+    Algorithm::Ecdsa {
+        curve: EcdsaCurve::NistP521,
+    },
+    Algorithm::Ed25519,
+    Algorithm::Rsa { hash: None },
+    Algorithm::Rsa {
+        hash: Some(HashAlg::Sha256),
+    },
+    Algorithm::Rsa {
+        hash: Some(HashAlg::Sha512),
+    },
+    Algorithm::SkEcdsaSha2NistP256,
+    Algorithm::SkEd25519,
+];
