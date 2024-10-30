@@ -476,6 +476,7 @@ impl Encrypted {
                             buf.clear();
                             buf.extend_ssh_string(session_id);
                             buf.extend(init);
+                            // Verify signature.
                             pubkey.verify_client_auth(&buf, sig)
                         }) {
                             debug!("signature verified");
