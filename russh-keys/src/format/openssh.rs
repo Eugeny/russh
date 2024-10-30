@@ -1,11 +1,9 @@
-use ssh_key::private::PrivateKey;
-
-use crate::key::KeyPair;
+use ssh_key::PrivateKey;
 use crate::Error;
 
 /// Decode a secret key given in the OpenSSH format, deciphering it if
 /// needed using the supplied password.
-pub fn decode_openssh(secret: &[u8], password: Option<&str>) -> Result<KeyPair, Error> {
+pub fn decode_openssh(secret: &[u8], password: Option<&str>) -> Result<PrivateKey, Error> {
     let pk = PrivateKey::from_bytes(secret)?;
     if pk.is_encrypted() {
         if let Some(password) = password {
@@ -14,5 +12,5 @@ pub fn decode_openssh(secret: &[u8], password: Option<&str>) -> Result<KeyPair, 
             return Err(Error::KeyIsEncrypted);
         }
     }
-    Ok(pk.into())
+    Ok(pk)
 }

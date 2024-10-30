@@ -9,7 +9,7 @@ use ssh_key::PrivateKey;
 use yasna::BERReaderSeq;
 
 use super::Encryption;
-use crate::{key, Error};
+use crate::Error;
 
 const PBES2: &[u64] = &[1, 2, 840, 113549, 1, 5, 13];
 const ED25519: &[u64] = &[1, 3, 101, 112];
@@ -17,7 +17,7 @@ const PBKDF2: &[u64] = &[1, 2, 840, 113549, 1, 5, 12];
 const AES256CBC: &[u64] = &[2, 16, 840, 1, 101, 3, 4, 1, 42];
 const HMAC_SHA256: &[u64] = &[1, 2, 840, 113549, 2, 9];
 
-pub fn decode_pkcs8(ciphertext: &[u8], password: Option<&[u8]>) -> Result<key::KeyPair, Error> {
+pub fn decode_pkcs8(ciphertext: &[u8], password: Option<&[u8]>) -> Result<PrivateKey, Error> {
     let secret = if let Some(pass) = password {
         Cow::Owned(yasna::parse_der(ciphertext, |reader| {
             reader.read_sequence(|reader| {

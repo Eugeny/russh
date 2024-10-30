@@ -23,7 +23,7 @@
 //! #[derive(Clone)]
 //! struct X{}
 //! impl agent::server::Agent for X {
-//!     fn confirm(self, _: std::sync::Arc<key::KeyPair>) -> Box<dyn Future<Output = (Self, bool)> + Send + Unpin> {
+//!     fn confirm(self, _: std::sync::Arc<PrivateKey>) -> Box<dyn Future<Output = (Self, bool)> + Send + Unpin> {
 //!         Box::new(futures::future::ready((self, true)))
 //!     }
 //! }
@@ -75,7 +75,7 @@ use encoding::Encoding;
 use helpers::EncodedExt;
 use russh_cryptovec::CryptoVec;
 use signature::Signer;
-use ssh_key::{Certificate, Signature};
+use ssh_key::Signature;
 use thiserror::Error;
 
 pub mod encoding;
@@ -84,6 +84,8 @@ pub mod key;
 mod format;
 mod helpers;
 pub use format::*;
+
+pub use ssh_key::{self, Algorithm, Certificate, EcdsaCurve, HashAlg, PrivateKey, PublicKey};
 
 /// OpenSSH agent protocol implementation
 pub mod agent;
@@ -144,11 +146,6 @@ pub enum Error {
     #[error(transparent)]
     IO(#[from] std::io::Error),
 
-    #[cfg(feature = "openssl")]
-    #[error(transparent)]
-    Openssl(#[from] openssl::error::ErrorStack),
-
-    #[cfg(not(feature = "openssl"))]
     #[error("Rsa: {0}")]
     Rsa(#[from] rsa::Error),
 
@@ -208,7 +205,7 @@ impl From<yasna::ASN1Error> for Error {
 /// ```
 /// russh_keys::load_public_key("../files/id_ed25519.pub").unwrap();
 /// ```
-pub fn load_public_key<P: AsRef<Path>>(path: P) -> Result<key::PublicKey, Error> {
+pub fn load_public_key<P: AsRef<Path>>(path: P) -> Result<ssh_key::PublicKey, Error> {
     let mut pubkey = String::new();
     let mut file = File::open(path.as_ref())?;
     file.read_to_string(&mut pubkey)?;
@@ -228,7 +225,7 @@ pub fn load_public_key<P: AsRef<Path>>(path: P) -> Result<key::PublicKey, Error>
 /// ```
 /// russh_keys::parse_public_key_base64("AAAAC3NzaC1lZDI1NTE5AAAAIJdD7y3aLq454yWBdwLWbieU1ebz9/cu7/QEXn9OIeZJ").is_ok();
 /// ```
-pub fn parse_public_key_base64(key: &str) -> Result<key::PublicKey, Error> {
+pub fn parse_public_key_base64(key: &str) -> Result<ssh_key::PublicKey, Error> {
     let base = BASE64_MIME.decode(key.as_bytes())?;
     key::parse_public_key(&base)
 }
@@ -244,13 +241,13 @@ pub trait PublicKeyBase64 {
     }
 }
 
-impl PublicKeyBase64 for key::PublicKey {
+impl PublicKeyBase64 for ssh_key::PublicKey {
     fn public_key_bytes(&self) -> Vec<u8> {
         self.key_data().encoded().unwrap_or_default()
     }
 }
 
-impl PublicKeyBase64 for key::KeyPair {
+impl PublicKeyBase64 for PrivateKey {
     fn public_key_bytes(&self) -> Vec<u8> {
         self.public_key().public_key_bytes()
     }
@@ -260,7 +257,7 @@ impl PublicKeyBase64 for key::KeyPair {
 pub fn load_secret_key<P: AsRef<Path>>(
     secret_: P,
     password: Option<&str>,
-) -> Result<key::KeyPair, Error> {
+) -> Result<PrivateKey, Error> {
     let mut secret_file = std::fs::File::open(secret_)?;
     let mut secret = String::new();
     secret_file.read_to_string(&mut secret)?;
@@ -309,9 +306,9 @@ pub fn add_self_signature<S: Signer<Signature>>(
 #[cfg(test)]
 mod test {
 
+    use crate::key::PublicKeyExt;
     #[cfg(unix)]
     use futures::Future;
-    use key::PublicKeyExt;
 
     use super::*;
 
@@ -386,7 +383,7 @@ MC4CAQAwBQYDK2VwBCIEINTuctv5E1hK1bbY8fdp+K06/nwoy/HU++CXqI9EdVhC
             decode_secret_key(RFC8410_ED25519_PRIVATE_ONLY_KEY, None)
                 .unwrap()
                 .algorithm()
-                == key::Algorithm::Ed25519,
+                == ssh_key::Algorithm::Ed25519,
         );
         // We always encode public key, skip test_decode_encode_symmetry.
     }
@@ -405,7 +402,7 @@ Z9w7lshQhqowtrbLDFw4rXAxZuE=
             decode_secret_key(RFC8410_ED25519_PRIVATE_PUBLIC_KEY, None)
                 .unwrap()
                 .algorithm()
-                == key::Algorithm::Ed25519,
+                == ssh_key::Algorithm::Ed25519,
         );
         // We can't encode attributes, skip test_decode_encode_symmetry.
     }
@@ -431,8 +428,8 @@ dgECAw==
 ";
         assert!(
             decode_secret_key(key, None).unwrap().algorithm()
-                == key::Algorithm::Ecdsa {
-                    curve: key::EcdsaCurve::NistP256
+                == ssh_key::Algorithm::Ecdsa {
+                    curve: ssh_key::EcdsaCurve::NistP256
                 },
         );
     }
@@ -453,8 +450,8 @@ Ylv0h4Wyzto8NfLQAAAA1yb2JlcnRAYmJzZGV2AQID
 ";
         assert!(
             decode_secret_key(key, None).unwrap().algorithm()
-                == key::Algorithm::Ecdsa {
-                    curve: key::EcdsaCurve::NistP384
+                == ssh_key::Algorithm::Ecdsa {
+                    curve: ssh_key::EcdsaCurve::NistP384
                 },
         );
     }
@@ -477,8 +474,8 @@ Ve0k2ddxoEsSE15H4lgNHM2iuYKzIqZJOReHRCTff6QGgMYPDqDfFfL1Hc1Ntql0pwAAAA
 ";
         assert!(
             decode_secret_key(key, None).unwrap().algorithm()
-                == key::Algorithm::Ecdsa {
-                    curve: key::EcdsaCurve::NistP521
+                == ssh_key::Algorithm::Ecdsa {
+                    curve: ssh_key::EcdsaCurve::NistP521
                 },
         );
     }
@@ -490,7 +487,7 @@ Ve0k2ddxoEsSE15H4lgNHM2iuYKzIqZJOReHRCTff6QGgMYPDqDfFfL1Hc1Ntql0pwAAAA
         )
         .unwrap();
         assert_eq!(
-            format!("{}", key.fingerprint(key::HashAlg::Sha256)),
+            format!("{}", key.fingerprint(ssh_key::HashAlg::Sha256)),
             "SHA256:ldyiXa1JQakitNU5tErauu8DvWQ1dZ7aXu+rm7KQuog"
         );
     }
@@ -502,8 +499,8 @@ Ve0k2ddxoEsSE15H4lgNHM2iuYKzIqZJOReHRCTff6QGgMYPDqDfFfL1Hc1Ntql0pwAAAA
 
         assert!(
             parse_public_key_base64(key).unwrap().algorithm()
-                == key::Algorithm::Ecdsa {
-                    curve: key::EcdsaCurve::NistP256
+                == ssh_key::Algorithm::Ecdsa {
+                    curve: ssh_key::EcdsaCurve::NistP256
                 },
         );
     }
@@ -515,8 +512,8 @@ Ve0k2ddxoEsSE15H4lgNHM2iuYKzIqZJOReHRCTff6QGgMYPDqDfFfL1Hc1Ntql0pwAAAA
 
         assert!(
             parse_public_key_base64(key).unwrap().algorithm()
-                == key::Algorithm::Ecdsa {
-                    curve: key::EcdsaCurve::NistP384
+                == ssh_key::Algorithm::Ecdsa {
+                    curve: ssh_key::EcdsaCurve::NistP384
                 }
         );
     }
@@ -528,8 +525,8 @@ Ve0k2ddxoEsSE15H4lgNHM2iuYKzIqZJOReHRCTff6QGgMYPDqDfFfL1Hc1Ntql0pwAAAA
 
         assert!(
             parse_public_key_base64(key).unwrap().algorithm()
-                == key::Algorithm::Ecdsa {
-                    curve: key::EcdsaCurve::NistP521
+                == ssh_key::Algorithm::Ecdsa {
+                    curve: ssh_key::EcdsaCurve::NistP521
                 }
         );
     }
@@ -623,8 +620,8 @@ qa92U3p4fkJToKXku5eq/32OBj23YMtz76jO3yfMbtG3l1JWLowPA8tV
 ";
         assert!(
             decode_secret_key(key, None).unwrap().algorithm()
-                == key::Algorithm::Ecdsa {
-                    curve: key::EcdsaCurve::NistP256
+                == ssh_key::Algorithm::Ecdsa {
+                    curve: ssh_key::EcdsaCurve::NistP256
                 },
         );
         test_decode_encode_symmetry(key);
@@ -642,8 +639,8 @@ CI3WfCsQvVjoC7m8qRyxuvR3Rv8gGXR1coQciIoCurLnn9zOFvXCS2Y=
 ";
         assert!(
             decode_secret_key(key, None).unwrap().algorithm()
-                == key::Algorithm::Ecdsa {
-                    curve: key::EcdsaCurve::NistP384
+                == ssh_key::Algorithm::Ecdsa {
+                    curve: ssh_key::EcdsaCurve::NistP384
                 },
         );
         test_decode_encode_symmetry(key);
@@ -663,8 +660,8 @@ Ow==
 ";
         assert!(
             decode_secret_key(key, None).unwrap().algorithm()
-                == key::Algorithm::Ecdsa {
-                    curve: key::EcdsaCurve::NistP521
+                == ssh_key::Algorithm::Ecdsa {
+                    curve: ssh_key::EcdsaCurve::NistP521
                 },
         );
         test_decode_encode_symmetry(key);
@@ -682,7 +679,7 @@ ocyR
 -----END PRIVATE KEY-----
 ";
 
-        assert!(decode_secret_key(key, None)?.algorithm() == key::Algorithm::Ed25519,);
+        assert!(decode_secret_key(key, None)?.algorithm() == ssh_key::Algorithm::Ed25519,);
 
         let k = decode_secret_key(key, None)?;
         let inner = k.key_data().ed25519().unwrap();
@@ -845,7 +842,7 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
             117, 254, 51, 45, 93, 184, 80, 225, 158, 29, 76, 38, 69, 72, 71, 76, 50, 191, 210, 95,
             152, 175, 26, 207, 91, 7,
         ];
-        key::PublicKey::decode(&key).unwrap();
+        ssh_key::PublicKey::decode(&key).unwrap();
     }
 
     #[test]
@@ -856,7 +853,7 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
     }
 
     #[cfg(unix)]
-    async fn test_client_agent(key: key::KeyPair) -> Result<(), Box<dyn std::error::Error>> {
+    async fn test_client_agent(key: PrivateKey) -> Result<(), Box<dyn std::error::Error>> {
         env_logger::try_init().unwrap_or(());
         use std::process::Stdio;
 
@@ -886,13 +883,13 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
         let (a, b) = buf.split_at(len);
 
         match key.public_key().key_data() {
-            key::KeyData::Ed25519 { .. } => {
+            ssh_key::public::KeyData::Ed25519 { .. } => {
                 let sig = &b[b.len() - 64..];
-                let sig = key::Signature::new(key.algorithm(), sig)?;
+                let sig = ssh_key::Signature::new(key.algorithm(), sig)?;
                 use signature::Verifier;
                 assert!(Verifier::verify(public, a, &sig).is_ok());
             }
-            key::KeyData::Ecdsa { .. } => {}
+            ssh_key::public::KeyData::Ecdsa { .. } => {}
             _ => {}
         }
 
@@ -939,7 +936,7 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
         impl agent::server::Agent for X {
             fn confirm(
                 self,
-                _: std::sync::Arc<key::KeyPair>,
+                _: std::sync::Arc<PrivateKey>,
             ) -> Box<dyn Future<Output = (Self, bool)> + Send + Unpin> {
                 Box::new(futures::future::ready((self, true)))
             }
@@ -970,9 +967,9 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
             let len = buf.len();
             let buf = client.sign_request(&public, buf).await.unwrap();
             let (a, b) = buf.split_at(len);
-            if let key::KeyData::Ed25519 { .. } = public.key_data() {
+            if let ssh_key::public::KeyData::Ed25519 { .. } = public.key_data() {
                 let sig = &b[b.len() - 64..];
-                let sig = key::Signature::new(key.algorithm(), sig).unwrap();
+                let sig = ssh_key::Signature::new(key.algorithm(), sig).unwrap();
                 assert!(Verifier::verify(public, a, &sig).is_ok());
             }
         })

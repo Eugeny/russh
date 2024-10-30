@@ -12,12 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-pub use signature::Verifier;
 use ssh_encoding::Decode;
-pub use ssh_key::public::KeyData;
-pub use ssh_key::public::PublicKey;
-pub use ssh_key::Signature;
-pub use ssh_key::{Algorithm, Certificate, EcdsaCurve, HashAlg, PrivateKey as KeyPair};
+use ssh_key::public::KeyData;
+use ssh_key::PublicKey;
 
 use crate::encoding::Reader;
 use crate::Error;

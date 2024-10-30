@@ -45,8 +45,9 @@ use async_trait::async_trait;
 use futures::task::{Context, Poll};
 use futures::Future;
 use log::{debug, error, info, trace};
+use russh_keys::encoding::Encoding;
 use signature::Verifier;
-use ssh_key::{Certificate, Signature};
+use ssh_key::{Certificate, PrivateKey, PublicKey, Signature};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadHalf, WriteHalf};
 use tokio::pin;
 use tokio::sync::mpsc::{
@@ -56,9 +57,8 @@ use tokio::sync::{oneshot, Mutex};
 
 use crate::channels::{Channel, ChannelMsg, ChannelRef};
 use crate::cipher::{self, clear, CipherPair, OpeningKey};
-use crate::key::PubKey;
 use crate::keys::encoding::Reader;
-use crate::keys::key::{self, parse_public_key, PublicKey};
+use crate::keys::key::parse_public_key;
 use crate::session::{
     CommonSession, EncryptedState, Exchange, GlobalRequestResponse, Kex, KexDhDone, KexInit,
     NewKeys,
@@ -107,7 +107,7 @@ enum Reply {
     AuthFailure,
     ChannelOpenFailure,
     SignRequest {
-        key: key::PublicKey,
+        key: ssh_key::PublicKey,
         data: CryptoVec,
     },
     AuthInfoRequest {
@@ -350,7 +350,7 @@ impl<H: Handler> Handle<H> {
     pub async fn authenticate_publickey<U: Into<String>>(
         &mut self,
         user: U,
-        key: Arc<key::KeyPair>,
+        key: Arc<PrivateKey>,
     ) -> Result<bool, crate::Error> {
         let user = user.into();
         self.sender
@@ -367,7 +367,7 @@ impl<H: Handler> Handle<H> {
     pub async fn authenticate_openssh_cert<U: Into<String>>(
         &mut self,
         user: U,
-        key: Arc<key::KeyPair>,
+        key: Arc<PrivateKey>,
         cert: Certificate,
     ) -> Result<bool, crate::Error> {
         let user = user.into();
@@ -388,7 +388,7 @@ impl<H: Handler> Handle<H> {
     pub async fn authenticate_agent<U: Into<String>, S: auth::Signer>(
         &mut self,
         user: U,
-        key: key::PublicKey,
+        key: ssh_key::PublicKey,
         signer: &mut S,
     ) -> Result<bool, S::Error> {
         let user = user.into();
@@ -1072,7 +1072,7 @@ impl Session {
     fn handle_msg(&mut self, msg: Msg) -> Result<(), crate::Error> {
         match msg {
             Msg::Authenticate { user, method } => {
-                self.write_auth_request_if_needed(&user, method);
+                self.write_auth_request_if_needed(&user, method)?;
             }
             Msg::Signed { .. } => {}
             Msg::AuthInfoResponse { .. } => {}
@@ -1325,7 +1325,7 @@ impl KexDhDone {
                 debug!("kexdhdone.exchange = {:?}", self.exchange);
 
                 let mut pubkey_vec = CryptoVec::new();
-                pubkey.push_to(&mut pubkey_vec);
+                pubkey_vec.extend_ssh_string(&pubkey.to_bytes().map_err(crate::Error::from)?);
 
                 let hash =
                     self.kex
@@ -1341,9 +1341,9 @@ impl KexDhDone {
                 debug!("signature: {:?}", signature);
                 let signature = Signature::new(pubkey.algorithm(), signature).map_err(|e| {
                     debug!("signature ctor failed: {e:?}");
-                    crate::Error::WrongServerSig.into()
+                    crate::Error::WrongServerSig
                 })?;
-                if !Verifier::verify(&pubkey, hash.as_ref(), &signature).is_ok() {
+                if Verifier::verify(&pubkey, hash.as_ref(), &signature).is_err() {
                     debug!("wrong server sig");
                     return Err(crate::Error::WrongServerSig.into());
                 }
@@ -1542,7 +1542,7 @@ pub trait Handler: Sized + Send {
     #[allow(unused_variables)]
     async fn check_server_key(
         &mut self,
-        server_public_key: &key::PublicKey,
+        server_public_key: &ssh_key::PublicKey,
     ) -> Result<bool, Self::Error> {
         Ok(false)
     }

@@ -8,6 +8,7 @@ use byteorder::{BigEndian, ByteOrder};
 use futures::future::Future;
 use futures::stream::{Stream, StreamExt};
 use russh_cryptovec::CryptoVec;
+use ssh_key::PrivateKey;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::time::sleep;
 use {std, tokio};
@@ -15,11 +16,11 @@ use {std, tokio};
 use super::{msg, Constraint};
 use crate::encoding::{Encoding, Position, Reader};
 use crate::helpers::EncodedExt;
-use crate::{add_signature, key, Error};
+use crate::{add_signature, Error};
 
 #[derive(Clone)]
 #[allow(clippy::type_complexity)]
-struct KeyStore(Arc<RwLock<HashMap<Vec<u8>, (Arc<key::KeyPair>, SystemTime, Vec<Constraint>)>>>);
+struct KeyStore(Arc<RwLock<HashMap<Vec<u8>, (Arc<PrivateKey>, SystemTime, Vec<Constraint>)>>>);
 
 #[derive(Clone)]
 struct Lock(Arc<RwLock<CryptoVec>>);
@@ -45,7 +46,7 @@ pub enum MessageType {
 pub trait Agent: Clone + Send + 'static {
     fn confirm(
         self,
-        _pk: Arc<key::KeyPair>,
+        _pk: Arc<PrivateKey>,
     ) -> Box<dyn Future<Output = (Self, bool)> + Unpin + Send> {
         Box::new(futures::future::ready((self, true)))
     }
@@ -81,10 +82,7 @@ where
 }
 
 impl Agent for () {
-    fn confirm(
-        self,
-        _: Arc<key::KeyPair>,
-    ) -> Box<dyn Future<Output = (Self, bool)> + Unpin + Send> {
+    fn confirm(self, _: Arc<PrivateKey>) -> Box<dyn Future<Output = (Self, bool)> + Unpin + Send> {
         Box::new(futures::future::ready((self, true)))
     }
 }
@@ -329,7 +327,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
         writebuf.push(msg::SIGN_RESPONSE);
         let data = r.read_string()?;
 
-        add_signature(&*key, &data, writebuf)?;
+        add_signature(&*key, data, writebuf)?;
 
         let len = writebuf.len();
         BigEndian::write_u32(writebuf, (len - 4) as u32);

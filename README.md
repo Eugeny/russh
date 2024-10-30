@@ -62,7 +62,6 @@ This is a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Éti
 * OpenSSH keepalive request handling ✨
 * OpenSSH agent forwarding channels ✨
 * OpenSSH `server-sig-algs` extension ✨
-* `openssl` dependency is optional ✨
 
 ## Safety
 

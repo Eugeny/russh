@@ -15,7 +15,7 @@ async fn main() -> anyhow::Result<()> {
     config.auth_rejection_time = std::time::Duration::from_secs(3);
     config
         .keys
-        .push(russh_keys::key::KeyPair::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap());
+        .push(russh_keys::PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap());
     let config = Arc::new(config);
     let mut sh = Server {
         clients: Arc::new(Mutex::new(HashMap::new())),
@@ -75,7 +75,7 @@ impl server::Handler for Server {
         Ok(())
     }
 
-    async fn auth_publickey(&mut self, _: &str, _: &key::PublicKey) -> Result<Auth, Self::Error> {
+    async fn auth_publickey(&mut self, _: &str, _: &ssh_key::PublicKey) -> Result<Auth, Self::Error> {
         Ok(server::Auth::Accept)
     }
     async fn data(

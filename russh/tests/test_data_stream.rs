@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 use rand::RngCore;
 use rand_core::OsRng;
-use russh::keys::key;
 use russh::server::{self, Auth, Msg, Server as _, Session};
 use russh::{client, Channel};
 use ssh_key::PrivateKey;
@@ -108,7 +107,11 @@ impl russh::server::Server for Server {
 impl russh::server::Handler for Server {
     type Error = anyhow::Error;
 
-    async fn auth_publickey(&mut self, _: &str, _: &key::PublicKey) -> Result<Auth, Self::Error> {
+    async fn auth_publickey(
+        &mut self,
+        _: &str,
+        _: &ssh_key::PublicKey,
+    ) -> Result<Auth, Self::Error> {
         Ok(Auth::Accept)
     }
 
@@ -138,7 +141,7 @@ struct Client;
 impl russh::client::Handler for Client {
     type Error = anyhow::Error;
 
-    async fn check_server_key(&mut self, _: &key::PublicKey) -> Result<bool, Self::Error> {
+    async fn check_server_key(&mut self, _: &ssh_key::PublicKey) -> Result<bool, Self::Error> {
         Ok(true)
     }
 }

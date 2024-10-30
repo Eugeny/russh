@@ -17,12 +17,11 @@ use std::str::from_utf8;
 
 use log::debug;
 use rand::RngCore;
-use ssh_key::{Algorithm, Certificate, EcdsaCurve, HashAlg};
+use ssh_key::{Algorithm, Certificate, EcdsaCurve, HashAlg, PrivateKey, PublicKey};
 
 use crate::cipher::CIPHERS;
 use crate::kex::{EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT, EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER};
 use crate::keys::encoding::{Encoding, Reader};
-use crate::keys::key::{KeyPair, PublicKey};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::server::Config;
 use crate::{cipher, compression, kex, mac, msg, AlgorithmKind, CryptoVec, Error};
@@ -30,7 +29,7 @@ use crate::{cipher, compression, kex, mac, msg, AlgorithmKind, CryptoVec, Error}
 #[cfg(target_arch = "wasm32")]
 /// WASM-only stub
 pub struct Config {
-    keys: Vec<KeyPair>,
+    keys: Vec<PrivateKey>,
 }
 
 #[derive(Debug, Clone)]
@@ -64,7 +63,7 @@ pub struct Preferred {
 impl Preferred {
     pub(crate) fn possible_host_key_algos_for_keys(
         &self,
-        available_host_keys: &[KeyPair],
+        available_host_keys: &[PrivateKey],
     ) -> Vec<Algorithm> {
         self.key
             .iter()
@@ -170,7 +169,7 @@ impl<'a> Named<'a> for PublicKey {
     }
 }
 
-impl<'a> Named<'a> for KeyPair {
+impl<'a> Named<'a> for PrivateKey {
     fn name(&'a self) -> impl AsRef<str> + 'a {
         self.algorithm()
     }
@@ -201,7 +200,7 @@ pub(crate) trait Select {
     fn read_kex(
         buffer: &[u8],
         pref: &Preferred,
-        available_host_keys: Option<&[KeyPair]>,
+        available_host_keys: Option<&[PrivateKey]>,
     ) -> Result<Names, Error> {
         let mut r = buffer.reader(17);
 

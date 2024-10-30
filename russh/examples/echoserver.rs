@@ -2,11 +2,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use key::Certificate;
 use rand_core::OsRng;
 use russh::keys::*;
 use russh::server::{Msg, Server as _, Session};
 use russh::*;
+use russh_keys::Certificate;
 use tokio::sync::Mutex;
 
 #[tokio::main]
@@ -19,7 +19,7 @@ async fn main() {
         inactivity_timeout: Some(std::time::Duration::from_secs(3600)),
         auth_rejection_time: std::time::Duration::from_secs(3),
         auth_rejection_time_initial: Some(std::time::Duration::from_secs(0)),
-        keys: vec![russh_keys::key::KeyPair::random(&mut OsRng, key::Algorithm::Ed25519).unwrap()],
+        keys: vec![russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519).unwrap()],
         preferred: Preferred {
             // key: Cow::Borrowed(&[CERT_ECDSA_SHA2_P256]),
             ..Preferred::default()
@@ -82,7 +82,7 @@ impl server::Handler for Server {
     async fn auth_publickey(
         &mut self,
         _: &str,
-        _key: &key::PublicKey,
+        _key: &ssh_key::PublicKey,
     ) -> Result<server::Auth, Self::Error> {
         Ok(server::Auth::Reject {
             proceed_with_methods: None,

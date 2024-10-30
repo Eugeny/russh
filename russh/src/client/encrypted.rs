@@ -19,8 +19,8 @@ use std::num::Wrapping;
 use log::{debug, error, info, trace, warn};
 use russh_keys::add_self_signature;
 
+use crate::cert::PublicKeyOrCertificate;
 use crate::client::{Handler, Msg, Prompt, Reply, Session};
-use crate::key::PubKey;
 use crate::keys::encoding::{Encoding, Reader};
 use crate::keys::key::parse_public_key;
 use crate::negotiation::{Named, Select};
@@ -202,7 +202,7 @@ impl Session {
                                 };
                                 let len = enc.write.len();
                                 #[allow(clippy::indexing_slicing)] // length checked
-                                if enc.write_auth_request(&self.common.auth_user, meth) {
+                                if enc.write_auth_request(&self.common.auth_user, meth)? {
                                     debug!("enc: {:?}", &enc.write[len..]);
                                     enc.state = EncryptedState::WaitingAuthRequest(auth_request)
                                 }
@@ -344,9 +344,9 @@ impl Session {
                                 self.common.buffer.clear();
                                 let i = enc.client_make_to_sign(
                                     &self.common.auth_user,
-                                    &key,
+                                    &PublicKeyOrCertificate::PublicKey(key.clone()),
                                     &mut self.common.buffer,
-                                );
+                                )?;
                                 let len = self.common.buffer.len();
                                 let buf =
                                     std::mem::replace(&mut self.common.buffer, CryptoVec::new());
@@ -924,7 +924,11 @@ impl Session {
         channel
     }
 
-    pub(crate) fn write_auth_request_if_needed(&mut self, user: &str, meth: auth::Method) -> bool {
+    pub(crate) fn write_auth_request_if_needed(
+        &mut self,
+        user: &str,
+        meth: auth::Method,
+    ) -> Result<bool, crate::Error> {
         let mut is_waiting = false;
         if let Some(ref mut enc) = self.common.encrypted {
             is_waiting = match enc.state {
@@ -951,20 +955,24 @@ impl Session {
                 is_waiting
             );
             if is_waiting {
-                enc.write_auth_request(user, &meth);
+                enc.write_auth_request(user, &meth)?;
             }
         }
         self.common.auth_user.clear();
         self.common.auth_user.push_str(user);
         self.common.auth_method = Some(meth);
-        is_waiting
+        Ok(is_waiting)
     }
 }
 
 impl Encrypted {
-    fn write_auth_request(&mut self, user: &str, auth_method: &auth::Method) -> bool {
+    fn write_auth_request(
+        &mut self,
+        user: &str,
+        auth_method: &auth::Method,
+    ) -> Result<bool, crate::Error> {
         // The server is waiting for our USERAUTH_REQUEST.
-        push_packet!(self.write, {
+        Ok(push_packet!(self.write, {
             self.write.push(msg::USERAUTH_REQUEST);
 
             match *auth_method {
@@ -991,7 +999,8 @@ impl Encrypted {
                     debug!("write_auth_request: key - {:?}", key.algorithm());
                     self.write
                         .extend_ssh_string(key.algorithm().as_str().as_bytes());
-                    key.push_to(&mut self.write);
+                    self.write
+                        .extend_ssh_string(key.public_key().to_bytes()?.as_slice());
                     true
                 }
                 auth::Method::OpenSshCertificate { ref cert, .. } => {
@@ -1003,7 +1012,7 @@ impl Encrypted {
                     debug!("write_auth_request: cert - {:?}", cert.algorithm());
                     self.write
                         .extend_ssh_string(cert.algorithm().to_certificate_type().as_bytes());
-                    cert.push_to(&mut self.write);
+                    self.write.extend_ssh_string(cert.to_bytes()?.as_slice());
                     true
                 }
                 auth::Method::FuturePublicKey { ref key, .. } => {
@@ -1014,7 +1023,8 @@ impl Encrypted {
 
                     self.write
                         .extend_ssh_string(key.algorithm().as_str().as_bytes());
-                    key.push_to(&mut self.write);
+
+                    self.write.extend_ssh_string(key.to_bytes()?.as_slice());
                     true
                 }
                 auth::Method::KeyboardInteractive { ref submethods } => {
@@ -1027,15 +1037,15 @@ impl Encrypted {
                     true
                 }
             }
-        })
+        }))
     }
 
-    fn client_make_to_sign<'a, Key: Named<'a> + PubKey>(
+    fn client_make_to_sign(
         &mut self,
         user: &str,
-        key: &'a Key,
+        key: &PublicKeyOrCertificate,
         buffer: &mut CryptoVec,
-    ) -> usize {
+    ) -> Result<usize, crate::Error> {
         buffer.clear();
         buffer.extend_ssh_string(self.session_id.as_ref());
 
@@ -1045,9 +1055,18 @@ impl Encrypted {
         buffer.extend_ssh_string(b"ssh-connection");
         buffer.extend_ssh_string(b"publickey");
         buffer.push(1);
-        buffer.extend_ssh_string(key.name().as_ref().as_bytes()); // TODO
-        key.push_to(buffer);
-        i0
+
+        match key {
+            PublicKeyOrCertificate::Certificate(cert) => {
+                buffer.extend_ssh_string(cert.name().as_ref().as_bytes());
+                buffer.extend_ssh_string(cert.to_bytes()?.as_slice());
+            }
+            PublicKeyOrCertificate::PublicKey(key) => {
+                buffer.extend_ssh_string(key.name().as_ref().as_bytes());
+                buffer.extend_ssh_string(key.to_bytes()?.as_slice());
+            }
+        }
+        Ok(i0)
     }
 
     fn client_send_signature(
@@ -1058,7 +1077,11 @@ impl Encrypted {
     ) -> Result<(), crate::Error> {
         match method {
             auth::Method::PublicKey { ref key, .. } => {
-                let i0 = self.client_make_to_sign(user, key.as_ref(), buffer);
+                let i0 = self.client_make_to_sign(
+                    user,
+                    &PublicKeyOrCertificate::PublicKey(key.public_key().clone()),
+                    buffer,
+                )?;
                 // Extend with self-signature.
 
                 add_self_signature(&**key, buffer)?;
@@ -1069,7 +1092,11 @@ impl Encrypted {
                 })
             }
             auth::Method::OpenSshCertificate { ref key, ref cert } => {
-                let i0 = self.client_make_to_sign(user, cert, buffer);
+                let i0 = self.client_make_to_sign(
+                    user,
+                    &PublicKeyOrCertificate::Certificate(cert.clone()),
+                    buffer,
+                )?;
                 // Extend with self-signature.
                 add_self_signature(&**key, buffer)?;
 

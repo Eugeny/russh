@@ -3,14 +3,13 @@ use core::str;
 use byteorder::{BigEndian, ByteOrder};
 use log::debug;
 use russh_cryptovec::CryptoVec;
-use ssh_key::{Algorithm, HashAlg, Signature};
+use ssh_key::{Algorithm, HashAlg, PrivateKey, PublicKey, Signature};
 use tokio;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use super::{msg, Constraint};
 use crate::encoding::{Encoding, Reader};
 use crate::helpers::EncodedExt;
-use crate::key::PublicKey;
 use crate::{key, Error};
 
 pub trait AgentStream: AsyncRead + AsyncWrite {}
@@ -144,7 +143,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
     /// constraints to apply when using the key to sign.
     pub async fn add_identity(
         &mut self,
-        key: &key::KeyPair,
+        key: &PrivateKey,
         constraints: &[Constraint],
     ) -> Result<(), Error> {
         // See IETF draft-miller-ssh-agent-13, section 3.2 for format.
@@ -284,7 +283,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
     /// Ask the agent to sign the supplied piece of data.
     pub async fn sign_request(
         &mut self,
-        public: &key::PublicKey,
+        public: &PublicKey,
         mut data: CryptoVec,
     ) -> Result<CryptoVec, Error> {
         debug!("sign_request: {:?}", data);
@@ -293,10 +292,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
         self.read_response().await?;
 
         if self.buf.first() == Some(&msg::SIGN_RESPONSE) {
-            let resp = self.write_signature(hash, &mut data);
-            if let Err(e) = resp {
-                return Err(e);
-            }
+            self.write_signature(hash, &mut data)?;
             Ok(data)
         } else if self.buf.first() == Some(&msg::FAILURE) {
             Err(Error::AgentFailure)
@@ -306,7 +302,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
         }
     }
 
-    fn prepare_sign_request(&mut self, public: &key::PublicKey, data: &[u8]) -> Result<u32, Error> {
+    fn prepare_sign_request(&mut self, public: &ssh_key::PublicKey, data: &[u8]) -> Result<u32, Error> {
         self.buf.clear();
         self.buf.resize(4);
         self.buf.push(msg::SIGN_REQUEST);
@@ -345,7 +341,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
     /// Ask the agent to sign the supplied piece of data.
     pub fn sign_request_base64(
         mut self,
-        public: &key::PublicKey,
+        public: &ssh_key::PublicKey,
         data: &[u8],
     ) -> impl futures::Future<Output = (Self, Result<String, Error>)> {
         debug!("sign_request: {:?}", data);
@@ -373,20 +369,13 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
     /// Ask the agent to sign the supplied piece of data, and return a `Signature`.
     pub async fn sign_request_signature(
         &mut self,
-        public: &key::PublicKey,
+        public: &ssh_key::PublicKey,
         data: &[u8],
     ) -> Result<Signature, Error> {
         debug!("sign_request: {:?}", data);
 
-        let r = self.prepare_sign_request(public, data);
-
-        if let Err(e) = r {
-            return Err(e);
-        }
-
-        if let Err(e) = self.read_response().await {
-            return Err(e);
-        }
+        self.prepare_sign_request(public, data)?;
+        self.read_response().await?;
 
         #[allow(clippy::indexing_slicing)] // length is checked
         if !self.buf.is_empty() && self.buf[0] == msg::SIGN_RESPONSE {
@@ -403,7 +392,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
     }
 
     /// Ask the agent to remove a key from its memory.
-    pub async fn remove_identity(&mut self, public: &key::PublicKey) -> Result<(), Error> {
+    pub async fn remove_identity(&mut self, public: &ssh_key::PublicKey) -> Result<(), Error> {
         self.buf.clear();
         self.buf.resize(4);
         self.buf.push(msg::REMOVE_IDENTITY);
@@ -468,7 +457,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
     }
 }
 
-fn key_blob(public: &key::PublicKey, buf: &mut CryptoVec) -> Result<(), Error> {
-    buf.extend_ssh_string(&public.key_data().encoded()?.as_slice());
+fn key_blob(public: &ssh_key::PublicKey, buf: &mut CryptoVec) -> Result<(), Error> {
+    buf.extend_ssh_string(public.key_data().encoded()?.as_slice());
     Ok(())
 }

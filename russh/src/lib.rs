@@ -115,7 +115,6 @@ mod cert;
 /// Re-export of the `russh-keys` crate.
 pub use russh_keys as keys;
 
-mod key;
 mod msg;
 mod negotiation;
 mod ssh_read;
@@ -295,10 +294,6 @@ pub enum Error {
 
     #[error(transparent)]
     Join(#[from] russh_util::runtime::JoinError),
-
-    #[error(transparent)]
-    #[cfg(feature = "openssl")]
-    Openssl(#[from] openssl::error::ErrorStack),
 
     #[error(transparent)]
     Elapsed(#[from] tokio::time::error::Elapsed),

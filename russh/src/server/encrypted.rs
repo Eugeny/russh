@@ -412,7 +412,7 @@ impl Encrypted {
         let pubkey_algo = r.read_string().map_err(crate::Error::from)?;
         let pubkey_key = r.read_string().map_err(crate::Error::from)?;
 
-        let key_or_cert = PublicKeyOrCertificate::decode(pubkey_algo, &pubkey_key);
+        let key_or_cert = PublicKeyOrCertificate::decode(pubkey_algo, pubkey_key);
 
         // Parse the public key or certificate
         match key_or_cert {
@@ -432,7 +432,7 @@ impl Encrypted {
                         }
 
                         // Verify the certificate’s signature
-                        if !cert.verify_signature().is_ok() {
+                        if cert.verify_signature().is_err() {
                             warn!("Certificate signature is invalid");
                             reject_auth_request(until, &mut self.write, auth_request).await;
                             return Ok(());
@@ -455,21 +455,18 @@ impl Encrypted {
 
                     let signature = r.read_string().map_err(crate::Error::from)?;
                     let mut s = signature.reader(0);
-                    let algo_ = s.read_string().map_err(crate::Error::from)?;
-                    // TODO TODO
-                    // if let Some(hash) = key::SignatureHash::from_rsa_hostkey_algo(algo_) {
-                    //     pubkey.set_algorithm(hash);
-                    // }
+                    let algo = s.read_string().map_err(crate::Error::from)?;
 
                     let sig = s.read_string().map_err(crate::Error::from)?;
                     #[allow(clippy::indexing_slicing)]
                     let sig = Signature::new(
-                        Algorithm::new(str::from_utf8(algo_).map_err(crate::Error::from)?)
+                        Algorithm::new(str::from_utf8(algo).map_err(crate::Error::from)?)
                             .map_err(crate::Error::from)?,
                         sig,
                     )
                     .map_err(crate::Error::from)?;
 
+                    #[allow(clippy::indexing_slicing)] // length checked
                     let init = &buf[0..pos0];
 
                     let is_valid = if sent_pk_ok && user == auth_user {
@@ -497,7 +494,7 @@ impl Encrypted {
                             debug!("signature verified");
                             let auth = match pk_or_cert {
                                 PublicKeyOrCertificate::PublicKey(ref pk) => {
-                                    handler.auth_publickey(user, &pk).await?
+                                    handler.auth_publickey(user, pk).await?
                                 }
                                 PublicKeyOrCertificate::Certificate(ref cert) => {
                                     handler.auth_openssh_certificate(user, cert).await?

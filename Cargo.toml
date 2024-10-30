@@ -23,7 +23,6 @@ digest = "0.10"
 futures = "0.3"
 hmac = "0.12"
 log = "0.4"
-openssl = { version = "0.10" }
 rand = "0.8"
 sha1 = { version = "0.10", features = ["oid"] }
 sha2 = { version = "0.10", features = ["oid"] }

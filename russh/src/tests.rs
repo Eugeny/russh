@@ -104,7 +104,7 @@ mod compress {
         async fn auth_publickey(
             &mut self,
             _: &str,
-            _: &russh_keys::key::PublicKey,
+            _: &russh_keys::ssh_key::PublicKey,
         ) -> Result<server::Auth, Self::Error> {
             debug!("auth_publickey");
             Ok(server::Auth::Accept)
@@ -129,7 +129,7 @@ mod compress {
 
         async fn check_server_key(
             &mut self,
-            _server_public_key: &russh_keys::key::PublicKey,
+            _server_public_key: &russh_keys::ssh_key::PublicKey,
         ) -> Result<bool, Self::Error> {
             // println!("check_server_key: {:?}", server_public_key);
             Ok(true)
@@ -223,7 +223,7 @@ mod channels {
 
             async fn check_server_key(
                 &mut self,
-                _server_public_key: &russh_keys::key::PublicKey,
+                _server_public_key: &russh_keys::ssh_key::PublicKey,
             ) -> Result<bool, Self::Error> {
                 Ok(true)
             }
@@ -259,7 +259,7 @@ mod channels {
             async fn auth_publickey(
                 &mut self,
                 _: &str,
-                _: &russh_keys::key::PublicKey,
+                _: &russh_keys::ssh_key::PublicKey,
             ) -> Result<server::Auth, Self::Error> {
                 Ok(server::Auth::Accept)
             }
@@ -305,7 +305,7 @@ mod channels {
 
             async fn check_server_key(
                 &mut self,
-                _server_public_key: &russh_keys::key::PublicKey,
+                _server_public_key: &russh_keys::ssh_key::PublicKey,
             ) -> Result<bool, Self::Error> {
                 Ok(true)
             }
@@ -332,7 +332,7 @@ mod channels {
             async fn auth_publickey(
                 &mut self,
                 _: &str,
-                _: &russh_keys::key::PublicKey,
+                _: &russh_keys::ssh_key::PublicKey,
             ) -> Result<server::Auth, Self::Error> {
                 Ok(server::Auth::Accept)
             }
@@ -401,7 +401,7 @@ mod channels {
 
             async fn check_server_key(
                 &mut self,
-                _server_public_key: &russh_keys::key::PublicKey,
+                _server_public_key: &russh_keys::ssh_key::PublicKey,
             ) -> Result<bool, Self::Error> {
                 Ok(true)
             }
@@ -418,7 +418,7 @@ mod channels {
             async fn auth_publickey(
                 &mut self,
                 _: &str,
-                _: &russh_keys::key::PublicKey,
+                _: &russh_keys::ssh_key::PublicKey,
             ) -> Result<server::Auth, Self::Error> {
                 Ok(server::Auth::Accept)
             }

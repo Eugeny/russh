@@ -17,11 +17,11 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bitflags::bitflags;
-use ssh_key::Certificate;
+use ssh_key::{Certificate, PrivateKey};
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite};
 
-use crate::keys::{encoding, key};
+use crate::keys::encoding;
 use crate::CryptoVec;
 
 bitflags! {
@@ -49,7 +49,11 @@ bitflags! {
 pub trait Signer: Sized {
     type Error: From<crate::SendError>;
 
-    async fn auth_publickey_sign(&mut self, key: &key::PublicKey, to_sign: CryptoVec) -> Result<CryptoVec, Self::Error>;
+    async fn auth_publickey_sign(
+        &mut self,
+        key: &ssh_key::PublicKey,
+        to_sign: CryptoVec,
+    ) -> Result<CryptoVec, Self::Error>;
 }
 
 #[derive(Debug, Error)]
@@ -66,7 +70,11 @@ impl<R: AsyncRead + AsyncWrite + Unpin + Send + 'static> Signer
 {
     type Error = AgentAuthError;
 
-    async fn auth_publickey_sign(&mut self, key: &key::PublicKey, to_sign: CryptoVec) -> Result<CryptoVec, Self::Error> {
+    async fn auth_publickey_sign(
+        &mut self,
+        key: &ssh_key::PublicKey,
+        to_sign: CryptoVec,
+    ) -> Result<CryptoVec, Self::Error> {
         self.sign_request(key, to_sign).await.map_err(Into::into)
     }
 }
@@ -78,14 +86,14 @@ pub enum Method {
         password: String,
     },
     PublicKey {
-        key: Arc<key::KeyPair>,
+        key: Arc<PrivateKey>,
     },
     OpenSshCertificate {
-        key: Arc<key::KeyPair>,
+        key: Arc<PrivateKey>,
         cert: Certificate,
     },
     FuturePublicKey {
-        key: key::PublicKey,
+        key: ssh_key::PublicKey,
     },
     KeyboardInteractive {
         submethods: String,

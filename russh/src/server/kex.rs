@@ -5,7 +5,6 @@ use log::debug;
 use super::*;
 use crate::cipher::SealingKey;
 use crate::kex::KEXES;
-use crate::key::PubKey;
 use crate::keys::encoding::{Encoding, Reader};
 use crate::negotiation::Select;
 use crate::{msg, negotiation};
@@ -113,7 +112,7 @@ impl KexDh {
                 debug!("server kexdhdone.exchange = {:?}", kexdhdone.exchange);
 
                 let mut pubkey_vec = CryptoVec::new();
-                config.keys[kexdhdone.key].push_to(&mut pubkey_vec);
+                pubkey_vec.extend_ssh_string(config.keys[kexdhdone.key].to_bytes()?.as_slice());
 
                 let hash = kexdhdone.kex.compute_exchange_hash(
                     &pubkey_vec,
@@ -123,7 +122,7 @@ impl KexDh {
                 debug!("exchange hash: {:?}", hash);
                 buffer.clear();
                 buffer.push(msg::KEX_ECDH_REPLY);
-                config.keys[kexdhdone.key].push_to(&mut buffer);
+                buffer.extend_ssh_string(config.keys[kexdhdone.key].to_bytes()?.as_slice());
                 // Server ephemeral
                 buffer.extend_ssh_string(&kexdhdone.exchange.server_ephemeral);
                 // Hash signature

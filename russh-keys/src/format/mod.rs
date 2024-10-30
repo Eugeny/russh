@@ -4,9 +4,10 @@ use std::io::Write;
 use data_encoding::{BASE64_MIME, HEXLOWER_PERMISSIVE};
 use pkcs1::DecodeRsaPrivateKey;
 use ssh_key::private::RsaKeypair;
+use ssh_key::PrivateKey;
 
 use super::is_base64_char;
-use crate::{key, Error};
+use crate::Error;
 
 pub mod openssh;
 
@@ -42,7 +43,7 @@ enum Format {
 
 /// Decode a secret key, possibly deciphering it with the supplied
 /// password.
-pub fn decode_secret_key(secret: &str, password: Option<&str>) -> Result<key::KeyPair, Error> {
+pub fn decode_secret_key(secret: &str, password: Option<&str>) -> Result<PrivateKey, Error> {
     let mut format = None;
     let secret = {
         let mut started = false;
@@ -85,7 +86,7 @@ pub fn decode_secret_key(secret: &str, password: Option<&str>) -> Result<key::Ke
     let secret = BASE64_MIME.decode(secret.as_bytes())?;
     match format {
         Some(Format::Openssh) => decode_openssh(&secret, password),
-        Some(Format::Rsa) => Ok(decode_rsa(&secret)?.into()),
+        Some(Format::Rsa) => Ok(decode_rsa_pkcs1_der(&secret)?.into()),
         Some(Format::Pkcs5Encrypted(enc)) => decode_pkcs5(&secret, password, enc),
         Some(Format::Pkcs8Encrypted) | Some(Format::Pkcs8) => {
             let result = self::pkcs8::decode_pkcs8(&secret, password.map(|x| x.as_bytes()));
@@ -105,7 +106,7 @@ pub fn decode_secret_key(secret: &str, password: Option<&str>) -> Result<key::Ke
     }
 }
 
-pub fn encode_pkcs8_pem<W: Write>(key: &key::KeyPair, mut w: W) -> Result<(), Error> {
+pub fn encode_pkcs8_pem<W: Write>(key: &PrivateKey, mut w: W) -> Result<(), Error> {
     let x = self::pkcs8::encode_pkcs8(key)?;
     w.write_all(b"-----BEGIN PRIVATE KEY-----\n")?;
     w.write_all(BASE64_MIME.encode(&x).as_bytes())?;
@@ -114,7 +115,7 @@ pub fn encode_pkcs8_pem<W: Write>(key: &key::KeyPair, mut w: W) -> Result<(), Er
 }
 
 pub fn encode_pkcs8_pem_encrypted<W: Write>(
-    key: &key::KeyPair,
+    key: &PrivateKey,
     pass: &[u8],
     rounds: u32,
     mut w: W,
@@ -126,6 +127,6 @@ pub fn encode_pkcs8_pem_encrypted<W: Write>(
     Ok(())
 }
 
-fn decode_rsa(secret: &[u8]) -> Result<RsaKeypair, Error> {
+fn decode_rsa_pkcs1_der(secret: &[u8]) -> Result<RsaKeypair, Error> {
     Ok(rsa::RsaPrivateKey::from_pkcs1_der(secret)?.try_into()?)
 }

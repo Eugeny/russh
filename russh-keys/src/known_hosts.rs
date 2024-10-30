@@ -8,10 +8,14 @@ use hmac::{Hmac, Mac};
 use log::debug;
 use sha1::Sha1;
 
-use crate::{key, Error};
+use crate::Error;
 
 /// Check whether the host is known, from its standard location.
-pub fn check_known_hosts(host: &str, port: u16, pubkey: &key::PublicKey) -> Result<bool, Error> {
+pub fn check_known_hosts(
+    host: &str,
+    port: u16,
+    pubkey: &ssh_key::PublicKey,
+) -> Result<bool, Error> {
     check_known_hosts_path(host, port, pubkey, known_hosts_path()?)
 }
 
@@ -19,7 +23,7 @@ pub fn check_known_hosts(host: &str, port: u16, pubkey: &key::PublicKey) -> Resu
 pub fn check_known_hosts_path<P: AsRef<Path>>(
     host: &str,
     port: u16,
-    pubkey: &key::PublicKey,
+    pubkey: &ssh_key::PublicKey,
     path: P,
 ) -> Result<bool, Error> {
     let check = known_host_keys_path(host, port, path)?
@@ -62,7 +66,7 @@ fn known_hosts_path() -> Result<PathBuf, Error> {
 }
 
 /// Get the server key that matches the one recorded in the user's known_hosts file.
-pub fn known_host_keys(host: &str, port: u16) -> Result<Vec<(usize, key::PublicKey)>, Error> {
+pub fn known_host_keys(host: &str, port: u16) -> Result<Vec<(usize, ssh_key::PublicKey)>, Error> {
     known_host_keys_path(host, port, known_hosts_path()?)
 }
 
@@ -71,7 +75,7 @@ pub fn known_host_keys_path<P: AsRef<Path>>(
     host: &str,
     port: u16,
     path: P,
-) -> Result<Vec<(usize, key::PublicKey)>, Error> {
+) -> Result<Vec<(usize, ssh_key::PublicKey)>, Error> {
     use crate::parse_public_key_base64;
 
     let mut f = if let Ok(f) = File::open(path) {
@@ -136,7 +140,7 @@ fn match_hostname(host: &str, pattern: &str) -> bool {
 }
 
 /// Record a host's public key into the user's known_hosts file.
-pub fn learn_known_hosts(host: &str, port: u16, pubkey: &key::PublicKey) -> Result<(), Error> {
+pub fn learn_known_hosts(host: &str, port: u16, pubkey: &ssh_key::PublicKey) -> Result<(), Error> {
     learn_known_hosts_path(host, port, pubkey, known_hosts_path()?)
 }
 
@@ -144,7 +148,7 @@ pub fn learn_known_hosts(host: &str, port: u16, pubkey: &key::PublicKey) -> Resu
 pub fn learn_known_hosts_path<P: AsRef<Path>>(
     host: &str,
     port: u16,
-    pubkey: &key::PublicKey,
+    pubkey: &ssh_key::PublicKey,
     path: P,
 ) -> Result<(), Error> {
     if let Some(parent) = path.as_ref().parent() {

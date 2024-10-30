@@ -5,8 +5,9 @@ use p384::NistP384;
 use p521::NistP521;
 use pkcs8::{AssociatedOid, EncodePrivateKey, PrivateKeyInfo, SecretDocument};
 use ssh_key::private::{EcdsaKeypair, Ed25519Keypair, Ed25519PrivateKey, KeypairData};
+use ssh_key::PrivateKey;
 
-use crate::{key, Error};
+use crate::Error;
 
 /// Decode a PKCS#8-encoded private key.
 pub fn decode_pkcs8(
@@ -23,7 +24,7 @@ pub fn decode_pkcs8(
     Ok(pkcs8_pki_into_keypair_data(doc.decode_msg::<PrivateKeyInfo>()?)?.try_into()?)
 }
 
-fn pkcs8_pki_into_keypair_data<'a>(pki: PrivateKeyInfo<'a>) -> Result<KeypairData, Error> {
+fn pkcs8_pki_into_keypair_data(pki: PrivateKeyInfo<'_>) -> Result<KeypairData, Error> {
     match pki.algorithm.oid {
         ed25519_dalek::pkcs8::ALGORITHM_OID => {
             let kpb = ed25519_dalek::pkcs8::KeypairBytes::try_from(pki)?;
@@ -87,7 +88,7 @@ fn pkcs8_pki_into_keypair_data<'a>(pki: PrivateKeyInfo<'a>) -> Result<KeypairDat
 pub fn encode_pkcs8_encrypted(
     pass: &[u8],
     rounds: u32,
-    key: &key::KeyPair,
+    key: &PrivateKey,
 ) -> Result<Vec<u8>, Error> {
     let pvi_bytes = encode_pkcs8(key)?;
     let pvi = PrivateKeyInfo::try_from(pvi_bytes.as_slice())?;
@@ -119,7 +120,7 @@ pub fn encode_pkcs8(key: &ssh_key::PrivateKey) -> Result<Vec<u8>, Error> {
             let sk = rsa::RsaPrivateKey::from_components(
                 rsa::BigUint::try_from(&pair.public.n)?,
                 rsa::BigUint::try_from(&pair.public.e)?,
-                rsa::BigUint::try_from(&pair.private.d )?,
+                rsa::BigUint::try_from(&pair.private.d)?,
                 vec![
                     rsa::BigUint::try_from(&pair.private.p)?,
                     rsa::BigUint::try_from(&pair.private.q)?,
@@ -129,15 +130,15 @@ pub fn encode_pkcs8(key: &ssh_key::PrivateKey) -> Result<Vec<u8>, Error> {
         }
         ssh_key::private::KeypairData::Ecdsa(ref pair) => match pair {
             EcdsaKeypair::NistP256 { private, .. } => {
-                let sk = p256::SecretKey::from_bytes(private.as_slice().try_into().unwrap())?;
+                let sk = p256::SecretKey::from_bytes(private.as_slice().into())?;
                 sk.to_pkcs8_der()?
             }
             EcdsaKeypair::NistP384 { private, .. } => {
-                let sk = p384::SecretKey::from_bytes(private.as_slice().try_into().unwrap())?;
+                let sk = p384::SecretKey::from_bytes(private.as_slice().into())?;
                 sk.to_pkcs8_der()?
             }
             EcdsaKeypair::NistP521 { private, .. } => {
-                let sk = p521::SecretKey::from_bytes(private.as_slice().try_into().unwrap())?;
+                let sk = p521::SecretKey::from_bytes(private.as_slice().into())?;
                 sk.to_pkcs8_der()?
             }
         },

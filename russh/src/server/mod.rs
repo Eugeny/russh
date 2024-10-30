@@ -39,13 +39,12 @@ use async_trait::async_trait;
 use futures::future::Future;
 use log::{debug, error};
 use russh_util::runtime::JoinHandle;
-use ssh_key::Certificate;
+use ssh_key::{Certificate, PrivateKey};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, ToSocketAddrs};
 use tokio::pin;
 
 use crate::cipher::{clear, CipherPair, OpeningKey};
-use crate::keys::key;
 use crate::session::*;
 use crate::ssh_read::*;
 use crate::sshbuffer::*;
@@ -72,7 +71,7 @@ pub struct Config {
     /// OpenSSH clients will send an initial "none" auth to probe for authentication methods.
     pub auth_rejection_time_initial: Option<std::time::Duration>,
     /// The server's keys. The first key pair in the client's preference order will be chosen.
-    pub keys: Vec<key::KeyPair>,
+    pub keys: Vec<PrivateKey>,
     /// The bytes and time limits before key re-exchange.
     pub limits: Limits,
     /// The initial size of a channel (used for flow control).
@@ -207,7 +206,7 @@ pub trait Handler: Sized {
     async fn auth_publickey_offered(
         &mut self,
         user: &str,
-        public_key: &key::PublicKey,
+        public_key: &ssh_key::PublicKey,
     ) -> Result<Auth, Self::Error> {
         Ok(Auth::Accept)
     }
@@ -222,7 +221,7 @@ pub trait Handler: Sized {
     async fn auth_publickey(
         &mut self,
         user: &str,
-        public_key: &key::PublicKey,
+        public_key: &ssh_key::PublicKey,
     ) -> Result<Auth, Self::Error> {
         Ok(Auth::Reject {
             proceed_with_methods: None,
