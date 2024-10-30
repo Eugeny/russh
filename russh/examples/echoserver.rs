@@ -19,7 +19,9 @@ async fn main() {
         inactivity_timeout: Some(std::time::Duration::from_secs(3600)),
         auth_rejection_time: std::time::Duration::from_secs(3),
         auth_rejection_time_initial: Some(std::time::Duration::from_secs(0)),
-        keys: vec![russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519).unwrap()],
+        keys: vec![
+            russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519).unwrap(),
+        ],
         preferred: Preferred {
             // key: Cow::Borrowed(&[CERT_ECDSA_SHA2_P256]),
             ..Preferred::default()

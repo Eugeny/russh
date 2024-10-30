@@ -84,7 +84,6 @@ pub mod key;
 mod format;
 mod helpers;
 pub use format::*;
-
 pub use ssh_key::{self, Algorithm, Certificate, EcdsaCurve, HashAlg, PrivateKey, PublicKey};
 
 /// OpenSSH agent protocol implementation
@@ -306,11 +305,11 @@ pub fn add_self_signature<S: Signer<Signature>>(
 #[cfg(test)]
 mod test {
 
-    use crate::key::PublicKeyExt;
     #[cfg(unix)]
     use futures::Future;
 
     use super::*;
+    use crate::key::PublicKeyExt;
 
     const ED25519_KEY: &str = "-----BEGIN OPENSSH PRIVATE KEY-----
 b3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jYmMAAAAGYmNyeXB0AAAAGAAAABDLGyfA39

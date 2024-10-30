@@ -302,7 +302,11 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
         }
     }
 
-    fn prepare_sign_request(&mut self, public: &ssh_key::PublicKey, data: &[u8]) -> Result<u32, Error> {
+    fn prepare_sign_request(
+        &mut self,
+        public: &ssh_key::PublicKey,
+        data: &[u8],
+    ) -> Result<u32, Error> {
         self.buf.clear();
         self.buf.resize(4);
         self.buf.push(msg::SIGN_REQUEST);

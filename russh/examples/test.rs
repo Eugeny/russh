@@ -75,7 +75,11 @@ impl server::Handler for Server {
         Ok(())
     }
 
-    async fn auth_publickey(&mut self, _: &str, _: &ssh_key::PublicKey) -> Result<Auth, Self::Error> {
+    async fn auth_publickey(
+        &mut self,
+        _: &str,
+        _: &ssh_key::PublicKey,
+    ) -> Result<Auth, Self::Error> {
         Ok(server::Auth::Accept)
     }
     async fn data(

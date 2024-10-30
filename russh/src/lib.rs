@@ -102,6 +102,7 @@ mod tests;
 
 mod auth;
 
+mod cert;
 /// Cipher names
 pub mod cipher;
 /// Compression algorithm names
@@ -110,7 +111,6 @@ pub mod compression;
 pub mod kex;
 /// MAC algorithm names
 pub mod mac;
-mod cert;
 
 /// Re-export of the `russh-keys` crate.
 pub use russh_keys as keys;
