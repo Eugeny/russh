@@ -160,6 +160,7 @@ impl Named for PublicKey {
             PublicKey::Ed25519(_) => ED25519.0,
             PublicKey::RSA { ref hash, .. } => hash.name().0,
             PublicKey::EC { ref key } => key.algorithm(),
+            PublicKey::Certificate(ref cert_data) => cert_data.pubkey.name(),
         }
     }
 }

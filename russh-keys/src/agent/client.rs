@@ -550,6 +550,9 @@ fn key_blob(public: &key::PublicKey, buf: &mut CryptoVec) -> Result<(), Error> {
         PublicKey::EC { .. } => {
             buf.extend_ssh_string(&public.public_key_bytes());
         }
+        PublicKey::Certificate(ref cert_data) => {
+            key_blob(&cert_data.pubkey, buf)?;
+        }
     }
     Ok(())
 }

@@ -261,6 +261,12 @@ impl<'a> Position<'a> {
             Err(Error::IndexOutOfBounds)
         }
     }
+    /// Read a `u64` from this reader by combining two `u32` values.
+    pub fn read_u64(&mut self) -> Result<u64, Error> {
+        let high = self.read_u32()? as u64;
+        let low = self.read_u32()? as u64;
+        Ok((high << 32) | low)
+    }
     /// Read one byte from this reader.
     pub fn read_byte(&mut self) -> Result<u8, Error> {
         if self.position < self.s.len() {

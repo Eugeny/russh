@@ -39,6 +39,9 @@ impl PubKey for PublicKey {
             PublicKey::EC { ref key } => {
                 write_ec_public_key(buffer, key);
             }
+            PublicKey::Certificate(ref cert_data) => {
+                cert_data.pubkey.push_to(buffer);
+            }
         }
     }
 }

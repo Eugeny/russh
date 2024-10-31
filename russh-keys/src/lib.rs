@@ -134,6 +134,8 @@ pub enum Error {
     /// Index out of bounds
     #[error("Index out of bounds")]
     IndexOutOfBounds,
+    #[error("UTF-8 conversion error: {0}")]
+    Utf8Error(#[from] std::string::FromUtf8Error),
     /// Unknown signature type
     #[error("Unknown signature type: {}", sig_type)]
     UnknownSignatureType { sig_type: String },
@@ -278,6 +280,9 @@ impl PublicKeyBase64 for key::PublicKey {
             }
             key::PublicKey::EC { ref key } => {
                 write_ec_public_key(&mut s, key);
+            }
+            key::PublicKey::Certificate(ref cert_data) => {
+                s.extend(cert_data.pubkey.public_key_bytes());
             }
         }
         s
