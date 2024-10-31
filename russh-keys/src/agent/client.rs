@@ -1,15 +1,16 @@
-use std::convert::TryFrom;
+use core::str;
 
 use byteorder::{BigEndian, ByteOrder};
 use log::debug;
 use russh_cryptovec::CryptoVec;
+use ssh_key::{Algorithm, HashAlg, PrivateKey, PublicKey, Signature};
 use tokio;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use super::{msg, Constraint};
 use crate::encoding::{Encoding, Reader};
-use crate::key::{PublicKey, SignatureHash};
-use crate::{key, protocol, Error, PublicKeyBase64};
+use crate::helpers::EncodedExt;
+use crate::{key, Error};
 
 pub trait AgentStream: AsyncRead + AsyncWrite {}
 
@@ -142,7 +143,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
     /// constraints to apply when using the key to sign.
     pub async fn add_identity(
         &mut self,
-        key: &key::KeyPair,
+        key: &PrivateKey,
         constraints: &[Constraint],
     ) -> Result<(), Error> {
         // See IETF draft-miller-ssh-agent-13, section 3.2 for format.
@@ -154,30 +155,10 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
         } else {
             self.buf.push(msg::ADD_ID_CONSTRAINED)
         }
-        match *key {
-            key::KeyPair::Ed25519(ref pair) => {
-                self.buf.extend_ssh_string(b"ssh-ed25519");
-                self.buf.extend_ssh_string(pair.verifying_key().as_bytes());
-                self.buf.push_u32_be(64);
-                self.buf.extend(pair.to_bytes().as_slice());
-                self.buf.extend(pair.verifying_key().as_bytes());
-                self.buf.extend_ssh_string(b"");
-            }
-            #[allow(clippy::unwrap_used)] // key is known to be private
-            key::KeyPair::RSA { ref key, .. } => {
-                self.buf.extend_ssh_string(b"ssh-rsa");
-                self.buf
-                    .extend_ssh(&protocol::RsaPrivateKey::try_from(key)?);
-            }
-            key::KeyPair::EC { ref key } => {
-                self.buf.extend_ssh_string(key.algorithm().as_bytes());
-                self.buf.extend_ssh_string(key.ident().as_bytes());
-                self.buf
-                    .extend_ssh_string(&key.to_public_key().to_sec1_bytes());
-                self.buf.extend_ssh_mpint(&key.to_secret_bytes());
-                self.buf.extend_ssh_string(b""); // comment
-            }
-        }
+
+        self.buf.extend(key.key_data().encoded()?.as_slice());
+        self.buf.extend_ssh_string(&[]); // comment field
+
         if !constraints.is_empty() {
             for cons in constraints {
                 match *cons {
@@ -292,10 +273,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
             for _ in 0..n {
                 let key_blob = r.read_string()?;
                 let _comment = r.read_string()?;
-                keys.push(key::parse_public_key(
-                    key_blob,
-                    Some(SignatureHash::SHA2_512),
-                )?);
+                keys.push(key::parse_public_key(key_blob)?);
             }
         }
 
@@ -303,55 +281,46 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
     }
 
     /// Ask the agent to sign the supplied piece of data.
-    pub fn sign_request(
-        mut self,
-        public: &key::PublicKey,
+    pub async fn sign_request(
+        &mut self,
+        public: &PublicKey,
         mut data: CryptoVec,
-    ) -> impl futures::Future<Output = (Self, Result<CryptoVec, Error>)> {
+    ) -> Result<CryptoVec, Error> {
         debug!("sign_request: {:?}", data);
-        let hash = self.prepare_sign_request(public, &data);
+        let hash = self.prepare_sign_request(public, &data)?;
 
-        async move {
-            if let Err(e) = hash {
-                return (self, Err(e));
-            }
+        self.read_response().await?;
 
-            let resp = self.read_response().await;
-            debug!("resp = {:?}", &self.buf[..]);
-            if let Err(e) = resp {
-                return (self, Err(e));
-            }
-
-            #[allow(clippy::indexing_slicing, clippy::unwrap_used)]
-            // length is checked, hash already checked
-            if !self.buf.is_empty() && self.buf[0] == msg::SIGN_RESPONSE {
-                let resp = self.write_signature(hash.unwrap(), &mut data);
-                if let Err(e) = resp {
-                    return (self, Err(e));
-                }
-                (self, Ok(data))
-            } else if self.buf.first() == Some(&msg::FAILURE) {
-                (self, Err(Error::AgentFailure))
-            } else {
-                debug!("self.buf = {:?}", &self.buf[..]);
-                (self, Ok(data))
-            }
+        if self.buf.first() == Some(&msg::SIGN_RESPONSE) {
+            self.write_signature(hash, &mut data)?;
+            Ok(data)
+        } else if self.buf.first() == Some(&msg::FAILURE) {
+            Err(Error::AgentFailure)
+        } else {
+            debug!("self.buf = {:?}", &self.buf[..]);
+            Ok(data)
         }
     }
 
-    fn prepare_sign_request(&mut self, public: &key::PublicKey, data: &[u8]) -> Result<u32, Error> {
+    fn prepare_sign_request(
+        &mut self,
+        public: &ssh_key::PublicKey,
+        data: &[u8],
+    ) -> Result<u32, Error> {
         self.buf.clear();
         self.buf.resize(4);
         self.buf.push(msg::SIGN_REQUEST);
         key_blob(public, &mut self.buf)?;
         self.buf.extend_ssh_string(data);
         debug!("public = {:?}", public);
-        let hash = match public {
-            PublicKey::RSA { hash, .. } => match hash {
-                SignatureHash::SHA2_256 => 2,
-                SignatureHash::SHA2_512 => 4,
-                SignatureHash::SHA1 => 0,
-            },
+        let hash = match public.algorithm() {
+            Algorithm::Rsa {
+                hash: Some(HashAlg::Sha256),
+            } => 2,
+            Algorithm::Rsa {
+                hash: Some(HashAlg::Sha512),
+            } => 4,
+            Algorithm::Rsa { hash: None } => 0,
             _ => 0,
         };
         self.buf.push_u32_be(hash);
@@ -376,7 +345,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
     /// Ask the agent to sign the supplied piece of data.
     pub fn sign_request_base64(
         mut self,
-        public: &key::PublicKey,
+        public: &ssh_key::PublicKey,
         data: &[u8],
     ) -> impl futures::Future<Output = (Self, Result<String, Error>)> {
         debug!("sign_request: {:?}", data);
@@ -402,67 +371,32 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
     }
 
     /// Ask the agent to sign the supplied piece of data, and return a `Signature`.
-    pub fn sign_request_signature(
-        mut self,
-        public: &key::PublicKey,
+    pub async fn sign_request_signature(
+        &mut self,
+        public: &ssh_key::PublicKey,
         data: &[u8],
-    ) -> impl futures::Future<Output = (Self, Result<crate::signature::Signature, Error>)> {
+    ) -> Result<Signature, Error> {
         debug!("sign_request: {:?}", data);
 
-        let r = self.prepare_sign_request(public, data);
+        self.prepare_sign_request(public, data)?;
+        self.read_response().await?;
 
-        async move {
-            if let Err(e) = r {
-                return (self, Err(e));
-            }
-
-            if let Err(e) = self.read_response().await {
-                return (self, Err(e));
-            }
-
-            #[allow(clippy::indexing_slicing)] // length is checked
-            if !self.buf.is_empty() && self.buf[0] == msg::SIGN_RESPONSE {
-                let as_sig = |buf: &CryptoVec| -> Result<crate::signature::Signature, Error> {
-                    let mut r = buf.reader(1);
-                    let mut resp = r.read_string()?.reader(0);
-                    let typ = resp.read_string()?;
-                    let sig = resp.read_string()?;
-                    use crate::signature::Signature;
-                    match typ {
-                        b"ssh-rsa" => Ok(Signature::RSA {
-                            bytes: sig.to_vec(),
-                            hash: SignatureHash::SHA1,
-                        }),
-                        b"rsa-sha2-256" => Ok(Signature::RSA {
-                            bytes: sig.to_vec(),
-                            hash: SignatureHash::SHA2_256,
-                        }),
-                        b"rsa-sha2-512" => Ok(Signature::RSA {
-                            bytes: sig.to_vec(),
-                            hash: SignatureHash::SHA2_512,
-                        }),
-                        b"ssh-ed25519" => {
-                            let mut sig_bytes = [0; 64];
-                            sig_bytes.clone_from_slice(sig);
-                            Ok(Signature::Ed25519(crate::signature::SignatureBytes(
-                                sig_bytes,
-                            )))
-                        }
-                        _ => Err(Error::UnknownSignatureType {
-                            sig_type: std::str::from_utf8(typ).unwrap_or("").to_string(),
-                        }),
-                    }
-                };
-                let sig = as_sig(&self.buf);
-                (self, sig)
-            } else {
-                (self, Err(Error::AgentProtocolError))
-            }
+        #[allow(clippy::indexing_slicing)] // length is checked
+        if !self.buf.is_empty() && self.buf[0] == msg::SIGN_RESPONSE {
+            let mut r = self.buf.reader(1);
+            let mut resp = r.read_string()?.reader(0);
+            let typ = String::from_utf8(resp.read_string()?.into())?;
+            let sig = resp.read_string()?;
+            let algo = Algorithm::new(&typ)?;
+            let sig = Signature::new(algo, sig.to_vec())?;
+            Ok(sig)
+        } else {
+            Err(Error::AgentProtocolError)
         }
     }
 
     /// Ask the agent to remove a key from its memory.
-    pub async fn remove_identity(&mut self, public: &key::PublicKey) -> Result<(), Error> {
+    pub async fn remove_identity(&mut self, public: &ssh_key::PublicKey) -> Result<(), Error> {
         self.buf.clear();
         self.buf.resize(4);
         self.buf.push(msg::REMOVE_IDENTITY);
@@ -527,29 +461,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
     }
 }
 
-fn key_blob(public: &key::PublicKey, buf: &mut CryptoVec) -> Result<(), Error> {
-    match *public {
-        PublicKey::RSA { ref key, .. } => {
-            buf.extend(&[0, 0, 0, 0]);
-            let len0 = buf.len();
-            buf.extend_ssh_string(b"ssh-rsa");
-            buf.extend_ssh(&protocol::RsaPublicKey::from(key));
-            let len1 = buf.len();
-            #[allow(clippy::indexing_slicing)] // length is known
-            BigEndian::write_u32(&mut buf[5..], (len1 - len0) as u32);
-        }
-        PublicKey::Ed25519(ref p) => {
-            buf.extend(&[0, 0, 0, 0]);
-            let len0 = buf.len();
-            buf.extend_ssh_string(b"ssh-ed25519");
-            buf.extend_ssh_string(p.as_bytes());
-            let len1 = buf.len();
-            #[allow(clippy::indexing_slicing)] // length is known
-            BigEndian::write_u32(&mut buf[5..], (len1 - len0) as u32);
-        }
-        PublicKey::EC { .. } => {
-            buf.extend_ssh_string(&public.public_key_bytes());
-        }
-    }
+fn key_blob(public: &ssh_key::PublicKey, buf: &mut CryptoVec) -> Result<(), Error> {
+    buf.extend_ssh_string(public.key_data().encoded()?.as_slice());
     Ok(())
 }

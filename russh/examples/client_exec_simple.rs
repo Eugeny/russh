@@ -18,7 +18,7 @@ use tokio::net::ToSocketAddrs;
 #[tokio::main]
 async fn main() -> Result<()> {
     env_logger::builder()
-        .filter_level(log::LevelFilter::Info)
+        .filter_level(log::LevelFilter::Debug)
         .init();
 
     // CLI options are defined later in this file
@@ -62,7 +62,7 @@ impl client::Handler for Client {
 
     async fn check_server_key(
         &mut self,
-        _server_public_key: &key::PublicKey,
+        _server_public_key: &ssh_key::PublicKey,
     ) -> Result<bool, Self::Error> {
         Ok(true)
     }

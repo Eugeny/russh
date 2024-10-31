@@ -1,12 +1,14 @@
+use std::collections::HashMap;
+use std::net::SocketAddr;
+use std::sync::Arc;
+use std::time::Duration;
+
 use async_trait::async_trait;
 use log::{error, info, LevelFilter};
-use russh::{
-    server::{Auth, Msg, Server as _, Session},
-    Channel, ChannelId,
-};
-use russh_keys::key::KeyPair;
+use rand_core::OsRng;
+use russh::server::{Auth, Msg, Server as _, Session};
+use russh::{Channel, ChannelId};
 use russh_sftp::protocol::{File, FileAttributes, Handle, Name, Status, StatusCode, Version};
-use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::Duration};
 use tokio::sync::Mutex;
 
 #[derive(Clone)]
@@ -51,7 +53,7 @@ impl russh::server::Handler for SshSession {
     async fn auth_publickey(
         &mut self,
         user: &str,
-        public_key: &russh_keys::key::PublicKey,
+        public_key: &russh_keys::ssh_key::PublicKey,
     ) -> Result<Auth, Self::Error> {
         info!("credentials: {}, {:?}", user, public_key);
         Ok(Auth::Accept)
@@ -179,7 +181,9 @@ async fn main() {
     let config = russh::server::Config {
         auth_rejection_time: Duration::from_secs(3),
         auth_rejection_time_initial: Some(Duration::from_secs(0)),
-        keys: vec![KeyPair::generate_ed25519()],
+        keys: vec![
+            russh_keys::PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap(),
+        ],
         ..Default::default()
     };
 

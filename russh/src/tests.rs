@@ -10,6 +10,8 @@ mod compress {
 
     use async_trait::async_trait;
     use log::debug;
+    use rand_core::OsRng;
+    use ssh_key::PrivateKey;
 
     use super::server::{Server as _, Session};
     use super::*;
@@ -19,14 +21,14 @@ mod compress {
     async fn compress_local_test() {
         let _ = env_logger::try_init();
 
-        let client_key = russh_keys::key::KeyPair::generate_ed25519();
+        let client_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap();
         let mut config = server::Config::default();
         config.preferred = Preferred::COMPRESSED;
         config.inactivity_timeout = None; // Some(std::time::Duration::from_secs(3));
         config.auth_rejection_time = std::time::Duration::from_secs(3);
         config
             .keys
-            .push(russh_keys::key::KeyPair::generate_ed25519());
+            .push(PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap());
         let config = Arc::new(config);
         let mut sh = Server {
             clients: Arc::new(Mutex::new(HashMap::new())),
@@ -102,7 +104,7 @@ mod compress {
         async fn auth_publickey(
             &mut self,
             _: &str,
-            _: &russh_keys::key::PublicKey,
+            _: &russh_keys::ssh_key::PublicKey,
         ) -> Result<server::Auth, Self::Error> {
             debug!("auth_publickey");
             Ok(server::Auth::Accept)
@@ -127,7 +129,7 @@ mod compress {
 
         async fn check_server_key(
             &mut self,
-            _server_public_key: &russh_keys::key::PublicKey,
+            _server_public_key: &russh_keys::ssh_key::PublicKey,
         ) -> Result<bool, Self::Error> {
             // println!("check_server_key: {:?}", server_public_key);
             Ok(true)
@@ -137,7 +139,9 @@ mod compress {
 
 mod channels {
     use async_trait::async_trait;
+    use rand_core::OsRng;
     use server::Session;
+    use ssh_key::PrivateKey;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     use super::*;
@@ -162,13 +166,13 @@ mod channels {
 
         let _ = env_logger::try_init();
 
-        let client_key = russh_keys::key::KeyPair::generate_ed25519();
+        let client_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap();
         let mut config = server::Config::default();
         config.inactivity_timeout = None;
         config.auth_rejection_time = std::time::Duration::from_secs(3);
         config
             .keys
-            .push(russh_keys::key::KeyPair::generate_ed25519());
+            .push(PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap());
         let config = Arc::new(config);
         let socket = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = socket.local_addr().unwrap();
@@ -219,7 +223,7 @@ mod channels {
 
             async fn check_server_key(
                 &mut self,
-                _server_public_key: &russh_keys::key::PublicKey,
+                _server_public_key: &russh_keys::ssh_key::PublicKey,
             ) -> Result<bool, Self::Error> {
                 Ok(true)
             }
@@ -255,7 +259,7 @@ mod channels {
             async fn auth_publickey(
                 &mut self,
                 _: &str,
-                _: &russh_keys::key::PublicKey,
+                _: &russh_keys::ssh_key::PublicKey,
             ) -> Result<server::Auth, Self::Error> {
                 Ok(server::Auth::Accept)
             }
@@ -301,7 +305,7 @@ mod channels {
 
             async fn check_server_key(
                 &mut self,
-                _server_public_key: &russh_keys::key::PublicKey,
+                _server_public_key: &russh_keys::ssh_key::PublicKey,
             ) -> Result<bool, Self::Error> {
                 Ok(true)
             }
@@ -328,7 +332,7 @@ mod channels {
             async fn auth_publickey(
                 &mut self,
                 _: &str,
-                _: &russh_keys::key::PublicKey,
+                _: &russh_keys::ssh_key::PublicKey,
             ) -> Result<server::Auth, Self::Error> {
                 Ok(server::Auth::Accept)
             }
@@ -397,7 +401,7 @@ mod channels {
 
             async fn check_server_key(
                 &mut self,
-                _server_public_key: &russh_keys::key::PublicKey,
+                _server_public_key: &russh_keys::ssh_key::PublicKey,
             ) -> Result<bool, Self::Error> {
                 Ok(true)
             }
@@ -414,7 +418,7 @@ mod channels {
             async fn auth_publickey(
                 &mut self,
                 _: &str,
-                _: &russh_keys::key::PublicKey,
+                _: &russh_keys::ssh_key::PublicKey,
             ) -> Result<server::Auth, Self::Error> {
                 Ok(server::Auth::Accept)
             }

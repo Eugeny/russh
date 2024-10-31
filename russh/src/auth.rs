@@ -15,12 +15,13 @@
 
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use bitflags::bitflags;
-use ssh_key::Certificate;
+use ssh_key::{Certificate, PrivateKey};
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite};
 
-use crate::keys::{encoding, key};
+use crate::keys::encoding;
 use crate::CryptoVec;
 
 bitflags! {
@@ -44,11 +45,15 @@ bitflags! {
     }
 }
 
+#[async_trait]
 pub trait Signer: Sized {
     type Error: From<crate::SendError>;
-    type Future: futures::Future<Output = (Self, Result<CryptoVec, Self::Error>)> + Send;
 
-    fn auth_publickey_sign(self, key: &key::PublicKey, to_sign: CryptoVec) -> Self::Future;
+    async fn auth_publickey_sign(
+        &mut self,
+        key: &ssh_key::PublicKey,
+        to_sign: CryptoVec,
+    ) -> Result<CryptoVec, Self::Error>;
 }
 
 #[derive(Debug, Error)]
@@ -59,20 +64,18 @@ pub enum AgentAuthError {
     Key(#[from] russh_keys::Error),
 }
 
+#[async_trait]
 impl<R: AsyncRead + AsyncWrite + Unpin + Send + 'static> Signer
     for russh_keys::agent::client::AgentClient<R>
 {
     type Error = AgentAuthError;
-    #[allow(clippy::type_complexity)]
-    type Future = std::pin::Pin<
-        Box<dyn futures::Future<Output = (Self, Result<CryptoVec, Self::Error>)> + Send>,
-    >;
-    fn auth_publickey_sign(self, key: &key::PublicKey, to_sign: CryptoVec) -> Self::Future {
-        let fut = self.sign_request(key, to_sign);
-        futures::FutureExt::boxed(async move {
-            let (a, b) = fut.await;
-            (a, b.map_err(AgentAuthError::Key))
-        })
+
+    async fn auth_publickey_sign(
+        &mut self,
+        key: &ssh_key::PublicKey,
+        to_sign: CryptoVec,
+    ) -> Result<CryptoVec, Self::Error> {
+        self.sign_request(key, to_sign).await.map_err(Into::into)
     }
 }
 
@@ -83,14 +86,14 @@ pub enum Method {
         password: String,
     },
     PublicKey {
-        key: Arc<key::KeyPair>,
+        key: Arc<PrivateKey>,
     },
-    OpenSSHCertificate {
-        key: Arc<key::KeyPair>,
+    OpenSshCertificate {
+        key: Arc<PrivateKey>,
         cert: Certificate,
     },
     FuturePublicKey {
-        key: key::PublicKey,
+        key: ssh_key::PublicKey,
     },
     KeyboardInteractive {
         submethods: String,

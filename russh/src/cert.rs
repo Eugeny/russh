@@ -1,62 +1,48 @@
-use ssh_encoding::Encode;
-use ssh_key::{Algorithm, Certificate, EcdsaCurve};
+use core::str;
 
-use crate::key::PubKey;
-use crate::keys::encoding::Encoding;
-use crate::negotiation::Named;
-use crate::CryptoVec;
+use ssh_encoding::Decode;
+use ssh_key::public::KeyData;
+use ssh_key::{Algorithm, Certificate, HashAlg, PublicKey};
 
-/// OpenSSH certificate for DSA public key
-const CERT_DSA: &str = "ssh-dss-cert-v01@openssh.com";
+#[derive(Debug)]
+pub(crate) enum PublicKeyOrCertificate {
+    PublicKey(PublicKey),
+    Certificate(Certificate),
+}
 
-/// OpenSSH certificate for ECDSA (NIST P-256) public key
-const CERT_ECDSA_SHA2_P256: &str = "ecdsa-sha2-nistp256-cert-v01@openssh.com";
-
-/// OpenSSH certificate for ECDSA (NIST P-384) public key
-const CERT_ECDSA_SHA2_P384: &str = "ecdsa-sha2-nistp384-cert-v01@openssh.com";
-
-/// OpenSSH certificate for ECDSA (NIST P-521) public key
-const CERT_ECDSA_SHA2_P521: &str = "ecdsa-sha2-nistp521-cert-v01@openssh.com";
-
-/// OpenSSH certificate for Ed25519 public key
-const CERT_ED25519: &str = "ssh-ed25519-cert-v01@openssh.com";
-
-/// OpenSSH certificate with RSA public key
-const CERT_RSA: &str = "ssh-rsa-cert-v01@openssh.com";
-
-/// OpenSSH certificate for ECDSA (NIST P-256) U2F/FIDO security key
-const CERT_SK_ECDSA_SHA2_P256: &str = "sk-ecdsa-sha2-nistp256-cert-v01@openssh.com";
-
-/// OpenSSH certificate for Ed25519 U2F/FIDO security key
-const CERT_SK_SSH_ED25519: &str = "sk-ssh-ed25519-cert-v01@openssh.com";
-
-/// None
-const NONE: &str = "none";
-
-impl PubKey for Certificate {
-    fn push_to(&self, buffer: &mut CryptoVec) {
-        let mut cert_encoded = Vec::new();
-        let _ = self.encode(&mut cert_encoded);
-
-        buffer.extend_ssh_string(&cert_encoded);
+impl PublicKeyOrCertificate {
+    pub fn decode(pubkey_algo: &[u8], buf: &[u8]) -> Result<Self, ssh_key::Error> {
+        let mut reader = buf;
+        match Algorithm::new_certificate_ext(str::from_utf8(pubkey_algo)?) {
+            Ok(Algorithm::Other(_)) | Err(ssh_key::Error::Encoding(_)) => {
+                // Did not match a known cert algorithm
+                Ok(PublicKeyOrCertificate::PublicKey(
+                    KeyData::decode(&mut reader)?.into(),
+                ))
+            }
+            _ => Ok(PublicKeyOrCertificate::Certificate(Certificate::decode(
+                &mut reader,
+            )?)),
+        }
     }
 }
 
-impl Named for Certificate {
-    fn name(&self) -> &'static str {
-        match self.algorithm() {
-            Algorithm::Dsa => CERT_DSA,
-            Algorithm::Ecdsa { curve } => match curve {
-                EcdsaCurve::NistP256 => CERT_ECDSA_SHA2_P256,
-                EcdsaCurve::NistP384 => CERT_ECDSA_SHA2_P384,
-                EcdsaCurve::NistP521 => CERT_ECDSA_SHA2_P521,
-            },
-            Algorithm::Ed25519 => CERT_ED25519,
-            Algorithm::Rsa { .. } => CERT_RSA,
-            Algorithm::SkEcdsaSha2NistP256 => CERT_SK_ECDSA_SHA2_P256,
-            Algorithm::SkEd25519 => CERT_SK_SSH_ED25519,
-            Algorithm::Other(_) => NONE,
-            _ => NONE,
+trait AlgorithmExt {
+    fn new_certificate_ext(algo: &str) -> Result<Self, ssh_key::Error>
+    where
+        Self: Sized;
+}
+
+impl AlgorithmExt for Algorithm {
+    fn new_certificate_ext(algo: &str) -> Result<Self, ssh_key::Error> {
+        match algo {
+            "rsa-sha2-256-cert-v01@openssh.com" => Ok(Algorithm::Rsa {
+                hash: Some(HashAlg::Sha256),
+            }),
+            "rsa-sha2-512-cert-v01@openssh.com" => Ok(Algorithm::Rsa {
+                hash: Some(HashAlg::Sha512),
+            }),
+            x => Algorithm::new_certificate(x),
         }
     }
 }

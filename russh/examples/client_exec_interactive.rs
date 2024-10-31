@@ -71,7 +71,7 @@ impl client::Handler for Client {
 
     async fn check_server_key(
         &mut self,
-        _server_public_key: &key::PublicKey,
+        _server_public_key: &ssh_key::PublicKey,
     ) -> Result<bool, Self::Error> {
         Ok(true)
     }
