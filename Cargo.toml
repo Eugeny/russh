@@ -1,5 +1,12 @@
 [workspace]
-members = ["russh-keys", "russh", "russh-config", "cryptovec", "pageant", "russh-util"]
+members = [
+    "russh-keys",
+    "russh",
+    "russh-config",
+    "cryptovec",
+    "pageant",
+    "russh-util",
+]
 resolver = "2"
 
 [patch.crates-io]
@@ -16,12 +23,19 @@ digest = "0.10"
 futures = "0.3"
 hmac = "0.12"
 log = "0.4"
-openssl = { version = "0.10" }
 rand = "0.8"
 sha1 = { version = "0.10", features = ["oid"] }
 sha2 = { version = "0.10", features = ["oid"] }
+signature = "2.2"
 ssh-encoding = "0.2"
-ssh-key = { version = "0.6", features = ["ed25519", "rsa", "encryption"] }
+ssh-key = { version = "0.6", features = [
+    "ed25519",
+    "rsa",
+    "p256",
+    "p384",
+    "p521",
+    "encryption",
+] }
 thiserror = "1.0"
 tokio = { version = "1.17.0" }
 tokio-stream = { version = "0.1", features = ["net", "sync"] }

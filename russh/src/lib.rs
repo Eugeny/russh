@@ -102,6 +102,7 @@ mod tests;
 
 mod auth;
 
+mod cert;
 /// Cipher names
 pub mod cipher;
 /// Compression algorithm names
@@ -114,8 +115,6 @@ pub mod mac;
 /// Re-export of the `russh-keys` crate.
 pub use russh_keys as keys;
 
-mod cert;
-mod key;
 mod msg;
 mod negotiation;
 mod ssh_read;
@@ -297,10 +296,6 @@ pub enum Error {
     Join(#[from] russh_util::runtime::JoinError),
 
     #[error(transparent)]
-    #[cfg(feature = "openssl")]
-    Openssl(#[from] openssl::error::ErrorStack),
-
-    #[error(transparent)]
     Elapsed(#[from] tokio::time::error::Elapsed),
 
     #[error("Violation detected during strict key exchange, message {message_type} at seq no {sequence_number}")]
@@ -308,6 +303,12 @@ pub enum Error {
         message_type: u8,
         sequence_number: usize,
     },
+
+    #[error("SshKey: {0}")]
+    SshKey(#[from] ssh_key::Error),
+
+    #[error("SshEncoding: {0}")]
+    SshEncoding(#[from] ssh_encoding::Error),
 }
 
 pub(crate) fn strict_kex_violation(message_type: u8, sequence_number: usize) -> crate::Error {

@@ -1,11 +1,11 @@
 use std::cell::RefCell;
 
 use log::debug;
+use russh_keys::add_signature;
 
 use super::*;
 use crate::cipher::SealingKey;
 use crate::kex::KEXES;
-use crate::key::PubKey;
 use crate::keys::encoding::{Encoding, Reader};
 use crate::negotiation::Select;
 use crate::{msg, negotiation};
@@ -33,7 +33,7 @@ impl KexInit {
             }
             let mut key = 0;
             #[allow(clippy::indexing_slicing)] // length checked
-            while key < config.keys.len() && config.keys[key].name() != algo.key.as_ref() {
+            while key < config.keys.len() && config.keys[key].algorithm() != algo.key {
                 key += 1
             }
             let next_kex = if key < config.keys.len() {
@@ -111,7 +111,12 @@ impl KexDh {
                 debug!("server kexdhdone.exchange = {:?}", kexdhdone.exchange);
 
                 let mut pubkey_vec = CryptoVec::new();
-                config.keys[kexdhdone.key].push_to(&mut pubkey_vec);
+                pubkey_vec.extend_ssh_string(
+                    config.keys[kexdhdone.key]
+                        .public_key()
+                        .to_bytes()?
+                        .as_slice(),
+                );
 
                 let hash = kexdhdone.kex.compute_exchange_hash(
                     &pubkey_vec,
@@ -121,14 +126,21 @@ impl KexDh {
                 debug!("exchange hash: {:?}", hash);
                 buffer.clear();
                 buffer.push(msg::KEX_ECDH_REPLY);
-                config.keys[kexdhdone.key].push_to(&mut buffer);
+                buffer.extend_ssh_string(
+                    config.keys[kexdhdone.key]
+                        .public_key()
+                        .to_bytes()?
+                        .as_slice(),
+                );
                 // Server ephemeral
                 buffer.extend_ssh_string(&kexdhdone.exchange.server_ephemeral);
                 // Hash signature
                 debug!("signing with key {:?}", kexdhdone.key);
                 debug!("hash: {:?}", hash);
                 debug!("key: {:?}", config.keys[kexdhdone.key]);
-                config.keys[kexdhdone.key].add_signature(&mut buffer, &hash)?;
+
+                add_signature(&config.keys[kexdhdone.key], &hash, &mut buffer)?;
+
                 cipher.write(&buffer, write_buffer);
                 cipher.write(&[msg::NEWKEYS], write_buffer);
                 Ok(hash)
