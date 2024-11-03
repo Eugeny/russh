@@ -70,9 +70,8 @@ impl server::Handler for Server {
         &mut self,
         channel: ChannelId,
         session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        session.request_success();
-        Ok(())
+    ) -> Result<bool, Self::Error> {
+        Ok(true)
     }
 
     async fn auth_publickey(
@@ -82,6 +81,7 @@ impl server::Handler for Server {
     ) -> Result<Auth, Self::Error> {
         Ok(server::Auth::Accept)
     }
+
     async fn data(
         &mut self,
         _channel: ChannelId,

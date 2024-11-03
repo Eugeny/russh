@@ -414,8 +414,8 @@ pub trait Handler: Sized {
         pix_height: u32,
         modes: &[(Pty, u32)],
         session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
+    ) -> Result<bool, Self::Error> {
+        Ok(false)
     }
 
     /// The client requests an X11 connection.
@@ -428,8 +428,8 @@ pub trait Handler: Sized {
         x11_auth_cookie: &str,
         x11_screen_number: u32,
         session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
+    ) -> Result<bool, Self::Error> {
+        Ok(false)
     }
 
     /// The client wants to set the given environment variable. Check
@@ -442,8 +442,8 @@ pub trait Handler: Sized {
         variable_name: &str,
         variable_value: &str,
         session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
+    ) -> Result<bool, Self::Error> {
+        Ok(false)
     }
 
     /// The client requests a shell.
@@ -452,8 +452,8 @@ pub trait Handler: Sized {
         &mut self,
         channel: ChannelId,
         session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
+    ) -> Result<bool, Self::Error> {
+        Ok(false)
     }
 
     /// The client sends a command to execute, to be passed to a
@@ -464,8 +464,8 @@ pub trait Handler: Sized {
         channel: ChannelId,
         data: &[u8],
         session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
+    ) -> Result<bool, Self::Error> {
+        Ok(false)
     }
 
     /// The client asks to start the subsystem with the given name
@@ -476,8 +476,8 @@ pub trait Handler: Sized {
         channel: ChannelId,
         name: &str,
         session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
+    ) -> Result<bool, Self::Error> {
+        Ok(false)
     }
 
     /// The client's pseudo-terminal window size has changed.
