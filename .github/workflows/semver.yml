@@ -1,0 +1,25 @@
+name: Rust
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  Build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Build (no features enabled)
+      run: cargo build --verbose
+
+    - name: Check semver compatibility (russh)
+      uses: obi1kenobi/cargo-semver-checks-action@v2
+      with:
+        package: russh
