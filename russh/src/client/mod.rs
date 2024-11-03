@@ -383,9 +383,8 @@ impl<H: Handler> Handle<H> {
 
     /// Authenticate using a custom method that implements the
     /// [`Signer`][auth::Signer] trait. Currently, this crate only provides an
-    /// implementation for an [SSH
-    /// agent][russh_keys::agent::client::AgentClient].
-    pub async fn authenticate_agent<U: Into<String>, S: auth::Signer>(
+    /// implementation for an [SSH agent][russh_keys::agent::client::AgentClient].
+    pub async fn authenticate_publickey_with<U: Into<String>, S: auth::Signer>(
         &mut self,
         user: U,
         key: ssh_key::PublicKey,
