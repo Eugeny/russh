@@ -458,13 +458,21 @@ impl Encrypted {
                     let algo = s.read_string().map_err(crate::Error::from)?;
 
                     let sig = s.read_string().map_err(crate::Error::from)?;
+
+                    let mut sig_buf = sig.to_vec();
+                    let algo = Algorithm::new(str::from_utf8(algo).map_err(crate::Error::from)?)
+                        .map_err(crate::Error::from)?;
+
+                    if algo == Algorithm::SkEcdsaSha2NistP256 || algo == Algorithm::SkEd25519 {
+                        // https://github.com/RustCrypto/SSH/issues/312
+                        let flags = s.read_byte().map_err(crate::Error::from)?;
+                        sig_buf.push(flags);
+                        let counter = s.read_u32().map_err(crate::Error::from)?;
+                        sig_buf.extend_from_slice(&counter.to_be_bytes());
+                    }
+
                     #[allow(clippy::indexing_slicing)]
-                    let sig = Signature::new(
-                        Algorithm::new(str::from_utf8(algo).map_err(crate::Error::from)?)
-                            .map_err(crate::Error::from)?,
-                        sig,
-                    )
-                    .map_err(crate::Error::from)?;
+                    let sig = Signature::new(algo, sig_buf).map_err(crate::Error::from)?;
 
                     #[allow(clippy::indexing_slicing)] // length checked
                     let init = &buf[0..pos0];
@@ -562,13 +570,16 @@ impl Encrypted {
                     Ok(())
                 }
             }
-            Err(ssh_key::Error::AlgorithmUnknown)
-            | Err(ssh_key::Error::AlgorithmUnsupported { .. })
-            | Err(ssh_key::Error::CertificateValidation { .. }) => {
-                reject_auth_request(until, &mut self.write, auth_request).await;
-                Ok(())
-            }
-            Err(e) => Err(crate::Error::from(e).into()),
+            Err(e) => match e {
+                ssh_key::Error::AlgorithmUnknown
+                | ssh_key::Error::AlgorithmUnsupported { .. }
+                | ssh_key::Error::CertificateValidation { .. } => {
+                    debug!("public key error: {e}");
+                    reject_auth_request(until, &mut self.write, auth_request).await;
+                    Ok(())
+                }
+                e => Err(crate::Error::from(e).into()),
+            },
         }
     }
 }
