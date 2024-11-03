@@ -1,8 +1,13 @@
 [package]
 name = "russh-util"
-version = "0.1.0"
+version = "0.46.0"
 edition = "2021"
 rust-version = "1.65"
+description = "Runtime abstraction utilities for russh."
+documentation = "https://docs.rs/russh-util"
+homepage = "https://github.com/warp-tech/russh"
+license = "Apache-2.0"
+repository = "https://github.com/warp-tech/russh"
 
 [dependencies]
 chrono = "0.4.38"
