@@ -16,7 +16,6 @@ use ssh_encoding::Decode;
 use ssh_key::public::KeyData;
 use ssh_key::{Algorithm, EcdsaCurve, HashAlg, PublicKey};
 
-use crate::encoding::Reader;
 use crate::Error;
 
 pub trait PublicKeyExt {
@@ -24,8 +23,8 @@ pub trait PublicKeyExt {
 }
 
 impl PublicKeyExt for PublicKey {
-    fn decode(bytes: &[u8]) -> Result<PublicKey, Error> {
-        let key = KeyData::decode(&mut bytes.reader(0))?;
+    fn decode(mut bytes: &[u8]) -> Result<PublicKey, Error> {
+        let key = KeyData::decode(&mut bytes)?;
         Ok(PublicKey::new(key, ""))
     }
 }
@@ -37,9 +36,9 @@ pub trait Verify {
 }
 
 /// Parse a public key from a byte slice.
-pub fn parse_public_key(p: &[u8]) -> Result<PublicKey, Error> {
+pub fn parse_public_key(mut p: &[u8]) -> Result<PublicKey, Error> {
     use ssh_encoding::Decode;
-    Ok(ssh_key::public::KeyData::decode(&mut p.reader(0))?.into())
+    Ok(ssh_key::public::KeyData::decode(&mut p)?.into())
 }
 
 /// Obtain a cryptographic-safe random number generator.

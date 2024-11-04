@@ -1332,10 +1332,10 @@ impl KexDhDone {
 
                 debug!("exchange hash: {:?}", hash);
                 let signature = {
-                    let mut sig_reader = signature.reader(0);
-                    let sig_type = String::decode(&mut sig_reader).map_err(crate::Error::from)?;
+                    let mut r = &signature[..];
+                    let sig_type = String::decode(&mut r).map_err(crate::Error::from)?;
                     debug!("sig_type: {:?}", sig_type);
-                    Bytes::decode(&mut sig_reader).map_err(crate::Error::from)?
+                    Bytes::decode(&mut r).map_err(crate::Error::from)?
                 };
 
                 debug!("signature: {:?}", signature);

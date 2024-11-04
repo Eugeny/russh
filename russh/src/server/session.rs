@@ -1108,12 +1108,12 @@ impl Session {
             // If client sent a ext-info-c message in the kex list, it supports RFC 8308 extension negotiation.
             let mut key_extension_client = false;
             if let Some(e) = &enc.exchange {
-                let mut r = e.client_kex_init.as_ref().reader(17);
-                if let Ok(kex_string) = r.read_string() {
+                let mut r = &e.client_kex_init.as_ref()[17..];
+                if let Ok(kex_string) = String::decode(&mut r) {
                     use super::negotiation::Select;
                     key_extension_client = super::negotiation::Server::select(
                         &[EXTENSION_SUPPORT_AS_CLIENT],
-                        &parse_kex_algo_list(kex_string),
+                        &parse_kex_algo_list(&kex_string),
                         AlgorithmKind::Kex,
                     )
                     .is_ok();
