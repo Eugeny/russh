@@ -1,7 +1,8 @@
 use std::cell::RefCell;
 
 use log::debug;
-use russh_keys::add_signature;
+use russh_keys::helpers::EncodedExt;
+use ssh_encoding::Encode;
 
 use super::*;
 use crate::cipher::SealingKey;
@@ -139,7 +140,8 @@ impl KexDh {
                 debug!("hash: {:?}", hash);
                 debug!("key: {:?}", config.keys[kexdhdone.key]);
 
-                add_signature(&config.keys[kexdhdone.key], &hash, &mut buffer)?;
+                let signature = signature::Signer::try_sign(&config.keys[kexdhdone.key], &hash)?;
+                signature.encoded()?.encode(&mut *buffer)?;
 
                 cipher.write(&buffer, write_buffer);
                 cipher.write(&[msg::NEWKEYS], write_buffer);

@@ -14,7 +14,7 @@ futures = { workspace = true }
 thiserror = { workspace = true }
 rand = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "rt"] }
-bytes = "1.7"
+bytes = { workspace = true }
 delegate = "0.13"
 
 [target.'cfg(windows)'.dependencies]

@@ -115,13 +115,13 @@ impl encoding::Bytes for MethodSet {
 }
 
 impl MethodSet {
-    pub(crate) fn from_bytes(b: &[u8]) -> Option<MethodSet> {
+    pub(crate) fn from_str(b: &str) -> Option<MethodSet> {
         match b {
-            b"none" => Some(MethodSet::NONE),
-            b"password" => Some(MethodSet::PASSWORD),
-            b"publickey" => Some(MethodSet::PUBLICKEY),
-            b"hostbased" => Some(MethodSet::HOSTBASED),
-            b"keyboard-interactive" => Some(MethodSet::KEYBOARD_INTERACTIVE),
+            "none" => Some(MethodSet::NONE),
+            "password" => Some(MethodSet::PASSWORD),
+            "publickey" => Some(MethodSet::PUBLICKEY),
+            "hostbased" => Some(MethodSet::HOSTBASED),
+            "keyboard-interactive" => Some(MethodSet::KEYBOARD_INTERACTIVE),
             _ => None,
         }
     }

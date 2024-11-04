@@ -1,6 +1,7 @@
 use ssh_encoding::Encode;
 
-pub(crate) trait EncodedExt {
+#[doc(hidden)]
+pub trait EncodedExt {
     fn encoded(&self) -> ssh_key::Result<Vec<u8>>;
 }
 

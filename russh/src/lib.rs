@@ -95,6 +95,7 @@ use std::fmt::{Debug, Display, Formatter};
 use log::debug;
 use parsing::ChannelOpenConfirmation;
 pub use russh_cryptovec::CryptoVec;
+use ssh_encoding::Decode;
 use thiserror::Error;
 
 #[cfg(test)]
@@ -304,6 +305,9 @@ pub enum Error {
         sequence_number: usize,
     },
 
+    #[error("Signature: {0}")]
+    Signature(#[from] signature::Error),
+
     #[error("SshKey: {0}")]
     SshKey(#[from] ssh_key::Error),
 
@@ -451,21 +455,21 @@ impl Sig {
             Sig::Custom(ref c) => c,
         }
     }
-    fn from_name(name: &[u8]) -> Result<Sig, Error> {
+    fn from_name(name: &str) -> Sig {
         match name {
-            b"ABRT" => Ok(Sig::ABRT),
-            b"ALRM" => Ok(Sig::ALRM),
-            b"FPE" => Ok(Sig::FPE),
-            b"HUP" => Ok(Sig::HUP),
-            b"ILL" => Ok(Sig::ILL),
-            b"INT" => Ok(Sig::INT),
-            b"KILL" => Ok(Sig::KILL),
-            b"PIPE" => Ok(Sig::PIPE),
-            b"QUIT" => Ok(Sig::QUIT),
-            b"SEGV" => Ok(Sig::SEGV),
-            b"TERM" => Ok(Sig::TERM),
-            b"USR1" => Ok(Sig::USR1),
-            x => Ok(Sig::Custom(std::str::from_utf8(x)?.to_string())),
+            "ABRT" => Sig::ABRT,
+            "ALRM" => Sig::ALRM,
+            "FPE" => Sig::FPE,
+            "HUP" => Sig::HUP,
+            "ILL" => Sig::ILL,
+            "INT" => Sig::INT,
+            "KILL" => Sig::KILL,
+            "PIPE" => Sig::PIPE,
+            "QUIT" => Sig::QUIT,
+            "SEGV" => Sig::SEGV,
+            "TERM" => Sig::TERM,
+            "USR1" => Sig::USR1,
+            x => Sig::Custom(x.to_string()),
         }
     }
 }
@@ -496,6 +500,14 @@ impl ChannelOpenFailure {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 /// The identifier of a channel.
 pub struct ChannelId(u32);
+
+impl Decode for ChannelId {
+    type Error = ssh_encoding::Error;
+
+    fn decode(reader: &mut impl ssh_encoding::Reader) -> Result<Self, Self::Error> {
+        Ok(Self(u32::decode(reader)?))
+    }
+}
 
 impl From<ChannelId> for u32 {
     fn from(c: ChannelId) -> u32 {

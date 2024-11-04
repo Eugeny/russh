@@ -42,11 +42,13 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use bytes::Bytes;
 use futures::task::{Context, Poll};
 use futures::Future;
 use log::{debug, error, info, trace};
 use russh_keys::encoding::Encoding;
 use signature::Verifier;
+use ssh_encoding::Decode;
 use ssh_key::{Certificate, PrivateKey, PublicKey, Signature};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadHalf, WriteHalf};
 use tokio::pin;
@@ -1051,15 +1053,13 @@ impl Session {
         buf: &[u8],
     ) -> Result<RemoteDisconnectInfo, E> {
         self.common.disconnected = true;
-        let mut reader = buf.reader(1);
+        let mut r = &buf[1..];
 
-        let reason_code = reader.read_u32().map_err(crate::Error::from)?.try_into()?;
-        let message = std::str::from_utf8(reader.read_string().map_err(crate::Error::from)?)
+        let reason_code = u32::decode(&mut r)
             .map_err(crate::Error::from)?
-            .to_owned();
-        let lang_tag = std::str::from_utf8(reader.read_string().map_err(crate::Error::from)?)
-            .map_err(crate::Error::from)?
-            .to_owned();
+            .try_into()?;
+        let message = String::decode(&mut r).map_err(crate::Error::from)?;
+        let lang_tag = String::decode(&mut r).map_err(crate::Error::from)?;
 
         Ok(RemoteDisconnectInfo {
             reason_code,
@@ -1301,9 +1301,9 @@ impl KexDhDone {
         handler: &mut H,
         buf: &[u8],
     ) -> Result<NewKeys, H::Error> {
-        let mut reader = buf.reader(1);
-        let pubkey = reader.read_string().map_err(crate::Error::from)?; // server public key.
-        let pubkey = parse_public_key(pubkey).map_err(crate::Error::from)?;
+        let mut r = &buf[1..];
+        let pubkey = Bytes::decode(&mut r).map_err(crate::Error::from)?; // server public key.
+        let pubkey = parse_public_key(&pubkey).map_err(crate::Error::from)?;
         debug!("server_public_Key: {:?}", pubkey);
         if !rekey {
             let check = handler.check_server_key(&pubkey).await?;
@@ -1315,9 +1315,9 @@ impl KexDhDone {
             let mut buffer = buffer.borrow_mut();
             buffer.clear();
             let hash = {
-                let server_ephemeral = reader.read_string().map_err(crate::Error::from)?;
-                self.exchange.server_ephemeral.extend(server_ephemeral);
-                let signature = reader.read_string().map_err(crate::Error::from)?;
+                let server_ephemeral = Bytes::decode(&mut r).map_err(crate::Error::from)?;
+                self.exchange.server_ephemeral.extend(&server_ephemeral);
+                let signature = Bytes::decode(&mut r).map_err(crate::Error::from)?;
 
                 self.kex
                     .compute_shared_secret(&self.exchange.server_ephemeral)?;
@@ -1333,10 +1333,11 @@ impl KexDhDone {
                 debug!("exchange hash: {:?}", hash);
                 let signature = {
                     let mut sig_reader = signature.reader(0);
-                    let sig_type = sig_reader.read_string().map_err(crate::Error::from)?;
+                    let sig_type = String::decode(&mut sig_reader).map_err(crate::Error::from)?;
                     debug!("sig_type: {:?}", sig_type);
-                    sig_reader.read_string().map_err(crate::Error::from)?
+                    Bytes::decode(&mut sig_reader).map_err(crate::Error::from)?
                 };
+
                 debug!("signature: {:?}", signature);
                 let signature = Signature::new(pubkey.algorithm(), signature).map_err(|e| {
                     debug!("signature ctor failed: {e:?}");
@@ -1656,7 +1657,7 @@ pub trait Handler: Sized + Send {
     async fn should_accept_unknown_server_channel(
         &mut self,
         id: ChannelId,
-        channel_type: &[u8],
+        channel_type: &str,
     ) -> bool {
         false
     }

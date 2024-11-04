@@ -16,12 +16,14 @@ use std::cell::RefCell;
 use std::convert::TryInto;
 use std::num::Wrapping;
 
+use bytes::Bytes;
 use log::{debug, error, info, trace, warn};
-use russh_keys::add_self_signature;
+use russh_keys::helpers::EncodedExt;
+use ssh_encoding::{Decode, Encode};
 
 use crate::cert::PublicKeyOrCertificate;
 use crate::client::{Handler, Msg, Prompt, Reply, Session};
-use crate::keys::encoding::{Encoding, Reader};
+use crate::keys::encoding::Encoding;
 use crate::keys::key::parse_public_key;
 use crate::negotiation::{Named, Select};
 use crate::parsing::{ChannelOpenConfirmation, ChannelType, OpenChannelMessage};
@@ -176,8 +178,10 @@ impl Session {
                         msg::SERVICE_ACCEPT
                     );
                     if buf.first() == Some(&msg::SERVICE_ACCEPT) {
-                        let mut r = buf.reader(1);
-                        if r.read_string().map_err(crate::Error::from)? == b"ssh-userauth" {
+                        let mut r = &buf[1..];
+                        if Bytes::decode(&mut r).map_err(crate::Error::from)?.as_ref()
+                            == b"ssh-userauth"
+                        {
                             *accepted = true;
                             if let Some(ref meth) = self.common.auth_method {
                                 let auth_request = match meth {
@@ -227,25 +231,20 @@ impl Session {
                         enc.server_compression.init_decompress(&mut enc.decompress);
                         return Ok(());
                     } else if buf.first() == Some(&msg::USERAUTH_BANNER) {
-                        let mut r = buf.reader(1);
-                        let banner = r.read_string().map_err(crate::Error::from)?;
-                        return if let Ok(banner) = std::str::from_utf8(banner) {
-                            client.auth_banner(banner, self).await
-                        } else {
-                            Ok(())
-                        };
+                        let mut r = &buf[1..];
+                        let banner = String::decode(&mut r).map_err(crate::Error::from)?;
+                        client.auth_banner(&banner, self).await?;
+                        return Ok(());
                     } else if buf.first() == Some(&msg::USERAUTH_FAILURE) {
                         debug!("userauth_failure");
 
-                        let mut r = buf.reader(1);
-                        let remaining_methods = r.read_string().map_err(crate::Error::from)?;
-                        debug!(
-                            "remaining methods {:?}",
-                            std::str::from_utf8(remaining_methods)
-                        );
+                        let mut r = &buf[1..];
+                        let remaining_methods =
+                            String::decode(&mut r).map_err(crate::Error::from)?;
+                        debug!("remaining methods {remaining_methods:?}",);
                         auth_request.methods = auth::MethodSet::empty();
-                        for method in remaining_methods.split(|&c| c == b',') {
-                            if let Some(m) = auth::MethodSet::from_bytes(method) {
+                        for method in remaining_methods.split(',') {
+                            if let Some(m) = auth::MethodSet::from_str(method) {
                                 auth_request.methods |= m
                             }
                         }
@@ -270,30 +269,23 @@ impl Session {
                             auth_request.current
                         {
                             debug!("keyboard_interactive");
-                            let mut r = buf.reader(1);
+                            let mut r = &buf[1..];
 
                             // read fields
-                            let name = String::from_utf8_lossy(
-                                r.read_string().map_err(crate::Error::from)?,
-                            )
-                            .to_string();
+                            let name = String::decode(&mut r).map_err(crate::Error::from)?;
 
-                            let instructions = String::from_utf8_lossy(
-                                r.read_string().map_err(crate::Error::from)?,
-                            )
-                            .to_string();
+                            let instructions =
+                                String::decode(&mut r).map_err(crate::Error::from)?;
 
-                            let _lang = r.read_string().map_err(crate::Error::from)?;
-                            let n_prompts = r.read_u32().map_err(crate::Error::from)?;
+                            let _lang = String::decode(&mut r).map_err(crate::Error::from)?;
+                            let n_prompts = u32::decode(&mut r).map_err(crate::Error::from)?;
 
                             // read prompts
                             let mut prompts = Vec::with_capacity(n_prompts.try_into().unwrap_or(0));
                             for _i in 0..n_prompts {
-                                let prompt = String::from_utf8_lossy(
-                                    r.read_string().map_err(crate::Error::from)?,
-                                );
+                                let prompt = String::decode(&mut r).map_err(crate::Error::from)?;
 
-                                let echo = r.read_byte().map_err(crate::Error::from)? != 0;
+                                let echo = u8::decode(&mut r).map_err(crate::Error::from)? != 0;
                                 prompts.push(Prompt {
                                     prompt: prompt.to_string(),
                                     echo,
@@ -401,8 +393,9 @@ impl Session {
         match buf.first() {
             Some(&msg::CHANNEL_OPEN_CONFIRMATION) => {
                 debug!("channel_open_confirmation");
-                let mut reader = buf.reader(1);
-                let msg = ChannelOpenConfirmation::parse(&mut reader)?;
+                let mut reader = &buf[1..];
+                let msg =
+                    ChannelOpenConfirmation::decode(&mut reader).map_err(crate::Error::from)?;
                 let local_id = ChannelId(msg.recipient_channel);
 
                 if let Some(ref mut enc) = self.common.encrypted {
@@ -439,8 +432,8 @@ impl Session {
             }
             Some(&msg::CHANNEL_CLOSE) => {
                 debug!("channel_close");
-                let mut r = buf.reader(1);
-                let channel_num = ChannelId(r.read_u32().map_err(crate::Error::from)?);
+                let mut r = &buf[1..];
+                let channel_num = ChannelId::decode(&mut r).map_err(crate::Error::from)?;
                 if let Some(ref mut enc) = self.common.encrypted {
                     // The CHANNEL_CLOSE message must be sent to the server at this point or the session
                     // will not be released.
@@ -451,8 +444,8 @@ impl Session {
             }
             Some(&msg::CHANNEL_EOF) => {
                 debug!("channel_eof");
-                let mut r = buf.reader(1);
-                let channel_num = ChannelId(r.read_u32().map_err(crate::Error::from)?);
+                let mut r = &buf[1..];
+                let channel_num = ChannelId::decode(&mut r).map_err(crate::Error::from)?;
                 if let Some(chan) = self.channels.get(&channel_num) {
                     let _ = chan.send(ChannelMsg::Eof);
                 }
@@ -460,15 +453,13 @@ impl Session {
             }
             Some(&msg::CHANNEL_OPEN_FAILURE) => {
                 debug!("channel_open_failure");
-                let mut r = buf.reader(1);
-                let channel_num = ChannelId(r.read_u32().map_err(crate::Error::from)?);
+                let mut r = &buf[1..];
+                let channel_num = ChannelId::decode(&mut r).map_err(crate::Error::from)?;
                 let reason_code =
-                    ChannelOpenFailure::from_u32(r.read_u32().map_err(crate::Error::from)?)
+                    ChannelOpenFailure::from_u32(u32::decode(&mut r).map_err(crate::Error::from)?)
                         .unwrap_or(ChannelOpenFailure::Unknown);
-                let descr = std::str::from_utf8(r.read_string().map_err(crate::Error::from)?)
-                    .map_err(crate::Error::from)?;
-                let language = std::str::from_utf8(r.read_string().map_err(crate::Error::from)?)
-                    .map_err(crate::Error::from)?;
+                let descr = String::decode(&mut r).map_err(crate::Error::from)?;
+                let language = String::decode(&mut r).map_err(crate::Error::from)?;
                 if let Some(ref mut enc) = self.common.encrypted {
                     enc.channels.remove(&channel_num);
                 }
@@ -480,17 +471,17 @@ impl Session {
                 let _ = self.sender.send(Reply::ChannelOpenFailure);
 
                 client
-                    .channel_open_failure(channel_num, reason_code, descr, language, self)
+                    .channel_open_failure(channel_num, reason_code, &descr, &language, self)
                     .await
             }
             Some(&msg::CHANNEL_DATA) => {
                 trace!("channel_data");
-                let mut r = buf.reader(1);
-                let channel_num = ChannelId(r.read_u32().map_err(crate::Error::from)?);
-                let data = r.read_string().map_err(crate::Error::from)?;
+                let mut r = &buf[1..];
+                let channel_num = ChannelId::decode(&mut r).map_err(crate::Error::from)?;
+                let data = Bytes::decode(&mut r).map_err(crate::Error::from)?;
                 let target = self.common.config.window_size;
                 if let Some(ref mut enc) = self.common.encrypted {
-                    if enc.adjust_window_size(channel_num, data, target) {
+                    if enc.adjust_window_size(channel_num, &data, target) {
                         let next_window =
                             client.adjust_window(channel_num, self.target_window_size);
                         if next_window > 0 {
@@ -501,21 +492,21 @@ impl Session {
 
                 if let Some(chan) = self.channels.get(&channel_num) {
                     let _ = chan.send(ChannelMsg::Data {
-                        data: CryptoVec::from_slice(data),
+                        data: CryptoVec::from_slice(&data),
                     });
                 }
 
-                client.data(channel_num, data, self).await
+                client.data(channel_num, &data, self).await
             }
             Some(&msg::CHANNEL_EXTENDED_DATA) => {
                 debug!("channel_extended_data");
-                let mut r = buf.reader(1);
-                let channel_num = ChannelId(r.read_u32().map_err(crate::Error::from)?);
-                let extended_code = r.read_u32().map_err(crate::Error::from)?;
-                let data = r.read_string().map_err(crate::Error::from)?;
+                let mut r = &buf[1..];
+                let channel_num = ChannelId::decode(&mut r).map_err(crate::Error::from)?;
+                let extended_code = u32::decode(&mut r).map_err(crate::Error::from)?;
+                let data = Bytes::decode(&mut r).map_err(crate::Error::from)?;
                 let target = self.common.config.window_size;
                 if let Some(ref mut enc) = self.common.encrypted {
-                    if enc.adjust_window_size(channel_num, data, target) {
+                    if enc.adjust_window_size(channel_num, &data, target) {
                         let next_window =
                             client.adjust_window(channel_num, self.target_window_size);
                         if next_window > 0 {
@@ -527,51 +518,44 @@ impl Session {
                 if let Some(chan) = self.channels.get(&channel_num) {
                     let _ = chan.send(ChannelMsg::ExtendedData {
                         ext: extended_code,
-                        data: CryptoVec::from_slice(data),
+                        data: CryptoVec::from_slice(&data),
                     });
                 }
 
                 client
-                    .extended_data(channel_num, extended_code, data, self)
+                    .extended_data(channel_num, extended_code, &data, self)
                     .await
             }
             Some(&msg::CHANNEL_REQUEST) => {
-                let mut r = buf.reader(1);
-                let channel_num = ChannelId(r.read_u32().map_err(crate::Error::from)?);
-                let req = r.read_string().map_err(crate::Error::from)?;
-                debug!(
-                    "channel_request: {:?} {:?}",
-                    channel_num,
-                    std::str::from_utf8(req)
-                );
-                match req {
-                    b"xon-xoff" => {
-                        r.read_byte().map_err(crate::Error::from)?; // should be 0.
-                        let client_can_do = r.read_byte().map_err(crate::Error::from)? != 0;
+                let mut r = &buf[1..];
+                let channel_num = ChannelId::decode(&mut r).map_err(crate::Error::from)?;
+                let req = String::decode(&mut r).map_err(crate::Error::from)?;
+                debug!("channel_request: {channel_num:?} {req:?}",);
+                match req.as_str() {
+                    "xon-xoff" => {
+                        u8::decode(&mut r).map_err(crate::Error::from)?; // should be 0.
+                        let client_can_do = u8::decode(&mut r).map_err(crate::Error::from)? != 0;
                         if let Some(chan) = self.channels.get(&channel_num) {
                             let _ = chan.send(ChannelMsg::XonXoff { client_can_do });
                         }
                         client.xon_xoff(channel_num, client_can_do, self).await
                     }
-                    b"exit-status" => {
-                        r.read_byte().map_err(crate::Error::from)?; // should be 0.
-                        let exit_status = r.read_u32().map_err(crate::Error::from)?;
+                    "exit-status" => {
+                        u8::decode(&mut r).map_err(crate::Error::from)?; // should be 0.
+                        let exit_status = u32::decode(&mut r).map_err(crate::Error::from)?;
                         if let Some(chan) = self.channels.get(&channel_num) {
                             let _ = chan.send(ChannelMsg::ExitStatus { exit_status });
                         }
                         client.exit_status(channel_num, exit_status, self).await
                     }
-                    b"exit-signal" => {
-                        r.read_byte().map_err(crate::Error::from)?; // should be 0.
-                        let signal_name =
-                            Sig::from_name(r.read_string().map_err(crate::Error::from)?)?;
-                        let core_dumped = r.read_byte().map_err(crate::Error::from)? != 0;
-                        let error_message =
-                            std::str::from_utf8(r.read_string().map_err(crate::Error::from)?)
-                                .map_err(crate::Error::from)?;
-                        let lang_tag =
-                            std::str::from_utf8(r.read_string().map_err(crate::Error::from)?)
-                                .map_err(crate::Error::from)?;
+                    "exit-signal" => {
+                        u8::decode(&mut r).map_err(crate::Error::from)?; // should be 0.
+                        let signal_name = Sig::from_name(
+                            String::decode(&mut r).map_err(crate::Error::from)?.as_str(),
+                        );
+                        let core_dumped = u8::decode(&mut r).map_err(crate::Error::from)? != 0;
+                        let error_message = String::decode(&mut r).map_err(crate::Error::from)?;
+                        let lang_tag = String::decode(&mut r).map_err(crate::Error::from)?;
                         if let Some(chan) = self.channels.get(&channel_num) {
                             let _ = chan.send(ChannelMsg::ExitSignal {
                                 signal_name: signal_name.clone(),
@@ -585,20 +569,17 @@ impl Session {
                                 channel_num,
                                 signal_name,
                                 core_dumped,
-                                error_message,
-                                lang_tag,
+                                &error_message,
+                                &lang_tag,
                                 self,
                             )
                             .await
                     }
-                    b"keepalive@openssh.com" => {
-                        let wants_reply = r.read_byte().map_err(crate::Error::from)?;
+                    "keepalive@openssh.com" => {
+                        let wants_reply = u8::decode(&mut r).map_err(crate::Error::from)?;
                         if wants_reply == 1 {
                             if let Some(ref mut enc) = self.common.encrypted {
-                                trace!(
-                                    "Received channel keep alive message: {:?}",
-                                    std::str::from_utf8(req),
-                                );
+                                trace!("Received channel keep alive message: {req:?}",);
                                 self.common.wants_reply = false;
                                 push_packet!(enc.write, {
                                     enc.write.push(msg::CHANNEL_SUCCESS);
@@ -611,7 +592,7 @@ impl Session {
                         Ok(())
                     }
                     _ => {
-                        let wants_reply = r.read_byte().map_err(crate::Error::from)?;
+                        let wants_reply = u8::decode(&mut r).map_err(crate::Error::from)?;
                         if wants_reply == 1 {
                             if let Some(ref mut enc) = self.common.encrypted {
                                 self.common.wants_reply = false;
@@ -621,20 +602,16 @@ impl Session {
                                 })
                             }
                         }
-                        info!(
-                            "Unknown channel request {:?} {:?}",
-                            std::str::from_utf8(req),
-                            wants_reply
-                        );
+                        info!("Unknown channel request {req:?} {wants_reply:?}",);
                         Ok(())
                     }
                 }
             }
             Some(&msg::CHANNEL_WINDOW_ADJUST) => {
                 debug!("channel_window_adjust");
-                let mut r = buf.reader(1);
-                let channel_num = ChannelId(r.read_u32().map_err(crate::Error::from)?);
-                let amount = r.read_u32().map_err(crate::Error::from)?;
+                let mut r = &buf[1..];
+                let channel_num = ChannelId::decode(&mut r).map_err(crate::Error::from)?;
+                let amount = u32::decode(&mut r).map_err(crate::Error::from)?;
                 let mut new_size = 0;
                 debug!("amount: {:?}", amount);
                 if let Some(ref mut enc) = self.common.encrypted {
@@ -657,39 +634,34 @@ impl Session {
                 client.window_adjusted(channel_num, new_size, self).await
             }
             Some(&msg::GLOBAL_REQUEST) => {
-                let mut r = buf.reader(1);
-                let req = r.read_string().map_err(crate::Error::from)?;
-                let wants_reply = r.read_byte().map_err(crate::Error::from)?;
+                let mut r = &buf[1..];
+                let req = String::decode(&mut r).map_err(crate::Error::from)?;
+                let wants_reply = u8::decode(&mut r).map_err(crate::Error::from)?;
                 if let Some(ref mut enc) = self.common.encrypted {
-                    if req.starts_with(b"keepalive") {
+                    if req.starts_with("keepalive") {
                         if wants_reply == 1 {
-                            trace!(
-                                "Received keep alive message: {:?}",
-                                std::str::from_utf8(req),
-                            );
+                            trace!("Received keep alive message: {req:?}",);
                             self.common.wants_reply = false;
                             push_packet!(enc.write, enc.write.push(msg::REQUEST_SUCCESS));
                         } else {
                             warn!("Received keepalive without reply request!");
                         }
-                    } else if req == b"hostkeys-00@openssh.com" {
+                    } else if req == "hostkeys-00@openssh.com" {
                         let mut keys = vec![];
                         loop {
-                            match r.read_string() {
+                            match Bytes::decode(&mut r) {
                                 Ok(key) => {
-                                    let key2 = <&[u8]>::clone(&key);
-                                    let key = parse_public_key(key).map_err(crate::Error::from);
+                                    let key = parse_public_key(&key).map_err(crate::Error::from);
                                     match key {
                                         Ok(key) => keys.push(key),
-                                        Err(err) => {
+                                        Err(ref err) => {
                                             debug!(
-                                                "failed to parse announced host key {:?}: {:?}",
-                                                key2, err
+                                                "failed to parse announced host key {key:?}: {err:?}",
                                             )
                                         }
                                     }
                                 }
-                                Err(russh_keys::Error::IndexOutOfBounds) => break,
+                                Err(ssh_encoding::Error::Length) => break,
                                 x => {
                                     x.map_err(crate::Error::from)?;
                                 }
@@ -697,11 +669,7 @@ impl Session {
                         }
                         return client.openssh_ext_host_keys_announced(keys, self).await;
                     } else {
-                        warn!(
-                            "Unhandled global request: {:?} {:?}",
-                            std::str::from_utf8(req),
-                            wants_reply
-                        );
+                        warn!("Unhandled global request: {req:?} {wants_reply:?}",);
                         self.common.wants_reply = false;
                         push_packet!(enc.write, enc.write.push(msg::REQUEST_FAILURE))
                     }
@@ -710,23 +678,23 @@ impl Session {
                 Ok(())
             }
             Some(&msg::CHANNEL_SUCCESS) => {
-                let mut r = buf.reader(1);
-                let channel_num = ChannelId(r.read_u32().map_err(crate::Error::from)?);
+                let mut r = &buf[1..];
+                let channel_num = ChannelId::decode(&mut r).map_err(crate::Error::from)?;
                 if let Some(chan) = self.channels.get(&channel_num) {
                     let _ = chan.send(ChannelMsg::Success);
                 }
                 client.channel_success(channel_num, self).await
             }
             Some(&msg::CHANNEL_FAILURE) => {
-                let mut r = buf.reader(1);
-                let channel_num = ChannelId(r.read_u32().map_err(crate::Error::from)?);
+                let mut r = &buf[1..];
+                let channel_num = ChannelId::decode(&mut r).map_err(crate::Error::from)?;
                 if let Some(chan) = self.channels.get(&channel_num) {
                     let _ = chan.send(ChannelMsg::Failure);
                 }
                 client.channel_failure(channel_num, self).await
             }
             Some(&msg::CHANNEL_OPEN) => {
-                let mut r = buf.reader(1);
+                let mut r = &buf[1..];
                 let msg = OpenChannelMessage::parse(&mut r)?;
 
                 if let Some(ref mut enc) = self.common.encrypted {
@@ -829,7 +797,7 @@ impl Session {
                                 let channel = self.accept_server_initiated_channel(id, &msg);
                                 client.server_channel_open_unknown(channel, self).await?;
                             } else {
-                                debug!("unknown channel type: {}", String::from_utf8_lossy(typ));
+                                debug!("unknown channel type: {typ}");
                                 msg.unknown_type(&mut enc.write);
                             }
                         }
@@ -850,8 +818,8 @@ impl Session {
                             // If a specific port was requested, the reply has no data
                             Some(0)
                         } else {
-                            let mut r = buf.reader(1);
-                            match r.read_u32() {
+                            let mut r = &buf[1..];
+                            match u32::decode(&mut r) {
                                 Ok(port) => Some(port),
                                 Err(e) => {
                                     error!("Error parsing port for TcpIpForward request: {e:?}");
@@ -1082,9 +1050,10 @@ impl Encrypted {
                     &PublicKeyOrCertificate::PublicKey(key.public_key().clone()),
                     buffer,
                 )?;
-                // Extend with self-signature.
 
-                add_self_signature(&**key, buffer)?;
+                // Extend with self-signature.
+                let signature = signature::Signer::try_sign(&**key, &buffer)?;
+                signature.encoded()?.encode(&mut *buffer)?;
 
                 push_packet!(self.write, {
                     #[allow(clippy::indexing_slicing)] // length checked
@@ -1097,8 +1066,10 @@ impl Encrypted {
                     &PublicKeyOrCertificate::Certificate(cert.clone()),
                     buffer,
                 )?;
+
                 // Extend with self-signature.
-                add_self_signature(&**key, buffer)?;
+                let signature = signature::Signer::try_sign(&**key, &buffer)?;
+                signature.encoded()?.encode(&mut *buffer)?;
 
                 push_packet!(self.write, {
                     #[allow(clippy::indexing_slicing)] // length checked

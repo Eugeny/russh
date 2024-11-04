@@ -71,18 +71,15 @@ use std::string::FromUtf8Error;
 use aes::cipher::block_padding::UnpadError;
 use aes::cipher::inout::PadError;
 use data_encoding::BASE64_MIME;
-use encoding::Encoding;
 use helpers::EncodedExt;
-use russh_cryptovec::CryptoVec;
-use signature::Signer;
-use ssh_key::Signature;
 use thiserror::Error;
 
 pub mod encoding;
 pub mod key;
 
 mod format;
-mod helpers;
+#[doc(hidden)]
+pub mod helpers;
 pub use format::*;
 pub use ssh_key::{self, Algorithm, Certificate, EcdsaCurve, HashAlg, PrivateKey, PublicKey};
 
@@ -279,27 +276,6 @@ fn is_base64_char(c: char) -> bool {
         || c == '/'
         || c == '+'
         || c == '='
-}
-
-#[doc(hidden)]
-pub fn add_signature<S: Signer<Signature>>(
-    signer: &S,
-    to_sign: &[u8],
-    output: &mut CryptoVec,
-) -> Result<(), ssh_key::Error> {
-    let sig = signer.sign(to_sign);
-    output.extend_ssh_string(sig.encoded()?.as_slice());
-    Ok(())
-}
-
-#[doc(hidden)]
-pub fn add_self_signature<S: Signer<Signature>>(
-    signer: &S,
-    buffer: &mut CryptoVec,
-) -> Result<(), ssh_key::Error> {
-    let sig = signer.sign(buffer);
-    buffer.extend_ssh_string(sig.encoded()?.as_slice());
-    Ok(())
 }
 
 #[cfg(test)]

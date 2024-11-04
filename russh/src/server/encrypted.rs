@@ -22,7 +22,8 @@ use cert::PublicKeyOrCertificate;
 use log::{debug, error, info, trace, warn};
 use negotiation::Select;
 use signature::Verifier;
-use ssh_key::{Algorithm, PublicKey, Signature};
+use ssh_encoding::Decode;
+use ssh_key::{PublicKey, Signature};
 use tokio::time::Instant;
 use {msg, negotiation};
 
@@ -453,26 +454,11 @@ impl Encrypted {
                         false
                     };
 
-                    let signature = r.read_string().map_err(crate::Error::from)?;
-                    let mut s = signature.reader(0);
-                    let algo = s.read_string().map_err(crate::Error::from)?;
+                    let encoded_signature =
+                        Vec::<u8>::decode(&mut r).map_err(crate::Error::from)?;
 
-                    let sig = s.read_string().map_err(crate::Error::from)?;
-
-                    let mut sig_buf = sig.to_vec();
-                    let algo = Algorithm::new(str::from_utf8(algo).map_err(crate::Error::from)?)
+                    let sig = Signature::decode(&mut encoded_signature.as_slice())
                         .map_err(crate::Error::from)?;
-
-                    if algo == Algorithm::SkEcdsaSha2NistP256 || algo == Algorithm::SkEd25519 {
-                        // https://github.com/RustCrypto/SSH/issues/312
-                        let flags = s.read_byte().map_err(crate::Error::from)?;
-                        sig_buf.push(flags);
-                        let counter = s.read_u32().map_err(crate::Error::from)?;
-                        sig_buf.extend_from_slice(&counter.to_be_bytes());
-                    }
-
-                    #[allow(clippy::indexing_slicing)]
-                    let sig = Signature::new(algo, sig_buf).map_err(crate::Error::from)?;
 
                     #[allow(clippy::indexing_slicing)] // length checked
                     let init = &buf[0..pos0];
@@ -783,7 +769,8 @@ impl Session {
             Some(&msg::CHANNEL_OPEN_CONFIRMATION) => {
                 debug!("channel_open_confirmation");
                 let mut reader = buf.reader(1);
-                let msg = ChannelOpenConfirmation::parse(&mut reader)?;
+                let msg =
+                    ChannelOpenConfirmation::decode(&mut reader).map_err(crate::Error::from)?;
                 let local_id = ChannelId(msg.recipient_channel);
 
                 if let Some(ref mut enc) = self.common.encrypted {
@@ -1017,7 +1004,8 @@ impl Session {
                             .await
                     }
                     b"signal" => {
-                        let signal = Sig::from_name(r.read_string().map_err(crate::Error::from)?)?;
+                        let signal =
+                            Sig::from_name(&String::decode(&mut r).map_err(crate::Error::from)?);
                         if let Some(chan) = self.channels.get(&channel_num) {
                             chan.send(ChannelMsg::Signal {
                                 signal: signal.clone(),
@@ -1322,7 +1310,7 @@ impl Session {
                 Ok(false)
             }
             ChannelType::Unknown { typ } => {
-                debug!("unknown channel type: {}", String::from_utf8_lossy(typ));
+                debug!("unknown channel type: {typ}");
                 if let Some(ref mut enc) = self.common.encrypted {
                     msg.unknown_type(&mut enc.write);
                 }

@@ -8,6 +8,7 @@ use byteorder::{BigEndian, ByteOrder};
 use futures::future::Future;
 use futures::stream::{Stream, StreamExt};
 use russh_cryptovec::CryptoVec;
+use ssh_encoding::Encode;
 use ssh_key::PrivateKey;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::time::sleep;
@@ -16,7 +17,7 @@ use {std, tokio};
 use super::{msg, Constraint};
 use crate::encoding::{Encoding, Position, Reader};
 use crate::helpers::EncodedExt;
-use crate::{add_signature, Error};
+use crate::Error;
 
 #[derive(Clone)]
 #[allow(clippy::type_complexity)]
@@ -327,7 +328,8 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
         writebuf.push(msg::SIGN_RESPONSE);
         let data = r.read_string()?;
 
-        add_signature(&*key, data, writebuf)?;
+        let signature = signature::Signer::try_sign(&*key, data)?;
+        signature.encoded()?.encode(writebuf)?;
 
         let len = writebuf.len();
         BigEndian::write_u32(writebuf, (len - 4) as u32);
