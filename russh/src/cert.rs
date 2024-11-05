@@ -11,9 +11,9 @@ pub(crate) enum PublicKeyOrCertificate {
 }
 
 impl PublicKeyOrCertificate {
-    pub fn decode(pubkey_algo: &[u8], buf: &[u8]) -> Result<Self, ssh_key::Error> {
+    pub fn decode(pubkey_algo: &str, buf: &[u8]) -> Result<Self, ssh_key::Error> {
         let mut reader = buf;
-        match Algorithm::new_certificate_ext(str::from_utf8(pubkey_algo)?) {
+        match Algorithm::new_certificate_ext(pubkey_algo) {
             Ok(Algorithm::Other(_)) | Err(ssh_key::Error::Encoding(_)) => {
                 // Did not match a known cert algorithm
                 Ok(PublicKeyOrCertificate::PublicKey(

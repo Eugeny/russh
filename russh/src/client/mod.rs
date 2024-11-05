@@ -48,7 +48,7 @@ use futures::Future;
 use log::{debug, error, info, trace};
 use russh_keys::encoding::Encoding;
 use signature::Verifier;
-use ssh_encoding::Decode;
+use ssh_encoding::{Decode, Reader};
 use ssh_key::{Certificate, PrivateKey, PublicKey, Signature};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadHalf, WriteHalf};
 use tokio::pin;
@@ -59,7 +59,6 @@ use tokio::sync::{oneshot, Mutex};
 
 use crate::channels::{Channel, ChannelMsg, ChannelRef};
 use crate::cipher::{self, clear, CipherPair, OpeningKey};
-use crate::keys::encoding::Reader;
 use crate::keys::key::parse_public_key;
 use crate::session::{
     CommonSession, EncryptedState, Exchange, GlobalRequestResponse, Kex, KexDhDone, KexInit,
@@ -943,7 +942,7 @@ impl Session {
                     if !buf.is_empty() {
                         #[allow(clippy::indexing_slicing)] // length checked
                         if buf[0] == crate::msg::DISCONNECT {
-                            result = self.process_disconnect(buf);
+                            result = self.process_disconnect(&buf[1..]);
                         } else {
                             self.common.received_data = true;
                             reply(self, handler, kex_done_signal, &mut buffer.seqn, buf).await?;
@@ -1050,10 +1049,9 @@ impl Session {
 
     fn process_disconnect<E: From<crate::Error> + Send>(
         &mut self,
-        buf: &[u8],
+        mut r: &[u8],
     ) -> Result<RemoteDisconnectInfo, E> {
         self.common.disconnected = true;
-        let mut r = &buf[1..];
 
         let reason_code = u32::decode(&mut r)
             .map_err(crate::Error::from)?
@@ -1295,14 +1293,13 @@ thread_local! {
 }
 
 impl KexDhDone {
-    async fn server_key_check<H: Handler>(
+    async fn server_key_check<H: Handler, R: Reader>(
         mut self,
         rekey: bool,
         handler: &mut H,
-        buf: &[u8],
+        r: &mut R,
     ) -> Result<NewKeys, H::Error> {
-        let mut r = &buf[1..];
-        let pubkey = Bytes::decode(&mut r).map_err(crate::Error::from)?; // server public key.
+        let pubkey = Bytes::decode(r).map_err(crate::Error::from)?; // server public key.
         let pubkey = parse_public_key(&pubkey).map_err(crate::Error::from)?;
         debug!("server_public_Key: {:?}", pubkey);
         if !rekey {
@@ -1315,9 +1312,9 @@ impl KexDhDone {
             let mut buffer = buffer.borrow_mut();
             buffer.clear();
             let hash = {
-                let server_ephemeral = Bytes::decode(&mut r).map_err(crate::Error::from)?;
+                let server_ephemeral = Bytes::decode(r).map_err(crate::Error::from)?;
                 self.exchange.server_ephemeral.extend(&server_ephemeral);
-                let signature = Bytes::decode(&mut r).map_err(crate::Error::from)?;
+                let signature = Bytes::decode(r).map_err(crate::Error::from)?;
 
                 self.kex
                     .compute_shared_secret(&self.exchange.server_ephemeral)?;
@@ -1419,7 +1416,10 @@ async fn reply<H: Handler>(
                 Ok(())
             } else if buf.first() == Some(&msg::KEX_ECDH_REPLY) {
                 // We've sent ECDH_INIT, waiting for ECDH_REPLY
-                let kex = kexdhdone.server_key_check(false, handler, buf).await?;
+
+                #[allow(clippy::indexing_slicing)] // length checked
+                let kex = kexdhdone.server_key_check(false, handler, &mut &buf[1..]).await?;
+
                 session.common.strict_kex = session.common.strict_kex || kex.names.strict_kex;
                 session.common.kex = Some(Kex::Keys(kex));
                 session

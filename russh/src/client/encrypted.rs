@@ -105,7 +105,12 @@ impl Session {
                         Ok(())
                     } else if buf.first() == Some(&msg::KEX_ECDH_REPLY) {
                         // We've sent ECDH_INIT, waiting for ECDH_REPLY
-                        let kex = kexdhdone.server_key_check(true, client, buf).await?;
+
+                        #[allow(clippy::indexing_slicing)] // length checked
+                        let kex = kexdhdone
+                            .server_key_check(true, client, &mut &buf[1..])
+                            .await?;
+
                         enc.rekey = Some(Kex::Keys(kex));
                         self.common
                             .cipher
@@ -177,196 +182,211 @@ impl Session {
                         buf.first(),
                         msg::SERVICE_ACCEPT
                     );
-                    if buf.first() == Some(&msg::SERVICE_ACCEPT) {
-                        let mut r = &buf[1..];
-                        if Bytes::decode(&mut r).map_err(crate::Error::from)?.as_ref()
-                            == b"ssh-userauth"
-                        {
-                            *accepted = true;
-                            if let Some(ref meth) = self.common.auth_method {
-                                let auth_request = match meth {
-                                    crate::auth::Method::KeyboardInteractive { submethods } => {
-                                        auth::AuthRequest {
+                    match buf.split_first() {
+                        Some((&msg::SERVICE_ACCEPT, mut r)) => {
+                            if Bytes::decode(&mut r).map_err(crate::Error::from)?.as_ref()
+                                == b"ssh-userauth"
+                            {
+                                *accepted = true;
+                                if let Some(ref meth) = self.common.auth_method {
+                                    let auth_request = match meth {
+                                        crate::auth::Method::KeyboardInteractive { submethods } => {
+                                            auth::AuthRequest {
+                                                methods: auth::MethodSet::all(),
+                                                partial_success: false,
+                                                current: Some(
+                                                    auth::CurrentRequest::KeyboardInteractive {
+                                                        submethods: submethods.to_string(),
+                                                    },
+                                                ),
+                                                rejection_count: 0,
+                                            }
+                                        }
+                                        _ => auth::AuthRequest {
                                             methods: auth::MethodSet::all(),
                                             partial_success: false,
-                                            current: Some(
-                                                auth::CurrentRequest::KeyboardInteractive {
-                                                    submethods: submethods.to_string(),
-                                                },
-                                            ),
+                                            current: None,
                                             rejection_count: 0,
-                                        }
+                                        },
+                                    };
+                                    let len = enc.write.len();
+                                    #[allow(clippy::indexing_slicing)] // length checked
+                                    if enc.write_auth_request(&self.common.auth_user, meth)? {
+                                        debug!("enc: {:?}", &enc.write[len..]);
+                                        enc.state = EncryptedState::WaitingAuthRequest(auth_request)
                                     }
-                                    _ => auth::AuthRequest {
-                                        methods: auth::MethodSet::all(),
-                                        partial_success: false,
-                                        current: None,
-                                        rejection_count: 0,
-                                    },
-                                };
-                                let len = enc.write.len();
-                                #[allow(clippy::indexing_slicing)] // length checked
-                                if enc.write_auth_request(&self.common.auth_user, meth)? {
-                                    debug!("enc: {:?}", &enc.write[len..]);
-                                    enc.state = EncryptedState::WaitingAuthRequest(auth_request)
+                                } else {
+                                    debug!("no auth method")
                                 }
-                            } else {
-                                debug!("no auth method")
                             }
                         }
-                    } else if buf.first() == Some(&msg::EXT_INFO) {
-                        return self.handle_ext_info(client, buf);
-                    } else {
-                        debug!("unknown message: {:?}", buf);
-                        return Err(crate::Error::Inconsistent.into());
+                        Some((&msg::EXT_INFO, r)) => {
+                            return self.handle_ext_info(client, r);
+                        }
+                        other => {
+                            debug!("unknown message: {other:?}");
+                            return Err(crate::Error::Inconsistent.into());
+                        }
                     }
                 }
                 EncryptedState::WaitingAuthRequest(ref mut auth_request) => {
-                    if buf.first() == Some(&msg::USERAUTH_SUCCESS) {
-                        debug!("userauth_success");
-                        self.sender
-                            .send(Reply::AuthSuccess)
-                            .map_err(|_| crate::Error::SendError)?;
-                        enc.state = EncryptedState::InitCompression;
-                        enc.server_compression.init_decompress(&mut enc.decompress);
-                        return Ok(());
-                    } else if buf.first() == Some(&msg::USERAUTH_BANNER) {
-                        let mut r = &buf[1..];
-                        let banner = String::decode(&mut r).map_err(crate::Error::from)?;
-                        client.auth_banner(&banner, self).await?;
-                        return Ok(());
-                    } else if buf.first() == Some(&msg::USERAUTH_FAILURE) {
-                        debug!("userauth_failure");
-
-                        let mut r = &buf[1..];
-                        let remaining_methods =
-                            String::decode(&mut r).map_err(crate::Error::from)?;
-                        debug!("remaining methods {remaining_methods:?}",);
-                        auth_request.methods = auth::MethodSet::empty();
-                        for method in remaining_methods.split(',') {
-                            if let Some(m) = auth::MethodSet::from_str(method) {
-                                auth_request.methods |= m
-                            }
-                        }
-                        let no_more_methods = auth_request.methods.is_empty();
-                        self.common.auth_method = None;
-                        self.sender
-                            .send(Reply::AuthFailure)
-                            .map_err(|_| crate::Error::SendError)?;
-
-                        // If no other authentication method is allowed by the server, give up.
-                        if no_more_methods {
-                            return Err(crate::Error::NoAuthMethod.into());
-                        }
-                    } else if buf.first() == Some(&msg::USERAUTH_INFO_REQUEST_OR_USERAUTH_PK_OK) {
-                        if let Some(auth::CurrentRequest::PublicKey {
-                            ref mut sent_pk_ok, ..
-                        }) = auth_request.current
-                        {
-                            debug!("userauth_pk_ok");
-                            *sent_pk_ok = true;
-                        } else if let Some(auth::CurrentRequest::KeyboardInteractive { .. }) =
-                            auth_request.current
-                        {
-                            debug!("keyboard_interactive");
-                            let mut r = &buf[1..];
-
-                            // read fields
-                            let name = String::decode(&mut r).map_err(crate::Error::from)?;
-
-                            let instructions =
-                                String::decode(&mut r).map_err(crate::Error::from)?;
-
-                            let _lang = String::decode(&mut r).map_err(crate::Error::from)?;
-                            let n_prompts = u32::decode(&mut r).map_err(crate::Error::from)?;
-
-                            // read prompts
-                            let mut prompts = Vec::with_capacity(n_prompts.try_into().unwrap_or(0));
-                            for _i in 0..n_prompts {
-                                let prompt = String::decode(&mut r).map_err(crate::Error::from)?;
-
-                                let echo = u8::decode(&mut r).map_err(crate::Error::from)? != 0;
-                                prompts.push(Prompt {
-                                    prompt: prompt.to_string(),
-                                    echo,
-                                });
-                            }
-
-                            // send challenges to caller
+                    match buf.split_first() {
+                        Some((&msg::USERAUTH_SUCCESS, _)) => {
+                            debug!("userauth_success");
                             self.sender
-                                .send(Reply::AuthInfoRequest {
-                                    name,
-                                    instructions,
-                                    prompts,
-                                })
+                                .send(Reply::AuthSuccess)
                                 .map_err(|_| crate::Error::SendError)?;
-
-                            // wait for response from handler
-                            let responses = loop {
-                                match self.receiver.recv().await {
-                                    Some(Msg::AuthInfoResponse { responses }) => break responses,
-                                    _ => {}
-                                }
-                            };
-                            // write responses
-                            enc.client_send_auth_response(&responses)?;
+                            enc.state = EncryptedState::InitCompression;
+                            enc.server_compression.init_decompress(&mut enc.decompress);
                             return Ok(());
                         }
+                        Some((&msg::USERAUTH_BANNER, mut r)) => {
+                            let banner = String::decode(&mut r).map_err(crate::Error::from)?;
+                            client.auth_banner(&banner, self).await?;
+                            return Ok(());
+                        }
+                        Some((&msg::USERAUTH_FAILURE, mut r)) => {
+                            debug!("userauth_failure");
 
-                        // continue with userauth_pk_ok
-                        match self.common.auth_method.take() {
-                            Some(auth_method @ auth::Method::PublicKey { .. }) => {
-                                self.common.buffer.clear();
-                                enc.client_send_signature(
-                                    &self.common.auth_user,
-                                    &auth_method,
-                                    &mut self.common.buffer,
-                                )?
+                            let remaining_methods =
+                                String::decode(&mut r).map_err(crate::Error::from)?;
+                            debug!("remaining methods {remaining_methods:?}",);
+                            auth_request.methods = auth::MethodSet::empty();
+                            for method in remaining_methods.split(',') {
+                                if let Some(m) = auth::MethodSet::from_str(method) {
+                                    auth_request.methods |= m
+                                }
                             }
-                            Some(auth_method @ auth::Method::OpenSshCertificate { .. }) => {
-                                self.common.buffer.clear();
-                                enc.client_send_signature(
-                                    &self.common.auth_user,
-                                    &auth_method,
-                                    &mut self.common.buffer,
-                                )?
-                            }
-                            Some(auth::Method::FuturePublicKey { key }) => {
-                                debug!("public key");
-                                self.common.buffer.clear();
-                                let i = enc.client_make_to_sign(
-                                    &self.common.auth_user,
-                                    &PublicKeyOrCertificate::PublicKey(key.clone()),
-                                    &mut self.common.buffer,
-                                )?;
-                                let len = self.common.buffer.len();
-                                let buf =
-                                    std::mem::replace(&mut self.common.buffer, CryptoVec::new());
+                            let no_more_methods = auth_request.methods.is_empty();
+                            self.common.auth_method = None;
+                            self.sender
+                                .send(Reply::AuthFailure)
+                                .map_err(|_| crate::Error::SendError)?;
 
+                            // If no other authentication method is allowed by the server, give up.
+                            if no_more_methods {
+                                return Err(crate::Error::NoAuthMethod.into());
+                            }
+                        }
+                        Some((&msg::USERAUTH_INFO_REQUEST_OR_USERAUTH_PK_OK, mut r)) => {
+                            if let Some(auth::CurrentRequest::PublicKey {
+                                ref mut sent_pk_ok,
+                                ..
+                            }) = auth_request.current
+                            {
+                                debug!("userauth_pk_ok");
+                                *sent_pk_ok = true;
+                            } else if let Some(auth::CurrentRequest::KeyboardInteractive {
+                                ..
+                            }) = auth_request.current
+                            {
+                                debug!("keyboard_interactive");
+
+                                // read fields
+                                let name = String::decode(&mut r).map_err(crate::Error::from)?;
+
+                                let instructions =
+                                    String::decode(&mut r).map_err(crate::Error::from)?;
+
+                                let _lang = String::decode(&mut r).map_err(crate::Error::from)?;
+                                let n_prompts = u32::decode(&mut r).map_err(crate::Error::from)?;
+
+                                // read prompts
+                                let mut prompts =
+                                    Vec::with_capacity(n_prompts.try_into().unwrap_or(0));
+                                for _i in 0..n_prompts {
+                                    let prompt =
+                                        String::decode(&mut r).map_err(crate::Error::from)?;
+
+                                    let echo = u8::decode(&mut r).map_err(crate::Error::from)? != 0;
+                                    prompts.push(Prompt {
+                                        prompt: prompt.to_string(),
+                                        echo,
+                                    });
+                                }
+
+                                // send challenges to caller
                                 self.sender
-                                    .send(Reply::SignRequest { key, data: buf })
+                                    .send(Reply::AuthInfoRequest {
+                                        name,
+                                        instructions,
+                                        prompts,
+                                    })
                                     .map_err(|_| crate::Error::SendError)?;
-                                self.common.buffer = loop {
+
+                                // wait for response from handler
+                                let responses = loop {
                                     match self.receiver.recv().await {
-                                        Some(Msg::Signed { data }) => break data,
+                                        Some(Msg::AuthInfoResponse { responses }) => {
+                                            break responses
+                                        }
                                         _ => {}
                                     }
                                 };
-                                if self.common.buffer.len() != len {
-                                    // The buffer was modified.
-                                    push_packet!(enc.write, {
-                                        #[allow(clippy::indexing_slicing)] // length checked
-                                        enc.write.extend(&self.common.buffer[i..]);
-                                    })
-                                }
+                                // write responses
+                                enc.client_send_auth_response(&responses)?;
+                                return Ok(());
                             }
-                            _ => {}
+
+                            // continue with userauth_pk_ok
+                            match self.common.auth_method.take() {
+                                Some(auth_method @ auth::Method::PublicKey { .. }) => {
+                                    self.common.buffer.clear();
+                                    enc.client_send_signature(
+                                        &self.common.auth_user,
+                                        &auth_method,
+                                        &mut self.common.buffer,
+                                    )?
+                                }
+                                Some(auth_method @ auth::Method::OpenSshCertificate { .. }) => {
+                                    self.common.buffer.clear();
+                                    enc.client_send_signature(
+                                        &self.common.auth_user,
+                                        &auth_method,
+                                        &mut self.common.buffer,
+                                    )?
+                                }
+                                Some(auth::Method::FuturePublicKey { key }) => {
+                                    debug!("public key");
+                                    self.common.buffer.clear();
+                                    let i = enc.client_make_to_sign(
+                                        &self.common.auth_user,
+                                        &PublicKeyOrCertificate::PublicKey(key.clone()),
+                                        &mut self.common.buffer,
+                                    )?;
+                                    let len = self.common.buffer.len();
+                                    let buf = std::mem::replace(
+                                        &mut self.common.buffer,
+                                        CryptoVec::new(),
+                                    );
+
+                                    self.sender
+                                        .send(Reply::SignRequest { key, data: buf })
+                                        .map_err(|_| crate::Error::SendError)?;
+                                    self.common.buffer = loop {
+                                        match self.receiver.recv().await {
+                                            Some(Msg::Signed { data }) => break data,
+                                            _ => {}
+                                        }
+                                    };
+                                    if self.common.buffer.len() != len {
+                                        // The buffer was modified.
+                                        push_packet!(enc.write, {
+                                            #[allow(clippy::indexing_slicing)] // length checked
+                                            enc.write.extend(&self.common.buffer[i..]);
+                                        })
+                                    }
+                                }
+                                _ => {}
+                            }
                         }
-                    } else if buf.first() == Some(&msg::EXT_INFO) {
-                        return self.handle_ext_info(client, buf);
-                    } else {
-                        debug!("unknown message: {:?}", buf);
-                        return Err(crate::Error::Inconsistent.into());
+                        Some((&msg::EXT_INFO, r)) => {
+                            return self.handle_ext_info(client, r);
+                        }
+                        other => {
+                            debug!("unknown message: {other:?}");
+                            return Err(crate::Error::Inconsistent.into());
+                        }
                     }
                 }
                 EncryptedState::InitCompression => unreachable!(),
@@ -380,8 +400,8 @@ impl Session {
         }
     }
 
-    fn handle_ext_info<H: Handler>(&mut self, _client: &mut H, buf: &[u8]) -> Result<(), H::Error> {
-        debug!("Received EXT_INFO: {:?}", buf);
+    fn handle_ext_info<H: Handler>(&mut self, _client: &mut H, r: &[u8]) -> Result<(), H::Error> {
+        debug!("Received EXT_INFO: {:?}", r);
         Ok(())
     }
 
@@ -390,10 +410,9 @@ impl Session {
         client: &mut H,
         buf: &[u8],
     ) -> Result<(), H::Error> {
-        match buf.first() {
-            Some(&msg::CHANNEL_OPEN_CONFIRMATION) => {
+        match buf.split_first() {
+            Some((&msg::CHANNEL_OPEN_CONFIRMATION, mut reader)) => {
                 debug!("channel_open_confirmation");
-                let mut reader = &buf[1..];
                 let msg =
                     ChannelOpenConfirmation::decode(&mut reader).map_err(crate::Error::from)?;
                 let local_id = ChannelId(msg.recipient_channel);
@@ -430,9 +449,8 @@ impl Session {
                     )
                     .await
             }
-            Some(&msg::CHANNEL_CLOSE) => {
+            Some((&msg::CHANNEL_CLOSE, mut r)) => {
                 debug!("channel_close");
-                let mut r = &buf[1..];
                 let channel_num = ChannelId::decode(&mut r).map_err(crate::Error::from)?;
                 if let Some(ref mut enc) = self.common.encrypted {
                     // The CHANNEL_CLOSE message must be sent to the server at this point or the session
@@ -442,18 +460,16 @@ impl Session {
                 self.channels.remove(&channel_num);
                 client.channel_close(channel_num, self).await
             }
-            Some(&msg::CHANNEL_EOF) => {
+            Some((&msg::CHANNEL_EOF, mut r)) => {
                 debug!("channel_eof");
-                let mut r = &buf[1..];
                 let channel_num = ChannelId::decode(&mut r).map_err(crate::Error::from)?;
                 if let Some(chan) = self.channels.get(&channel_num) {
                     let _ = chan.send(ChannelMsg::Eof);
                 }
                 client.channel_eof(channel_num, self).await
             }
-            Some(&msg::CHANNEL_OPEN_FAILURE) => {
+            Some((&msg::CHANNEL_OPEN_FAILURE, mut r)) => {
                 debug!("channel_open_failure");
-                let mut r = &buf[1..];
                 let channel_num = ChannelId::decode(&mut r).map_err(crate::Error::from)?;
                 let reason_code =
                     ChannelOpenFailure::from_u32(u32::decode(&mut r).map_err(crate::Error::from)?)
@@ -474,9 +490,8 @@ impl Session {
                     .channel_open_failure(channel_num, reason_code, &descr, &language, self)
                     .await
             }
-            Some(&msg::CHANNEL_DATA) => {
+            Some((&msg::CHANNEL_DATA, mut r)) => {
                 trace!("channel_data");
-                let mut r = &buf[1..];
                 let channel_num = ChannelId::decode(&mut r).map_err(crate::Error::from)?;
                 let data = Bytes::decode(&mut r).map_err(crate::Error::from)?;
                 let target = self.common.config.window_size;
@@ -498,9 +513,8 @@ impl Session {
 
                 client.data(channel_num, &data, self).await
             }
-            Some(&msg::CHANNEL_EXTENDED_DATA) => {
+            Some((&msg::CHANNEL_EXTENDED_DATA, mut r)) => {
                 debug!("channel_extended_data");
-                let mut r = &buf[1..];
                 let channel_num = ChannelId::decode(&mut r).map_err(crate::Error::from)?;
                 let extended_code = u32::decode(&mut r).map_err(crate::Error::from)?;
                 let data = Bytes::decode(&mut r).map_err(crate::Error::from)?;
@@ -526,8 +540,7 @@ impl Session {
                     .extended_data(channel_num, extended_code, &data, self)
                     .await
             }
-            Some(&msg::CHANNEL_REQUEST) => {
-                let mut r = &buf[1..];
+            Some((&msg::CHANNEL_REQUEST, mut r)) => {
                 let channel_num = ChannelId::decode(&mut r).map_err(crate::Error::from)?;
                 let req = String::decode(&mut r).map_err(crate::Error::from)?;
                 debug!("channel_request: {channel_num:?} {req:?}",);
@@ -607,9 +620,8 @@ impl Session {
                     }
                 }
             }
-            Some(&msg::CHANNEL_WINDOW_ADJUST) => {
+            Some((&msg::CHANNEL_WINDOW_ADJUST, mut r)) => {
                 debug!("channel_window_adjust");
-                let mut r = &buf[1..];
                 let channel_num = ChannelId::decode(&mut r).map_err(crate::Error::from)?;
                 let amount = u32::decode(&mut r).map_err(crate::Error::from)?;
                 let mut new_size = 0;
@@ -633,8 +645,7 @@ impl Session {
                 }
                 client.window_adjusted(channel_num, new_size, self).await
             }
-            Some(&msg::GLOBAL_REQUEST) => {
-                let mut r = &buf[1..];
+            Some((&msg::GLOBAL_REQUEST, mut r)) => {
                 let req = String::decode(&mut r).map_err(crate::Error::from)?;
                 let wants_reply = u8::decode(&mut r).map_err(crate::Error::from)?;
                 if let Some(ref mut enc) = self.common.encrypted {
@@ -677,24 +688,21 @@ impl Session {
                 self.common.received_data = false;
                 Ok(())
             }
-            Some(&msg::CHANNEL_SUCCESS) => {
-                let mut r = &buf[1..];
+            Some((&msg::CHANNEL_SUCCESS, mut r)) => {
                 let channel_num = ChannelId::decode(&mut r).map_err(crate::Error::from)?;
                 if let Some(chan) = self.channels.get(&channel_num) {
                     let _ = chan.send(ChannelMsg::Success);
                 }
                 client.channel_success(channel_num, self).await
             }
-            Some(&msg::CHANNEL_FAILURE) => {
-                let mut r = &buf[1..];
+            Some((&msg::CHANNEL_FAILURE, mut r)) => {
                 let channel_num = ChannelId::decode(&mut r).map_err(crate::Error::from)?;
                 if let Some(chan) = self.channels.get(&channel_num) {
                     let _ = chan.send(ChannelMsg::Failure);
                 }
                 client.channel_failure(channel_num, self).await
             }
-            Some(&msg::CHANNEL_OPEN) => {
-                let mut r = &buf[1..];
+            Some((&msg::CHANNEL_OPEN, mut r)) => {
                 let msg = OpenChannelMessage::parse(&mut r)?;
 
                 if let Some(ref mut enc) = self.common.encrypted {
@@ -807,18 +815,17 @@ impl Session {
                     Err(crate::Error::Inconsistent.into())
                 }
             }
-            Some(&msg::REQUEST_SUCCESS) => {
+            Some((&msg::REQUEST_SUCCESS, mut r)) => {
                 trace!("Global Request Success");
                 match self.open_global_requests.pop_front() {
                     Some(GlobalRequestResponse::Keepalive) => {
                         // ignore keepalives
                     }
                     Some(GlobalRequestResponse::TcpIpForward(return_channel)) => {
-                        let result = if buf.len() == 1 {
+                        let result = if r.is_empty() {
                             // If a specific port was requested, the reply has no data
                             Some(0)
                         } else {
-                            let mut r = &buf[1..];
                             match u32::decode(&mut r) {
                                 Ok(port) => Some(port),
                                 Err(e) => {
@@ -844,7 +851,7 @@ impl Session {
                 }
                 Ok(())
             }
-            Some(&msg::REQUEST_FAILURE) => {
+            Some((&msg::REQUEST_FAILURE, _)) => {
                 trace!("global request failure");
                 match self.open_global_requests.pop_front() {
                     Some(GlobalRequestResponse::Keepalive) => {
@@ -1052,7 +1059,7 @@ impl Encrypted {
                 )?;
 
                 // Extend with self-signature.
-                let signature = signature::Signer::try_sign(&**key, &buffer)?;
+                let signature = signature::Signer::try_sign(&**key, buffer)?;
                 signature.encoded()?.encode(&mut *buffer)?;
 
                 push_packet!(self.write, {
@@ -1068,7 +1075,7 @@ impl Encrypted {
                 )?;
 
                 // Extend with self-signature.
-                let signature = signature::Signer::try_sign(&**key, &buffer)?;
+                let signature = signature::Signer::try_sign(&**key, buffer)?;
                 signature.encoded()?.encode(&mut *buffer)?;
 
                 push_packet!(self.write, {

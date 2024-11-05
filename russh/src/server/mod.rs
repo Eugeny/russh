@@ -36,6 +36,7 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use async_trait::async_trait;
+use bytes::Bytes;
 use futures::future::Future;
 use log::{debug, error};
 use russh_util::runtime::JoinHandle;
@@ -121,21 +122,12 @@ impl Default for Config {
 /// A client's response in a challenge-response authentication.
 ///
 /// You should iterate it to get `&[u8]` response slices.
-#[derive(Debug)]
-pub struct Response<'a> {
-    pos: russh_keys::encoding::Position<'a>,
-    n: u32,
-}
+pub struct Response<'a> (&'a mut (dyn Iterator<Item = Option<Bytes>> + Send));
 
-impl<'a> Iterator for Response<'a> {
-    type Item = &'a [u8];
+impl Iterator for Response<'_> {
+    type Item = Bytes;
     fn next(&mut self) -> Option<Self::Item> {
-        if self.n == 0 {
-            None
-        } else {
-            self.n -= 1;
-            self.pos.read_string().ok()
-        }
+        self.0.next().flatten()
     }
 }
 

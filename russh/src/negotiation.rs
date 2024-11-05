@@ -200,7 +200,9 @@ pub(crate) trait Select {
         pref: &Preferred,
         available_host_keys: Option<&[PrivateKey]>,
     ) -> Result<Names, Error> {
-        let mut r = &buffer[17..];
+        let Some(mut r) = &buffer.get(17..) else {
+            return Err(Error::Inconsistent);
+        };
 
         // Key exchange
 
