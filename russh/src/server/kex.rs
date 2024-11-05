@@ -7,7 +7,7 @@ use ssh_encoding::Encode;
 use super::*;
 use crate::cipher::SealingKey;
 use crate::kex::KEXES;
-use crate::keys::encoding::{Encoding, Reader};
+use crate::keys::encoding::Encoding;
 use crate::negotiation::Select;
 use crate::{msg, negotiation};
 
@@ -88,9 +88,13 @@ impl KexDh {
             Ok(Kex::Dh(self))
         } else {
             // Else, process it.
-            assert!(buf.first() == Some(&msg::KEX_ECDH_INIT));
-            let mut r = buf.reader(1);
-            self.exchange.client_ephemeral.extend(r.read_string()?);
+            let Some((&msg::KEX_ECDH_INIT, mut r)) = buf.split_first() else {
+                return Err(Error::Inconsistent);
+            };
+
+            self.exchange
+                .client_ephemeral
+                .extend(&Bytes::decode(&mut r)?);
 
             let mut kex = KEXES.get(&self.names.kex).ok_or(Error::UnknownAlgo)?.make();
 

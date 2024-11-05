@@ -1,6 +1,7 @@
 use core::str;
 
 use byteorder::{BigEndian, ByteOrder};
+use bytes::Bytes;
 use log::debug;
 use russh_cryptovec::CryptoVec;
 use ssh_key::{Algorithm, HashAlg, PrivateKey, PublicKey, Signature};
@@ -8,9 +9,10 @@ use tokio;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use super::{msg, Constraint};
-use crate::encoding::{Encoding, Reader};
+use crate::encoding::Encoding;
 use crate::helpers::EncodedExt;
 use crate::{key, Error};
+use ssh_encoding::{Decode, Encode, Reader};
 
 pub trait AgentStream: AsyncRead + AsyncWrite {}
 
@@ -267,13 +269,12 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
         let mut keys = Vec::new();
 
         #[allow(clippy::indexing_slicing)] // static length
-        if self.buf[0] == msg::IDENTITIES_ANSWER {
-            let mut r = self.buf.reader(1);
-            let n = r.read_u32()?;
+        if let Some((&msg::IDENTITIES_ANSWER, mut r)) = self.buf.split_first() {
+            let n = u32::decode(&mut r)?;
             for _ in 0..n {
-                let key_blob = r.read_string()?;
-                let _comment = r.read_string()?;
-                keys.push(key::parse_public_key(key_blob)?);
+                let key_blob = Bytes::decode(&mut r)?;
+                let _comment = String::decode(&mut r)?;
+                keys.push(key::parse_public_key(&key_blob)?);
             }
         }
 
@@ -291,14 +292,16 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
 
         self.read_response().await?;
 
-        if self.buf.first() == Some(&msg::SIGN_RESPONSE) {
-            self.write_signature(hash, &mut data)?;
-            Ok(data)
-        } else if self.buf.first() == Some(&msg::FAILURE) {
-            Err(Error::AgentFailure)
-        } else {
-            debug!("self.buf = {:?}", &self.buf[..]);
-            Ok(data)
+        match self.buf.split_first() {
+            Some((&msg::SIGN_RESPONSE, mut r)) => {
+                self.write_signature(&mut r, hash, &mut data)?;
+                Ok(data)
+            }
+            Some((&msg::FAILURE, _)) => Err(Error::AgentFailure),
+            _ => {
+                debug!("self.buf = {:?}", &self.buf[..]);
+                Err(Error::AgentProtocolError)
+            }
         }
     }
 
@@ -329,15 +332,19 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
         Ok(hash)
     }
 
-    fn write_signature(&self, hash: u32, data: &mut CryptoVec) -> Result<(), Error> {
-        let mut r = self.buf.reader(1);
-        let mut resp = r.read_string()?.reader(0);
-        let t = resp.read_string()?;
-        if (hash == 2 && t == b"rsa-sha2-256") || (hash == 4 && t == b"rsa-sha2-512") || hash == 0 {
-            let sig = resp.read_string()?;
-            data.push_u32_be((t.len() + sig.len() + 8) as u32);
-            data.extend_ssh_string(t);
-            data.extend_ssh_string(sig);
+    fn write_signature<R: Reader>(
+        &self,
+        r: &mut R,
+        hash: u32,
+        data: &mut CryptoVec,
+    ) -> Result<(), Error> {
+        let mut resp = &Bytes::decode(r)?[..];
+        let t = String::decode(&mut resp)?;
+        if (hash == 2 && t == "rsa-sha2-256") || (hash == 4 && t == "rsa-sha2-512") || hash == 0 {
+            let sig = Bytes::decode(&mut resp)?;
+            (t.len() + sig.len() + 8).encode(data)?;
+            t.encode(data)?;
+            sig.encode(data)?;
         }
         Ok(())
     }
@@ -381,17 +388,13 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
         self.prepare_sign_request(public, data)?;
         self.read_response().await?;
 
-        #[allow(clippy::indexing_slicing)] // length is checked
-        if !self.buf.is_empty() && self.buf[0] == msg::SIGN_RESPONSE {
-            let mut r = self.buf.reader(1);
-            let mut resp = r.read_string()?.reader(0);
-            let typ = String::from_utf8(resp.read_string()?.into())?;
-            let sig = resp.read_string()?;
-            let algo = Algorithm::new(&typ)?;
-            let sig = Signature::new(algo, sig.to_vec())?;
-            Ok(sig)
-        } else {
-            Err(Error::AgentProtocolError)
+        match self.buf.split_first() {
+            Some((&msg::SIGN_RESPONSE, mut r)) => {
+                let mut resp = &Bytes::decode(&mut r)?[..];
+                let sig = Signature::decode(&mut resp)?;
+                Ok(sig)
+            }
+            _ => Err(Error::AgentProtocolError),
         }
     }
 
@@ -453,11 +456,13 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
         BigEndian::write_u32(&mut self.buf[..], len as u32);
         self.read_response().await?;
 
-        let mut r = self.buf.reader(1);
-        ext.extend(r.read_string()?);
-
-        #[allow(clippy::indexing_slicing)] // length is checked
-        Ok(!self.buf.is_empty() && self.buf[0] == msg::SUCCESS)
+        match self.buf.split_first() {
+            Some((&msg::SUCCESS, mut r)) => {
+                ext.extend(&Bytes::decode(&mut r)?);
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
     }
 }
 

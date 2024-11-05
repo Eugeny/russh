@@ -22,6 +22,7 @@ use bytes::Bytes;
 use cert::PublicKeyOrCertificate;
 use log::{debug, error, info, trace, warn};
 use negotiation::Select;
+use russh_keys::helpers::NameList;
 use signature::Verifier;
 use ssh_encoding::{Decode, Encode, Reader};
 use ssh_key::{PublicKey, Signature};
@@ -30,7 +31,6 @@ use {msg, negotiation};
 
 use super::super::*;
 use super::*;
-use crate::keys::encoding::Encoding;
 use crate::msg::SSH_OPEN_ADMINISTRATIVELY_PROHIBITED;
 use crate::parsing::{ChannelOpenConfirmation, ChannelType, OpenChannelMessage};
 
@@ -183,7 +183,7 @@ impl Session {
                         self.common.config.as_ref().auth_banner,
                         self.common.config.as_ref().methods,
                         &mut enc.write,
-                    );
+                    )?;
                     *accepted = true;
                     enc.state = EncryptedState::WaitingAuthRequest(auth_request);
                 }
@@ -244,26 +244,26 @@ fn server_accept_service(
     banner: Option<&str>,
     methods: MethodSet,
     buffer: &mut CryptoVec,
-) -> AuthRequest {
+) -> Result<AuthRequest, crate::Error> {
     push_packet!(buffer, {
         buffer.push(msg::SERVICE_ACCEPT);
-        buffer.extend_ssh_string(b"ssh-userauth");
+        "ssh-userauth".encode(buffer)?;
     });
 
     if let Some(banner) = banner {
         push_packet!(buffer, {
             buffer.push(msg::USERAUTH_BANNER);
-            buffer.extend_ssh_string(banner.as_bytes());
-            buffer.extend_ssh_string(b"");
+            banner.encode(buffer)?;
+            "".encode(buffer)?;
         })
     }
 
-    AuthRequest {
+    Ok(AuthRequest {
         methods,
         partial_success: false, // not used immediately anway.
         current: None,
         rejection_count: 0,
-    }
+    })
 }
 
 impl Encrypted {
@@ -310,7 +310,7 @@ impl Encrypted {
                         auth_request.methods -= MethodSet::PASSWORD;
                     }
                     auth_request.partial_success = false;
-                    reject_auth_request(until, &mut self.write, auth_request).await;
+                    reject_auth_request(until, &mut self.write, auth_request).await?;
                 }
                 Ok(())
             } else if method == "publickey" {
@@ -348,7 +348,7 @@ impl Encrypted {
                         auth_request.methods -= MethodSet::NONE;
                     }
                     auth_request.partial_success = false;
-                    reject_auth_request(until, &mut self.write, auth_request).await;
+                    reject_auth_request(until, &mut self.write, auth_request).await?;
                 }
                 Ok(())
             } else if method == "keyboard-interactive" {
@@ -381,7 +381,7 @@ impl Encrypted {
                 } else {
                     unreachable!()
                 };
-                reject_auth_request(until, &mut self.write, auth_request).await;
+                reject_auth_request(until, &mut self.write, auth_request).await?;
                 Ok(())
             }
         } else {
@@ -430,14 +430,14 @@ impl Encrypted {
                         let now = SystemTime::now();
                         if now < cert.valid_after_time() || now > cert.valid_before_time() {
                             warn!("Certificate is expired or not yet valid");
-                            reject_auth_request(until, &mut self.write, auth_request).await;
+                            reject_auth_request(until, &mut self.write, auth_request).await?;
                             return Ok(());
                         }
 
                         // Verify the certificate’s signature
                         if cert.verify_signature().is_err() {
                             warn!("Certificate signature is invalid");
-                            reject_auth_request(until, &mut self.write, auth_request).await;
+                            reject_auth_request(until, &mut self.write, auth_request).await?;
                             return Ok(());
                         }
 
@@ -488,11 +488,11 @@ impl Encrypted {
                         if SIGNATURE_BUFFER.with(|buf| {
                             let mut buf = buf.borrow_mut();
                             buf.clear();
-                            buf.extend_ssh_string(session_id);
+                            session_id.encode(&mut *buf).map_err(crate::Error::from)?;
                             buf.extend(init);
 
-                            Verifier::verify(&pubkey, &buf, &sig).is_ok()
-                        }) {
+                            Ok(Verifier::verify(&pubkey, &buf, &sig).is_ok())
+                        })? {
                             debug!("signature verified");
                             let auth = match pk_or_cert {
                                 PublicKeyOrCertificate::PublicKey(ref pk) => {
@@ -515,14 +515,14 @@ impl Encrypted {
                                 }
                                 auth_request.partial_success = false;
                                 auth_user.clear();
-                                reject_auth_request(until, &mut self.write, auth_request).await;
+                                reject_auth_request(until, &mut self.write, auth_request).await?;
                             }
                         } else {
                             debug!("signature wrong");
-                            reject_auth_request(until, &mut self.write, auth_request).await;
+                            reject_auth_request(until, &mut self.write, auth_request).await?;
                         }
                     } else {
-                        reject_auth_request(until, &mut self.write, auth_request).await;
+                        reject_auth_request(until, &mut self.write, auth_request).await?;
                     }
                     Ok(())
                 } else {
@@ -562,7 +562,7 @@ impl Encrypted {
                             }
                             auth_request.partial_success = false;
                             auth_user.clear();
-                            reject_auth_request(until, &mut self.write, auth_request).await;
+                            reject_auth_request(until, &mut self.write, auth_request).await?;
                         }
                     }
                     Ok(())
@@ -573,7 +573,7 @@ impl Encrypted {
                 | ssh_key::Error::AlgorithmUnsupported { .. }
                 | ssh_key::Error::CertificateValidation { .. } => {
                     debug!("public key error: {e}");
-                    reject_auth_request(until, &mut self.write, auth_request).await;
+                    reject_auth_request(until, &mut self.write, auth_request).await?;
                     Ok(())
                 }
                 e => Err(crate::Error::from(e).into()),
@@ -586,17 +586,18 @@ async fn reject_auth_request(
     until: Instant,
     write: &mut CryptoVec,
     auth_request: &mut AuthRequest,
-) {
+) -> Result<(), Error> {
     debug!("rejecting {:?}", auth_request);
     push_packet!(write, {
         write.push(msg::USERAUTH_FAILURE);
-        write.extend_list(auth_request.methods.into_iter());
+        NameList::from(auth_request.methods).encode(write)?;
         write.push(auth_request.partial_success as u8);
     });
     auth_request.current = None;
     auth_request.rejection_count += 1;
     debug!("packet pushed");
-    tokio::time::sleep_until(until).await
+    tokio::time::sleep_until(until).await;
+    Ok(())
 }
 
 fn server_auth_request_success(buffer: &mut CryptoVec) {
@@ -629,7 +630,7 @@ async fn read_userauth_info_response<H: Handler + Send, R: Reader>(
             .map_err(H::Error::from)?;
         Ok(resp)
     } else {
-        reject_auth_request(until, write, auth_request).await;
+        reject_auth_request(until, write, auth_request).await?;
         Ok(false)
     }
 }
@@ -652,7 +653,7 @@ async fn reply_userauth_info_response(
                 auth_request.methods = proceed_with_methods;
             }
             auth_request.partial_success = false;
-            reject_auth_request(until, write, auth_request).await;
+            reject_auth_request(until, write, auth_request).await?;
             Ok(false)
         }
         Auth::Partial {
@@ -661,16 +662,17 @@ async fn reply_userauth_info_response(
             prompts,
         } => {
             push_packet!(write, {
-                write.push(msg::USERAUTH_INFO_REQUEST);
-                write.extend_ssh_string(name.as_bytes());
-                write.extend_ssh_string(instructions.as_bytes());
-                write.extend_ssh_string(b""); // lang, should be empty
-                write.push_u32_be(prompts.len() as u32);
+                msg::USERAUTH_INFO_REQUEST.encode(write)?;
+                name.as_ref().encode(write)?;
+                instructions.as_ref().encode(write)?;
+                "".encode(write)?; // lang, should be empty
+                prompts.len().encode(write)?;
                 for &(ref a, b) in prompts.iter() {
-                    write.extend_ssh_string(a.as_bytes());
-                    write.push(b as u8);
+                    a.as_ref().encode(write)?;
+                    (b as u8).encode(write)?;
                 }
-            });
+                Ok::<(), crate::Error>(())
+            })?;
             Ok(false)
         }
         Auth::UnsupportedMethod => unreachable!(),

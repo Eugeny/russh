@@ -16,8 +16,6 @@
 use byteorder::{BigEndian, ByteOrder, WriteBytesExt};
 use russh_cryptovec::CryptoVec;
 
-use crate::Error;
-
 #[doc(hidden)]
 pub trait Bytes {
     fn bytes(&self) -> &[u8];
@@ -203,118 +201,5 @@ impl Encoding for CryptoVec {
         let data_len = self.len() - data_offset;
         #[allow(clippy::indexing_slicing)] // length is known
         BigEndian::write_u32(&mut self[len_offset..], data_len as u32);
-    }
-}
-
-/// A cursor-like trait to read SSH-encoded things.
-pub trait Reader {
-    /// Create an SSH reader for `self`.
-    fn reader(&self, starting_at: usize) -> Position;
-}
-
-impl Reader for CryptoVec {
-    fn reader(&self, starting_at: usize) -> Position {
-        Position {
-            s: self,
-            position: starting_at,
-        }
-    }
-}
-
-impl Reader for [u8] {
-    fn reader(&self, starting_at: usize) -> Position {
-        Position {
-            s: self,
-            position: starting_at,
-        }
-    }
-}
-
-/// A cursor-like type to read SSH-encoded values.
-#[derive(Debug)]
-pub struct Position<'a> {
-    s: &'a [u8],
-    #[doc(hidden)]
-    pub position: usize,
-}
-impl<'a> Position<'a> {
-    /// Read one string from this reader.
-    pub fn read_string(&mut self) -> Result<&'a [u8], Error> {
-        let len = self.read_u32()? as usize;
-        if self.position + len <= self.s.len() {
-            #[allow(clippy::indexing_slicing)] // length is known
-            let result = &self.s[self.position..(self.position + len)];
-            self.position += len;
-            Ok(result)
-        } else {
-            Err(Error::IndexOutOfBounds)
-        }
-    }
-    /// Read a `u32` from this reader.
-    pub fn read_u32(&mut self) -> Result<u32, Error> {
-        if self.position + 4 <= self.s.len() {
-            #[allow(clippy::indexing_slicing)] // length is known
-            let u = BigEndian::read_u32(&self.s[self.position..]);
-            self.position += 4;
-            Ok(u)
-        } else {
-            Err(Error::IndexOutOfBounds)
-        }
-    }
-    /// Read a `u64` from this reader by combining two `u32` values.
-    pub fn read_u64(&mut self) -> Result<u64, Error> {
-        let high = self.read_u32()? as u64;
-        let low = self.read_u32()? as u64;
-        Ok((high << 32) | low)
-    }
-    /// Read one byte from this reader.
-    pub fn read_byte(&mut self) -> Result<u8, Error> {
-        if self.position < self.s.len() {
-            #[allow(clippy::indexing_slicing)] // length is known
-            let u = self.s[self.position];
-            self.position += 1;
-            Ok(u)
-        } else {
-            Err(Error::IndexOutOfBounds)
-        }
-    }
-
-    /// Read one byte from this reader.
-    pub fn read_mpint(&mut self) -> Result<&'a [u8], Error> {
-        let len = self.read_u32()? as usize;
-        if self.position + len <= self.s.len() {
-            #[allow(clippy::indexing_slicing)] // length was checked
-            let result = &self.s[self.position..(self.position + len)];
-            self.position += len;
-            Ok(result)
-        } else {
-            Err(Error::IndexOutOfBounds)
-        }
-    }
-
-    pub fn read_ssh<T: SshRead<'a>>(&mut self) -> Result<T, Error> {
-        T::read_ssh(self)
-    }
-}
-
-/// Trait for reading value in SSH-encoded format.
-pub trait SshRead<'a>: Sized + 'a {
-    /// Read the value from a position.
-    fn read_ssh(pos: &mut Position<'a>) -> Result<Self, Error>;
-}
-
-impl<'a> ssh_encoding::Reader for Position<'a> {
-    fn read<'o>(&mut self, out: &'o mut [u8]) -> ssh_encoding::Result<&'o [u8]> {
-        out.copy_from_slice(
-            self.s
-                .get(self.position..(self.position + out.len()))
-                .ok_or(ssh_encoding::Error::Length)?,
-        );
-        self.position += out.len();
-        Ok(out)
-    }
-
-    fn remaining_len(&self) -> usize {
-        self.s.len() - self.position
     }
 }

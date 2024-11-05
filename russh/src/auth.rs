@@ -20,8 +20,8 @@ use bitflags::bitflags;
 use ssh_key::{Certificate, PrivateKey};
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite};
+use russh_keys::helpers::NameList;
 
-use crate::keys::encoding;
 use crate::CryptoVec;
 
 bitflags! {
@@ -101,16 +101,28 @@ pub enum Method {
     // Hostbased,
 }
 
-impl encoding::Bytes for MethodSet {
-    fn bytes(&self) -> &'static [u8] {
-        match *self {
-            MethodSet::NONE => b"none",
-            MethodSet::PASSWORD => b"password",
-            MethodSet::PUBLICKEY => b"publickey",
-            MethodSet::HOSTBASED => b"hostbased",
-            MethodSet::KEYBOARD_INTERACTIVE => b"keyboard-interactive",
-            _ => b"",
+impl From<MethodSet> for &'static str {
+    fn from(value: MethodSet) -> Self {
+        match value {
+            MethodSet::NONE => "none",
+            MethodSet::PASSWORD => "password",
+            MethodSet::PUBLICKEY => "publickey",
+            MethodSet::HOSTBASED => "hostbased",
+            MethodSet::KEYBOARD_INTERACTIVE => "keyboard-interactive",
+            _ => "",
         }
+    }
+}
+
+impl From<MethodSet> for String {
+    fn from(value: MethodSet) -> Self {
+        <&str>::from(value).to_string()
+    }
+}
+
+impl From<MethodSet> for NameList {
+    fn from(value: MethodSet) -> Self {
+        Self(value.into_iter().map(|x| x.into()).collect())
     }
 }
 
