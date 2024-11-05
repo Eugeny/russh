@@ -17,10 +17,10 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bitflags::bitflags;
+use russh_keys::helpers::NameList;
 use ssh_key::{Certificate, PrivateKey};
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite};
-use russh_keys::helpers::NameList;
 
 use crate::CryptoVec;
 

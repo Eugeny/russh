@@ -122,7 +122,7 @@ impl Default for Config {
 /// A client's response in a challenge-response authentication.
 ///
 /// You should iterate it to get `&[u8]` response slices.
-pub struct Response<'a> (&'a mut (dyn Iterator<Item = Option<Bytes>> + Send));
+pub struct Response<'a>(&'a mut (dyn Iterator<Item = Option<Bytes>> + Send));
 
 impl Iterator for Response<'_> {
     type Item = Bytes;

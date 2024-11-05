@@ -1418,7 +1418,9 @@ async fn reply<H: Handler>(
                 // We've sent ECDH_INIT, waiting for ECDH_REPLY
 
                 #[allow(clippy::indexing_slicing)] // length checked
-                let kex = kexdhdone.server_key_check(false, handler, &mut &buf[1..]).await?;
+                let kex = kexdhdone
+                    .server_key_check(false, handler, &mut &buf[1..])
+                    .await?;
 
                 session.common.strict_kex = session.common.strict_kex || kex.names.strict_kex;
                 session.common.kex = Some(Kex::Keys(kex));
