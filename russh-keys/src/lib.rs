@@ -74,7 +74,6 @@ use data_encoding::BASE64_MIME;
 use helpers::EncodedExt;
 use thiserror::Error;
 
-pub mod encoding;
 pub mod key;
 
 mod format;
