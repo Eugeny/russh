@@ -23,17 +23,19 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt::Debug;
+use std::ops::DerefMut;
 
 use curve25519::Curve25519KexType;
+use delegate::delegate;
 use dh::{
     DhGroup14Sha1KexType, DhGroup14Sha256KexType, DhGroup16Sha512KexType, DhGroup1Sha1KexType,
 };
 use digest::Digest;
 use ecdh_nistp::{EcdhNistP256KexType, EcdhNistP384KexType, EcdhNistP521KexType};
 use once_cell::sync::Lazy;
+use ssh_encoding::{Encode, Writer};
 
 use crate::cipher::CIPHERS;
-use crate::keys::encoding::Encoding;
 use crate::mac::{self, MACS};
 use crate::session::Exchange;
 use crate::{cipher, CryptoVec};
@@ -86,6 +88,13 @@ impl AsRef<str> for Name {
     fn as_ref(&self) -> &str {
         self.0
     }
+}
+
+impl Encode for Name {
+    delegate! { to self.as_ref() {
+        fn encoded_len(&self) -> Result<usize, ssh_encoding::Error>;
+        fn encode(&self, writer: &mut impl ssh_encoding::Writer) -> Result<(), ssh_encoding::Error>;
+    }}
 }
 
 impl TryFrom<&str> for Name {
@@ -199,7 +208,7 @@ pub(crate) fn compute_keys<D: Digest>(
                         key.clear();
 
                         if let Some(shared) = shared_secret {
-                            buffer.extend_ssh_mpint(shared);
+                            encode_mpint(shared, buffer.deref_mut())?;
                         }
 
                         buffer.extend(exchange_hash.as_ref());
@@ -216,7 +225,7 @@ pub(crate) fn compute_keys<D: Digest>(
                             // extend.
                             buffer.clear();
                             if let Some(shared) = shared_secret {
-                                buffer.extend_ssh_mpint(shared);
+                                encode_mpint(shared, buffer.deref_mut())?;
                             }
                             buffer.extend(exchange_hash.as_ref());
                             buffer.extend(key);
@@ -283,4 +292,24 @@ pub(crate) fn compute_keys<D: Digest>(
             })
         })
     })
+}
+
+// NOTE: using MpInt::from_bytes().encode() will randomly fail,
+// I'm assuming it's due to specific byte values / padding but no time to investigate
+#[allow(clippy::indexing_slicing)] // length is known
+pub(crate) fn encode_mpint<W: Writer>(s: &[u8], w: &mut W) -> Result<(), crate::Error> {
+    // Skip initial 0s.
+    let mut i = 0;
+    while i < s.len() && s[i] == 0 {
+        i += 1
+    }
+    // If the first non-zero is >= 128, write its length (u32, BE), followed by 0.
+    if s[i] & 0x80 != 0 {
+        ((s.len() - i + 1) as u32).encode(w)?;
+        0u8.encode(w)?;
+    } else {
+        ((s.len() - i) as u32).encode(w)?;
+    }
+    w.write(&s[i..])?;
+    Ok(())
 }

@@ -13,15 +13,15 @@
 // limitations under the License.
 //
 use std::borrow::Cow;
-use std::str::from_utf8;
 
 use log::debug;
 use rand::RngCore;
+use russh_keys::helpers::NameList;
+use ssh_encoding::{Decode, Encode};
 use ssh_key::{Algorithm, Certificate, EcdsaCurve, HashAlg, PrivateKey, PublicKey};
 
 use crate::cipher::CIPHERS;
 use crate::kex::{EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT, EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER};
-use crate::keys::encoding::{Encoding, Reader};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::server::Config;
 use crate::{cipher, compression, kex, mac, msg, AlgorithmKind, CryptoVec, Error};
@@ -181,10 +181,8 @@ impl<'a> Named<'a> for Certificate {
     }
 }
 
-pub(crate) fn parse_kex_algo_list(list: &[u8]) -> Vec<&str> {
-    list.split(|&x| x == b',')
-        .map(|x| from_utf8(x).unwrap_or_default())
-        .collect()
+pub(crate) fn parse_kex_algo_list(list: &str) -> Vec<&str> {
+    list.split(',').collect()
 }
 
 pub(crate) trait Select {
@@ -202,14 +200,16 @@ pub(crate) trait Select {
         pref: &Preferred,
         available_host_keys: Option<&[PrivateKey]>,
     ) -> Result<Names, Error> {
-        let mut r = buffer.reader(17);
+        let Some(mut r) = &buffer.get(17..) else {
+            return Err(Error::Inconsistent);
+        };
 
         // Key exchange
 
-        let kex_string = r.read_string()?;
+        let kex_string = String::decode(&mut r)?;
         let (kex_both_first, kex_algorithm) = Self::select(
             &pref.kex,
-            &parse_kex_algo_list(kex_string),
+            &parse_kex_algo_list(&kex_string),
             AlgorithmKind::Kex,
         )?;
 
@@ -226,7 +226,7 @@ pub(crate) trait Select {
             } else {
                 EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER
             }],
-            &parse_kex_algo_list(kex_string),
+            &parse_kex_algo_list(&kex_string),
             AlgorithmKind::Kex,
         )
         .is_ok();
@@ -236,7 +236,7 @@ pub(crate) trait Select {
 
         // Host key
 
-        let key_string: &[u8] = r.read_string()?;
+        let key_string = String::decode(&mut r)?;
         let possible_host_key_algos = match available_host_keys {
             Some(available_host_keys) => pref.possible_host_key_algos_for_keys(available_host_keys),
             None => pref.key.iter().map(ToOwned::to_owned).collect::<Vec<_>>(),
@@ -244,19 +244,19 @@ pub(crate) trait Select {
 
         let (key_both_first, key_algorithm) = Self::select(
             &possible_host_key_algos[..],
-            &parse_kex_algo_list(key_string),
+            &parse_kex_algo_list(&key_string),
             AlgorithmKind::Key,
         )?;
 
         // Cipher
 
-        let cipher_string = r.read_string()?;
+        let cipher_string = String::decode(&mut r)?;
         let (_cipher_both_first, cipher) = Self::select(
             &pref.cipher,
-            &parse_kex_algo_list(cipher_string),
+            &parse_kex_algo_list(&cipher_string),
             AlgorithmKind::Cipher,
         )?;
-        r.read_string()?; // cipher server-to-client.
+        String::decode(&mut r)?; // cipher server-to-client.
         debug!("kex {}", line!());
 
         // MAC
@@ -265,7 +265,7 @@ pub(crate) trait Select {
 
         let client_mac = match Self::select(
             &pref.mac,
-            &parse_kex_algo_list(r.read_string()?),
+            &parse_kex_algo_list(&String::decode(&mut r)?),
             AlgorithmKind::Mac,
         ) {
             Ok((_, m)) => m,
@@ -279,7 +279,7 @@ pub(crate) trait Select {
         };
         let server_mac = match Self::select(
             &pref.mac,
-            &parse_kex_algo_list(r.read_string()?),
+            &parse_kex_algo_list(&String::decode(&mut r)?),
             AlgorithmKind::Mac,
         ) {
             Ok((_, m)) => m,
@@ -299,7 +299,7 @@ pub(crate) trait Select {
         let client_compression = compression::Compression::new(
             &Self::select(
                 &pref.compression,
-                &parse_kex_algo_list(r.read_string()?),
+                &parse_kex_algo_list(&String::decode(&mut r)?),
                 AlgorithmKind::Compression,
             )?
             .1,
@@ -310,16 +310,16 @@ pub(crate) trait Select {
         let server_compression = compression::Compression::new(
             &Self::select(
                 &pref.compression,
-                &parse_kex_algo_list(r.read_string()?),
+                &parse_kex_algo_list(&String::decode(&mut r)?),
                 AlgorithmKind::Compression,
             )?
             .1,
         );
         debug!("client_compression = {:?}", client_compression);
-        r.read_string()?; // languages client-to-server
-        r.read_string()?; // languages server-to-client
+        String::decode(&mut r)?; // languages client-to-server
+        String::decode(&mut r)?; // languages server-to-client
 
-        let follows = r.read_byte()? != 0;
+        let follows = u8::decode(&mut r)? != 0;
         Ok(Names {
             kex: kex_algorithm,
             key: key_algorithm,
@@ -404,43 +404,92 @@ pub fn write_kex(
     rand::thread_rng().fill_bytes(&mut cookie);
 
     buf.extend(&cookie); // cookie
-    buf.extend_list(prefs.kex.iter().filter(|k| {
-        !(if server_config.is_some() {
-            [
-                crate::kex::EXTENSION_SUPPORT_AS_CLIENT,
-                crate::kex::EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT,
-            ]
-        } else {
-            [
-                crate::kex::EXTENSION_SUPPORT_AS_SERVER,
-                crate::kex::EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER,
-            ]
-        })
-        .contains(*k)
-    })); // kex algo
+    NameList(
+        prefs
+            .kex
+            .iter()
+            .filter(|k| {
+                !(if server_config.is_some() {
+                    [
+                        crate::kex::EXTENSION_SUPPORT_AS_CLIENT,
+                        crate::kex::EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT,
+                    ]
+                } else {
+                    [
+                        crate::kex::EXTENSION_SUPPORT_AS_SERVER,
+                        crate::kex::EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER,
+                    ]
+                })
+                .contains(*k)
+            })
+            .map(|x| x.as_ref().to_owned())
+            .collect(),
+    )
+    .encode(buf)?; // kex algo
 
     if let Some(server_config) = server_config {
         // Only advertise host key algorithms that we have keys for.
-        buf.extend_list(
+        NameList(
             prefs
                 .key
                 .iter()
-                .filter(|algo| server_config.keys.iter().any(|k| k.algorithm() == **algo)),
-        );
+                .filter(|algo| server_config.keys.iter().any(|k| k.algorithm() == **algo))
+                .map(|x| x.to_string())
+                .collect(),
+        )
+        .encode(buf)?;
     } else {
-        buf.extend_list(prefs.key.iter());
+        NameList(prefs.key.iter().map(ToString::to_string).collect()).encode(buf)?;
     }
 
-    buf.extend_list(prefs.cipher.iter()); // cipher client to server
-    buf.extend_list(prefs.cipher.iter()); // cipher server to client
+    // cipher client to server
+    NameList(
+        prefs
+            .cipher
+            .iter()
+            .map(|x| x.as_ref().to_string())
+            .collect(),
+    )
+    .encode(buf)?;
 
-    buf.extend_list(prefs.mac.iter()); // mac client to server
-    buf.extend_list(prefs.mac.iter()); // mac server to client
-    buf.extend_list(prefs.compression.iter()); // compress client to server
-    buf.extend_list(prefs.compression.iter()); // compress server to client
+    // cipher server to client
+    NameList(
+        prefs
+            .cipher
+            .iter()
+            .map(|x| x.as_ref().to_string())
+            .collect(),
+    )
+    .encode(buf)?;
 
-    buf.write_empty_list(); // languages client to server
-    buf.write_empty_list(); // languagesserver to client
+    // mac client to server
+    NameList(prefs.mac.iter().map(|x| x.as_ref().to_string()).collect()).encode(buf)?;
+
+    // mac server to client
+    NameList(prefs.mac.iter().map(|x| x.as_ref().to_string()).collect()).encode(buf)?;
+
+    // compress client to server
+    NameList(
+        prefs
+            .compression
+            .iter()
+            .map(|x| x.as_ref().to_string())
+            .collect(),
+    )
+    .encode(buf)?;
+
+    // compress server to client
+    NameList(
+        prefs
+            .compression
+            .iter()
+            .map(|x| x.as_ref().to_string())
+            .collect(),
+    )
+    .encode(buf)?;
+
+    Vec::<String>::new().encode(buf)?; // languages client to server
+    Vec::<String>::new().encode(buf)?; // languages server to client
 
     buf.push(0); // doesn't follow
     buf.extend(&[0, 0, 0, 0]); // reserved

@@ -1,14 +1,15 @@
 use core::str;
 
 use byteorder::{BigEndian, ByteOrder};
+use bytes::Bytes;
 use log::debug;
 use russh_cryptovec::CryptoVec;
+use ssh_encoding::{Decode, Encode, Reader};
 use ssh_key::{Algorithm, HashAlg, PrivateKey, PublicKey, Signature};
 use tokio;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use super::{msg, Constraint};
-use crate::encoding::{Encoding, Reader};
 use crate::helpers::EncodedExt;
 use crate::{key, Error};
 
@@ -156,24 +157,24 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
             self.buf.push(msg::ADD_ID_CONSTRAINED)
         }
 
-        self.buf.extend(key.key_data().encoded()?.as_slice());
-        self.buf.extend_ssh_string(&[]); // comment field
+        key.key_data().encode(&mut self.buf)?;
+        "".encode(&mut self.buf)?; // comment field
 
         if !constraints.is_empty() {
             for cons in constraints {
                 match *cons {
                     Constraint::KeyLifetime { seconds } => {
-                        self.buf.push(msg::CONSTRAIN_LIFETIME);
-                        self.buf.push_u32_be(seconds);
+                        msg::CONSTRAIN_LIFETIME.encode(&mut self.buf)?;
+                        seconds.encode(&mut self.buf)?;
                     }
                     Constraint::Confirm => self.buf.push(msg::CONSTRAIN_CONFIRM),
                     Constraint::Extensions {
                         ref name,
                         ref details,
                     } => {
-                        self.buf.push(msg::CONSTRAIN_EXTENSION);
-                        self.buf.extend_ssh_string(name);
-                        self.buf.extend_ssh_string(details);
+                        msg::CONSTRAIN_EXTENSION.encode(&mut self.buf)?;
+                        name.encode(&mut self.buf)?;
+                        details.encode(&mut self.buf)?;
                     }
                 }
             }
@@ -200,24 +201,24 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
         } else {
             self.buf.push(msg::ADD_SMARTCARD_KEY_CONSTRAINED)
         }
-        self.buf.extend_ssh_string(id.as_bytes());
-        self.buf.extend_ssh_string(pin);
+        id.encode(&mut self.buf)?;
+        pin.encode(&mut self.buf)?;
         if !constraints.is_empty() {
-            self.buf.push_u32_be(constraints.len() as u32);
+            (constraints.len() as u32).encode(&mut self.buf)?;
             for cons in constraints {
                 match *cons {
                     Constraint::KeyLifetime { seconds } => {
-                        self.buf.push(msg::CONSTRAIN_LIFETIME);
-                        self.buf.push_u32_be(seconds)
+                        msg::CONSTRAIN_LIFETIME.encode(&mut self.buf)?;
+                        seconds.encode(&mut self.buf)?;
                     }
                     Constraint::Confirm => self.buf.push(msg::CONSTRAIN_CONFIRM),
                     Constraint::Extensions {
                         ref name,
                         ref details,
                     } => {
-                        self.buf.push(msg::CONSTRAIN_EXTENSION);
-                        self.buf.extend_ssh_string(name);
-                        self.buf.extend_ssh_string(details);
+                        msg::CONSTRAIN_EXTENSION.encode(&mut self.buf)?;
+                        name.encode(&mut self.buf)?;
+                        details.encode(&mut self.buf)?;
                     }
                 }
             }
@@ -233,7 +234,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
         self.buf.clear();
         self.buf.resize(4);
         self.buf.push(msg::LOCK);
-        self.buf.extend_ssh_string(passphrase);
+        passphrase.encode(&mut self.buf)?;
         let len = self.buf.len() - 4;
         BigEndian::write_u32(&mut self.buf[..], len as u32);
         self.read_response().await?;
@@ -244,8 +245,8 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
     pub async fn unlock(&mut self, passphrase: &[u8]) -> Result<(), Error> {
         self.buf.clear();
         self.buf.resize(4);
-        self.buf.push(msg::UNLOCK);
-        self.buf.extend_ssh_string(passphrase);
+        msg::UNLOCK.encode(&mut self.buf)?;
+        passphrase.encode(&mut self.buf)?;
         let len = self.buf.len() - 4;
         #[allow(clippy::indexing_slicing)] // static length
         BigEndian::write_u32(&mut self.buf[..], len as u32);
@@ -258,7 +259,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
     pub async fn request_identities(&mut self) -> Result<Vec<PublicKey>, Error> {
         self.buf.clear();
         self.buf.resize(4);
-        self.buf.push(msg::REQUEST_IDENTITIES);
+        msg::REQUEST_IDENTITIES.encode(&mut self.buf)?;
         let len = self.buf.len() - 4;
         BigEndian::write_u32(&mut self.buf[..], len as u32);
 
@@ -267,13 +268,12 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
         let mut keys = Vec::new();
 
         #[allow(clippy::indexing_slicing)] // static length
-        if self.buf[0] == msg::IDENTITIES_ANSWER {
-            let mut r = self.buf.reader(1);
-            let n = r.read_u32()?;
+        if let Some((&msg::IDENTITIES_ANSWER, mut r)) = self.buf.split_first() {
+            let n = u32::decode(&mut r)?;
             for _ in 0..n {
-                let key_blob = r.read_string()?;
-                let _comment = r.read_string()?;
-                keys.push(key::parse_public_key(key_blob)?);
+                let key_blob = Bytes::decode(&mut r)?;
+                let _comment = String::decode(&mut r)?;
+                keys.push(key::parse_public_key(&key_blob)?);
             }
         }
 
@@ -291,14 +291,16 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
 
         self.read_response().await?;
 
-        if self.buf.first() == Some(&msg::SIGN_RESPONSE) {
-            self.write_signature(hash, &mut data)?;
-            Ok(data)
-        } else if self.buf.first() == Some(&msg::FAILURE) {
-            Err(Error::AgentFailure)
-        } else {
-            debug!("self.buf = {:?}", &self.buf[..]);
-            Ok(data)
+        match self.buf.split_first() {
+            Some((&msg::SIGN_RESPONSE, mut r)) => {
+                self.write_signature(&mut r, hash, &mut data)?;
+                Ok(data)
+            }
+            Some((&msg::FAILURE, _)) => Err(Error::AgentFailure),
+            _ => {
+                debug!("self.buf = {:?}", &self.buf[..]);
+                Err(Error::AgentProtocolError)
+            }
         }
     }
 
@@ -309,9 +311,9 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
     ) -> Result<u32, Error> {
         self.buf.clear();
         self.buf.resize(4);
-        self.buf.push(msg::SIGN_REQUEST);
-        key_blob(public, &mut self.buf)?;
-        self.buf.extend_ssh_string(data);
+        msg::SIGN_REQUEST.encode(&mut self.buf)?;
+        public.key_data().encoded()?.encode(&mut self.buf)?;
+        data.encode(&mut self.buf)?;
         debug!("public = {:?}", public);
         let hash = match public.algorithm() {
             Algorithm::Rsa {
@@ -323,21 +325,25 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
             Algorithm::Rsa { hash: None } => 0,
             _ => 0,
         };
-        self.buf.push_u32_be(hash);
+        hash.encode(&mut self.buf)?;
         let len = self.buf.len() - 4;
         BigEndian::write_u32(&mut self.buf[..], len as u32);
         Ok(hash)
     }
 
-    fn write_signature(&self, hash: u32, data: &mut CryptoVec) -> Result<(), Error> {
-        let mut r = self.buf.reader(1);
-        let mut resp = r.read_string()?.reader(0);
-        let t = resp.read_string()?;
-        if (hash == 2 && t == b"rsa-sha2-256") || (hash == 4 && t == b"rsa-sha2-512") || hash == 0 {
-            let sig = resp.read_string()?;
-            data.push_u32_be((t.len() + sig.len() + 8) as u32);
-            data.extend_ssh_string(t);
-            data.extend_ssh_string(sig);
+    fn write_signature<R: Reader>(
+        &self,
+        r: &mut R,
+        hash: u32,
+        data: &mut CryptoVec,
+    ) -> Result<(), Error> {
+        let mut resp = &Bytes::decode(r)?[..];
+        let t = String::decode(&mut resp)?;
+        if (hash == 2 && t == "rsa-sha2-256") || (hash == 4 && t == "rsa-sha2-512") || hash == 0 {
+            let sig = Bytes::decode(&mut resp)?;
+            (t.len() + sig.len() + 8).encode(data)?;
+            t.encode(data)?;
+            sig.encode(data)?;
         }
         Ok(())
     }
@@ -381,17 +387,13 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
         self.prepare_sign_request(public, data)?;
         self.read_response().await?;
 
-        #[allow(clippy::indexing_slicing)] // length is checked
-        if !self.buf.is_empty() && self.buf[0] == msg::SIGN_RESPONSE {
-            let mut r = self.buf.reader(1);
-            let mut resp = r.read_string()?.reader(0);
-            let typ = String::from_utf8(resp.read_string()?.into())?;
-            let sig = resp.read_string()?;
-            let algo = Algorithm::new(&typ)?;
-            let sig = Signature::new(algo, sig.to_vec())?;
-            Ok(sig)
-        } else {
-            Err(Error::AgentProtocolError)
+        match self.buf.split_first() {
+            Some((&msg::SIGN_RESPONSE, mut r)) => {
+                let mut resp = &Bytes::decode(&mut r)?[..];
+                let sig = Signature::decode(&mut resp)?;
+                Ok(sig)
+            }
+            _ => Err(Error::AgentProtocolError),
         }
     }
 
@@ -400,7 +402,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
         self.buf.clear();
         self.buf.resize(4);
         self.buf.push(msg::REMOVE_IDENTITY);
-        key_blob(public, &mut self.buf)?;
+        public.key_data().encoded()?.encode(&mut self.buf)?;
         let len = self.buf.len() - 4;
         BigEndian::write_u32(&mut self.buf[..], len as u32);
         self.read_response().await?;
@@ -411,9 +413,9 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
     pub async fn remove_smartcard_key(&mut self, id: &str, pin: &[u8]) -> Result<(), Error> {
         self.buf.clear();
         self.buf.resize(4);
-        self.buf.push(msg::REMOVE_SMARTCARD_KEY);
-        self.buf.extend_ssh_string(id.as_bytes());
-        self.buf.extend_ssh_string(pin);
+        msg::REMOVE_SMARTCARD_KEY.encode(&mut self.buf)?;
+        id.encode(&mut self.buf)?;
+        pin.encode(&mut self.buf)?;
         let len = self.buf.len() - 4;
         BigEndian::write_u32(&mut self.buf[..], len as u32);
         self.read_response().await?;
@@ -424,8 +426,8 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
     pub async fn remove_all_identities(&mut self) -> Result<(), Error> {
         self.buf.clear();
         self.buf.resize(4);
-        self.buf.push(msg::REMOVE_ALL_IDENTITIES);
-        BigEndian::write_u32(&mut self.buf[..], 1);
+        msg::REMOVE_ALL_IDENTITIES.encode(&mut self.buf)?;
+        1u32.encode(&mut self.buf)?;
         self.read_success().await?;
         Ok(())
     }
@@ -434,11 +436,11 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
     pub async fn extension(&mut self, typ: &[u8], ext: &[u8]) -> Result<(), Error> {
         self.buf.clear();
         self.buf.resize(4);
-        self.buf.push(msg::EXTENSION);
-        self.buf.extend_ssh_string(typ);
-        self.buf.extend_ssh_string(ext);
+        msg::EXTENSION.encode(&mut self.buf)?;
+        typ.encode(&mut self.buf)?;
+        ext.encode(&mut self.buf)?;
         let len = self.buf.len() - 4;
-        BigEndian::write_u32(&mut self.buf[..], len as u32);
+        (len as u32).encode(&mut self.buf)?;
         self.read_response().await?;
         Ok(())
     }
@@ -447,21 +449,18 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
     pub async fn query_extension(&mut self, typ: &[u8], mut ext: CryptoVec) -> Result<bool, Error> {
         self.buf.clear();
         self.buf.resize(4);
-        self.buf.push(msg::EXTENSION);
-        self.buf.extend_ssh_string(typ);
+        msg::EXTENSION.encode(&mut self.buf)?;
+        typ.encode(&mut self.buf)?;
         let len = self.buf.len() - 4;
-        BigEndian::write_u32(&mut self.buf[..], len as u32);
+        (len as u32).encode(&mut self.buf)?;
         self.read_response().await?;
 
-        let mut r = self.buf.reader(1);
-        ext.extend(r.read_string()?);
-
-        #[allow(clippy::indexing_slicing)] // length is checked
-        Ok(!self.buf.is_empty() && self.buf[0] == msg::SUCCESS)
+        match self.buf.split_first() {
+            Some((&msg::SUCCESS, mut r)) => {
+                ext.extend(&Bytes::decode(&mut r)?);
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
     }
-}
-
-fn key_blob(public: &ssh_key::PublicKey, buf: &mut CryptoVec) -> Result<(), Error> {
-    buf.extend_ssh_string(public.key_data().encoded()?.as_slice());
-    Ok(())
 }

@@ -1,5 +1,8 @@
 use std::convert::TryFrom;
 
+use delegate::delegate;
+use ssh_encoding::Encode;
+
 #[derive(Debug, Clone)]
 pub enum Compression {
     None,
@@ -27,6 +30,13 @@ impl AsRef<str> for Name {
     fn as_ref(&self) -> &str {
         self.0
     }
+}
+
+impl Encode for Name {
+    delegate! { to self.as_ref() {
+        fn encoded_len(&self) -> Result<usize, ssh_encoding::Error>;
+        fn encode(&self, writer: &mut impl ssh_encoding::Writer) -> Result<(), ssh_encoding::Error>;
+    }}
 }
 
 impl TryFrom<&str> for Name {

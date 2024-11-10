@@ -17,11 +17,11 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bitflags::bitflags;
+use russh_keys::helpers::NameList;
 use ssh_key::{Certificate, PrivateKey};
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite};
 
-use crate::keys::encoding;
 use crate::CryptoVec;
 
 bitflags! {
@@ -101,27 +101,39 @@ pub enum Method {
     // Hostbased,
 }
 
-impl encoding::Bytes for MethodSet {
-    fn bytes(&self) -> &'static [u8] {
-        match *self {
-            MethodSet::NONE => b"none",
-            MethodSet::PASSWORD => b"password",
-            MethodSet::PUBLICKEY => b"publickey",
-            MethodSet::HOSTBASED => b"hostbased",
-            MethodSet::KEYBOARD_INTERACTIVE => b"keyboard-interactive",
-            _ => b"",
+impl From<MethodSet> for &'static str {
+    fn from(value: MethodSet) -> Self {
+        match value {
+            MethodSet::NONE => "none",
+            MethodSet::PASSWORD => "password",
+            MethodSet::PUBLICKEY => "publickey",
+            MethodSet::HOSTBASED => "hostbased",
+            MethodSet::KEYBOARD_INTERACTIVE => "keyboard-interactive",
+            _ => "",
         }
     }
 }
 
+impl From<MethodSet> for String {
+    fn from(value: MethodSet) -> Self {
+        <&str>::from(value).to_string()
+    }
+}
+
+impl From<MethodSet> for NameList {
+    fn from(value: MethodSet) -> Self {
+        Self(value.into_iter().map(|x| x.into()).collect())
+    }
+}
+
 impl MethodSet {
-    pub(crate) fn from_bytes(b: &[u8]) -> Option<MethodSet> {
+    pub(crate) fn from_str(b: &str) -> Option<MethodSet> {
         match b {
-            b"none" => Some(MethodSet::NONE),
-            b"password" => Some(MethodSet::PASSWORD),
-            b"publickey" => Some(MethodSet::PUBLICKEY),
-            b"hostbased" => Some(MethodSet::HOSTBASED),
-            b"keyboard-interactive" => Some(MethodSet::KEYBOARD_INTERACTIVE),
+            "none" => Some(MethodSet::NONE),
+            "password" => Some(MethodSet::PASSWORD),
+            "publickey" => Some(MethodSet::PUBLICKEY),
+            "hostbased" => Some(MethodSet::HOSTBASED),
+            "keyboard-interactive" => Some(MethodSet::KEYBOARD_INTERACTIVE),
             _ => None,
         }
     }

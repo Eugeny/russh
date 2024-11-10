@@ -5,18 +5,19 @@ use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
 use byteorder::{BigEndian, ByteOrder};
+use bytes::Bytes;
 use futures::future::Future;
 use futures::stream::{Stream, StreamExt};
 use russh_cryptovec::CryptoVec;
+use ssh_encoding::{Decode, Encode, Reader};
 use ssh_key::PrivateKey;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::time::sleep;
 use {std, tokio};
 
 use super::{msg, Constraint};
-use crate::encoding::{Encoding, Position, Reader};
 use crate::helpers::EncodedExt;
-use crate::{add_signature, Error};
+use crate::Error;
 
 #[derive(Clone)]
 #[allow(clippy::type_complexity)]
@@ -127,26 +128,30 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
             }
         };
         writebuf.extend(&[0, 0, 0, 0]);
-        let mut r = self.buf.reader(0);
         let agentref = self.agent.as_ref().ok_or(Error::AgentFailure)?;
-        match r.read_byte() {
-            Ok(11) if !is_locked && agentref.confirm_request(MessageType::RequestKeys).await => {
+
+        match self.buf.split_first() {
+            Some((&11, _))
+                if !is_locked && agentref.confirm_request(MessageType::RequestKeys).await =>
+            {
                 // request identities
                 if let Ok(keys) = self.keys.0.read() {
-                    writebuf.push(msg::IDENTITIES_ANSWER);
-                    writebuf.push_u32_be(keys.len() as u32);
+                    msg::IDENTITIES_ANSWER.encode(writebuf)?;
+                    (keys.len() as u32).encode(writebuf)?;
                     for (k, _) in keys.iter() {
-                        writebuf.extend_ssh_string(k);
-                        writebuf.extend_ssh_string(b"");
+                        k.encode(writebuf)?;
+                        "".encode(writebuf)?;
                     }
                 } else {
-                    writebuf.push(msg::FAILURE)
+                    msg::FAILURE.encode(writebuf)?
                 }
             }
-            Ok(13) if !is_locked && agentref.confirm_request(MessageType::Sign).await => {
+            Some((&13, mut r))
+                if !is_locked && agentref.confirm_request(MessageType::Sign).await =>
+            {
                 // sign request
                 let agent = self.agent.take().ok_or(Error::AgentFailure)?;
-                let (agent, signed) = self.try_sign(agent, r, writebuf).await?;
+                let (agent, signed) = self.try_sign(agent, &mut r, writebuf).await?;
                 self.agent = Some(agent);
                 if signed {
                     return Ok(());
@@ -155,22 +160,28 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
                     writebuf.push(msg::FAILURE)
                 }
             }
-            Ok(17) if !is_locked && agentref.confirm_request(MessageType::AddKeys).await => {
+            Some((&17, mut r))
+                if !is_locked && agentref.confirm_request(MessageType::AddKeys).await =>
+            {
                 // add identity
-                if let Ok(true) = self.add_key(r, false, writebuf).await {
+                if let Ok(true) = self.add_key(&mut r, false, writebuf).await {
                 } else {
                     writebuf.push(msg::FAILURE)
                 }
             }
-            Ok(18) if !is_locked && agentref.confirm_request(MessageType::RemoveKeys).await => {
+            Some((&18, mut r))
+                if !is_locked && agentref.confirm_request(MessageType::RemoveKeys).await =>
+            {
                 // remove identity
-                if let Ok(true) = self.remove_identity(r) {
+                if let Ok(true) = self.remove_identity(&mut r) {
                     writebuf.push(msg::SUCCESS)
                 } else {
                     writebuf.push(msg::FAILURE)
                 }
             }
-            Ok(19) if !is_locked && agentref.confirm_request(MessageType::RemoveAllKeys).await => {
+            Some((&19, _))
+                if !is_locked && agentref.confirm_request(MessageType::RemoveAllKeys).await =>
+            {
                 // remove all identities
                 if let Ok(mut keys) = self.keys.0.write() {
                     keys.clear();
@@ -179,25 +190,31 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
                     writebuf.push(msg::FAILURE)
                 }
             }
-            Ok(22) if !is_locked && agentref.confirm_request(MessageType::Lock).await => {
+            Some((&22, mut r))
+                if !is_locked && agentref.confirm_request(MessageType::Lock).await =>
+            {
                 // lock
-                if let Ok(()) = self.lock(r) {
+                if let Ok(()) = self.lock(&mut r) {
                     writebuf.push(msg::SUCCESS)
                 } else {
                     writebuf.push(msg::FAILURE)
                 }
             }
-            Ok(23) if is_locked && agentref.confirm_request(MessageType::Unlock).await => {
+            Some((&23, mut r))
+                if is_locked && agentref.confirm_request(MessageType::Unlock).await =>
+            {
                 // unlock
-                if let Ok(true) = self.unlock(r) {
+                if let Ok(true) = self.unlock(&mut r) {
                     writebuf.push(msg::SUCCESS)
                 } else {
                     writebuf.push(msg::FAILURE)
                 }
             }
-            Ok(25) if !is_locked && agentref.confirm_request(MessageType::AddKeys).await => {
+            Some((&25, mut r))
+                if !is_locked && agentref.confirm_request(MessageType::AddKeys).await =>
+            {
                 // add identity constrained
-                if let Ok(true) = self.add_key(r, true, writebuf).await {
+                if let Ok(true) = self.add_key(&mut r, true, writebuf).await {
                 } else {
                     writebuf.push(msg::FAILURE)
                 }
@@ -212,17 +229,17 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
         Ok(())
     }
 
-    fn lock(&self, mut r: Position) -> Result<(), Error> {
-        let password = r.read_string()?;
+    fn lock<R: Reader>(&self, r: &mut R) -> Result<(), Error> {
+        let password = Bytes::decode(r)?;
         let mut lock = self.lock.0.write().or(Err(Error::AgentFailure))?;
-        lock.extend(password);
+        lock.extend(&password);
         Ok(())
     }
 
-    fn unlock(&self, mut r: Position) -> Result<bool, Error> {
-        let password = r.read_string()?;
+    fn unlock<R: Reader>(&self, r: &mut R) -> Result<bool, Error> {
+        let password = Bytes::decode(r)?;
         let mut lock = self.lock.0.write().or(Err(Error::AgentFailure))?;
-        if &lock[..] == password {
+        if lock[..] == password {
             lock.clear();
             Ok(true)
         } else {
@@ -230,9 +247,9 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
         }
     }
 
-    fn remove_identity(&self, mut r: Position) -> Result<bool, Error> {
+    fn remove_identity<R: Reader>(&self, r: &mut R) -> Result<bool, Error> {
         if let Ok(mut keys) = self.keys.0.write() {
-            if keys.remove(r.read_string()?).is_some() {
+            if keys.remove(&Bytes::decode(r)?.to_vec()).is_some() {
                 Ok(true)
             } else {
                 Ok(false)
@@ -242,20 +259,18 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
         }
     }
 
-    async fn add_key(
+    async fn add_key<R: Reader>(
         &self,
-        mut r: Position<'_>,
+        r: &mut R,
         constrained: bool,
         writebuf: &mut CryptoVec,
     ) -> Result<bool, Error> {
         let (blob, key_pair) = {
             use ssh_encoding::Decode;
 
-            let private_key = ssh_key::private::PrivateKey::new(
-                ssh_key::private::KeypairData::decode(&mut r)?,
-                "",
-            )?;
-            let _comment = r.read_string()?;
+            let private_key =
+                ssh_key::private::PrivateKey::new(ssh_key::private::KeypairData::decode(r)?, "")?;
+            let _comment = String::decode(r)?;
 
             (private_key.public_key().key_data().encoded()?, private_key)
         };
@@ -264,9 +279,9 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
         let now = SystemTime::now();
         if constrained {
             let mut c = Vec::new();
-            while let Ok(t) = r.read_byte() {
+            while let Ok(t) = u8::decode(r) {
                 if t == msg::CONSTRAIN_LIFETIME {
-                    let seconds = r.read_u32()?;
+                    let seconds = u32::decode(r)?;
                     c.push(Constraint::KeyLifetime { seconds });
                     let blob = blob.clone();
                     let keys = self.keys.clone();
@@ -296,17 +311,17 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
         Ok(true)
     }
 
-    async fn try_sign(
+    async fn try_sign<R: Reader>(
         &self,
         agent: A,
-        mut r: Position<'_>,
+        r: &mut R,
         writebuf: &mut CryptoVec,
     ) -> Result<(A, bool), Error> {
         let mut needs_confirm = false;
         let key = {
-            let blob = r.read_string()?;
+            let blob = Bytes::decode(r)?;
             let k = self.keys.0.read().or(Err(Error::AgentFailure))?;
-            if let Some((key, _, constraints)) = k.get(blob) {
+            if let Some((key, _, constraints)) = k.get(&blob.to_vec()) {
                 if constraints.iter().any(|c| *c == Constraint::Confirm) {
                     needs_confirm = true;
                 }
@@ -325,9 +340,10 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
             agent
         };
         writebuf.push(msg::SIGN_RESPONSE);
-        let data = r.read_string()?;
+        let data = Bytes::decode(r)?;
 
-        add_signature(&*key, data, writebuf)?;
+        let signature = signature::Signer::try_sign(&*key, &data)?;
+        signature.encoded()?.encode(writebuf)?;
 
         let len = writebuf.len();
         BigEndian::write_u32(writebuf, (len - 4) as u32);

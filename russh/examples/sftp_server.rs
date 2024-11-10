@@ -78,7 +78,7 @@ impl russh::server::Handler for SshSession {
     ) -> Result<(), Self::Error> {
         // After a client has sent an EOF, indicating that they don't want
         // to send more data in this session, the channel can be closed.
-        session.close(channel);
+        session.close(channel)?;
         Ok(())
     }
 
@@ -93,10 +93,10 @@ impl russh::server::Handler for SshSession {
         if name == "sftp" {
             let channel = self.get_channel(channel_id).await;
             let sftp = SftpSession::default();
-            session.channel_success(channel_id);
+            session.channel_success(channel_id)?;
             russh_sftp::server::run(channel.into_stream(), sftp).await;
         } else {
-            session.channel_failure(channel_id);
+            session.channel_failure(channel_id)?;
         }
 
         Ok(())

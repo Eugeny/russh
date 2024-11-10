@@ -19,11 +19,11 @@ use std::num::Wrapping;
 
 use byteorder::{BigEndian, ByteOrder};
 use log::{debug, trace};
+use ssh_encoding::Encode;
 use tokio::sync::oneshot;
 
 use crate::cipher::SealingKey;
 use crate::kex::KexAlgorithm;
-use crate::keys::encoding::Encoding;
 use crate::sshbuffer::SSHBuffer;
 use crate::{
     auth, cipher, mac, msg, negotiation, ChannelId, ChannelParams, CryptoVec, Disconnect, Limits,
@@ -138,31 +138,39 @@ impl<C> CommonSession<C> {
     }
 
     /// Send a disconnect message.
-    pub fn disconnect(&mut self, reason: Disconnect, description: &str, language_tag: &str) {
+    pub fn disconnect(
+        &mut self,
+        reason: Disconnect,
+        description: &str,
+        language_tag: &str,
+    ) -> Result<(), crate::Error> {
         let disconnect = |buf: &mut CryptoVec| {
             push_packet!(buf, {
-                buf.push(msg::DISCONNECT);
-                buf.push_u32_be(reason as u32);
-                buf.extend_ssh_string(description.as_bytes());
-                buf.extend_ssh_string(language_tag.as_bytes());
+                msg::DISCONNECT.encode(buf)?;
+                (reason as u32).encode(buf)?;
+                description.encode(buf)?;
+                language_tag.encode(buf)?;
             });
+            Ok(())
         };
         if !self.disconnected {
             self.disconnected = true;
-            if let Some(ref mut enc) = self.encrypted {
+            return if let Some(ref mut enc) = self.encrypted {
                 disconnect(&mut enc.write)
             } else {
                 disconnect(&mut self.write_buffer.buffer)
-            }
+            };
         }
+        Ok(())
     }
 
     /// Send a single byte message onto the channel.
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn byte(&mut self, channel: ChannelId, msg: u8) {
+    pub fn byte(&mut self, channel: ChannelId, msg: u8) -> Result<(), crate::Error> {
         if let Some(ref mut enc) = self.encrypted {
-            enc.byte(channel, msg)
+            enc.byte(channel, msg)?
         }
+        Ok(())
     }
 
     pub(crate) fn maybe_reset_seqn(&mut self) {
@@ -173,13 +181,14 @@ impl<C> CommonSession<C> {
 }
 
 impl Encrypted {
-    pub fn byte(&mut self, channel: ChannelId, msg: u8) {
+    pub fn byte(&mut self, channel: ChannelId, msg: u8) -> Result<(), crate::Error> {
         if let Some(channel) = self.channels.get(&channel) {
             push_packet!(self.write, {
                 self.write.push(msg);
-                self.write.push_u32_be(channel.recipient_channel);
+                channel.recipient_channel.encode(&mut self.write)?;
             });
         }
+        Ok(())
     }
 
     /*
@@ -189,21 +198,23 @@ impl Encrypted {
     }
     */
 
-    pub fn eof(&mut self, channel: ChannelId) {
+    pub fn eof(&mut self, channel: ChannelId) -> Result<(), crate::Error> {
         if let Some(channel) = self.has_pending_data_mut(channel) {
             channel.pending_eof = true;
         } else {
-            self.byte(channel, msg::CHANNEL_EOF);
+            self.byte(channel, msg::CHANNEL_EOF)?;
         }
+        Ok(())
     }
 
-    pub fn close(&mut self, channel: ChannelId) {
+    pub fn close(&mut self, channel: ChannelId) -> Result<(), crate::Error> {
         if let Some(channel) = self.has_pending_data_mut(channel) {
             channel.pending_close = true;
         } else {
-            self.byte(channel, msg::CHANNEL_CLOSE);
+            self.byte(channel, msg::CHANNEL_CLOSE)?;
             self.channels.remove(&channel);
         }
+        Ok(())
     }
 
     pub fn sender_window_size(&self, channel: ChannelId) -> usize {
@@ -214,7 +225,12 @@ impl Encrypted {
         }
     }
 
-    pub fn adjust_window_size(&mut self, channel: ChannelId, data: &[u8], target: u32) -> bool {
+    pub fn adjust_window_size(
+        &mut self,
+        channel: ChannelId,
+        data: &[u8],
+        target: u32,
+    ) -> Result<bool, crate::Error> {
         if let Some(channel) = self.channels.get_mut(&channel) {
             trace!(
                 "adjust_window_size, channel = {}, size = {},",
@@ -233,32 +249,39 @@ impl Encrypted {
                 );
                 push_packet!(self.write, {
                     self.write.push(msg::CHANNEL_WINDOW_ADJUST);
-                    self.write.push_u32_be(channel.recipient_channel);
-                    self.write.push_u32_be(target - channel.sender_window_size);
+                    channel.recipient_channel.encode(&mut self.write)?;
+                    (target - channel.sender_window_size).encode(&mut self.write)?;
                 });
                 channel.sender_window_size = target;
-                return true;
+                return Ok(true);
             }
         }
-        false
+        Ok(false)
     }
 
-    fn flush_channel(write: &mut CryptoVec, channel: &mut ChannelParams) -> ChannelFlushResult {
+    fn flush_channel(
+        write: &mut CryptoVec,
+        channel: &mut ChannelParams,
+    ) -> Result<ChannelFlushResult, crate::Error> {
         let mut pending_size = 0;
         while let Some((buf, a, from)) = channel.pending_data.pop_front() {
-            let size = Self::data_noqueue(write, channel, &buf, a, from);
+            let size = Self::data_noqueue(write, channel, &buf, a, from)?;
             pending_size += size;
             if from + size < buf.len() {
                 channel.pending_data.push_front((buf, a, from + size));
-                return ChannelFlushResult::Incomplete {
+                return Ok(ChannelFlushResult::Incomplete {
                     wrote: pending_size,
-                };
+                });
             }
         }
-        ChannelFlushResult::complete(pending_size, channel)
+        Ok(ChannelFlushResult::complete(pending_size, channel))
     }
 
-    fn handle_flushed_channel(&mut self, channel: ChannelId, flush_result: ChannelFlushResult) {
+    fn handle_flushed_channel(
+        &mut self,
+        channel: ChannelId,
+        flush_result: ChannelFlushResult,
+    ) -> Result<(), crate::Error> {
         if let ChannelFlushResult::Complete {
             wrote: _,
             pending_eof,
@@ -266,33 +289,35 @@ impl Encrypted {
         } = flush_result
         {
             if pending_eof {
-                self.eof(channel);
+                self.eof(channel)?;
             }
             if pending_close {
-                self.close(channel);
+                self.close(channel)?;
             }
         }
+        Ok(())
     }
 
-    pub fn flush_pending(&mut self, channel: ChannelId) -> usize {
+    pub fn flush_pending(&mut self, channel: ChannelId) -> Result<usize, crate::Error> {
         let mut pending_size = 0;
         let mut maybe_flush_result = Option::<ChannelFlushResult>::None;
 
         if let Some(channel) = self.channels.get_mut(&channel) {
-            let flush_result = Self::flush_channel(&mut self.write, channel);
+            let flush_result = Self::flush_channel(&mut self.write, channel)?;
             pending_size += flush_result.wrote();
             maybe_flush_result = Some(flush_result);
         }
         if let Some(flush_result) = maybe_flush_result {
-            self.handle_flushed_channel(channel, flush_result)
+            self.handle_flushed_channel(channel, flush_result)?
         }
-        pending_size
+        Ok(pending_size)
     }
 
-    pub fn flush_all_pending(&mut self) {
+    pub fn flush_all_pending(&mut self) -> Result<(), crate::Error> {
         for channel in self.channels.values_mut() {
-            Self::flush_channel(&mut self.write, channel);
+            Self::flush_channel(&mut self.write, channel)?;
         }
+        Ok(())
     }
 
     fn has_pending_data_mut(&mut self, channel: ChannelId) -> Option<&mut ChannelParams> {
@@ -318,9 +343,9 @@ impl Encrypted {
         buf0: &[u8],
         a: Option<u32>,
         from: usize,
-    ) -> usize {
+    ) -> Result<usize, crate::Error> {
         if from >= buf0.len() {
-            return 0;
+            return Ok(0);
         }
         let mut buf = if buf0.len() as u32 > from as u32 + channel.recipient_window_size {
             #[allow(clippy::indexing_slicing)] // length checked
@@ -337,16 +362,16 @@ impl Encrypted {
             match a {
                 None => push_packet!(write, {
                     write.push(msg::CHANNEL_DATA);
-                    write.push_u32_be(channel.recipient_channel);
+                    channel.recipient_channel.encode(write)?;
                     #[allow(clippy::indexing_slicing)] // length checked
-                    write.extend_ssh_string(&buf[..off]);
+                    buf[..off].encode(write)?;
                 }),
                 Some(ext) => push_packet!(write, {
                     write.push(msg::CHANNEL_EXTENDED_DATA);
-                    write.push_u32_be(channel.recipient_channel);
-                    write.push_u32_be(ext);
+                    channel.recipient_channel.encode(write)?;
+                    ext.encode(write)?;
                     #[allow(clippy::indexing_slicing)] // length checked
-                    write.extend_ssh_string(&buf[..off]);
+                    buf[..off].encode(write)?;
                 }),
             }
             trace!(
@@ -361,37 +386,44 @@ impl Encrypted {
             }
         }
         trace!("buf.len() = {:?}, buf_len = {:?}", buf.len(), buf_len);
-        buf_len
+        Ok(buf_len)
     }
 
-    pub fn data(&mut self, channel: ChannelId, buf0: CryptoVec) {
+    pub fn data(&mut self, channel: ChannelId, buf0: CryptoVec) -> Result<(), crate::Error> {
         if let Some(channel) = self.channels.get_mut(&channel) {
             assert!(channel.confirmed);
             if !channel.pending_data.is_empty() || self.rekey.is_some() {
                 channel.pending_data.push_back((buf0, None, 0));
-                return;
+                return Ok(());
             }
-            let buf_len = Self::data_noqueue(&mut self.write, channel, &buf0, None, 0);
+            let buf_len = Self::data_noqueue(&mut self.write, channel, &buf0, None, 0)?;
             if buf_len < buf0.len() {
                 channel.pending_data.push_back((buf0, None, buf_len))
             }
         } else {
             debug!("{:?} not saved for this session", channel);
         }
+        Ok(())
     }
 
-    pub fn extended_data(&mut self, channel: ChannelId, ext: u32, buf0: CryptoVec) {
+    pub fn extended_data(
+        &mut self,
+        channel: ChannelId,
+        ext: u32,
+        buf0: CryptoVec,
+    ) -> Result<(), crate::Error> {
         if let Some(channel) = self.channels.get_mut(&channel) {
             assert!(channel.confirmed);
             if !channel.pending_data.is_empty() {
                 channel.pending_data.push_back((buf0, Some(ext), 0));
-                return;
+                return Ok(());
             }
-            let buf_len = Self::data_noqueue(&mut self.write, channel, &buf0, Some(ext), 0);
+            let buf_len = Self::data_noqueue(&mut self.write, channel, &buf0, Some(ext), 0)?;
             if buf_len < buf0.len() {
                 channel.pending_data.push_back((buf0, Some(ext), buf_len))
             }
         }
+        Ok(())
     }
 
     pub fn flush(

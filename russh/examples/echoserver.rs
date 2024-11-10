@@ -86,9 +86,7 @@ impl server::Handler for Server {
         _: &str,
         _key: &ssh_key::PublicKey,
     ) -> Result<server::Auth, Self::Error> {
-        Ok(server::Auth::Reject {
-            proceed_with_methods: None,
-        })
+        Ok(server::Auth::Accept)
     }
 
     async fn auth_openssh_certificate(
@@ -113,7 +111,7 @@ impl server::Handler for Server {
 
         let data = CryptoVec::from(format!("Got data: {}\r\n", String::from_utf8_lossy(data)));
         self.post(data.clone()).await;
-        session.data(channel, data);
+        session.data(channel, data)?;
         Ok(())
     }
 

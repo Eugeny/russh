@@ -3,6 +3,8 @@ use std::sync::Arc;
 
 use log::debug;
 use negotiation::parse_kex_algo_list;
+use russh_keys::helpers::NameList;
+use russh_keys::map_err;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc::{unbounded_channel, Receiver, Sender, UnboundedReceiver};
 use tokio::sync::{oneshot, Mutex};
@@ -10,7 +12,6 @@ use tokio::sync::{oneshot, Mutex};
 use super::*;
 use crate::channels::{Channel, ChannelMsg, ChannelRef};
 use crate::kex::EXTENSION_SUPPORT_AS_CLIENT;
-use crate::keys::encoding::{Encoding, Reader};
 use crate::msg;
 
 /// A connected server session. This type is unique to a client.
@@ -435,10 +436,7 @@ impl Session {
         R: AsyncRead + AsyncWrite + Unpin + Send + 'static,
     {
         self.flush()?;
-        stream
-            .write_all(&self.common.write_buffer.buffer)
-            .await
-            .map_err(crate::Error::from)?;
+        map_err!(stream.write_all(&self.common.write_buffer.buffer).await)?;
         self.common.write_buffer.buffer.clear();
 
         let (stream_read, mut stream_write) = stream.split();
@@ -517,7 +515,7 @@ impl Session {
                     }
                     self.common.alive_timeouts = self.common.alive_timeouts.saturating_add(1);
                     sent_keepalive = true;
-                    self.keepalive_request();
+                    self.keepalive_request()?;
                 }
                 () = &mut inactivity_timer => {
                     debug!("timeout");
@@ -526,31 +524,31 @@ impl Session {
                 msg = self.receiver.recv(), if !self.is_rekeying() => {
                     match msg {
                         Some(Msg::Channel(id, ChannelMsg::Data { data })) => {
-                            self.data(id, data);
+                            self.data(id, data)?;
                         }
                         Some(Msg::Channel(id, ChannelMsg::ExtendedData { ext, data })) => {
-                            self.extended_data(id, ext, data);
+                            self.extended_data(id, ext, data)?;
                         }
                         Some(Msg::Channel(id, ChannelMsg::Eof)) => {
-                            self.eof(id);
+                            self.eof(id)?;
                         }
                         Some(Msg::Channel(id, ChannelMsg::Close)) => {
-                            self.close(id);
+                            self.close(id)?;
                         }
                         Some(Msg::Channel(id, ChannelMsg::Success)) => {
-                            self.channel_success(id);
+                            self.channel_success(id)?;
                         }
                         Some(Msg::Channel(id, ChannelMsg::Failure)) => {
-                            self.channel_failure(id);
+                            self.channel_failure(id)?;
                         }
                         Some(Msg::Channel(id, ChannelMsg::XonXoff { client_can_do })) => {
-                            self.xon_xoff_request(id, client_can_do);
+                            self.xon_xoff_request(id, client_can_do)?;
                         }
                         Some(Msg::Channel(id, ChannelMsg::ExitStatus { exit_status })) => {
-                            self.exit_status_request(id, exit_status);
+                            self.exit_status_request(id, exit_status)?;
                         }
                         Some(Msg::Channel(id, ChannelMsg::ExitSignal { signal_name, core_dumped, error_message, lang_tag })) => {
-                            self.exit_signal_request(id, signal_name, core_dumped, &error_message, &lang_tag);
+                            self.exit_signal_request(id, signal_name, core_dumped, &error_message, &lang_tag)?;
                         }
                         Some(Msg::Channel(id, ChannelMsg::WindowAdjusted { new_size })) => {
                             debug!("window adjusted to {:?} for channel {:?}", new_size, id);
@@ -580,13 +578,13 @@ impl Session {
                             self.channels.insert(id, channel_ref);
                         }
                         Some(Msg::TcpIpForward { address, port, reply_channel }) => {
-                            self.tcpip_forward(&address, port, reply_channel);
+                            self.tcpip_forward(&address, port, reply_channel)?;
                         }
                         Some(Msg::CancelTcpIpForward { address, port, reply_channel }) => {
-                            self.cancel_tcpip_forward(&address, port, reply_channel);
+                            self.cancel_tcpip_forward(&address, port, reply_channel)?;
                         }
                         Some(Msg::Disconnect {reason, description, language_tag}) => {
-                            self.common.disconnect(reason, &description, &language_tag);
+                            self.common.disconnect(reason, &description, &language_tag)?;
                         }
                         Some(_) => {
                             // should be unreachable, since the receiver only gets
@@ -600,10 +598,11 @@ impl Session {
                 }
             }
             self.flush()?;
-            stream_write
-                .write_all(&self.common.write_buffer.buffer)
-                .await
-                .map_err(crate::Error::from)?;
+            map_err!(
+                stream_write
+                    .write_all(&self.common.write_buffer.buffer)
+                    .await
+            )?;
             self.common.write_buffer.buffer.clear();
 
             if self.common.received_data {
@@ -633,7 +632,7 @@ impl Session {
         }
         debug!("disconnected");
         // Shutdown
-        stream_write.shutdown().await.map_err(crate::Error::from)?;
+        map_err!(stream_write.shutdown().await)?;
         loop {
             if let Some((stream_read, buffer, opening_cipher)) = is_reading.take() {
                 reading.set(start_reading(stream_read, buffer, opening_cipher));
@@ -706,11 +705,11 @@ impl Session {
         Ok(())
     }
 
-    pub fn flush_pending(&mut self, channel: ChannelId) -> usize {
+    pub fn flush_pending(&mut self, channel: ChannelId) -> Result<usize, Error> {
         if let Some(ref mut enc) = self.common.encrypted {
             enc.flush_pending(channel)
         } else {
-            0
+            Ok(0)
         }
     }
 
@@ -736,8 +735,13 @@ impl Session {
     }
 
     /// Sends a disconnect message.
-    pub fn disconnect(&mut self, reason: Disconnect, description: &str, language_tag: &str) {
-        self.common.disconnect(reason, description, language_tag);
+    pub fn disconnect(
+        &mut self,
+        reason: Disconnect,
+        description: &str,
+        language_tag: &str,
+    ) -> Result<(), Error> {
+        self.common.disconnect(reason, description, language_tag)
     }
 
     /// Send a "success" reply to a /global/ request (requests without
@@ -764,7 +768,7 @@ impl Session {
     /// Send a "success" reply to a channel request. Always call this
     /// function if the request was successful (it checks whether the
     /// client expects an answer).
-    pub fn channel_success(&mut self, channel: ChannelId) {
+    pub fn channel_success(&mut self, channel: ChannelId) -> Result<(), crate::Error> {
         if let Some(ref mut enc) = self.common.encrypted {
             if let Some(channel) = enc.channels.get_mut(&channel) {
                 assert!(channel.confirmed);
@@ -772,16 +776,17 @@ impl Session {
                     channel.wants_reply = false;
                     debug!("channel_success {:?}", channel);
                     push_packet!(enc.write, {
-                        enc.write.push(msg::CHANNEL_SUCCESS);
-                        enc.write.push_u32_be(channel.recipient_channel);
+                        msg::CHANNEL_SUCCESS.encode(&mut enc.write)?;
+                        channel.recipient_channel.encode(&mut enc.write)?;
                     })
                 }
             }
         }
+        Ok(())
     }
 
     /// Send a "failure" reply to a global request.
-    pub fn channel_failure(&mut self, channel: ChannelId) {
+    pub fn channel_failure(&mut self, channel: ChannelId) -> Result<(), crate::Error> {
         if let Some(ref mut enc) = self.common.encrypted {
             if let Some(channel) = enc.channels.get_mut(&channel) {
                 assert!(channel.confirmed);
@@ -789,11 +794,12 @@ impl Session {
                     channel.wants_reply = false;
                     push_packet!(enc.write, {
                         enc.write.push(msg::CHANNEL_FAILURE);
-                        enc.write.push_u32_be(channel.recipient_channel);
+                        channel.recipient_channel.encode(&mut enc.write)?;
                     })
                 }
             }
         }
+        Ok(())
     }
 
     /// Send a "failure" reply to a request to open a channel open.
@@ -803,26 +809,27 @@ impl Session {
         reason: ChannelOpenFailure,
         description: &str,
         language: &str,
-    ) {
+    ) -> Result<(), crate::Error> {
         if let Some(ref mut enc) = self.common.encrypted {
             push_packet!(enc.write, {
                 enc.write.push(msg::CHANNEL_OPEN_FAILURE);
-                enc.write.push_u32_be(channel.0);
-                enc.write.push_u32_be(reason as u32);
-                enc.write.extend_ssh_string(description.as_bytes());
-                enc.write.extend_ssh_string(language.as_bytes());
+                channel.encode(&mut enc.write)?;
+                (reason as u32).encode(&mut enc.write)?;
+                description.encode(&mut enc.write)?;
+                language.encode(&mut enc.write)?;
             })
         }
+        Ok(())
     }
 
     /// Close a channel.
-    pub fn close(&mut self, channel: ChannelId) {
-        self.common.byte(channel, msg::CHANNEL_CLOSE);
+    pub fn close(&mut self, channel: ChannelId) -> Result<(), Error> {
+        self.common.byte(channel, msg::CHANNEL_CLOSE)
     }
 
     /// Send EOF to a channel
-    pub fn eof(&mut self, channel: ChannelId) {
-        self.common.byte(channel, msg::CHANNEL_EOF);
+    pub fn eof(&mut self, channel: ChannelId) -> Result<(), Error> {
+        self.common.byte(channel, msg::CHANNEL_EOF)
     }
 
     /// Send data to a channel. On session channels, `extended` can be
@@ -831,7 +838,7 @@ impl Session {
     ///
     /// The number of bytes added to the "sending pipeline" (to be
     /// processed by the event loop) is returned.
-    pub fn data(&mut self, channel: ChannelId, data: CryptoVec) {
+    pub fn data(&mut self, channel: ChannelId, data: CryptoVec) -> Result<(), Error> {
         if let Some(ref mut enc) = self.common.encrypted {
             enc.data(channel, data)
         } else {
@@ -845,7 +852,12 @@ impl Session {
     ///
     /// The number of bytes added to the "sending pipeline" (to be
     /// processed by the event loop) is returned.
-    pub fn extended_data(&mut self, channel: ChannelId, extended: u32, data: CryptoVec) {
+    pub fn extended_data(
+        &mut self,
+        channel: ChannelId,
+        extended: u32,
+        data: CryptoVec,
+    ) -> Result<(), Error> {
         if let Some(ref mut enc) = self.common.encrypted {
             enc.extended_data(channel, extended, data)
         } else {
@@ -856,51 +868,62 @@ impl Session {
     /// Inform the client of whether they may perform
     /// control-S/control-Q flow control. See
     /// [RFC4254](https://tools.ietf.org/html/rfc4254#section-6.8).
-    pub fn xon_xoff_request(&mut self, channel: ChannelId, client_can_do: bool) {
+    pub fn xon_xoff_request(
+        &mut self,
+        channel: ChannelId,
+        client_can_do: bool,
+    ) -> Result<(), Error> {
         if let Some(ref mut enc) = self.common.encrypted {
             if let Some(channel) = enc.channels.get(&channel) {
                 assert!(channel.confirmed);
                 push_packet!(enc.write, {
-                    enc.write.push(msg::CHANNEL_REQUEST);
+                    msg::CHANNEL_REQUEST.encode(&mut enc.write)?;
 
-                    enc.write.push_u32_be(channel.recipient_channel);
-                    enc.write.extend_ssh_string(b"xon-xoff");
-                    enc.write.push(0);
-                    enc.write.push(client_can_do as u8);
+                    channel.recipient_channel.encode(&mut enc.write)?;
+                    "xon-xoff".encode(&mut enc.write)?;
+                    0u8.encode(&mut enc.write)?;
+                    (client_can_do as u8).encode(&mut enc.write)?;
                 })
             }
         }
+        Ok(())
     }
 
     /// Ping the client to verify there is still connectivity.
-    pub fn keepalive_request(&mut self) {
+    pub fn keepalive_request(&mut self) -> Result<(), Error> {
         let want_reply = u8::from(true);
         if let Some(ref mut enc) = self.common.encrypted {
             self.open_global_requests
                 .push_back(GlobalRequestResponse::Keepalive);
             push_packet!(enc.write, {
-                enc.write.push(msg::GLOBAL_REQUEST);
-                enc.write.extend_ssh_string(b"keepalive@openssh.com");
-                enc.write.push(want_reply);
+                msg::GLOBAL_REQUEST.encode(&mut enc.write)?;
+                "keepalive@openssh.com".encode(&mut enc.write)?;
+                want_reply.encode(&mut enc.write)?;
             })
         }
+        Ok(())
     }
 
     /// Send the exit status of a program.
-    pub fn exit_status_request(&mut self, channel: ChannelId, exit_status: u32) {
+    pub fn exit_status_request(
+        &mut self,
+        channel: ChannelId,
+        exit_status: u32,
+    ) -> Result<(), Error> {
         if let Some(ref mut enc) = self.common.encrypted {
             if let Some(channel) = enc.channels.get(&channel) {
                 assert!(channel.confirmed);
                 push_packet!(enc.write, {
-                    enc.write.push(msg::CHANNEL_REQUEST);
+                    msg::CHANNEL_REQUEST.encode(&mut enc.write)?;
 
-                    enc.write.push_u32_be(channel.recipient_channel);
-                    enc.write.extend_ssh_string(b"exit-status");
-                    enc.write.push(0);
-                    enc.write.push_u32_be(exit_status)
+                    channel.recipient_channel.encode(&mut enc.write)?;
+                    "exit-status".encode(&mut enc.write)?;
+                    0u8.encode(&mut enc.write)?;
+                    exit_status.encode(&mut enc.write)?;
                 })
             }
         }
+        Ok(())
     }
 
     /// If the program was killed by a signal, send the details about the signal to the client.
@@ -911,28 +934,29 @@ impl Session {
         core_dumped: bool,
         error_message: &str,
         language_tag: &str,
-    ) {
+    ) -> Result<(), Error> {
         if let Some(ref mut enc) = self.common.encrypted {
             if let Some(channel) = enc.channels.get(&channel) {
                 assert!(channel.confirmed);
                 push_packet!(enc.write, {
-                    enc.write.push(msg::CHANNEL_REQUEST);
+                    msg::CHANNEL_REQUEST.encode(&mut enc.write)?;
 
-                    enc.write.push_u32_be(channel.recipient_channel);
-                    enc.write.extend_ssh_string(b"exit-signal");
-                    enc.write.push(0);
-                    enc.write.extend_ssh_string(signal.name().as_bytes());
-                    enc.write.push(core_dumped as u8);
-                    enc.write.extend_ssh_string(error_message.as_bytes());
-                    enc.write.extend_ssh_string(language_tag.as_bytes());
+                    channel.recipient_channel.encode(&mut enc.write)?;
+                    "exit-signal".encode(&mut enc.write)?;
+                    0u8.encode(&mut enc.write)?;
+                    signal.name().encode(&mut enc.write)?;
+                    (core_dumped as u8).encode(&mut enc.write)?;
+                    error_message.encode(&mut enc.write)?;
+                    language_tag.encode(&mut enc.write)?;
                 })
             }
         }
+        Ok(())
     }
 
     /// Opens a new session channel on the client.
     pub fn channel_open_session(&mut self) -> Result<ChannelId, Error> {
-        self.channel_open_generic(b"session", |_| ())
+        self.channel_open_generic(b"session", |_| Ok(()))
     }
 
     /// Opens a direct TCP/IP channel on the client.
@@ -944,10 +968,11 @@ impl Session {
         originator_port: u32,
     ) -> Result<ChannelId, Error> {
         self.channel_open_generic(b"direct-tcpip", |write| {
-            write.extend_ssh_string(host_to_connect.as_bytes());
-            write.push_u32_be(port_to_connect); // sender channel id.
-            write.extend_ssh_string(originator_address.as_bytes());
-            write.push_u32_be(originator_port); // sender channel id.
+            host_to_connect.encode(write)?;
+            port_to_connect.encode(write)?; // sender channel id.
+            originator_address.encode(write)?;
+            originator_port.encode(write)?; // sender channel id.
+            Ok(())
         })
     }
 
@@ -964,10 +989,11 @@ impl Session {
         originator_port: u32,
     ) -> Result<ChannelId, Error> {
         self.channel_open_generic(b"forwarded-tcpip", |write| {
-            write.extend_ssh_string(connected_address.as_bytes());
-            write.push_u32_be(connected_port); // sender channel id.
-            write.extend_ssh_string(originator_address.as_bytes());
-            write.push_u32_be(originator_port); // sender channel id.
+            connected_address.encode(write)?;
+            connected_port.encode(write)?; // sender channel id.
+            originator_address.encode(write)?;
+            originator_port.encode(write)?; // sender channel id.
+            Ok(())
         })
     }
 
@@ -976,8 +1002,9 @@ impl Session {
         socket_path: &str,
     ) -> Result<ChannelId, Error> {
         self.channel_open_generic(b"forwarded-streamlocal@openssh.com", |write| {
-            write.extend_ssh_string(socket_path.as_bytes());
-            write.extend_ssh_string(b"");
+            socket_path.encode(write)?;
+            "".encode(write)?;
+            Ok(())
         })
     }
 
@@ -990,19 +1017,20 @@ impl Session {
         originator_port: u32,
     ) -> Result<ChannelId, Error> {
         self.channel_open_generic(b"x11", |write| {
-            write.extend_ssh_string(originator_address.as_bytes());
-            write.push_u32_be(originator_port);
+            originator_address.encode(write)?;
+            originator_port.encode(write)?;
+            Ok(())
         })
     }
 
     /// Opens a new agent channel on the client.
     pub fn channel_open_agent(&mut self) -> Result<ChannelId, Error> {
-        self.channel_open_generic(b"auth-agent@openssh.com", |_| ())
+        self.channel_open_generic(b"auth-agent@openssh.com", |_| Ok(()))
     }
 
     fn channel_open_generic<F>(&mut self, kind: &[u8], write_suffix: F) -> Result<ChannelId, Error>
     where
-        F: FnOnce(&mut CryptoVec),
+        F: FnOnce(&mut CryptoVec) -> Result<(), Error>,
     {
         let result = if let Some(ref mut enc) = self.common.encrypted {
             if !matches!(
@@ -1018,20 +1046,26 @@ impl Session {
             );
             push_packet!(enc.write, {
                 enc.write.push(msg::CHANNEL_OPEN);
-                enc.write.extend_ssh_string(kind);
+                kind.encode(&mut enc.write)?;
 
                 // sender channel id.
-                enc.write.push_u32_be(sender_channel.0);
+                sender_channel.encode(&mut enc.write)?;
 
                 // window.
-                enc.write
-                    .push_u32_be(self.common.config.as_ref().window_size);
+                self.common
+                    .config
+                    .as_ref()
+                    .window_size
+                    .encode(&mut enc.write)?;
 
                 // max packet size.
-                enc.write
-                    .push_u32_be(self.common.config.as_ref().maximum_packet_size);
+                self.common
+                    .config
+                    .as_ref()
+                    .maximum_packet_size
+                    .encode(&mut enc.write)?;
 
-                write_suffix(&mut enc.write);
+                write_suffix(&mut enc.write)?;
             });
             sender_channel
         } else {
@@ -1048,7 +1082,7 @@ impl Session {
         address: &str,
         port: u32,
         reply_channel: Option<oneshot::Sender<Option<u32>>>,
-    ) {
+    ) -> Result<(), Error> {
         if let Some(ref mut enc) = self.common.encrypted {
             let want_reply = reply_channel.is_some();
             if let Some(reply_channel) = reply_channel {
@@ -1058,12 +1092,13 @@ impl Session {
             }
             push_packet!(enc.write, {
                 enc.write.push(msg::GLOBAL_REQUEST);
-                enc.write.extend_ssh_string(b"tcpip-forward");
-                enc.write.push(want_reply as u8);
-                enc.write.extend_ssh_string(address.as_bytes());
-                enc.write.push_u32_be(port);
+                "tcpip-forward".encode(&mut enc.write)?;
+                (want_reply as u8).encode(&mut enc.write)?;
+                address.encode(&mut enc.write)?;
+                port.encode(&mut enc.write)?;
             });
         }
+        Ok(())
     }
 
     /// Cancels a previously tcpip_forward request.
@@ -1072,7 +1107,7 @@ impl Session {
         address: &str,
         port: u32,
         reply_channel: Option<oneshot::Sender<bool>>,
-    ) {
+    ) -> Result<(), Error> {
         if let Some(ref mut enc) = self.common.encrypted {
             let want_reply = reply_channel.is_some();
             if let Some(reply_channel) = reply_channel {
@@ -1081,13 +1116,14 @@ impl Session {
                 );
             }
             push_packet!(enc.write, {
-                enc.write.push(msg::GLOBAL_REQUEST);
-                enc.write.extend_ssh_string(b"cancel-tcpip-forward");
-                enc.write.push(want_reply as u8);
-                enc.write.extend_ssh_string(address.as_bytes());
-                enc.write.push_u32_be(port);
+                msg::GLOBAL_REQUEST.encode(&mut enc.write)?;
+                "cancel-tcpip-forward".encode(&mut enc.write)?;
+                (want_reply as u8).encode(&mut enc.write)?;
+                address.encode(&mut enc.write)?;
+                port.encode(&mut enc.write)?;
             });
         }
+        Ok(())
     }
 
     /// Returns the SSH ID (Protocol Version + Software Version) the client sent when connecting
@@ -1103,17 +1139,19 @@ impl Session {
         &self.common.remote_sshid
     }
 
-    pub(crate) fn maybe_send_ext_info(&mut self) {
+    pub(crate) fn maybe_send_ext_info(&mut self) -> Result<(), Error> {
         if let Some(ref mut enc) = self.common.encrypted {
             // If client sent a ext-info-c message in the kex list, it supports RFC 8308 extension negotiation.
             let mut key_extension_client = false;
             if let Some(e) = &enc.exchange {
-                let mut r = e.client_kex_init.as_ref().reader(17);
-                if let Ok(kex_string) = r.read_string() {
+                let Some(mut r) = &e.client_kex_init.as_ref().get(17..) else {
+                    return Ok(());
+                };
+                if let Ok(kex_string) = String::decode(&mut r) {
                     use super::negotiation::Select;
                     key_extension_client = super::negotiation::Server::select(
                         &[EXTENSION_SUPPORT_AS_CLIENT],
-                        &parse_kex_algo_list(kex_string),
+                        &parse_kex_algo_list(&kex_string),
                         AlgorithmKind::Kex,
                     )
                     .is_ok();
@@ -1122,16 +1160,26 @@ impl Session {
 
             if !key_extension_client {
                 debug!("RFC 8308 Extension Negotiation not supported by client");
-                return;
+                return Ok(());
             }
 
             push_packet!(enc.write, {
-                enc.write.push(msg::EXT_INFO);
-                enc.write.push_u32_be(1);
-                enc.write.extend_ssh_string(b"server-sig-algs");
-                enc.write
-                    .extend_list(self.common.config.preferred.key.iter());
+                msg::EXT_INFO.encode(&mut enc.write)?;
+                1u32.encode(&mut enc.write)?;
+                "server-sig-algs".encode(&mut enc.write)?;
+
+                NameList(
+                    self.common
+                        .config
+                        .preferred
+                        .key
+                        .iter()
+                        .map(|x| x.to_string())
+                        .collect(),
+                )
+                .encode(&mut enc.write)?;
             });
         }
+        Ok(())
     }
 }

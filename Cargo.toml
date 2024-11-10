@@ -19,7 +19,9 @@ russh-config = { path = "russh-config" }
 aes = "0.8"
 async-trait = "0.1"
 byteorder = "1.4"
+bytes = "1.7"
 digest = "0.10"
+delegate = "0.13"
 futures = "0.3"
 hmac = "0.12"
 log = "0.4"
@@ -27,7 +29,7 @@ rand = "0.8"
 sha1 = { version = "0.10", features = ["oid"] }
 sha2 = { version = "0.10", features = ["oid"] }
 signature = "2.2"
-ssh-encoding = "0.2"
+ssh-encoding = { version = "0.2", features = ["bytes"] }
 ssh-key = { version = "0.6", features = [
     "ed25519",
     "rsa",

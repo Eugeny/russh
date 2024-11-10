@@ -1,4 +1,5 @@
 use std::marker::PhantomData;
+use std::ops::Deref;
 
 use byteorder::{BigEndian, ByteOrder};
 use elliptic_curve::ecdh::{EphemeralSecret, SharedSecret};
@@ -10,9 +11,10 @@ use p256::NistP256;
 use p384::NistP384;
 use p521::NistP521;
 use sha2::{Digest, Sha256, Sha384, Sha512};
+use ssh_encoding::Encode;
 
+use super::encode_mpint;
 use crate::kex::{compute_keys, KexAlgorithm, KexType};
-use crate::keys::encoding::Encoding;
 use crate::mac::{self};
 use crate::session::Exchange;
 use crate::{cipher, msg, CryptoVec};
@@ -129,7 +131,7 @@ where
         client_ephemeral.extend(&client_pubkey.to_sec1_bytes());
 
         buf.push(msg::KEX_ECDH_INIT);
-        buf.extend_ssh_string(&client_pubkey.to_sec1_bytes());
+        client_pubkey.to_sec1_bytes().encode(buf)?;
 
         self.local_secret = Some(client_secret);
         Ok(())
@@ -151,17 +153,17 @@ where
     ) -> Result<CryptoVec, crate::Error> {
         // Computing the exchange hash, see page 7 of RFC 5656.
         buffer.clear();
-        buffer.extend_ssh_string(&exchange.client_id);
-        buffer.extend_ssh_string(&exchange.server_id);
-        buffer.extend_ssh_string(&exchange.client_kex_init);
-        buffer.extend_ssh_string(&exchange.server_kex_init);
+        exchange.client_id.deref().encode(buffer)?;
+        exchange.server_id.deref().encode(buffer)?;
+        exchange.client_kex_init.deref().encode(buffer)?;
+        exchange.server_kex_init.deref().encode(buffer)?;
 
         buffer.extend(key);
-        buffer.extend_ssh_string(&exchange.client_ephemeral);
-        buffer.extend_ssh_string(&exchange.server_ephemeral);
+        exchange.client_ephemeral.deref().encode(buffer)?;
+        exchange.server_ephemeral.deref().encode(buffer)?;
 
         if let Some(ref shared) = self.shared_secret {
-            buffer.extend_ssh_mpint(shared.raw_secret_bytes());
+            encode_mpint(shared.raw_secret_bytes(), buffer)?;
         }
 
         let mut hasher = D::new();

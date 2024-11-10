@@ -26,3 +26,6 @@ pub use cryptovec::CryptoVec;
 
 // Platform-specific modules
 mod platform;
+
+#[cfg(feature = "ssh-encoding")]
+mod ssh;
