@@ -39,6 +39,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use futures::future::Future;
 use log::{debug, error};
+use russh_keys::map_err;
 use russh_util::runtime::JoinHandle;
 use ssh_key::{Certificate, PrivateKey};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
@@ -687,10 +688,7 @@ where
     // Writing SSH id.
     let mut write_buffer = SSHBuffer::new();
     write_buffer.send_ssh_id(&config.as_ref().server_id);
-    stream
-        .write_all(&write_buffer.buffer[..])
-        .await
-        .map_err(crate::Error::from)?;
+    map_err!(stream.write_all(&write_buffer.buffer[..]).await)?;
 
     // Reading SSH id and allocating a session.
     let mut stream = SshRead::new(stream);
@@ -836,7 +834,7 @@ async fn reply<H: Handler + Send>(
                     },
                     newkeys,
                 );
-                session.maybe_send_ext_info();
+                session.maybe_send_ext_info()?;
                 if session.common.strict_kex {
                     *seqn = Wrapping(0);
                 }

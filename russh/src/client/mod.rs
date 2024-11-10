@@ -46,9 +46,9 @@ use bytes::Bytes;
 use futures::task::{Context, Poll};
 use futures::Future;
 use log::{debug, error, info, trace};
-use russh_keys::encoding::Encoding;
+use russh_keys::map_err;
 use signature::Verifier;
-use ssh_encoding::{Decode, Reader};
+use ssh_encoding::{Decode, Encode, Reader};
 use ssh_key::{Certificate, PrivateKey, PublicKey, Signature};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadHalf, WriteHalf};
 use tokio::pin;
@@ -714,9 +714,9 @@ pub async fn connect<H: Handler + Send + 'static, A: tokio::net::ToSocketAddrs>(
     addrs: A,
     handler: H,
 ) -> Result<Handle<H>, H::Error> {
-    let socket = tokio::net::TcpStream::connect(addrs)
-        .await
-        .map_err(crate::Error::from)?;
+    use russh_keys::map_err;
+
+    let socket = map_err!(tokio::net::TcpStream::connect(addrs).await)?;
     connect_stream(config, socket, handler).await
 }
 
@@ -736,10 +736,7 @@ where
     // Writing SSH id.
     let mut write_buffer = SSHBuffer::new();
     write_buffer.send_ssh_id(&config.as_ref().client_id);
-    stream
-        .write_all(&write_buffer.buffer)
-        .await
-        .map_err(crate::Error::from)?;
+    map_err!(stream.write_all(&write_buffer.buffer).await)?;
 
     // Reading SSH id and allocating a session if correct.
     let mut stream = SshRead::new(stream);
@@ -845,7 +842,7 @@ impl Session {
         trace!("disconnected");
         self.receiver.close();
         self.inbound_channel_receiver.close();
-        stream_write.shutdown().await.map_err(crate::Error::from)?;
+        map_err!(stream_write.shutdown().await)?;
         match result {
             Ok(v) => {
                 handler
@@ -882,11 +879,12 @@ impl Session {
         self.flush()?;
         if !self.common.write_buffer.buffer.is_empty() {
             debug!("writing {:?} bytes", self.common.write_buffer.buffer.len());
-            stream_write
-                .write_all(&self.common.write_buffer.buffer)
-                .await
-                .map_err(crate::Error::from)?;
-            stream_write.flush().await.map_err(crate::Error::from)?;
+            map_err!(
+                stream_write
+                    .write_all(&self.common.write_buffer.buffer)
+                    .await
+            )?;
+            map_err!(stream_write.flush().await)?;
         }
         self.common.write_buffer.buffer.clear();
         let mut decomp = CryptoVec::new();
@@ -958,7 +956,7 @@ impl Session {
                         return Err(crate::Error::KeepaliveTimeout.into());
                     }
                     self.common.alive_timeouts = self.common.alive_timeouts.saturating_add(1);
-                    self.send_keepalive(true);
+                    self.send_keepalive(true)?;
                     sent_keepalive = true;
                 }
                 () = &mut inactivity_timer => {
@@ -1004,11 +1002,12 @@ impl Session {
                     "writing to stream: {:?} bytes",
                     self.common.write_buffer.buffer.len()
                 );
-                stream_write
-                    .write_all(&self.common.write_buffer.buffer)
-                    .await
-                    .map_err(crate::Error::from)?;
-                stream_write.flush().await.map_err(crate::Error::from)?;
+                map_err!(
+                    stream_write
+                        .write_all(&self.common.write_buffer.buffer)
+                        .await
+                )?;
+                map_err!(stream_write.flush().await)?;
             }
             self.common.write_buffer.buffer.clear();
             if let Some(ref mut enc) = self.common.encrypted {
@@ -1053,11 +1052,9 @@ impl Session {
     ) -> Result<RemoteDisconnectInfo, E> {
         self.common.disconnected = true;
 
-        let reason_code = u32::decode(&mut r)
-            .map_err(crate::Error::from)?
-            .try_into()?;
-        let message = String::decode(&mut r).map_err(crate::Error::from)?;
-        let lang_tag = String::decode(&mut r).map_err(crate::Error::from)?;
+        let reason_code = map_err!(u32::decode(&mut r))?.try_into()?;
+        let message = map_err!(String::decode(&mut r))?;
+        let lang_tag = map_err!(String::decode(&mut r))?;
 
         Ok(RemoteDisconnectInfo {
             reason_code,
@@ -1111,31 +1108,31 @@ impl Session {
                 reply_channel,
                 address,
                 port,
-            } => self.tcpip_forward(reply_channel, &address, port),
+            } => self.tcpip_forward(reply_channel, &address, port)?,
             Msg::CancelTcpIpForward {
                 reply_channel,
                 address,
                 port,
-            } => self.cancel_tcpip_forward(reply_channel, &address, port),
+            } => self.cancel_tcpip_forward(reply_channel, &address, port)?,
             Msg::StreamLocalForward {
                 reply_channel,
                 socket_path,
-            } => self.streamlocal_forward(reply_channel, &socket_path),
+            } => self.streamlocal_forward(reply_channel, &socket_path)?,
             Msg::CancelStreamLocalForward {
                 reply_channel,
                 socket_path,
-            } => self.cancel_streamlocal_forward(reply_channel, &socket_path),
+            } => self.cancel_streamlocal_forward(reply_channel, &socket_path)?,
             Msg::Disconnect {
                 reason,
                 description,
                 language_tag,
-            } => self.disconnect(reason, &description, &language_tag),
-            Msg::Channel(id, ChannelMsg::Data { data }) => self.data(id, data),
+            } => self.disconnect(reason, &description, &language_tag)?,
+            Msg::Channel(id, ChannelMsg::Data { data }) => self.data(id, data)?,
             Msg::Channel(id, ChannelMsg::Eof) => {
-                self.eof(id);
+                self.eof(id)?;
             }
             Msg::Channel(id, ChannelMsg::ExtendedData { data, ext }) => {
-                self.extended_data(id, ext, data);
+                self.extended_data(id, ext, data)?;
             }
             Msg::Channel(
                 id,
@@ -1157,7 +1154,7 @@ impl Session {
                 pix_width,
                 pix_height,
                 &terminal_modes,
-            ),
+            )?,
             Msg::Channel(
                 id,
                 ChannelMsg::WindowChange {
@@ -1166,7 +1163,7 @@ impl Session {
                     pix_width,
                     pix_height,
                 },
-            ) => self.window_change(id, col_width, row_height, pix_width, pix_height),
+            ) => self.window_change(id, col_width, row_height, pix_width, pix_height)?,
             Msg::Channel(
                 id,
                 ChannelMsg::RequestX11 {
@@ -1183,7 +1180,7 @@ impl Session {
                 &x11_authentication_protocol,
                 &x11_authentication_cookie,
                 x11_screen_number,
-            ),
+            )?,
             Msg::Channel(
                 id,
                 ChannelMsg::SetEnv {
@@ -1191,9 +1188,9 @@ impl Session {
                     variable_name,
                     variable_value,
                 },
-            ) => self.set_env(id, want_reply, &variable_name, &variable_value),
+            ) => self.set_env(id, want_reply, &variable_name, &variable_value)?,
             Msg::Channel(id, ChannelMsg::RequestShell { want_reply }) => {
-                self.request_shell(want_reply, id)
+                self.request_shell(want_reply, id)?
             }
             Msg::Channel(
                 id,
@@ -1201,15 +1198,15 @@ impl Session {
                     want_reply,
                     command,
                 },
-            ) => self.exec(id, want_reply, &command),
-            Msg::Channel(id, ChannelMsg::Signal { signal }) => self.signal(id, signal),
+            ) => self.exec(id, want_reply, &command)?,
+            Msg::Channel(id, ChannelMsg::Signal { signal }) => self.signal(id, signal)?,
             Msg::Channel(id, ChannelMsg::RequestSubsystem { want_reply, name }) => {
-                self.request_subsystem(want_reply, id, &name)
+                self.request_subsystem(want_reply, id, &name)?
             }
             Msg::Channel(id, ChannelMsg::AgentForward { want_reply }) => {
-                self.agent_forward(id, want_reply)
+                self.agent_forward(id, want_reply)?
             }
-            Msg::Channel(id, ChannelMsg::Close) => self.close(id),
+            Msg::Channel(id, ChannelMsg::Close) => self.close(id)?,
             msg => {
                 // should be unreachable, since the receiver only gets
                 // messages from methods implemented within russh
@@ -1299,8 +1296,8 @@ impl KexDhDone {
         handler: &mut H,
         r: &mut R,
     ) -> Result<NewKeys, H::Error> {
-        let pubkey = Bytes::decode(r).map_err(crate::Error::from)?; // server public key.
-        let pubkey = parse_public_key(&pubkey).map_err(crate::Error::from)?;
+        let pubkey = map_err!(Bytes::decode(r))?; // server public key.
+        let pubkey = map_err!(parse_public_key(&pubkey))?;
         debug!("server_public_Key: {:?}", pubkey);
         if !rekey {
             let check = handler.check_server_key(&pubkey).await?;
@@ -1312,16 +1309,16 @@ impl KexDhDone {
             let mut buffer = buffer.borrow_mut();
             buffer.clear();
             let hash = {
-                let server_ephemeral = Bytes::decode(r).map_err(crate::Error::from)?;
+                let server_ephemeral = map_err!(Bytes::decode(r))?;
                 self.exchange.server_ephemeral.extend(&server_ephemeral);
-                let signature = Bytes::decode(r).map_err(crate::Error::from)?;
+                let signature = map_err!(Bytes::decode(r))?;
 
                 self.kex
                     .compute_shared_secret(&self.exchange.server_ephemeral)?;
                 debug!("kexdhdone.exchange = {:?}", self.exchange);
 
                 let mut pubkey_vec = CryptoVec::new();
-                pubkey_vec.extend_ssh_string(&pubkey.to_bytes().map_err(crate::Error::from)?);
+                map_err!(map_err!(pubkey.to_bytes())?.encode(&mut pubkey_vec))?;
 
                 let hash =
                     self.kex
@@ -1330,9 +1327,9 @@ impl KexDhDone {
                 debug!("exchange hash: {:?}", hash);
                 let signature = {
                     let mut r = &signature[..];
-                    let sig_type = String::decode(&mut r).map_err(crate::Error::from)?;
+                    let sig_type = map_err!(String::decode(&mut r))?;
                     debug!("sig_type: {:?}", sig_type);
-                    Bytes::decode(&mut r).map_err(crate::Error::from)?
+                    map_err!(Bytes::decode(&mut r))?
                 };
 
                 debug!("signature: {:?}", signature);

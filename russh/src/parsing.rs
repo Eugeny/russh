@@ -1,6 +1,6 @@
-use ssh_encoding::{Decode, Reader};
+use russh_keys::helpers::map_err;
+use ssh_encoding::{Decode, Encode, Reader};
 
-use crate::keys::encoding::Encoding;
 use crate::{msg, CryptoVec};
 
 #[derive(Debug)]
@@ -14,16 +14,16 @@ pub struct OpenChannelMessage {
 impl OpenChannelMessage {
     pub fn parse<R: Reader>(r: &mut R) -> Result<Self, crate::Error> {
         // https://tools.ietf.org/html/rfc4254#section-5.1
-        let typ = String::decode(r).map_err(crate::Error::from)?;
-        let sender = u32::decode(r).map_err(crate::Error::from)?;
-        let window = u32::decode(r).map_err(crate::Error::from)?;
-        let maxpacket = u32::decode(r).map_err(crate::Error::from)?;
+        let typ = map_err!(String::decode(r))?;
+        let sender = map_err!(u32::decode(r))?;
+        let window = map_err!(u32::decode(r))?;
+        let maxpacket = map_err!(u32::decode(r))?;
 
         let typ = match typ.as_str() {
             "session" => ChannelType::Session,
             "x11" => {
-                let originator_address = String::decode(r).map_err(crate::Error::from)?;
-                let originator_port = u32::decode(r).map_err(crate::Error::from)?;
+                let originator_address = map_err!(String::decode(r))?;
+                let originator_port = map_err!(u32::decode(r))?;
                 ChannelType::X11 {
                     originator_address,
                     originator_port,
@@ -53,34 +53,41 @@ impl OpenChannelMessage {
         sender_channel: u32,
         window_size: u32,
         packet_size: u32,
-    ) {
+    ) -> Result<(), crate::Error> {
         push_packet!(buffer, {
-            buffer.push(msg::CHANNEL_OPEN_CONFIRMATION);
-            buffer.push_u32_be(self.recipient_channel); // remote channel number.
-            buffer.push_u32_be(sender_channel); // our channel number.
-            buffer.push_u32_be(window_size);
-            buffer.push_u32_be(packet_size);
+            msg::CHANNEL_OPEN_CONFIRMATION.encode(buffer)?;
+            self.recipient_channel.encode(buffer)?; // remote channel number.
+            sender_channel.encode(buffer)?; // our channel number.
+            window_size.encode(buffer)?;
+            packet_size.encode(buffer)?;
         });
+        Ok(())
     }
 
     /// Pushes a failure message to the vec.
-    pub fn fail(&self, buffer: &mut CryptoVec, reason: u8, message: &[u8]) {
+    pub fn fail(
+        &self,
+        buffer: &mut CryptoVec,
+        reason: u8,
+        message: &[u8],
+    ) -> Result<(), crate::Error> {
         push_packet!(buffer, {
-            buffer.push(msg::CHANNEL_OPEN_FAILURE);
-            buffer.push_u32_be(self.recipient_channel);
-            buffer.push_u32_be(reason as u32);
-            buffer.extend_ssh_string(message);
-            buffer.extend_ssh_string(b"en");
+            msg::CHANNEL_OPEN_FAILURE.encode(buffer)?;
+            self.recipient_channel.encode(buffer)?;
+            (reason as u32).encode(buffer)?;
+            message.encode(buffer)?;
+            "en".encode(buffer)?;
         });
+        Ok(())
     }
 
     /// Pushes an unknown type error to the vec.
-    pub fn unknown_type(&self, buffer: &mut CryptoVec) {
+    pub fn unknown_type(&self, buffer: &mut CryptoVec) -> Result<(), crate::Error> {
         self.fail(
             buffer,
             msg::SSH_OPEN_UNKNOWN_CHANNEL_TYPE,
             b"Unknown channel type",
-        );
+        )
     }
 }
 

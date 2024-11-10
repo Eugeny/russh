@@ -16,7 +16,6 @@ use tokio::time::sleep;
 use {std, tokio};
 
 use super::{msg, Constraint};
-use crate::encoding::Encoding;
 use crate::helpers::EncodedExt;
 use crate::Error;
 
@@ -137,14 +136,14 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
             {
                 // request identities
                 if let Ok(keys) = self.keys.0.read() {
-                    writebuf.push(msg::IDENTITIES_ANSWER);
-                    writebuf.push_u32_be(keys.len() as u32);
+                    msg::IDENTITIES_ANSWER.encode(writebuf)?;
+                    (keys.len() as u32).encode(writebuf)?;
                     for (k, _) in keys.iter() {
-                        writebuf.extend_ssh_string(k);
-                        writebuf.extend_ssh_string(b"");
+                        k.encode(writebuf)?;
+                        "".encode(writebuf)?;
                     }
                 } else {
-                    writebuf.push(msg::FAILURE)
+                    msg::FAILURE.encode(writebuf)?
                 }
             }
             Some((&13, mut r))

@@ -95,7 +95,7 @@ use std::fmt::{Debug, Display, Formatter};
 use log::debug;
 use parsing::ChannelOpenConfirmation;
 pub use russh_cryptovec::CryptoVec;
-use ssh_encoding::Decode;
+use ssh_encoding::{Decode, Encode};
 use thiserror::Error;
 
 #[cfg(test)]
@@ -506,6 +506,16 @@ impl Decode for ChannelId {
 
     fn decode(reader: &mut impl ssh_encoding::Reader) -> Result<Self, Self::Error> {
         Ok(Self(u32::decode(reader)?))
+    }
+}
+
+impl Encode for ChannelId {
+    fn encoded_len(&self) -> Result<usize, ssh_encoding::Error> {
+        self.0.encoded_len()
+    }
+
+    fn encode(&self, writer: &mut impl ssh_encoding::Writer) -> Result<(), ssh_encoding::Error> {
+        self.0.encode(writer)
     }
 }
 

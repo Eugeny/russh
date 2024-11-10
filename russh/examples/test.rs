@@ -92,7 +92,7 @@ impl server::Handler for Server {
         {
             let mut clients = self.clients.lock().unwrap();
             for ((_, _channel_id), ref mut channel) in clients.iter_mut() {
-                session.data(channel.id(), CryptoVec::from(data.to_vec()));
+                session.data(channel.id(), CryptoVec::from(data.to_vec()))?;
             }
         }
         Ok(())

@@ -1,6 +1,6 @@
 use std::ops::{Deref, DerefMut, Index, IndexMut, Range, RangeFrom, RangeFull, RangeTo};
 
-use crate::platform::{self, memcpy, memset, mlock, munlock};
+use crate::platform::{self, memset, mlock, munlock};
 
 /// A buffer which zeroes its memory on `.clear()`, `.resize()`, and
 /// reallocations, to avoid copying secrets around.
@@ -244,38 +244,6 @@ impl CryptoVec {
         let size = self.size;
         self.resize(size + 1);
         unsafe { *self.p.add(size) = s }
-    }
-
-    /// Append a new u32, big endian-encoded, at the end of this CryptoVec.
-    ///
-    /// ```
-    /// let mut v = russh_cryptovec::CryptoVec::new();
-    /// let n = 43554;
-    /// v.push_u32_be(n);
-    /// assert_eq!(n, v.read_u32_be(0))
-    /// ```
-    pub fn push_u32_be(&mut self, s: u32) {
-        let s = s.to_be();
-        let x: [u8; 4] = s.to_ne_bytes();
-        self.extend(&x)
-    }
-
-    /// Read a big endian-encoded u32 from this CryptoVec, with the
-    /// first byte at position `i`.
-    ///
-    /// ```
-    /// let mut v = russh_cryptovec::CryptoVec::new();
-    /// let n = 99485710;
-    /// v.push_u32_be(n);
-    /// assert_eq!(n, v.read_u32_be(0))
-    /// ```
-    pub fn read_u32_be(&self, i: usize) -> u32 {
-        assert!(i + 4 <= self.size);
-        let mut x: u32 = 0;
-        unsafe {
-            memcpy((&mut x) as *mut u32, self.p.add(i), 4);
-        }
-        u32::from_be(x)
     }
 
     /// Read `n_bytes` from `r`, and append them at the end of this

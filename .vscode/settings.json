@@ -1,0 +1,5 @@
+{
+    "rust-analyzer.cargo.features": [
+        "legacy-ed25519-pkcs8-parser"
+    ]
+}

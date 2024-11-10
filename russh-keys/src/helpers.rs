@@ -30,3 +30,14 @@ impl Encode for NameList {
         self.as_encoded_string().encode(writer)
     }
 }
+
+#[macro_export]
+#[doc(hidden)]
+#[allow(clippy::crate_in_macro_def)]
+macro_rules! map_err {
+    ($result:expr) => {
+        $result.map_err(|e| crate::Error::from(e))
+    };
+}
+
+pub use map_err;

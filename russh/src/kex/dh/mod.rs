@@ -8,10 +8,10 @@ use log::debug;
 use num_bigint::BigUint;
 use sha1::Sha1;
 use sha2::{Sha256, Sha512};
+use ssh_encoding::Encode;
 
 use self::groups::{DhGroup, DH_GROUP1, DH_GROUP14, DH_GROUP16};
 use super::{compute_keys, KexAlgorithm, KexType};
-use crate::keys::encoding::Encoding;
 use crate::session::Exchange;
 use crate::{cipher, mac, msg, CryptoVec};
 
@@ -155,8 +155,8 @@ impl<D: Digest> KexAlgorithm for DhGroupKex<D> {
         client_ephemeral.clear();
         client_ephemeral.extend(&encoded_pubkey);
 
-        buf.push(msg::KEX_ECDH_INIT);
-        buf.extend_ssh_string(&encoded_pubkey);
+        msg::KEX_ECDH_INIT.encode(buf)?;
+        encoded_pubkey.encode(buf)?;
 
         Ok(())
     }
@@ -184,17 +184,17 @@ impl<D: Digest> KexAlgorithm for DhGroupKex<D> {
     ) -> Result<CryptoVec, crate::Error> {
         // Computing the exchange hash, see page 7 of RFC 5656.
         buffer.clear();
-        buffer.extend_ssh_string(&exchange.client_id);
-        buffer.extend_ssh_string(&exchange.server_id);
-        buffer.extend_ssh_string(&exchange.client_kex_init);
-        buffer.extend_ssh_string(&exchange.server_kex_init);
+        exchange.client_id.encode(buffer)?;
+        exchange.server_id.encode(buffer)?;
+        exchange.client_kex_init.encode(buffer)?;
+        exchange.server_kex_init.encode(buffer)?;
 
         buffer.extend(key);
-        buffer.extend_ssh_string(&exchange.client_ephemeral);
-        buffer.extend_ssh_string(&exchange.server_ephemeral);
+        exchange.client_ephemeral.encode(buffer)?;
+        exchange.server_ephemeral.encode(buffer)?;
 
         if let Some(ref shared) = self.shared_secret {
-            buffer.extend_ssh_mpint(shared);
+            shared.encode(buffer)?;
         }
 
         let mut hasher = D::new();

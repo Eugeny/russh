@@ -17,11 +17,13 @@ use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::marker::PhantomData;
 
+use delegate::delegate;
 use digest::typenum::{U20, U32, U64};
 use hmac::Hmac;
 use once_cell::sync::Lazy;
 use sha1::Sha1;
 use sha2::{Sha256, Sha512};
+use ssh_encoding::Encode;
 
 use self::crypto::CryptoMacAlgorithm;
 use self::crypto_etm::CryptoEtmMacAlgorithm;
@@ -51,6 +53,13 @@ impl AsRef<str> for Name {
     fn as_ref(&self) -> &str {
         self.0
     }
+}
+
+impl Encode for Name {
+    delegate! { to self.as_ref() {
+        fn encoded_len(&self) -> Result<usize, ssh_encoding::Error>;
+        fn encode(&self, writer: &mut impl ssh_encoding::Writer) -> Result<(), ssh_encoding::Error>;
+    }}
 }
 
 impl TryFrom<&str> for Name {

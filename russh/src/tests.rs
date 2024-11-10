@@ -116,7 +116,7 @@ mod compress {
             session: &mut Session,
         ) -> Result<(), Self::Error> {
             debug!("server data = {:?}", std::str::from_utf8(data));
-            session.data(channel, CryptoVec::from_slice(data));
+            session.data(channel, CryptoVec::from_slice(data))?;
             Ok(())
         }
     }
@@ -235,7 +235,7 @@ mod channels {
                 session: &mut client::Session,
             ) -> Result<(), Self::Error> {
                 assert_eq!(data, &b"hello world!"[..]);
-                session.data(channel, CryptoVec::from_slice(&b"hey there!"[..]));
+                session.data(channel, CryptoVec::from_slice(&b"hey there!"[..]))?;
                 Ok(())
             }
         }

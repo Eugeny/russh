@@ -167,7 +167,7 @@ impl Handler for AppServer {
             // Pressing 'q' closes the connection.
             b"q" => {
                 self.clients.lock().await.remove(&self.id);
-                session.close(channel);
+                session.close(channel)?;
             }
             // Pressing 'c' resets the counter for the app.
             // Only the client with the id sees the counter reset.

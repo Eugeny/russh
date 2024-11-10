@@ -16,12 +16,12 @@ use std::borrow::Cow;
 
 use log::debug;
 use rand::RngCore;
-use ssh_encoding::Decode;
+use russh_keys::helpers::NameList;
+use ssh_encoding::{Decode, Encode};
 use ssh_key::{Algorithm, Certificate, EcdsaCurve, HashAlg, PrivateKey, PublicKey};
 
 use crate::cipher::CIPHERS;
 use crate::kex::{EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT, EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER};
-use crate::keys::encoding::Encoding;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::server::Config;
 use crate::{cipher, compression, kex, mac, msg, AlgorithmKind, CryptoVec, Error};
@@ -404,43 +404,92 @@ pub fn write_kex(
     rand::thread_rng().fill_bytes(&mut cookie);
 
     buf.extend(&cookie); // cookie
-    buf.extend_list(prefs.kex.iter().filter(|k| {
-        !(if server_config.is_some() {
-            [
-                crate::kex::EXTENSION_SUPPORT_AS_CLIENT,
-                crate::kex::EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT,
-            ]
-        } else {
-            [
-                crate::kex::EXTENSION_SUPPORT_AS_SERVER,
-                crate::kex::EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER,
-            ]
-        })
-        .contains(*k)
-    })); // kex algo
+    NameList(
+        prefs
+            .kex
+            .iter()
+            .filter(|k| {
+                !(if server_config.is_some() {
+                    [
+                        crate::kex::EXTENSION_SUPPORT_AS_CLIENT,
+                        crate::kex::EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT,
+                    ]
+                } else {
+                    [
+                        crate::kex::EXTENSION_SUPPORT_AS_SERVER,
+                        crate::kex::EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER,
+                    ]
+                })
+                .contains(*k)
+            })
+            .map(|x| x.as_ref().to_owned())
+            .collect(),
+    )
+    .encode(buf)?; // kex algo
 
     if let Some(server_config) = server_config {
         // Only advertise host key algorithms that we have keys for.
-        buf.extend_list(
+        NameList(
             prefs
                 .key
                 .iter()
-                .filter(|algo| server_config.keys.iter().any(|k| k.algorithm() == **algo)),
-        );
+                .filter(|algo| server_config.keys.iter().any(|k| k.algorithm() == **algo))
+                .map(|x| x.to_string())
+                .collect(),
+        )
+        .encode(buf)?;
     } else {
-        buf.extend_list(prefs.key.iter());
+        NameList(prefs.key.iter().map(ToString::to_string).collect()).encode(buf)?;
     }
 
-    buf.extend_list(prefs.cipher.iter()); // cipher client to server
-    buf.extend_list(prefs.cipher.iter()); // cipher server to client
+    // cipher client to server
+    NameList(
+        prefs
+            .cipher
+            .iter()
+            .map(|x| x.as_ref().to_string())
+            .collect(),
+    )
+    .encode(buf)?;
 
-    buf.extend_list(prefs.mac.iter()); // mac client to server
-    buf.extend_list(prefs.mac.iter()); // mac server to client
-    buf.extend_list(prefs.compression.iter()); // compress client to server
-    buf.extend_list(prefs.compression.iter()); // compress server to client
+    // cipher server to client
+    NameList(
+        prefs
+            .cipher
+            .iter()
+            .map(|x| x.as_ref().to_string())
+            .collect(),
+    )
+    .encode(buf)?;
 
-    buf.write_empty_list(); // languages client to server
-    buf.write_empty_list(); // languagesserver to client
+    // mac client to server
+    NameList(prefs.mac.iter().map(|x| x.as_ref().to_string()).collect()).encode(buf)?;
+
+    // mac server to client
+    NameList(prefs.mac.iter().map(|x| x.as_ref().to_string()).collect()).encode(buf)?;
+
+    // compress client to server
+    NameList(
+        prefs
+            .compression
+            .iter()
+            .map(|x| x.as_ref().to_string())
+            .collect(),
+    )
+    .encode(buf)?;
+
+    // compress server to client
+    NameList(
+        prefs
+            .compression
+            .iter()
+            .map(|x| x.as_ref().to_string())
+            .collect(),
+    )
+    .encode(buf)?;
+
+    Vec::<String>::new().encode(buf)?; // languages client to server
+    Vec::<String>::new().encode(buf)?; // languages server to client
 
     buf.push(0); // doesn't follow
     buf.extend(&[0, 0, 0, 0]); // reserved
