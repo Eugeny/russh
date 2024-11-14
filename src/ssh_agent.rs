@@ -39,6 +39,10 @@ pub trait Agent: Clone + Send + 'static {
     fn confirm(&self, _pk: Key) -> impl std::future::Future<Output = bool> + Send {
         async { true }
     }
+    
+    fn can_list(&self) -> impl std::future::Future<Output = bool> + Send {
+        async { true }
+    }
 }
 
 pub async fn serve<S, L, A>(
@@ -117,6 +121,12 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
         let mut r = self.buf.reader(0);
         match r.read_byte() {
             Ok(REQUEST_IDENTITIES) => {
+                let agent = self.agent.take().ok_or(SSHAgentError::AgentFailure)?;
+                if !agent.can_list().await {
+                    writebuf.push(msg::FAILURE);
+                    return Ok(());
+                }
+
                 if let Ok(keys) = self.keys.0.read() {
                     writebuf.push(msg::IDENTITIES_ANSWER);
                     writebuf.push_u32_be(keys.len() as u32);
