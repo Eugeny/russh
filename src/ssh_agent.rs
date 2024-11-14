@@ -122,6 +122,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
         match r.read_byte() {
             Ok(REQUEST_IDENTITIES) => {
                 let agent = self.agent.take().ok_or(SSHAgentError::AgentFailure)?;
+                self.agent = Some(agent.clone());
                 if !agent.can_list().await {
                     writebuf.push(msg::FAILURE);
                 } else {
