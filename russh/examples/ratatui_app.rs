@@ -208,6 +208,17 @@ impl Handler for AppServer {
     }
 }
 
+impl Drop for AppServer {
+    fn drop(&mut self) {
+        let id = self.id;
+        let clients = self.clients.clone();
+        tokio::spawn(async move {
+            let mut clients = clients.lock().await;
+            clients.remove(&id);
+        });
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let mut server = AppServer::new();

@@ -38,14 +38,14 @@ async fn main() {
 
 #[derive(Clone)]
 struct Server {
-    clients: Arc<Mutex<HashMap<(usize, ChannelId), russh::server::Handle>>>,
+    clients: Arc<Mutex<HashMap<usize, (ChannelId, russh::server::Handle)>>>,
     id: usize,
 }
 
 impl Server {
     async fn post(&mut self, data: CryptoVec) {
         let mut clients = self.clients.lock().await;
-        for ((id, channel), ref mut s) in clients.iter_mut() {
+        for (id, (channel, ref mut s)) in clients.iter_mut() {
             if *id != self.id {
                 let _ = s.data(*channel, data.clone()).await;
             }
@@ -76,7 +76,7 @@ impl server::Handler for Server {
     ) -> Result<bool, Self::Error> {
         {
             let mut clients = self.clients.lock().await;
-            clients.insert((self.id, channel.id()), session.handle());
+            clients.insert(self.id, (channel.id(), session.handle()));
         }
         Ok(true)
     }
@@ -133,5 +133,16 @@ impl server::Handler for Server {
             let _ = channel.eof().await;
         });
         Ok(true)
+    }
+}
+
+impl Drop for Server {
+    fn drop(&mut self) {
+        let id = self.id;
+        let clients = self.clients.clone();
+        tokio::spawn(async move {
+            let mut clients = clients.lock().await;
+            clients.remove(&id);
+        });
     }
 }
