@@ -127,7 +127,10 @@ impl Debug for Config {
             .field("methods", &self.methods)
             .field("auth_banner", &self.auth_banner)
             .field("auth_rejection_time", &self.auth_rejection_time)
-            .field("auth_rejection_time_initial", &self.auth_rejection_time_initial)
+            .field(
+                "auth_rejection_time_initial",
+                &self.auth_rejection_time_initial,
+            )
             .field("keys", &"***")
             .field("window_size", &self.window_size)
             .field("maximum_packet_size", &self.maximum_packet_size)
