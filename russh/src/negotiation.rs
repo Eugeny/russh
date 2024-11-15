@@ -177,7 +177,7 @@ impl<'a> Named<'a> for PrivateKey {
 
 impl<'a> Named<'a> for Certificate {
     fn name(&'a self) -> impl AsRef<str> + 'a {
-        self.algorithm()
+        self.algorithm().to_certificate_type()
     }
 }
 
