@@ -57,7 +57,6 @@ mod session;
 pub use self::session::*;
 mod encrypted;
 
-#[derive(Debug)]
 /// Configuration of a server.
 pub struct Config {
     /// The server ID string sent at the beginning of the protocol.
@@ -117,6 +116,32 @@ impl Default for Config {
             keepalive_interval: None,
             keepalive_max: 3,
         }
+    }
+}
+
+impl Debug for Config {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // display everything except the private keys
+        f.debug_struct("Config")
+            .field("server_id", &self.server_id)
+            .field("methods", &self.methods)
+            .field("auth_banner", &self.auth_banner)
+            .field("auth_rejection_time", &self.auth_rejection_time)
+            .field(
+                "auth_rejection_time_initial",
+                &self.auth_rejection_time_initial,
+            )
+            .field("keys", &"***")
+            .field("window_size", &self.window_size)
+            .field("maximum_packet_size", &self.maximum_packet_size)
+            .field("event_buffer_size", &self.event_buffer_size)
+            .field("limits", &self.limits)
+            .field("preferred", &self.preferred)
+            .field("max_auth_attempts", &self.max_auth_attempts)
+            .field("inactivity_timeout", &self.inactivity_timeout)
+            .field("keepalive_interval", &self.keepalive_interval)
+            .field("keepalive_max", &self.keepalive_max)
+            .finish()
     }
 }
 

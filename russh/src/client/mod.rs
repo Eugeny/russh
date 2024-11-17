@@ -80,6 +80,7 @@ mod session;
 /// It is in charge of multiplexing and keeping track of various channels
 /// that may get opened and closed during the lifetime of an SSH session and
 /// allows sending messages to the server.
+#[derive(Debug)]
 pub struct Session {
     common: CommonSession<Arc<Config>>,
     receiver: Receiver<Msg>,
