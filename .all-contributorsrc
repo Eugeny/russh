@@ -409,6 +409,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "qsantos",
+      "name": "Quentin Santos",
+      "avatar_url": "https://avatars.githubusercontent.com/u/8493765?v=4",
+      "profile": "https://qsantos.fr/",
+      "contributions": [
+        "doc"
+      ]
     }
   ],
   "contributorsPerLine": 7,
