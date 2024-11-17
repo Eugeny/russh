@@ -396,6 +396,27 @@ pub trait Handler: Sized {
 
     /// The client requests a pseudo-terminal with the given
     /// specifications.
+    ///
+    /// **Note:** Success or failure should be communicated to the client by calling
+    /// `session.channel_success(channel)` or `session.channel_failure(channel)` respectively. For
+    /// instance:
+    ///
+    /// ```ignore
+    /// async fn pty_request(
+    ///     &mut self,
+    ///     channel: ChannelId,
+    ///     term: &str,
+    ///     col_width: u32,
+    ///     row_height: u32,
+    ///     pix_width: u32,
+    ///     pix_height: u32,
+    ///     modes: &[(Pty, u32)],
+    ///     session: &mut Session,
+    /// ) -> Result<(), Self::Error> {
+    ///     session.channel_success(channel);
+    ///     Ok(())
+    /// }
+    /// ```
     #[allow(unused_variables, clippy::too_many_arguments)]
     async fn pty_request(
         &mut self,
@@ -412,6 +433,25 @@ pub trait Handler: Sized {
     }
 
     /// The client requests an X11 connection.
+    ///
+    /// **Note:** Success or failure should be communicated to the client by calling
+    /// `session.channel_success(channel)` or `session.channel_failure(channel)` respectively. For
+    /// instance:
+    ///
+    /// ```ignore
+    /// async fn x11_request(
+    ///     &mut self,
+    ///     channel: ChannelId,
+    ///     single_connection: bool,
+    ///     x11_auth_protocol: &str,
+    ///     x11_auth_cookie: &str,
+    ///     x11_screen_number: u32,
+    ///     session: &mut Session,
+    /// ) -> Result<(), Self::Error> {
+    ///     session.channel_success(channel);
+    ///     Ok(())
+    /// }
+    /// ```
     #[allow(unused_variables)]
     async fn x11_request(
         &mut self,
@@ -428,6 +468,23 @@ pub trait Handler: Sized {
     /// The client wants to set the given environment variable. Check
     /// these carefully, as it is dangerous to allow any variable
     /// environment to be set.
+    ///
+    /// **Note:** Success or failure should be communicated to the client by calling
+    /// `session.channel_success(channel)` or `session.channel_failure(channel)` respectively. For
+    /// instance:
+    ///
+    /// ```ignore
+    /// async fn env_request(
+    ///     &mut self,
+    ///     channel: ChannelId,
+    ///     variable_name: &str,
+    ///     variable_value: &str,
+    ///     session: &mut Session,
+    /// ) -> Result<(), Self::Error> {
+    ///     session.channel_success(channel);
+    ///     Ok(())
+    /// }
+    /// ```
     #[allow(unused_variables)]
     async fn env_request(
         &mut self,
@@ -440,6 +497,21 @@ pub trait Handler: Sized {
     }
 
     /// The client requests a shell.
+    ///
+    /// **Note:** Success or failure should be communicated to the client by calling
+    /// `session.channel_success(channel)` or `session.channel_failure(channel)` respectively. For
+    /// instance:
+    ///
+    /// ```ignore
+    /// async fn shell_request(
+    ///     &mut self,
+    ///     channel: ChannelId,
+    ///     session: &mut Session,
+    /// ) -> Result<(), Self::Error> {
+    ///     session.channel_success(channel);
+    ///     Ok(())
+    /// }
+    /// ```
     #[allow(unused_variables)]
     async fn shell_request(
         &mut self,
@@ -451,6 +523,22 @@ pub trait Handler: Sized {
 
     /// The client sends a command to execute, to be passed to a
     /// shell. Make sure to check the command before doing so.
+    ///
+    /// **Note:** Success or failure should be communicated to the client by calling
+    /// `session.channel_success(channel)` or `session.channel_failure(channel)` respectively. For
+    /// instance:
+    ///
+    /// ```ignore
+    /// async fn exec_request(
+    ///     &mut self,
+    ///     channel: ChannelId,
+    ///     data: &[u8],
+    ///     session: &mut Session,
+    /// ) -> Result<(), Self::Error> {
+    ///     session.channel_success(channel);
+    ///     Ok(())
+    /// }
+    /// ```
     #[allow(unused_variables)]
     async fn exec_request(
         &mut self,
@@ -463,6 +551,22 @@ pub trait Handler: Sized {
 
     /// The client asks to start the subsystem with the given name
     /// (such as sftp).
+    ///
+    /// **Note:** Success or failure should be communicated to the client by calling
+    /// `session.channel_success(channel)` or `session.channel_failure(channel)` respectively. For
+    /// instance:
+    ///
+    /// ```ignore
+    /// async fn subsystem_request(
+    ///     &mut self,
+    ///     channel: ChannelId,
+    ///     name: &str,
+    ///     session: &mut Session,
+    /// ) -> Result<(), Self::Error> {
+    ///     session.channel_success(channel);
+    ///     Ok(())
+    /// }
+    /// ```
     #[allow(unused_variables)]
     async fn subsystem_request(
         &mut self,
@@ -474,6 +578,25 @@ pub trait Handler: Sized {
     }
 
     /// The client's pseudo-terminal window size has changed.
+    ///
+    /// **Note:** Success or failure should be communicated to the client by calling
+    /// `session.channel_success(channel)` or `session.channel_failure(channel)` respectively. For
+    /// instance:
+    ///
+    /// ```ignore
+    /// async fn window_change_request(
+    ///     &mut self,
+    ///     channel: ChannelId,
+    ///     col_width: u32,
+    ///     row_height: u32,
+    ///     pix_width: u32,
+    ///     pix_height: u32,
+    ///     session: &mut Session,
+    /// ) -> Result<(), Self::Error> {
+    ///     session.channel_success(channel);
+    ///     Ok(())
+    /// }
+    /// ```
     #[allow(unused_variables)]
     async fn window_change_request(
         &mut self,
@@ -488,6 +611,21 @@ pub trait Handler: Sized {
     }
 
     /// The client requests OpenSSH agent forwarding
+    ///
+    /// **Note:** Success or failure should be communicated to the client by calling
+    /// `session.channel_success(channel)` or `session.channel_failure(channel)` respectively. For
+    /// instance:
+    ///
+    /// ```ignore
+    /// async fn agent_request(
+    ///     &mut self,
+    ///     channel: ChannelId,
+    ///     session: &mut Session,
+    /// ) -> Result<bool, Self::Error> {
+    ///     session.channel_success(channel);
+    ///     Ok(())
+    /// }
+    /// ```
     #[allow(unused_variables)]
     async fn agent_request(
         &mut self,
