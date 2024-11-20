@@ -39,6 +39,10 @@ pub trait Agent: Clone + Send + 'static {
     fn confirm(&self, _pk: Key) -> impl std::future::Future<Output = bool> + Send {
         async { true }
     }
+    
+    fn can_list(&self) -> impl std::future::Future<Output = bool> + Send {
+        async { true }
+    }
 }
 
 pub async fn serve<S, L, A>(
@@ -117,15 +121,21 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
         let mut r = self.buf.reader(0);
         match r.read_byte() {
             Ok(REQUEST_IDENTITIES) => {
-                if let Ok(keys) = self.keys.0.read() {
-                    writebuf.push(msg::IDENTITIES_ANSWER);
-                    writebuf.push_u32_be(keys.len() as u32);
-                    for (public_key_bytes, key) in keys.iter() {
-                        writebuf.extend_ssh_string(public_key_bytes);
-                        writebuf.extend_ssh_string(key.name.as_bytes());
-                    }
+                let agent = self.agent.take().ok_or(SSHAgentError::AgentFailure)?;
+                self.agent = Some(agent.clone());
+                if !agent.can_list().await {
+                    writebuf.push(msg::FAILURE);
                 } else {
-                    writebuf.push(msg::FAILURE)
+                    if let Ok(keys) = self.keys.0.read() {
+                        writebuf.push(msg::IDENTITIES_ANSWER);
+                        writebuf.push_u32_be(keys.len() as u32);
+                        for (public_key_bytes, key) in keys.iter() {
+                            writebuf.extend_ssh_string(public_key_bytes);
+                            writebuf.extend_ssh_string(key.name.as_bytes());
+                        }
+                    } else {
+                        writebuf.push(msg::FAILURE)
+                    }
                 }
             }
             Ok(SIGN_REQUEST) => {
