@@ -142,7 +142,10 @@ pub fn parse(file: &str, host: &str) -> Result<Config, Error> {
                         }
                     }
                     "identityfile" => {
-                        let id = value.trim_start();
+                        let mut id = value.trim_start();
+                        if id.len() > 1 && id.starts_with('\'') && id.ends_with('\'') {
+                            id = &id[1..id.len() - 1];
+                        }
                         if id.starts_with("~/") {
                             if let Some(mut home) = home::home_dir() {
                                 home.push(id.split_at(2).1);
@@ -172,7 +175,10 @@ pub fn parse(file: &str, host: &str) -> Result<Config, Error> {
                         _ => config.add_keys_to_agent = AddKeysToAgent::No,
                     },
                     "userknownhostsfile" => {
-                        let id = value.trim_start();
+                        let mut id = value.trim_start();
+                        if id.len() > 1 && id.starts_with('\'') && id.ends_with('\'') {
+                            id = &id[1..id.len() - 1];
+                        }
                         if id.starts_with("~/") {
                             if let Some(mut home) = home::home_dir() {
                                 home.push(id.split_at(2).1);
