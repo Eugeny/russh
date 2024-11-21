@@ -1,7 +1,7 @@
 # Russh
 
 [![Rust](https://github.com/warp-tech/russh/actions/workflows/rust.yml/badge.svg)](https://github.com/warp-tech/russh/actions/workflows/rust.yml)  <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
-[![All Contributors](https://img.shields.io/badge/all_contributors-46-orange.svg?style=flat-square)](#contributors-)
+[![All Contributors](https://img.shields.io/badge/all_contributors-47-orange.svg?style=flat-square)](#contributors-)
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
 
 Low-level Tokio SSH2 client and server implementation.
@@ -172,6 +172,7 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
       <td align="center" valign="top" width="14.28%"><a href="https://eric.dev.br"><img src="https://avatars.githubusercontent.com/u/3129194?v=4?s=100" width="100px;" alt="Eric Rodrigues Pires"/><br /><sub><b>Eric Rodrigues Pires</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=EpicEric" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="http://www.fly.io"><img src="https://avatars.githubusercontent.com/u/43325?v=4?s=100" width="100px;" alt="Jerome Gravel-Niquet"/><br /><sub><b>Jerome Gravel-Niquet</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=jeromegn" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://qsantos.fr/"><img src="https://avatars.githubusercontent.com/u/8493765?v=4?s=100" width="100px;" alt="Quentin Santos"/><br /><sub><b>Quentin Santos</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=qsantos" title="Documentation">📖</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/ogedei-khan"><img src="https://avatars.githubusercontent.com/u/181673956?v=4?s=100" width="100px;" alt="André Almeida"/><br /><sub><b>André Almeida</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=ogedei-khan" title="Code">💻</a></td>
     </tr>
   </tbody>
 </table>
