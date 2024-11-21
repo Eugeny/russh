@@ -37,6 +37,8 @@ pub struct Config {
     pub proxy_command: Option<String>,
     pub proxy_jump: Option<String>,
     pub add_keys_to_agent: AddKeysToAgent,
+    pub user_known_hosts_file: Option<String>,
+    pub strict_host_key_checking: bool,
 }
 
 impl Config {
@@ -49,6 +51,8 @@ impl Config {
             proxy_command: None,
             proxy_jump: None,
             add_keys_to_agent: AddKeysToAgent::default(),
+            user_known_hosts_file: None,
+            strict_host_key_checking: true,
         }
     }
 }
@@ -166,6 +170,32 @@ pub fn parse(file: &str, host: &str) -> Result<Config, Error> {
                         "confirm" => config.add_keys_to_agent = AddKeysToAgent::Confirm,
                         "ask" => config.add_keys_to_agent = AddKeysToAgent::Ask,
                         _ => config.add_keys_to_agent = AddKeysToAgent::No,
+                    },
+                    "userknownhostsfile" => {
+                        let id = value.trim_start();
+                        if id.starts_with("~/") {
+                            if let Some(mut home) = home::home_dir() {
+                                home.push(id.split_at(2).1);
+                                config.user_known_hosts_file = Some(
+                                    home.to_str()
+                                        .ok_or_else(|| {
+                                            std::io::Error::new(
+                                                std::io::ErrorKind::Other,
+                                                "Failed to convert home directory to string",
+                                            )
+                                        })?
+                                        .to_string(),
+                                );
+                            } else {
+                                return Err(Error::NoHome);
+                            }
+                        } else {
+                            config.user_known_hosts_file = Some(id.to_string())
+                        }
+                    }
+                    "stricthostkeychecking" => match value.to_lowercase().as_str() {
+                        "no" => config.strict_host_key_checking = false,
+                        _ => config.strict_host_key_checking = true,
                     },
                     key => {
                         debug!("{:?}", key);
