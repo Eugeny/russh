@@ -8,10 +8,10 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::{Terminal, TerminalOptions, Viewport};
-use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use russh::keys::ssh_key::PublicKey;
 use russh::server::*;
 use russh::{Channel, ChannelId, Pty};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::sync::Mutex;
 
 type SshTerminal = Terminal<CrosstermBackend<TerminalHandle>>;
@@ -43,7 +43,10 @@ impl TerminalHandle {
                 }
             }
         });
-        Self { sender, sink: Vec::new() }
+        Self {
+            sender,
+            sink: Vec::new(),
+        }
     }
 }
 
@@ -57,7 +60,10 @@ impl std::io::Write for TerminalHandle {
     fn flush(&mut self) -> std::io::Result<()> {
         let result = self.sender.send(self.sink.clone());
         if result.is_err() {
-            return Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe, result.unwrap_err()));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                result.unwrap_err(),
+            ));
         }
 
         self.sink.clear();
@@ -151,7 +157,9 @@ impl Handler for AppServer {
         let backend = CrosstermBackend::new(terminal_handle);
 
         // the correct viewport area will be set when the client request a pty
-        let options = TerminalOptions { viewport: Viewport::Fixed(Rect::default()) };
+        let options = TerminalOptions {
+            viewport: Viewport::Fixed(Rect::default()),
+        };
 
         let terminal = Terminal::with_options(backend, options)?;
 
