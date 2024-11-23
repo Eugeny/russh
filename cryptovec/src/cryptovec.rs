@@ -47,6 +47,18 @@ impl From<String> for CryptoVec {
     }
 }
 
+impl From<&str> for CryptoVec {
+    fn from(e: &str) -> Self {
+        CryptoVec::from(e.as_bytes())
+    }
+}
+
+impl From<&[u8]> for CryptoVec {
+    fn from(e: &[u8]) -> Self {
+        CryptoVec::from_slice(e)
+    }
+}
+
 impl From<Vec<u8>> for CryptoVec {
     fn from(e: Vec<u8>) -> Self {
         let mut c = CryptoVec::new_zeroed(e.len());
