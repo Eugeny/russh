@@ -12,24 +12,24 @@ version = "0.47.0-beta.2"
 rust-version = "1.65"
 
 [dependencies]
-aes = { workspace = true }
-async-trait = { workspace = true }
+aes.workspace = true
+async-trait.workspace = true
 bcrypt-pbkdf = "0.10"
-bytes = { workspace = true }
+bytes.workspace = true
 cbc = "0.1"
 ctr = "0.9"
 block-padding = { version = "0.3", features = ["std"] }
-byteorder = { workspace = true }
+byteorder.workspace = true
 data-encoding = "2.3"
-digest = { workspace = true }
+digest.workspace = true
 der = "0.7"
 ecdsa = "0.16"
 ed25519-dalek = { version = "2.0", features = ["rand_core", "pkcs8"] }
 elliptic-curve = "0.13"
-futures = { workspace = true }
-hmac = { workspace = true }
+futures.workspace = true
+hmac.workspace = true
 inout = { version = "0.1", features = ["std"] }
-log = { workspace = true }
+log.workspace = true
 md5 = "0.7"
 num-integer = "0.1"
 p256 = "0.13"
@@ -39,22 +39,22 @@ pbkdf2 = "0.12"
 pkcs1 = "0.7"
 pkcs5 = "0.7"
 pkcs8 = { version = "0.10", features = ["pkcs5", "encryption"] }
-rand = { workspace = true }
+rand.workspace = true
 rand_core = { version = "0.6.4", features = ["std"] }
-rsa = "0.9"
+rsa.workspace = true
 russh-cryptovec = { version = "0.8.0-beta.1", path = "../cryptovec", features = [
   "ssh-encoding",
 ] }
 russh-util = { version = "0.46.0", path = "../russh-util" }
 sec1 = { version = "0.7", features = ["pkcs8"] }
 serde = { version = "1.0", features = ["derive"] }
-sha1 = { workspace = true }
-sha2 = { workspace = true }
-signature = { workspace = true }
+sha1.workspace = true
+sha2.workspace = true
+signature.workspace = true
 spki = "0.7"
-ssh-encoding = { workspace = true }
-ssh-key = { workspace = true }
-thiserror = { workspace = true }
+ssh-encoding.workspace = true
+ssh-key.workspace = true
+thiserror.workspace = true
 typenum = "1.17"
 yasna = { version = "0.5.0", features = [
   "bit-vec",
@@ -74,7 +74,7 @@ tokio = { workspace = true, features = [
   "time",
   "net",
 ] }
-tokio-stream = { workspace = true }
+tokio-stream.workspace = true
 home = "0.5"
 
 

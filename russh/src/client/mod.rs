@@ -47,9 +47,8 @@ use futures::task::{Context, Poll};
 use futures::Future;
 use log::{debug, error, info, trace};
 use russh_keys::map_err;
-use signature::Verifier;
 use ssh_encoding::{Decode, Encode, Reader};
-use ssh_key::{Certificate, PrivateKey, PublicKey, Signature};
+use ssh_key::{Certificate, PrivateKey, PublicKey};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadHalf, WriteHalf};
 use tokio::pin;
 use tokio::sync::mpsc::{
@@ -67,8 +66,8 @@ use crate::session::{
 use crate::ssh_read::SshRead;
 use crate::sshbuffer::{SSHBuffer, SshId};
 use crate::{
-    auth, msg, negotiation, strict_kex_violation, ChannelId, ChannelOpenFailure, CryptoVec,
-    Disconnect, Limits, Sig,
+    auth, msg, negotiation, sig_workaround, strict_kex_violation, ChannelId, ChannelOpenFailure,
+    CryptoVec, Disconnect, Limits, Sig,
 };
 
 mod encrypted;
@@ -1334,11 +1333,12 @@ impl KexDhDone {
                 };
 
                 debug!("signature: {:?}", signature);
-                let signature = Signature::new(pubkey.algorithm(), signature).map_err(|e| {
-                    debug!("signature ctor failed: {e:?}");
-                    crate::Error::WrongServerSig
-                })?;
-                if Verifier::verify(&pubkey, hash.as_ref(), &signature).is_err() {
+                let signature = sig_workaround::Sig::new(pubkey.algorithm(), signature.to_vec())
+                    .map_err(|e| {
+                        debug!("signature ctor failed: {e:?}");
+                        crate::Error::WrongServerSig
+                    })?;
+                if sig_workaround::verify(&pubkey, hash.as_ref(), &signature).is_err() {
                     debug!("wrong server sig");
                     return Err(crate::Error::WrongServerSig.into());
                 }

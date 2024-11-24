@@ -10,11 +10,11 @@ version = "0.0.1-beta.3"
 rust-version = "1.65"
 
 [dependencies]
-futures = { workspace = true }
-thiserror = { workspace = true }
-rand = { workspace = true }
+futures.workspace = true
+thiserror.workspace = true
+rand.workspace = true
 tokio = { workspace = true, features = ["io-util", "rt"] }
-bytes = { workspace = true }
+bytes.workspace = true
 delegate.workspace = true
 
 [target.'cfg(windows)'.dependencies]

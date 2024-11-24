@@ -112,6 +112,7 @@ pub mod compression;
 pub mod kex;
 /// MAC algorithm names
 pub mod mac;
+mod sig_workaround;
 
 /// Re-export of the `russh-keys` crate.
 pub use russh_keys as keys;
