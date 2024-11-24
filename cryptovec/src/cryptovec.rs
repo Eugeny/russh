@@ -47,6 +47,18 @@ impl From<String> for CryptoVec {
     }
 }
 
+impl From<&str> for CryptoVec {
+    fn from(e: &str) -> Self {
+        CryptoVec::from(e.as_bytes())
+    }
+}
+
+impl From<&[u8]> for CryptoVec {
+    fn from(e: &[u8]) -> Self {
+        CryptoVec::from_slice(e)
+    }
+}
+
 impl From<Vec<u8>> for CryptoVec {
     fn from(e: Vec<u8>) -> Self {
         let mut c = CryptoVec::new_zeroed(e.len());
@@ -356,25 +368,18 @@ impl Drop for CryptoVec {
     }
 }
 
-// DocTests cannot be run on with wasm_bindgen_test
 #[cfg(test)]
-#[cfg(target_arch = "wasm32")]
 mod test {
-
-    use wasm_bindgen_test::wasm_bindgen_test;
-
     use super::CryptoVec;
 
-    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
-
-    #[wasm_bindgen_test]
+    #[test]
     fn test_new() {
         let crypto_vec = CryptoVec::new();
         assert_eq!(crypto_vec.size, 0);
         assert_eq!(crypto_vec.capacity, 0);
     }
 
-    #[wasm_bindgen_test]
+    #[test]
     fn test_resize_expand() {
         let mut crypto_vec = CryptoVec::new_zeroed(5);
         crypto_vec.resize(10);
@@ -383,7 +388,7 @@ mod test {
         assert!(crypto_vec.iter().skip(5).all(|&x| x == 0)); // Ensure newly added elements are zeroed
     }
 
-    #[wasm_bindgen_test]
+    #[test]
     fn test_resize_shrink() {
         let mut crypto_vec = CryptoVec::new_zeroed(10);
         crypto_vec.resize(5);
@@ -392,7 +397,7 @@ mod test {
         assert_eq!(crypto_vec.len(), 5);
     }
 
-    #[wasm_bindgen_test]
+    #[test]
     fn test_push() {
         let mut crypto_vec = CryptoVec::new();
         crypto_vec.push(1);
@@ -402,7 +407,7 @@ mod test {
         assert_eq!(crypto_vec[1], 2);
     }
 
-    #[wasm_bindgen_test]
+    #[test]
     fn test_write_trait() {
         use std::io::Write;
 
@@ -413,7 +418,7 @@ mod test {
         assert_eq!(crypto_vec.as_ref(), &[1, 2, 3]);
     }
 
-    #[wasm_bindgen_test]
+    #[test]
     fn test_as_ref_as_mut() {
         let mut crypto_vec = CryptoVec::new_zeroed(5);
         let slice_ref: &[u8] = crypto_vec.as_ref();
@@ -423,21 +428,35 @@ mod test {
         assert_eq!(crypto_vec[0], 1);
     }
 
-    #[wasm_bindgen_test]
+    #[test]
     fn test_from_string() {
         let input = String::from("hello");
         let crypto_vec: CryptoVec = input.into();
         assert_eq!(crypto_vec.as_ref(), b"hello");
     }
 
-    #[wasm_bindgen_test]
+    #[test]
+    fn test_from_str() {
+        let input = "hello";
+        let crypto_vec: CryptoVec = input.into();
+        assert_eq!(crypto_vec.as_ref(), b"hello");
+    }
+
+    #[test]
+    fn test_from_byte_slice() {
+        let input = b"hello".as_slice();
+        let crypto_vec: CryptoVec = input.into();
+        assert_eq!(crypto_vec.as_ref(), b"hello");
+    }
+
+    #[test]
     fn test_from_vec() {
         let input = vec![1, 2, 3, 4];
         let crypto_vec: CryptoVec = input.into();
         assert_eq!(crypto_vec.as_ref(), &[1, 2, 3, 4]);
     }
 
-    #[wasm_bindgen_test]
+    #[test]
     fn test_index() {
         let crypto_vec = CryptoVec::from(vec![1, 2, 3, 4, 5]);
         assert_eq!(crypto_vec[0], 1);
@@ -445,7 +464,7 @@ mod test {
         assert_eq!(&crypto_vec[1..3], &[2, 3]);
     }
 
-    #[wasm_bindgen_test]
+    #[test]
     fn test_drop() {
         let mut crypto_vec = CryptoVec::new_zeroed(10);
         // Ensure vector is filled with non-zero data
@@ -458,7 +477,7 @@ mod test {
         // it may be checked using tools like Valgrind or manual inspection.
     }
 
-    #[wasm_bindgen_test]
+    #[test]
     fn test_new_zeroed() {
         let crypto_vec = CryptoVec::new_zeroed(10);
         assert_eq!(crypto_vec.size, 10);
@@ -466,25 +485,7 @@ mod test {
         assert!(crypto_vec.iter().all(|&x| x == 0)); // Ensure all bytes are zeroed
     }
 
-    #[wasm_bindgen_test]
-    fn test_push_u32_be() {
-        let mut crypto_vec = CryptoVec::new();
-        let value = 43554u32;
-        crypto_vec.push_u32_be(value);
-        assert_eq!(crypto_vec.len(), 4); // u32 is 4 bytes long
-        assert_eq!(crypto_vec.read_u32_be(0), value);
-    }
-
-    #[wasm_bindgen_test]
-
-    fn test_read_u32_be() {
-        let mut crypto_vec = CryptoVec::new();
-        let value = 99485710u32;
-        crypto_vec.push_u32_be(value);
-        assert_eq!(crypto_vec.read_u32_be(0), value);
-    }
-
-    #[wasm_bindgen_test]
+    #[test]
     fn test_clear() {
         let mut crypto_vec = CryptoVec::new();
         crypto_vec.extend(b"blabla");
@@ -492,14 +493,14 @@ mod test {
         assert!(crypto_vec.is_empty());
     }
 
-    #[wasm_bindgen_test]
+    #[test]
     fn test_extend() {
         let mut crypto_vec = CryptoVec::new();
         crypto_vec.extend(b"test");
         assert_eq!(crypto_vec.as_ref(), b"test");
     }
 
-    #[wasm_bindgen_test]
+    #[test]
     fn test_write_all_from() {
         let mut crypto_vec = CryptoVec::new();
         crypto_vec.extend(b"blabla");
@@ -510,10 +511,37 @@ mod test {
         assert_eq!(output, b"blabla");
     }
 
-    #[wasm_bindgen_test]
+    #[test]
     fn test_resize_mut() {
         let mut crypto_vec = CryptoVec::new();
         crypto_vec.resize_mut(4).clone_from_slice(b"test");
         assert_eq!(crypto_vec.as_ref(), b"test");
+    }
+
+    // DocTests cannot be run on with wasm_bindgen_test
+    #[cfg(target_arch = "wasm32")]
+    mod wasm32 {
+        use wasm_bindgen_test::wasm_bindgen_test;
+
+        use super::*;
+
+        wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+        #[wasm_bindgen_test]
+        fn test_push_u32_be() {
+            let mut crypto_vec = CryptoVec::new();
+            let value = 43554u32;
+            crypto_vec.push_u32_be(value);
+            assert_eq!(crypto_vec.len(), 4); // u32 is 4 bytes long
+            assert_eq!(crypto_vec.read_u32_be(0), value);
+        }
+
+        #[wasm_bindgen_test]
+        fn test_read_u32_be() {
+            let mut crypto_vec = CryptoVec::new();
+            let value = 99485710u32;
+            crypto_vec.push_u32_be(value);
+            assert_eq!(crypto_vec.read_u32_be(0), value);
+        }
     }
 }
