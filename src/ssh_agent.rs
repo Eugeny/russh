@@ -35,17 +35,21 @@ pub enum ServerError<E> {
     Error(Error),
 }
 
-pub trait Agent: Clone + Send + 'static {
-    fn confirm(&self, _pk: Key) -> impl std::future::Future<Output = bool> + Send {
+pub trait Agent<I>: Clone + Send + 'static {
+    fn confirm(
+        &self,
+        _pk: Key,
+        _connection_info: &I,
+    ) -> impl std::future::Future<Output = bool> + Send {
         async { true }
     }
-    
-    fn can_list(&self) -> impl std::future::Future<Output = bool> + Send {
+
+    fn can_list(&self, _connection_info: &I) -> impl std::future::Future<Output = bool> + Send {
         async { true }
     }
 }
 
-pub async fn serve<S, L, A>(
+pub async fn serve<S, L, A, I>(
     mut listener: L,
     agent: A,
     keys: KeyStore,
@@ -53,15 +57,16 @@ pub async fn serve<S, L, A>(
 ) -> Result<(), Error>
 where
     S: AsyncRead + AsyncWrite + Send + Sync + Unpin + 'static,
-    L: Stream<Item = tokio::io::Result<S>> + Unpin,
-    A: Agent + Send + Sync + 'static,
+    L: Stream<Item = tokio::io::Result<(S, I)>> + Unpin,
+    A: Agent<I> + Send + Sync + 'static,
+    I: Send + Sync + 'static,
 {
     loop {
         select! {
             _ = cancellation_token.cancelled() => {
                 break;
             }
-            Some(Ok(stream)) = listener.next() => {
+            Some(Ok((stream, info))) = listener.next() => {
                 let mut buf = CryptoVec::new();
                 buf.resize(4);
                 let keys = keys.clone();
@@ -73,6 +78,7 @@ where
                         agent: Some(agent),
                         s: stream,
                         buf: CryptoVec::new(),
+                        connection_info: info,
                     }
                     .run()
                     .await;
@@ -84,15 +90,19 @@ where
     Ok(())
 }
 
-struct Connection<S: AsyncRead + AsyncWrite + Send + 'static, A: Agent> {
+struct Connection<S: AsyncRead + AsyncWrite + Send + 'static, A: Agent<I>, I> {
     keys: KeyStore,
     agent: Option<A>,
     s: S,
     buf: CryptoVec,
+    connection_info: I,
 }
 
-impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync + 'static>
-    Connection<S, A>
+impl<
+        S: AsyncRead + AsyncWrite + Send + Unpin + 'static,
+        A: Agent<I> + Send + Sync + 'static,
+        I,
+    > Connection<S, A, I>
 {
     async fn run(mut self) -> Result<(), Error> {
         let mut writebuf = CryptoVec::new();
@@ -123,7 +133,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
             Ok(REQUEST_IDENTITIES) => {
                 let agent = self.agent.take().ok_or(SSHAgentError::AgentFailure)?;
                 self.agent = Some(agent.clone());
-                if !agent.can_list().await {
+                if !agent.can_list(&self.connection_info).await {
                     writebuf.push(msg::FAILURE);
                 } else {
                     if let Ok(keys) = self.keys.0.read() {
@@ -174,7 +184,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
 
         let data = r.read_string()?;
 
-        let ok = agent.confirm(key.clone()).await;
+        let ok = agent.confirm(key.clone(), &self.connection_info).await;
         if !ok {
             return Ok((agent, false));
         }
