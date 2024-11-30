@@ -19,18 +19,16 @@ pub use windows::{memset, mlock, munlock};
 
 #[cfg(test)]
 mod tests {
-    use wasm_bindgen_test::wasm_bindgen_test;
-
     use super::*;
 
-    #[wasm_bindgen_test]
+    #[test]
     fn test_memset() {
         let mut buf = vec![0u8; 10];
         memset(buf.as_mut_ptr(), 0xff, buf.len());
         assert_eq!(buf, vec![0xff; 10]);
     }
 
-    #[wasm_bindgen_test]
+    #[test]
     fn test_memset_partial() {
         let mut buf = vec![0u8; 10];
         memset(buf.as_mut_ptr(), 0xff, 5);
