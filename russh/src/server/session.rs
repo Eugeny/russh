@@ -736,6 +736,12 @@ impl Session {
         &self.common.config
     }
 
+    /// Retrieves the authenticated user associated with this session.
+    /// In case of successful `auth_none`, username is empty ("")
+    pub fn username(&self) -> &str {
+        &self.common.auth_user
+    }
+
     /// Sends a disconnect message.
     pub fn disconnect(
         &mut self,
