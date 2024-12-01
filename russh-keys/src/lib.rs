@@ -929,7 +929,7 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
                 },
                 X {},
             )
-            .await
+            .await.unwrap()
         });
         let key = decode_secret_key(PKCS8_ENCRYPTED, Some("blabla")).unwrap();
         core.block_on(async move {
