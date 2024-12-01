@@ -1049,7 +1049,7 @@ impl Encrypted {
                 )?;
 
                 // Extend with self-signature.
-                let signature = sign_workaround(&**key, buffer)?;
+                let signature = sign_workaround(key, buffer)?;
                 signature.encoded()?.encode(&mut *buffer)?;
 
                 push_packet!(self.write, {
@@ -1065,7 +1065,7 @@ impl Encrypted {
                 )?;
 
                 // Extend with self-signature.
-                let signature = sign_workaround(&**key, buffer)?;
+                let signature = sign_workaround(key, buffer)?;
                 signature.encoded()?.encode(&mut *buffer)?;
 
                 push_packet!(self.write, {

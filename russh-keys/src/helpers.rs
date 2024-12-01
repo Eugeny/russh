@@ -62,7 +62,7 @@ pub fn sign_workaround(
             )?;
             let signature = signature::Signer::try_sign(
                 &rsa::pkcs1v15::SigningKey::<sha2::Sha512>::new(pk),
-                &data,
+                data,
             )?;
             ssh_key::Signature::new(
                 ssh_key::Algorithm::Rsa {
@@ -71,6 +71,6 @@ pub fn sign_workaround(
                 <rsa::pkcs1v15::Signature as signature::SignatureEncoding>::to_vec(&signature),
             )?
         }
-        keypair => signature::Signer::try_sign(keypair, &data)?,
+        keypair => signature::Signer::try_sign(keypair, data)?,
     })
 }
