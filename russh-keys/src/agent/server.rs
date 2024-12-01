@@ -349,6 +349,9 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
         writebuf.push(msg::SIGN_RESPONSE);
         let data = Bytes::decode(r).unwrap();
 
+        dbg!(&key);
+        dbg!(&key.key_data());
+        dbg!(&data);
         let signature = signature::Signer::try_sign(&*key, &data).unwrap();
         signature.encoded().unwrap().encode(writebuf).unwrap();
 
