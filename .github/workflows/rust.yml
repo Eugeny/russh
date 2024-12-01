@@ -70,13 +70,13 @@ jobs:
     - name: Test (no features enabled)
       run: |
         eval `ssh-agent`
-        cargo test --verbose
+        cargo test
       env:
         RUST_BACKTRACE: 1
 
     - name: Test (all features enabled)
       run: |
         eval `ssh-agent`
-        cargo test --verbose --all-features
+        cargo test --all-features
       env:
         RUST_BACKTRACE: 1
