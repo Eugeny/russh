@@ -11,7 +11,7 @@ env:
 
 jobs:
   Build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
     - uses: actions/checkout@v2
@@ -23,7 +23,7 @@ jobs:
       run: cargo build --verbose --all-features
 
   Build-WASM:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
     - uses: actions/checkout@v2
@@ -35,7 +35,7 @@ jobs:
       run: cargo build --verbose --target wasm32-wasip1 -p russh
 
   Formatting:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
     - uses: actions/checkout@v2
@@ -47,7 +47,7 @@ jobs:
       run: cargo fmt --check
 
   Clippy:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
     - uses: actions/checkout@v2
@@ -62,7 +62,7 @@ jobs:
       run: cargo clippy --all-features -- -D warnings
 
   Test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
     - uses: actions/checkout@v2
