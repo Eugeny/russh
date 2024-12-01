@@ -68,17 +68,22 @@ where
     while let Some(Ok(stream)) = listener.next().await {
         let mut buf = CryptoVec::new();
         buf.resize(4);
-        russh_util::runtime::spawn(async move {
-            (Connection {
-                lock: lock.clone(),
-                keys: keys.clone(),
-                agent: Some(agent.clone()),
-                s: stream,
-                buf: CryptoVec::new(),
-            })
-            .run()
-            .await
-            .unwrap()
+        russh_util::runtime::spawn({
+            let lock = lock.clone();
+            let keys = keys.clone();
+            let agent = agent.clone();
+            async move {
+                (Connection {
+                    lock: lock.clone(),
+                    keys: keys.clone(),
+                    agent: Some(agent.clone()),
+                    s: stream,
+                    buf: CryptoVec::new(),
+                })
+                .run()
+                .await
+                .unwrap()
+            }
         });
     }
     Ok(())
