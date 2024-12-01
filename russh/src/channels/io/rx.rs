@@ -89,3 +89,16 @@ where
         }
     }
 }
+
+impl<'i, S> Drop for ChannelRx<'i, S>
+where
+    S: From<(ChannelId, ChannelMsg)>,
+{
+    fn drop(&mut self) {
+        if let ChannelAsMut::Owned(ref mut channel) = &mut self.channel {
+            let _ = channel
+                .sender
+                .try_send((channel.id, ChannelMsg::Close).into());
+        }
+    }
+}
