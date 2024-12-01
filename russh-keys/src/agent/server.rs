@@ -342,7 +342,35 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
         writebuf.push(msg::SIGN_RESPONSE);
         let data = Bytes::decode(r)?;
 
-        let signature = signature::Signer::try_sign(&*key, &data)?;
+        // TODO only needed until https://github.com/RustCrypto/SSH/pull/318 is released
+        let signature = match key.key_data() {
+            ssh_key::private::KeypairData::Rsa(rsa_keypair) => {
+                let pk = rsa::RsaPrivateKey::from_components(
+                    <rsa::BigUint as std::convert::TryFrom<_>>::try_from(&rsa_keypair.public.n)?,
+                    <rsa::BigUint as std::convert::TryFrom<_>>::try_from(&rsa_keypair.public.e)?,
+                    <rsa::BigUint as std::convert::TryFrom<_>>::try_from(&rsa_keypair.private.d)?,
+                    vec![
+                        <rsa::BigUint as std::convert::TryFrom<_>>::try_from(
+                            &rsa_keypair.private.p,
+                        )?,
+                        <rsa::BigUint as std::convert::TryFrom<_>>::try_from(
+                            &rsa_keypair.private.q,
+                        )?,
+                    ],
+                )?;
+                let signature = signature::Signer::try_sign(
+                    &rsa::pkcs1v15::SigningKey::<sha2::Sha512>::new(pk),
+                    &data,
+                )?;
+                ssh_key::Signature::new(
+                    ssh_key::Algorithm::Rsa {
+                        hash: Some(ssh_key::HashAlg::Sha512),
+                    },
+                    <rsa::pkcs1v15::Signature as signature::SignatureEncoding>::to_vec(&signature),
+                )?
+            }
+            keypair => signature::Signer::try_sign(keypair, &data)?,
+        };
         signature.encoded()?.encode(writebuf)?;
 
         let len = writebuf.len();
