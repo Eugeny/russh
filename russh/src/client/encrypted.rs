@@ -18,7 +18,7 @@ use std::num::Wrapping;
 
 use bytes::Bytes;
 use log::{debug, error, info, trace, warn};
-use russh_keys::helpers::{map_err, EncodedExt};
+use russh_keys::helpers::{map_err, sign_workaround, EncodedExt};
 use ssh_encoding::{Decode, Encode};
 
 use crate::cert::PublicKeyOrCertificate;
@@ -1049,7 +1049,7 @@ impl Encrypted {
                 )?;
 
                 // Extend with self-signature.
-                let signature = signature::Signer::try_sign(&**key, buffer)?;
+                let signature = sign_workaround(key, buffer)?;
                 signature.encoded()?.encode(&mut *buffer)?;
 
                 push_packet!(self.write, {
@@ -1065,7 +1065,7 @@ impl Encrypted {
                 )?;
 
                 // Extend with self-signature.
-                let signature = signature::Signer::try_sign(&**key, buffer)?;
+                let signature = sign_workaround(key, buffer)?;
                 signature.encoded()?.encode(&mut *buffer)?;
 
                 push_packet!(self.write, {

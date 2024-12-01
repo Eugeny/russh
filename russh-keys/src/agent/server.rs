@@ -16,7 +16,7 @@ use tokio::time::sleep;
 use {std, tokio};
 
 use super::{msg, Constraint};
-use crate::helpers::EncodedExt;
+use crate::helpers::{sign_workaround, EncodedExt};
 use crate::Error;
 
 #[derive(Clone)]
@@ -342,7 +342,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
         writebuf.push(msg::SIGN_RESPONSE);
         let data = Bytes::decode(r)?;
 
-        let signature = signature::Signer::try_sign(&*key, &data)?;
+        let signature = sign_workaround(&key, &data)?;
         signature.encoded()?.encode(writebuf)?;
 
         let len = writebuf.len();
