@@ -68,7 +68,7 @@ where
     while let Some(Ok(stream)) = listener.next().await {
         let mut buf = CryptoVec::new();
         buf.resize(4);
-        russh_util::runtime::spawn(
+        russh_util::runtime::spawn(async move {
             (Connection {
                 lock: lock.clone(),
                 keys: keys.clone(),
@@ -76,8 +76,10 @@ where
                 s: stream,
                 buf: CryptoVec::new(),
             })
-            .run(),
-        );
+            .run()
+            .await
+            .unwrap()
+        });
     }
     Ok(())
 }
