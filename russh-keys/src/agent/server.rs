@@ -326,8 +326,8 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
     ) -> Result<(A, bool), Error> {
         let mut needs_confirm = false;
         let key = {
-            let blob = Bytes::decode(r)?;
-            let k = self.keys.0.read().or(Err(Error::AgentFailure))?;
+            let blob = Bytes::decode(r).unwrap();
+            let k = self.keys.0.read().or(Err(Error::AgentFailure)).unwrap();
             if let Some((key, _, constraints)) = k.get(&blob.to_vec()) {
                 if constraints.iter().any(|c| *c == Constraint::Confirm) {
                     needs_confirm = true;
@@ -347,10 +347,10 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
             agent
         };
         writebuf.push(msg::SIGN_RESPONSE);
-        let data = Bytes::decode(r)?;
+        let data = Bytes::decode(r).unwrap();
 
-        let signature = signature::Signer::try_sign(&*key, &data)?;
-        signature.encoded()?.encode(writebuf)?;
+        let signature = signature::Signer::try_sign(&*key, &data).unwrap();
+        signature.encoded().unwrap().encode(writebuf).unwrap();
 
         let len = writebuf.len();
         BigEndian::write_u32(writebuf, (len - 4) as u32);
