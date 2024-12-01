@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::ops::DerefMut;
 
 use log::debug;
-use russh_keys::helpers::EncodedExt;
+use russh_keys::helpers::{sign_workaround, EncodedExt};
 use ssh_encoding::Encode;
 
 use super::*;
@@ -145,7 +145,7 @@ impl KexDh {
                 debug!("hash: {:?}", hash);
                 debug!("key: {:?}", config.keys[kexdhdone.key]);
 
-                let signature = signature::Signer::try_sign(&config.keys[kexdhdone.key], &hash)?;
+                let signature = sign_workaround(&config.keys[kexdhdone.key], &hash)?;
                 signature.encoded()?.encode(&mut *buffer)?;
 
                 cipher.write(&buffer, write_buffer);
