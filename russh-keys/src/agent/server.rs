@@ -112,17 +112,17 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
             // Reading the length
             self.buf.clear();
             self.buf.resize(4);
-            self.s.read_exact(&mut self.buf).await?;
+            self.s.read_exact(&mut self.buf).await.unwrap();
             // Reading the rest of the buffer
             let len = BigEndian::read_u32(&self.buf) as usize;
             self.buf.clear();
             self.buf.resize(len);
-            self.s.read_exact(&mut self.buf).await?;
+            self.s.read_exact(&mut self.buf).await.unwrap();
             // respond
             writebuf.clear();
-            self.respond(&mut writebuf).await?;
-            self.s.write_all(&writebuf).await?;
-            self.s.flush().await?
+            self.respond(&mut writebuf).await.unwrap();
+            self.s.write_all(&writebuf).await.unwrap();
+            self.s.flush().await.unwrap()
         }
     }
 
@@ -135,7 +135,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
             }
         };
         writebuf.extend(&[0, 0, 0, 0]);
-        let agentref = self.agent.as_ref().ok_or(Error::AgentFailure)?;
+        let agentref = self.agent.as_ref().ok_or(Error::AgentFailure).unwrap();
 
         match self.buf.split_first() {
             Some((&11, _))
@@ -143,22 +143,22 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
             {
                 // request identities
                 if let Ok(keys) = self.keys.0.read() {
-                    msg::IDENTITIES_ANSWER.encode(writebuf)?;
-                    (keys.len() as u32).encode(writebuf)?;
+                    msg::IDENTITIES_ANSWER.encode(writebuf).unwrap();
+                    (keys.len() as u32).encode(writebuf).unwrap();
                     for (k, _) in keys.iter() {
-                        k.encode(writebuf)?;
-                        "".encode(writebuf)?;
+                        k.encode(writebuf).unwrap();
+                        "".encode(writebuf).unwrap();
                     }
                 } else {
-                    msg::FAILURE.encode(writebuf)?
+                    msg::FAILURE.encode(writebuf).unwrap()
                 }
             }
             Some((&13, mut r))
                 if !is_locked && agentref.confirm_request(MessageType::Sign).await =>
             {
                 // sign request
-                let agent = self.agent.take().ok_or(Error::AgentFailure)?;
-                let (agent, signed) = self.try_sign(agent, &mut r, writebuf).await?;
+                let agent = self.agent.take().ok_or(Error::AgentFailure).unwrap();
+                let (agent, signed) = self.try_sign(agent, &mut r, writebuf).await.unwrap();
                 self.agent = Some(agent);
                 if signed {
                     return Ok(());
@@ -237,7 +237,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
     }
 
     fn lock<R: Reader>(&self, r: &mut R) -> Result<(), Error> {
-        let password = Bytes::decode(r)?;
+        let password = Bytes::decode(r).unwrap();
         let mut lock = self.lock.0.write().or(Err(Error::AgentFailure))?;
         lock.extend(&password);
         Ok(())
