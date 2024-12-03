@@ -8,7 +8,7 @@ keywords = ["ssh"]
 license = "Apache-2.0"
 name = "russh-keys"
 repository = "https://github.com/warp-tech/russh"
-version = "0.47.0-beta.2"
+version = "0.47.0-beta.4"
 rust-version = "1.65"
 
 [dependencies]
@@ -42,7 +42,7 @@ pkcs8 = { version = "0.10", features = ["pkcs5", "encryption"] }
 rand.workspace = true
 rand_core = { version = "0.6.4", features = ["std"] }
 rsa.workspace = true
-russh-cryptovec = { version = "0.8.0-beta.1", path = "../cryptovec", features = [
+russh-cryptovec = { version = "0.47.0-beta.4", path = "../cryptovec", features = [
   "ssh-encoding",
 ] }
 russh-util = { version = "0.46.0", path = "../russh-util" }

@@ -9,12 +9,6 @@ members = [
 ]
 resolver = "2"
 
-[patch.crates-io]
-russh = { path = "russh" }
-russh-keys = { path = "russh-keys" }
-russh-cryptovec = { path = "cryptovec" }
-russh-config = { path = "russh-config" }
-
 [workspace.dependencies]
 aes = "0.8"
 async-trait = "0.1"
