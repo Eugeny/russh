@@ -275,7 +275,7 @@ impl<H: Handler> Handle<H> {
 
     /// Initiate Keyboard-Interactive based SSH authentication.
     ///
-    /// * `submethods` - Hnts to the server the preferred methods to be used for authentication
+    /// * `submethods` - Hints to the server the preferred methods to be used for authentication
     pub async fn authenticate_keyboard_interactive_start<
         U: Into<String>,
         S: Into<Option<String>>,
