@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::mpsc::{Sender, UnboundedReceiver};
-use tokio::sync::Mutex;
+use tokio::sync::{watch, Mutex};
 
 use crate::{ChannelId, ChannelOpenFailure, CryptoVec, Error, Pty, Sig};
 
@@ -112,6 +112,22 @@ pub enum ChannelMsg {
     OpenFailure(ChannelOpenFailure),
 }
 
+#[derive(Clone, Debug)]
+pub struct WindowSizeRef {
+    pub(crate) value: Arc<Mutex<u32>>,
+    notifier: watch::Sender<u32>,
+}
+
+impl WindowSizeRef {
+    pub fn new(initial: u32) -> Self {
+        let (notifier, _) = watch::channel(initial);
+        Self {
+            value: Arc::new(Mutex::new(initial)),
+            notifier,
+        }
+    }
+}
+
 /// A handle to a session channel.
 ///
 /// Allows you to read and write from a channel without borrowing the session
@@ -120,7 +136,7 @@ pub struct Channel<Send: From<(ChannelId, ChannelMsg)>> {
     pub(crate) sender: Sender<Send>,
     pub(crate) receiver: UnboundedReceiver<ChannelMsg>,
     pub(crate) max_packet_size: u32,
-    pub(crate) window_size: Arc<Mutex<u32>>,
+    pub(crate) window_size: WindowSizeRef,
 }
 
 impl<T: From<(ChannelId, ChannelMsg)>> std::fmt::Debug for Channel<T> {
@@ -137,7 +153,7 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + Sync + 'static> Channel<S> {
         window_size: u32,
     ) -> (Self, ChannelRef) {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        let window_size = Arc::new(Mutex::new(window_size));
+        let window_size = WindowSizeRef::new(window_size);
 
         (
             Self {
@@ -157,7 +173,8 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + Sync + 'static> Channel<S> {
     /// Returns the min between the maximum packet size and the
     /// remaining window size in the channel.
     pub async fn writable_packet_size(&self) -> usize {
-        self.max_packet_size.min(*self.window_size.lock().await) as usize
+        self.max_packet_size
+            .min(*self.window_size.value.lock().await) as usize
     }
 
     pub fn id(&self) -> ChannelId {
@@ -337,7 +354,8 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + Sync + 'static> Channel<S> {
             io::ChannelTx::new(
                 self.sender.clone(),
                 self.id,
-                self.window_size.clone(),
+                self.window_size.value.clone(),
+                self.window_size.notifier.subscribe(),
                 self.max_packet_size,
                 None,
             ),
@@ -369,7 +387,8 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + Sync + 'static> Channel<S> {
         io::ChannelTx::new(
             self.sender.clone(),
             self.id,
-            self.window_size.clone(),
+            self.window_size.value.clone(),
+            self.window_size.notifier.subscribe(),
             self.max_packet_size,
             ext,
         )

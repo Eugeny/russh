@@ -1,27 +1,26 @@
-use std::sync::Arc;
-
 use tokio::sync::mpsc::UnboundedSender;
-use tokio::sync::Mutex;
 
 use crate::ChannelMsg;
+
+use super::WindowSizeRef;
 
 /// A handle to the [`super::Channel`]'s to be able to transmit messages
 /// to it and update it's `window_size`.
 #[derive(Debug)]
 pub struct ChannelRef {
     pub(super) sender: UnboundedSender<ChannelMsg>,
-    pub(super) window_size: Arc<Mutex<u32>>,
+    pub(super) window_size: WindowSizeRef,
 }
 
 impl ChannelRef {
     pub fn new(sender: UnboundedSender<ChannelMsg>) -> Self {
         Self {
             sender,
-            window_size: Default::default(),
+            window_size: WindowSizeRef::new(0),
         }
     }
 
-    pub fn window_size(&self) -> &Arc<Mutex<u32>> {
+    pub fn window_size(&self) -> &WindowSizeRef {
         &self.window_size
     }
 }

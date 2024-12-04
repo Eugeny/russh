@@ -54,9 +54,9 @@ use tokio::pin;
 use tokio::sync::mpsc::{
     channel, unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender,
 };
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::oneshot;
 
-use crate::channels::{Channel, ChannelMsg, ChannelRef};
+use crate::channels::{Channel, ChannelMsg, ChannelRef, WindowSizeRef};
 use crate::cipher::{self, clear, CipherPair, OpeningKey};
 use crate::keys::key::parse_public_key;
 use crate::session::{
@@ -428,7 +428,7 @@ impl<H: Handler> Handle<H> {
     async fn wait_channel_confirmation(
         &self,
         mut receiver: UnboundedReceiver<ChannelMsg>,
-        window_size_ref: Arc<Mutex<u32>>,
+        window_size_ref: WindowSizeRef,
     ) -> Result<Channel<Msg>, crate::Error> {
         loop {
             match receiver.recv().await {
@@ -437,7 +437,7 @@ impl<H: Handler> Handle<H> {
                     max_packet_size,
                     window_size,
                 }) => {
-                    *window_size_ref.lock().await = window_size;
+                    *window_size_ref.value.lock().await = window_size;
 
                     return Ok(Channel {
                         id,
