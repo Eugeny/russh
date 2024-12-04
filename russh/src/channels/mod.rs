@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::mpsc::{Sender, UnboundedReceiver};
-use tokio::sync::{watch, Mutex};
+use tokio::sync::{watch, Mutex, MutexGuard};
 
 use crate::{ChannelId, ChannelOpenFailure, CryptoVec, Error, Pty, Sig};
 
@@ -114,7 +114,7 @@ pub enum ChannelMsg {
 
 #[derive(Clone, Debug)]
 pub struct WindowSizeRef {
-    pub(crate) value: Arc<Mutex<u32>>,
+    value: Arc<Mutex<u32>>,
     notifier: watch::Sender<u32>,
 }
 
@@ -125,6 +125,14 @@ impl WindowSizeRef {
             value: Arc::new(Mutex::new(initial)),
             notifier,
         }
+    }
+
+    pub async fn value(&self) -> MutexGuard<'_, u32> {
+        self.value.lock().await
+    }
+
+    pub fn subscribe(&self) -> watch::Receiver<u32> {
+        self.notifier.subscribe()
     }
 }
 
@@ -355,7 +363,7 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + Sync + 'static> Channel<S> {
                 self.sender.clone(),
                 self.id,
                 self.window_size.value.clone(),
-                self.window_size.notifier.subscribe(),
+                self.window_size.subscribe(),
                 self.max_packet_size,
                 None,
             ),
@@ -388,7 +396,7 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + Sync + 'static> Channel<S> {
             self.sender.clone(),
             self.id,
             self.window_size.value.clone(),
-            self.window_size.notifier.subscribe(),
+            self.window_size.subscribe(),
             self.max_packet_size,
             ext,
         )

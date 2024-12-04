@@ -1,8 +1,7 @@
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::ChannelMsg;
-
 use super::WindowSizeRef;
+use crate::ChannelMsg;
 
 /// A handle to the [`super::Channel`]'s to be able to transmit messages
 /// to it and update it's `window_size`.

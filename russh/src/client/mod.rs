@@ -437,7 +437,7 @@ impl<H: Handler> Handle<H> {
                     max_packet_size,
                     window_size,
                 }) => {
-                    *window_size_ref.value.lock().await = window_size;
+                    *window_size_ref.value().await = window_size;
 
                     return Ok(Channel {
                         id,
