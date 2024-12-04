@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::task::Waker;
 
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::mpsc::{Sender, UnboundedReceiver};
@@ -112,6 +113,35 @@ pub enum ChannelMsg {
     OpenFailure(ChannelOpenFailure),
 }
 
+#[derive(Debug, Default)]
+pub(crate) struct WindowSize {
+    window_size: u32,
+    waker: Option<Waker>,
+}
+
+impl WindowSize {
+    pub(crate) fn get(&self) -> u32 {
+        self.window_size
+    }
+
+    pub(crate) fn set(&mut self, window_size: u32) {
+        self.window_size = window_size;
+        if let Some(waker) = self.waker.take() {
+            waker.wake();
+        }
+    }
+
+    pub(crate) fn add_waker(&mut self, waker: Waker) {
+        self.waker = Some(waker);
+    }
+}
+
+impl std::ops::SubAssign<u32> for WindowSize {
+    fn sub_assign(&mut self, rhs: u32) {
+        self.window_size -= rhs;
+    }
+}
+
 /// A handle to a session channel.
 ///
 /// Allows you to read and write from a channel without borrowing the session
@@ -120,7 +150,7 @@ pub struct Channel<Send: From<(ChannelId, ChannelMsg)>> {
     pub(crate) sender: Sender<Send>,
     pub(crate) receiver: UnboundedReceiver<ChannelMsg>,
     pub(crate) max_packet_size: u32,
-    pub(crate) window_size: Arc<Mutex<u32>>,
+    pub(crate) window_size: Arc<Mutex<WindowSize>>,
 }
 
 impl<T: From<(ChannelId, ChannelMsg)>> std::fmt::Debug for Channel<T> {
@@ -137,7 +167,10 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + Sync + 'static> Channel<S> {
         window_size: u32,
     ) -> (Self, ChannelRef) {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        let window_size = Arc::new(Mutex::new(window_size));
+        let window_size = Arc::new(Mutex::new(WindowSize {
+            window_size,
+            waker: None,
+        }));
 
         (
             Self {
@@ -157,7 +190,8 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + Sync + 'static> Channel<S> {
     /// Returns the min between the maximum packet size and the
     /// remaining window size in the channel.
     pub async fn writable_packet_size(&self) -> usize {
-        self.max_packet_size.min(*self.window_size.lock().await) as usize
+        self.max_packet_size
+            .min(self.window_size.lock().await.window_size) as usize
     }
 
     pub fn id(&self) -> ChannelId {

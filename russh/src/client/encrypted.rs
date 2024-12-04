@@ -630,7 +630,7 @@ impl Session {
                     new_size -= enc.flush_pending(channel_num)? as u32;
                 }
                 if let Some(chan) = self.channels.get(&channel_num) {
-                    *chan.window_size().lock().await = new_size;
+                    chan.window_size().lock().await.set(new_size);
 
                     let _ = chan.send(ChannelMsg::WindowAdjusted { new_size });
                 }

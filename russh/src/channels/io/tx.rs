@@ -9,8 +9,7 @@ use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{self, OwnedPermit};
 use tokio::sync::{Mutex, OwnedMutexGuard};
 
-use super::ChannelMsg;
-use crate::{ChannelId, CryptoVec};
+use crate::{channels::WindowSize, ChannelId, ChannelMsg, CryptoVec};
 
 type BoxedThreadsafeFuture<T> = Pin<Box<dyn Sync + Send + std::future::Future<Output = T>>>;
 type OwnedPermitFuture<S> =
@@ -21,8 +20,8 @@ pub struct ChannelTx<S> {
     send_fut: Option<OwnedPermitFuture<S>>,
     id: ChannelId,
 
-    window_size_fut: Option<BoxedThreadsafeFuture<OwnedMutexGuard<u32>>>,
-    window_size: Arc<Mutex<u32>>,
+    window_size_fut: Option<BoxedThreadsafeFuture<OwnedMutexGuard<WindowSize>>>,
+    window_size: Arc<Mutex<WindowSize>>,
     max_packet_size: u32,
     ext: Option<u32>,
 }
@@ -34,7 +33,7 @@ where
     pub fn new(
         sender: mpsc::Sender<S>,
         id: ChannelId,
-        window_size: Arc<Mutex<u32>>,
+        window_size: Arc<Mutex<WindowSize>>,
         max_packet_size: u32,
         ext: Option<u32>,
     ) -> Self {
@@ -58,11 +57,13 @@ where
         self.window_size_fut.take();
 
         let writable = (self.max_packet_size)
-            .min(*window_size)
+            .min(window_size.get())
             .min(buf.len() as u32) as usize;
         if writable == 0 {
-            // TODO fix this busywait
-            cx.waker().wake_by_ref();
+            if buf.is_empty() || self.sender.is_closed() {
+                return Poll::Ready((ChannelMsg::Eof, 0));
+            }
+            window_size.add_waker(cx.waker().clone());
             return Poll::Pending;
         }
         let mut data = CryptoVec::new_zeroed(writable);
@@ -116,6 +117,9 @@ where
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<Result<usize, io::Error>> {
+        if self.sender.is_closed() {
+            return Poll::Ready(Err(std::io::ErrorKind::BrokenPipe.into()));
+        }
         let send_fut = if let Some(x) = self.send_fut.as_mut() {
             x
         } else {

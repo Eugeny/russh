@@ -10,7 +10,7 @@ use tokio::sync::mpsc::{unbounded_channel, Receiver, Sender, UnboundedReceiver};
 use tokio::sync::{oneshot, Mutex};
 
 use super::*;
-use crate::channels::{Channel, ChannelMsg, ChannelRef};
+use crate::channels::{Channel, ChannelMsg, ChannelRef, WindowSize};
 use crate::kex::EXTENSION_SUPPORT_AS_CLIENT;
 use crate::msg;
 
@@ -346,7 +346,7 @@ impl Handle {
     async fn wait_channel_confirmation(
         &self,
         mut receiver: UnboundedReceiver<ChannelMsg>,
-        window_size_ref: Arc<Mutex<u32>>,
+        window_size_ref: Arc<Mutex<WindowSize>>,
     ) -> Result<Channel<Msg>, Error> {
         loop {
             match receiver.recv().await {
@@ -355,7 +355,7 @@ impl Handle {
                     max_packet_size,
                     window_size,
                 }) => {
-                    *window_size_ref.lock().await = window_size;
+                    window_size_ref.lock().await.set(window_size);
 
                     return Ok(Channel {
                         id,
