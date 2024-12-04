@@ -80,11 +80,10 @@ mod format;
 #[doc(hidden)]
 pub mod helpers;
 pub use format::*;
-pub use ssh_key::{self, Algorithm, Certificate, EcdsaCurve, HashAlg, PrivateKey, PublicKey};
-
 // Reexports
 pub use signature;
 pub use ssh_encoding;
+pub use ssh_key::{self, Algorithm, Certificate, EcdsaCurve, HashAlg, PrivateKey, PublicKey};
 
 /// OpenSSH agent protocol implementation
 pub mod agent;
