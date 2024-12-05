@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::mpsc::{Sender, UnboundedReceiver};
-use tokio::sync::{watch, Mutex, MutexGuard};
+use tokio::sync::{Mutex, MutexGuard, Notify};
 
 use crate::{ChannelId, ChannelOpenFailure, CryptoVec, Error, Pty, Sig};
 
@@ -113,26 +113,49 @@ pub enum ChannelMsg {
 }
 
 #[derive(Clone, Debug)]
-pub struct WindowSizeRef {
+pub(crate) struct WindowSizeRef {
     value: Arc<Mutex<u32>>,
-    notifier: watch::Sender<u32>,
+    notifier: Arc<Notify>,
 }
 
 impl WindowSizeRef {
-    pub fn new(initial: u32) -> Self {
-        let (notifier, _) = watch::channel(initial);
+    pub(crate) fn new(initial: u32) -> Self {
+        let notifier = Arc::new(Notify::new());
         Self {
             value: Arc::new(Mutex::new(initial)),
             notifier,
         }
     }
 
-    pub async fn value(&self) -> MutexGuard<'_, u32> {
-        self.value.lock().await
+    pub(crate) async fn lock(&self) -> WindowSizeRefGuard<'_> {
+        WindowSizeRefGuard {
+            inner: self.value.lock().await,
+            notifier: &self.notifier,
+        }
     }
 
-    pub fn subscribe(&self) -> watch::Receiver<u32> {
-        self.notifier.subscribe()
+    pub(crate) fn subscribe(&self) -> Arc<Notify> {
+        Arc::clone(&self.notifier)
+    }
+}
+
+pub(crate) struct WindowSizeRefGuard<'a> {
+    inner: MutexGuard<'a, u32>,
+    notifier: &'a Notify,
+}
+
+impl std::ops::Deref for WindowSizeRefGuard<'_> {
+    type Target = u32;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner.deref()
+    }
+}
+
+impl std::ops::DerefMut for WindowSizeRefGuard<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.notifier.notify_one();
+        self.inner.deref_mut()
     }
 }
 
