@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::mpsc::{Sender, UnboundedReceiver};
-use tokio::sync::{Mutex, MutexGuard, Notify};
+use tokio::sync::{Mutex, Notify};
 
 use crate::{ChannelId, ChannelOpenFailure, CryptoVec, Error, Pty, Sig};
 
@@ -127,35 +127,13 @@ impl WindowSizeRef {
         }
     }
 
-    pub(crate) async fn lock(&self) -> WindowSizeRefGuard<'_> {
-        WindowSizeRefGuard {
-            inner: self.value.lock().await,
-            notifier: &self.notifier,
-        }
+    pub(crate) async fn update(&self, value: u32) {
+        *self.value.lock().await = value;
+        self.notifier.notify_one();
     }
 
     pub(crate) fn subscribe(&self) -> Arc<Notify> {
         Arc::clone(&self.notifier)
-    }
-}
-
-pub(crate) struct WindowSizeRefGuard<'a> {
-    inner: MutexGuard<'a, u32>,
-    notifier: &'a Notify,
-}
-
-impl std::ops::Deref for WindowSizeRefGuard<'_> {
-    type Target = u32;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner.deref()
-    }
-}
-
-impl std::ops::DerefMut for WindowSizeRefGuard<'_> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.notifier.notify_one();
-        self.inner.deref_mut()
     }
 }
 
