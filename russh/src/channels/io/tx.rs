@@ -98,6 +98,7 @@ where
             Err(_) => {
                 drop(window_size);
                 ready!(self.window_size_notication.poll_unpin(cx));
+                self.window_size_notication = WatchNotification::new(Arc::clone(&self.notify));
                 cx.waker().wake_by_ref();
                 Poll::Pending
             }
@@ -184,5 +185,12 @@ where
         };
         let r = ready!(send_fut.as_mut().poll_unpin(cx)).map(|(p, _, _)| (p, ChannelMsg::Eof, 0));
         Poll::Ready(self.handle_write_result(r).map(drop))
+    }
+}
+
+impl<S> Drop for ChannelTx<S> {
+    fn drop(&mut self) {
+        // Allow other writers to make progress
+        self.notify.notify_one();
     }
 }
