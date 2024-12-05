@@ -19,7 +19,7 @@ impl ChannelRef {
         }
     }
 
-    pub fn window_size(&self) -> &WindowSizeRef {
+    pub(crate) fn window_size(&self) -> &WindowSizeRef {
         &self.window_size
     }
 }
