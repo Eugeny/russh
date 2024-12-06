@@ -160,6 +160,12 @@ where
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<Result<usize, io::Error>> {
+        if buf.is_empty() {
+            return Poll::Ready(Err(io::Error::new(
+                io::ErrorKind::WriteZero,
+                "cannot send empty buffer",
+            )));
+        }
         let send_fut = if let Some(x) = self.send_fut.as_mut() {
             x
         } else {
