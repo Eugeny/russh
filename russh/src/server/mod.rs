@@ -79,6 +79,8 @@ pub struct Config {
     pub window_size: u32,
     /// The maximal size of a single packet.
     pub maximum_packet_size: u32,
+    /// Buffer size for created channels.
+    pub channel_buffer_size: usize,
     /// Internal event buffer size
     pub event_buffer_size: usize,
     /// Lists of preferred algorithms.
@@ -108,6 +110,7 @@ impl Default for Config {
             keys: Vec::new(),
             window_size: 2097152,
             maximum_packet_size: 32768,
+            channel_buffer_size: 100,
             event_buffer_size: 10,
             limits: Limits::default(),
             preferred: Default::default(),
@@ -134,6 +137,7 @@ impl Debug for Config {
             .field("keys", &"***")
             .field("window_size", &self.window_size)
             .field("maximum_packet_size", &self.maximum_packet_size)
+            .field("channel_buffer_size", &self.channel_buffer_size)
             .field("event_buffer_size", &self.event_buffer_size)
             .field("limits", &self.limits)
             .field("preferred", &self.preferred)
@@ -748,10 +752,10 @@ pub trait Server {
                     match accept_result {
                         Ok((socket, _)) => {
                             let config = config.clone();
-                            let  handler = self.new_client(socket.peer_addr().ok());
+                            let handler = self.new_client(socket.peer_addr().ok());
                             let error_tx = error_tx.clone();
                             russh_util::runtime::spawn(async move {
-                                let session = match run_stream(config, socket,  handler).await {
+                                let session = match run_stream(config, socket, handler).await {
                                     Ok(s) => s,
                                     Err(e) => {
                                         debug!("Connection setup failed");
@@ -856,8 +860,11 @@ where
     // Reading SSH id and allocating a session.
     let mut stream = SshRead::new(stream);
     let (sender, receiver) = tokio::sync::mpsc::channel(config.event_buffer_size);
+    let handle = server::session::Handle {
+        sender,
+        channel_buffer_size: config.channel_buffer_size,
+    };
     let common = read_ssh_id(config, &mut stream).await?;
-    let handle = server::session::Handle { sender };
     let session = Session {
         target_window_size: common.config.window_size,
         common,

@@ -428,6 +428,7 @@ impl Session {
                             max_packet_size: msg.maximum_packet_size,
                             window_size: msg.initial_window_size,
                         })
+                        .await
                         .unwrap_or(());
                 } else {
                     error!("no channel for id {local_id:?}");
@@ -457,7 +458,7 @@ impl Session {
                 debug!("channel_eof");
                 let channel_num = map_err!(ChannelId::decode(&mut r))?;
                 if let Some(chan) = self.channels.get(&channel_num) {
-                    let _ = chan.send(ChannelMsg::Eof);
+                    let _ = chan.send(ChannelMsg::Eof).await;
                 }
                 client.channel_eof(channel_num, self).await
             }
@@ -473,7 +474,7 @@ impl Session {
                 }
 
                 if let Some(sender) = self.channels.remove(&channel_num) {
-                    let _ = sender.send(ChannelMsg::OpenFailure(reason_code));
+                    let _ = sender.send(ChannelMsg::OpenFailure(reason_code)).await;
                 }
 
                 let _ = self.sender.send(Reply::ChannelOpenFailure);
@@ -498,9 +499,11 @@ impl Session {
                 }
 
                 if let Some(chan) = self.channels.get(&channel_num) {
-                    let _ = chan.send(ChannelMsg::Data {
-                        data: CryptoVec::from_slice(&data),
-                    });
+                    let _ = chan
+                        .send(ChannelMsg::Data {
+                            data: CryptoVec::from_slice(&data),
+                        })
+                        .await;
                 }
 
                 client.data(channel_num, &data, self).await
@@ -522,10 +525,12 @@ impl Session {
                 }
 
                 if let Some(chan) = self.channels.get(&channel_num) {
-                    let _ = chan.send(ChannelMsg::ExtendedData {
-                        ext: extended_code,
-                        data: CryptoVec::from_slice(&data),
-                    });
+                    let _ = chan
+                        .send(ChannelMsg::ExtendedData {
+                            ext: extended_code,
+                            data: CryptoVec::from_slice(&data),
+                        })
+                        .await;
                 }
 
                 client
@@ -541,7 +546,7 @@ impl Session {
                         map_err!(u8::decode(&mut r))?; // should be 0.
                         let client_can_do = map_err!(u8::decode(&mut r))? != 0;
                         if let Some(chan) = self.channels.get(&channel_num) {
-                            let _ = chan.send(ChannelMsg::XonXoff { client_can_do });
+                            let _ = chan.send(ChannelMsg::XonXoff { client_can_do }).await;
                         }
                         client.xon_xoff(channel_num, client_can_do, self).await
                     }
@@ -549,7 +554,7 @@ impl Session {
                         map_err!(u8::decode(&mut r))?; // should be 0.
                         let exit_status = map_err!(u32::decode(&mut r))?;
                         if let Some(chan) = self.channels.get(&channel_num) {
-                            let _ = chan.send(ChannelMsg::ExitStatus { exit_status });
+                            let _ = chan.send(ChannelMsg::ExitStatus { exit_status }).await;
                         }
                         client.exit_status(channel_num, exit_status, self).await
                     }
@@ -561,12 +566,14 @@ impl Session {
                         let error_message = map_err!(String::decode(&mut r))?;
                         let lang_tag = map_err!(String::decode(&mut r))?;
                         if let Some(chan) = self.channels.get(&channel_num) {
-                            let _ = chan.send(ChannelMsg::ExitSignal {
-                                signal_name: signal_name.clone(),
-                                core_dumped,
-                                error_message: error_message.to_string(),
-                                lang_tag: lang_tag.to_string(),
-                            });
+                            let _ = chan
+                                .send(ChannelMsg::ExitSignal {
+                                    signal_name: signal_name.clone(),
+                                    core_dumped,
+                                    error_message: error_message.to_string(),
+                                    lang_tag: lang_tag.to_string(),
+                                })
+                                .await;
                         }
                         client
                             .exit_signal(
@@ -632,7 +639,7 @@ impl Session {
                 if let Some(chan) = self.channels.get(&channel_num) {
                     chan.window_size().update(new_size).await;
 
-                    let _ = chan.send(ChannelMsg::WindowAdjusted { new_size });
+                    let _ = chan.send(ChannelMsg::WindowAdjusted { new_size }).await;
                 }
                 client.window_adjusted(channel_num, new_size, self).await
             }
@@ -682,14 +689,14 @@ impl Session {
             Some((&msg::CHANNEL_SUCCESS, mut r)) => {
                 let channel_num = map_err!(ChannelId::decode(&mut r))?;
                 if let Some(chan) = self.channels.get(&channel_num) {
-                    let _ = chan.send(ChannelMsg::Success);
+                    let _ = chan.send(ChannelMsg::Success).await;
                 }
                 client.channel_success(channel_num, self).await
             }
             Some((&msg::CHANNEL_FAILURE, mut r)) => {
                 let channel_num = map_err!(ChannelId::decode(&mut r))?;
                 if let Some(chan) = self.channels.get(&channel_num) {
-                    let _ = chan.send(ChannelMsg::Failure);
+                    let _ = chan.send(ChannelMsg::Failure).await;
                 }
                 client.channel_failure(channel_num, self).await
             }
@@ -884,6 +891,7 @@ impl Session {
             self.inbound_channel_sender.clone(),
             msg.recipient_maximum_packet_size,
             msg.recipient_window_size,
+            self.common.config.channel_buffer_size,
         );
 
         self.channels.insert(id, channel_ref);
