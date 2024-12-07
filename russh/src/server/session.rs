@@ -7,7 +7,7 @@ use negotiation::parse_kex_algo_list;
 use russh_keys::helpers::NameList;
 use russh_keys::map_err;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
-use tokio::sync::mpsc::{unbounded_channel, Receiver, Sender, UnboundedReceiver};
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::oneshot;
 
 use super::*;
@@ -90,6 +90,7 @@ impl From<(ChannelId, ChannelMsg)> for Msg {
 /// the request/response cycle.
 pub struct Handle {
     pub(crate) sender: Sender<Msg>,
+    pub(crate) channel_buffer_size: usize,
 }
 
 impl Handle {
@@ -217,7 +218,7 @@ impl Handle {
     /// confirmed that it allows agent forwarding. See
     /// [PROTOCOL.agent](https://datatracker.ietf.org/doc/html/draft-miller-ssh-agent).
     pub async fn channel_open_agent(&self) -> Result<Channel<Msg>, Error> {
-        let (sender, receiver) = unbounded_channel();
+        let (sender, receiver) = channel(self.channel_buffer_size);
         let channel_ref = ChannelRef::new(sender);
         let window_size_ref = channel_ref.window_size().clone();
 
@@ -236,7 +237,7 @@ impl Handle {
     /// usable when it's confirmed by the server, as indicated by the
     /// `confirmed` field of the corresponding `Channel`.
     pub async fn channel_open_session(&self) -> Result<Channel<Msg>, Error> {
-        let (sender, receiver) = unbounded_channel();
+        let (sender, receiver) = channel(self.channel_buffer_size);
         let channel_ref = ChannelRef::new(sender);
         let window_size_ref = channel_ref.window_size().clone();
 
@@ -261,7 +262,7 @@ impl Handle {
         originator_address: B,
         originator_port: u32,
     ) -> Result<Channel<Msg>, Error> {
-        let (sender, receiver) = unbounded_channel();
+        let (sender, receiver) = channel(self.channel_buffer_size);
         let channel_ref = ChannelRef::new(sender);
         let window_size_ref = channel_ref.window_size().clone();
 
@@ -286,7 +287,7 @@ impl Handle {
         originator_address: B,
         originator_port: u32,
     ) -> Result<Channel<Msg>, Error> {
-        let (sender, receiver) = unbounded_channel();
+        let (sender, receiver) = channel(self.channel_buffer_size);
         let channel_ref = ChannelRef::new(sender);
         let window_size_ref = channel_ref.window_size().clone();
 
@@ -308,7 +309,7 @@ impl Handle {
         &self,
         server_socket_path: A,
     ) -> Result<Channel<Msg>, Error> {
-        let (sender, receiver) = unbounded_channel();
+        let (sender, receiver) = channel(self.channel_buffer_size);
         let channel_ref = ChannelRef::new(sender);
         let window_size_ref = channel_ref.window_size().clone();
 
@@ -328,7 +329,7 @@ impl Handle {
         originator_address: A,
         originator_port: u32,
     ) -> Result<Channel<Msg>, Error> {
-        let (sender, receiver) = unbounded_channel();
+        let (sender, receiver) = channel(self.channel_buffer_size);
         let channel_ref = ChannelRef::new(sender);
         let window_size_ref = channel_ref.window_size().clone();
 
@@ -346,7 +347,7 @@ impl Handle {
 
     async fn wait_channel_confirmation(
         &self,
-        mut receiver: UnboundedReceiver<ChannelMsg>,
+        mut receiver: Receiver<ChannelMsg>,
         window_size_ref: WindowSizeRef,
     ) -> Result<Channel<Msg>, Error> {
         loop {
