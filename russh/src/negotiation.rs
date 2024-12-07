@@ -79,7 +79,7 @@ impl Preferred {
             .filter(|n| {
                 available_host_keys
                     .iter()
-                    .any(|k| is_key_compatible_with_algo(k, *n))
+                    .any(|k| is_key_compatible_with_algo(k, n))
             })
             .cloned()
             .collect::<Vec<_>>()
@@ -450,7 +450,7 @@ pub fn write_kex(
                     server_config
                         .keys
                         .iter()
-                        .any(|k| is_key_compatible_with_algo(k, *algo))
+                        .any(|k| is_key_compatible_with_algo(k, algo))
                 })
                 .map(|x| x.to_string())
                 .collect(),

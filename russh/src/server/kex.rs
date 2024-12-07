@@ -36,7 +36,7 @@ impl KexInit {
             let Some(matching_key_index) = config
                 .keys
                 .iter()
-                .position(|key| is_key_compatible_with_algo(&key, &algo.key))
+                .position(|key| is_key_compatible_with_algo(key, &algo.key))
             else {
                 debug!("unknown key {:?}", algo.key);
                 return Err(Error::UnknownKey);
