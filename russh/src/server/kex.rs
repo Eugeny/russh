@@ -8,7 +8,7 @@ use ssh_encoding::Encode;
 use super::*;
 use crate::cipher::SealingKey;
 use crate::kex::KEXES;
-use crate::negotiation::Select;
+use crate::negotiation::{is_key_compatible_with_algo, Select};
 use crate::{msg, negotiation};
 
 thread_local! {
@@ -32,22 +32,22 @@ impl KexInit {
             if !self.sent {
                 self.server_write(config, cipher, write_buffer)?
             }
-            let mut key = 0;
-            #[allow(clippy::indexing_slicing)] // length checked
-            while key < config.keys.len() && config.keys[key].algorithm() != algo.key {
-                key += 1
-            }
-            let next_kex = if key < config.keys.len() {
-                Kex::Dh(KexDh {
-                    exchange: self.exchange,
-                    key,
-                    names: algo,
-                    session_id: self.session_id,
-                })
-            } else {
+
+            let Some(matching_key_index) = config
+                .keys
+                .iter()
+                .position(|key| is_key_compatible_with_algo(&key, &algo.key))
+            else {
                 debug!("unknown key {:?}", algo.key);
                 return Err(Error::UnknownKey);
             };
+
+            let next_kex = Kex::Dh(KexDh {
+                exchange: self.exchange,
+                key: matching_key_index,
+                names: algo,
+                session_id: self.session_id,
+            });
 
             Ok(next_kex)
         } else {
