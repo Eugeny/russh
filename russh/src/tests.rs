@@ -208,6 +208,8 @@ mod channels {
         let server_handle = tokio::spawn(run_server(server_session.unwrap().handle()));
 
         let (server_session, client_session) = tokio::join!(server_handle, client_handle);
+        assert!(server_session.is_ok());
+        assert!(client_session.is_ok());
         drop(client_session);
         drop(server_session);
     }
@@ -454,20 +456,117 @@ mod channels {
 
                 let msg = ch.wait().await.unwrap();
                 if let ChannelMsg::Data { data } = msg {
-                    assert_eq!(data.as_ref(), &b"hey there!"[..]);
+                    assert_eq!(data.as_ref(), &b"hello world!"[..]);
                 } else {
                     panic!("Unexpected message {:?}", msg);
                 }
 
-                let msg = ch.wait().await.unwrap();
-                let ChannelMsg::Close = msg else {
-                    panic!("Unexpected message {:?}", msg);
-                };
-
-                ch.close().await.unwrap();
+                assert!(ch.wait().await.is_none());
                 c
             },
             |s| async move { s },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_channel_window_size() {
+        #[derive(Debug)]
+        struct Client {}
+
+        #[async_trait]
+        impl client::Handler for Client {
+            type Error = crate::Error;
+
+            async fn check_server_key(
+                &mut self,
+                _server_public_key: &russh_keys::ssh_key::PublicKey,
+            ) -> Result<bool, Self::Error> {
+                Ok(true)
+            }
+        }
+
+        struct ServerHandle {
+            channel: Option<tokio::sync::oneshot::Sender<Channel<server::Msg>>>,
+        }
+
+        impl ServerHandle {
+            fn get_channel_waiter(
+                &mut self,
+            ) -> tokio::sync::oneshot::Receiver<Channel<server::Msg>> {
+                let (tx, rx) = tokio::sync::oneshot::channel::<Channel<server::Msg>>();
+                self.channel = Some(tx);
+                rx
+            }
+        }
+
+        #[async_trait]
+        impl server::Handler for ServerHandle {
+            type Error = crate::Error;
+
+            async fn auth_publickey(
+                &mut self,
+                _: &str,
+                _: &russh_keys::ssh_key::PublicKey,
+            ) -> Result<server::Auth, Self::Error> {
+                Ok(server::Auth::Accept)
+            }
+
+            async fn channel_open_session(
+                &mut self,
+                channel: Channel<server::Msg>,
+                _session: &mut server::Session,
+            ) -> Result<bool, Self::Error> {
+                if let Some(a) = self.channel.take() {
+                    println!("channel open session {:?}", a);
+                    a.send(channel).unwrap();
+                }
+                Ok(true)
+            }
+        }
+
+        let mut sh = ServerHandle { channel: None };
+        let scw = sh.get_channel_waiter();
+
+        test_session(
+            Client {},
+            sh,
+            |client| async move {
+                let ch = client.channel_open_session().await.unwrap();
+
+                let mut writer_1 = ch.make_writer();
+                let jh_1 = tokio::spawn(async move {
+                    let buf = [1u8; 1024 * 64];
+                    assert!(writer_1.write_all(&buf).await.is_ok());
+                });
+                let mut writer_2 = ch.make_writer();
+                let jh_2 = tokio::spawn(async move {
+                    let buf = [2u8; 1024 * 64];
+                    assert!(writer_2.write_all(&buf).await.is_ok());
+                });
+
+                assert!(tokio::try_join!(jh_1, jh_2).is_ok());
+
+                client
+            },
+            |server| async move {
+                let mut channel = scw.await.unwrap();
+
+                let mut total_data = 2 * 1024 * 64;
+                while let Some(msg) = channel.wait().await {
+                    match msg {
+                        ChannelMsg::Data { data } => {
+                            total_data -= data.len();
+                            if total_data == 0 {
+                                break;
+                            }
+                        }
+                        _ => panic!("Unexpected message {:?}", msg),
+                    }
+                }
+
+                server
+            },
         )
         .await;
     }

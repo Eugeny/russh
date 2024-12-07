@@ -192,13 +192,6 @@ impl Encrypted {
         Ok(())
     }
 
-    /*
-    pub fn authenticated(&mut self) {
-        self.server_compression.init_compress(&mut self.compress);
-        self.state = EncryptedState::Authenticated;
-    }
-    */
-
     pub fn eof(&mut self, channel: ChannelId) -> Result<(), crate::Error> {
         if let Some(channel) = self.has_pending_data_mut(channel) {
             channel.pending_eof = true;

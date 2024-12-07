@@ -1,13 +1,14 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
+use channels::WindowSizeRef;
 use log::debug;
 use negotiation::parse_kex_algo_list;
 use russh_keys::helpers::NameList;
 use russh_keys::map_err;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc::{unbounded_channel, Receiver, Sender, UnboundedReceiver};
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::oneshot;
 
 use super::*;
 use crate::channels::{Channel, ChannelMsg, ChannelRef};
@@ -346,7 +347,7 @@ impl Handle {
     async fn wait_channel_confirmation(
         &self,
         mut receiver: UnboundedReceiver<ChannelMsg>,
-        window_size_ref: Arc<Mutex<u32>>,
+        window_size_ref: WindowSizeRef,
     ) -> Result<Channel<Msg>, Error> {
         loop {
             match receiver.recv().await {
@@ -355,7 +356,7 @@ impl Handle {
                     max_packet_size,
                     window_size,
                 }) => {
-                    *window_size_ref.lock().await = window_size;
+                    window_size_ref.update(window_size).await;
 
                     return Ok(Channel {
                         id,
