@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::sync::mpsc::{Sender, UnboundedReceiver};
+use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::{Mutex, Notify};
 
 use crate::{ChannelId, ChannelOpenFailure, CryptoVec, Error, Pty, Sig};
@@ -143,7 +143,7 @@ impl WindowSizeRef {
 pub struct Channel<Send: From<(ChannelId, ChannelMsg)>> {
     pub(crate) id: ChannelId,
     pub(crate) sender: Sender<Send>,
-    pub(crate) receiver: UnboundedReceiver<ChannelMsg>,
+    pub(crate) receiver: Receiver<ChannelMsg>,
     pub(crate) max_packet_size: u32,
     pub(crate) window_size: WindowSizeRef,
 }
@@ -160,8 +160,9 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + Sync + 'static> Channel<S> {
         sender: Sender<S>,
         max_packet_size: u32,
         window_size: u32,
+        channel_buffer_size: usize,
     ) -> (Self, ChannelRef) {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, rx) = tokio::sync::mpsc::channel(channel_buffer_size);
         let window_size = WindowSizeRef::new(window_size);
 
         (
