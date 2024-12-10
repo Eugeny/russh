@@ -15,16 +15,17 @@
 use std::cell::RefCell;
 use std::convert::TryInto;
 use std::num::Wrapping;
+use std::ops::Deref;
 
 use bytes::Bytes;
 use log::{debug, error, info, trace, warn};
-use russh_keys::helpers::{map_err, sign_workaround, EncodedExt};
+use russh_keys::helpers::{map_err, sign_workaround_encoded, AlgorithmExt, EncodedExt};
 use ssh_encoding::{Decode, Encode};
 
 use crate::cert::PublicKeyOrCertificate;
 use crate::client::{Handler, Msg, Prompt, Reply, Session};
 use crate::keys::key::parse_public_key;
-use crate::negotiation::{Named, Select};
+use crate::negotiation::Select;
 use crate::parsing::{ChannelOpenConfirmation, ChannelType, OpenChannelMessage};
 use crate::session::{Encrypted, EncryptedState, GlobalRequestResponse, Kex, KexInit};
 use crate::{
@@ -345,7 +346,10 @@ impl Session {
                                     self.common.buffer.clear();
                                     let i = enc.client_make_to_sign(
                                         &self.common.auth_user,
-                                        &PublicKeyOrCertificate::PublicKey(key.clone()),
+                                        &PublicKeyOrCertificate::PublicKey {
+                                            key: key.clone(),
+                                            hash_alg: None,
+                                        },
                                         &mut self.common.buffer,
                                     )?;
                                     let len = self.common.buffer.len();
@@ -1023,11 +1027,11 @@ impl Encrypted {
 
         match key {
             PublicKeyOrCertificate::Certificate(cert) => {
-                cert.name().as_ref().encode(buffer)?;
+                cert.algorithm().encode(buffer)?;
                 cert.to_bytes()?.encode(buffer)?;
             }
-            PublicKeyOrCertificate::PublicKey(key) => {
-                key.name().as_ref().encode(buffer)?;
+            PublicKeyOrCertificate::PublicKey { key, hash_alg } => {
+                key.algorithm().with_hash_alg(*hash_alg).encode(buffer)?;
                 key.to_bytes()?.encode(buffer)?;
             }
         }
@@ -1041,16 +1045,12 @@ impl Encrypted {
         buffer: &mut CryptoVec,
     ) -> Result<(), crate::Error> {
         match method {
-            auth::Method::PublicKey { ref key, .. } => {
-                let i0 = self.client_make_to_sign(
-                    user,
-                    &PublicKeyOrCertificate::PublicKey(key.public_key().clone()),
-                    buffer,
-                )?;
+            auth::Method::PublicKey { ref key } => {
+                let i0 =
+                    self.client_make_to_sign(user, &PublicKeyOrCertificate::from(key), buffer)?;
 
                 // Extend with self-signature.
-                let signature = sign_workaround(key, buffer)?;
-                signature.encoded()?.encode(&mut *buffer)?;
+                sign_workaround_encoded(key, buffer)?.encode(&mut *buffer)?;
 
                 push_packet!(self.write, {
                     #[allow(clippy::indexing_slicing)] // length checked
@@ -1065,8 +1065,9 @@ impl Encrypted {
                 )?;
 
                 // Extend with self-signature.
-                let signature = sign_workaround(key, buffer)?;
-                signature.encoded()?.encode(&mut *buffer)?;
+                signature::Signer::try_sign(key.deref(), buffer)?
+                    .encoded()?
+                    .encode(&mut *buffer)?;
 
                 push_packet!(self.write, {
                     #[allow(clippy::indexing_slicing)] // length checked

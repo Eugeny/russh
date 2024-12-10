@@ -425,7 +425,7 @@ impl Encrypted {
 
                 // Handle certificates specifically
                 let pubkey = match pk_or_cert {
-                    PublicKeyOrCertificate::PublicKey(ref pk) => pk.clone(),
+                    PublicKeyOrCertificate::PublicKey { ref key, .. } => key.clone(),
                     PublicKeyOrCertificate::Certificate(ref cert) => {
                         // Validate certificate expiration
                         let now = SystemTime::now();
@@ -497,8 +497,8 @@ impl Encrypted {
                         })? {
                             debug!("signature verified");
                             let auth = match pk_or_cert {
-                                PublicKeyOrCertificate::PublicKey(ref pk) => {
-                                    handler.auth_publickey(user, pk).await?
+                                PublicKeyOrCertificate::PublicKey { ref key, .. } => {
+                                    handler.auth_publickey(user, key).await?
                                 }
                                 PublicKeyOrCertificate::Certificate(ref cert) => {
                                     handler.auth_openssh_certificate(user, cert).await?

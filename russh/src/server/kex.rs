@@ -2,8 +2,10 @@ use std::cell::RefCell;
 use std::ops::DerefMut;
 
 use log::debug;
-use russh_keys::helpers::{sign_workaround, EncodedExt};
+use russh_keys::helpers::sign_workaround_encoded;
+use russh_keys::key::PrivateKeyWithHashAlg;
 use ssh_encoding::Encode;
+use ssh_key::Algorithm;
 
 use super::*;
 use crate::cipher::SealingKey;
@@ -100,6 +102,14 @@ impl KexDh {
 
             kex.server_dh(&mut self.exchange, buf)?;
 
+            // Look up the key we'll be using to sign the exchange hash
+            #[allow(clippy::indexing_slicing)] // key index checked
+            let key = &config.keys[self.key];
+            let signature_hash_alg = match &self.names.key {
+                Algorithm::Rsa { hash } => *hash,
+                _ => None,
+            };
+
             // Then, we fill the write buffer right away, so that we
             // can output it immediately when the time comes.
             let kexdhdone = KexDhDone {
@@ -109,17 +119,14 @@ impl KexDh {
                 names: self.names,
                 session_id: self.session_id,
             };
-            #[allow(clippy::indexing_slicing)] // key index checked
+
             let hash: Result<_, Error> = HASH_BUF.with(|buffer| {
                 let mut buffer = buffer.borrow_mut();
                 buffer.clear();
                 debug!("server kexdhdone.exchange = {:?}", kexdhdone.exchange);
 
                 let mut pubkey_vec = CryptoVec::new();
-                config.keys[kexdhdone.key]
-                    .public_key()
-                    .to_bytes()?
-                    .encode(&mut pubkey_vec)?;
+                key.public_key().to_bytes()?.encode(&mut pubkey_vec)?;
 
                 let hash = kexdhdone.kex.compute_exchange_hash(
                     &pubkey_vec,
@@ -129,10 +136,7 @@ impl KexDh {
                 debug!("exchange hash: {:?}", hash);
                 buffer.clear();
                 buffer.push(msg::KEX_ECDH_REPLY);
-                config.keys[kexdhdone.key]
-                    .public_key()
-                    .to_bytes()?
-                    .encode(buffer.deref_mut())?;
+                key.public_key().to_bytes()?.encode(buffer.deref_mut())?;
 
                 // Server ephemeral
                 kexdhdone
@@ -143,10 +147,13 @@ impl KexDh {
                 // Hash signature
                 debug!("signing with key {:?}", kexdhdone.key);
                 debug!("hash: {:?}", hash);
-                debug!("key: {:?}", config.keys[kexdhdone.key]);
+                debug!("key: {:?}", key);
 
-                let signature = sign_workaround(&config.keys[kexdhdone.key], &hash)?;
-                signature.encoded()?.encode(&mut *buffer)?;
+                sign_workaround_encoded(
+                    &PrivateKeyWithHashAlg::new(Arc::new(key.clone()), signature_hash_alg)?,
+                    &hash,
+                )?
+                .encode(&mut *buffer)?;
 
                 cipher.write(&buffer, write_buffer);
                 cipher.write(&[msg::NEWKEYS], write_buffer);

@@ -18,7 +18,7 @@ use log::debug;
 use rand::RngCore;
 use russh_keys::helpers::NameList;
 use ssh_encoding::{Decode, Encode};
-use ssh_key::{Algorithm, Certificate, EcdsaCurve, HashAlg, PrivateKey, PublicKey};
+use ssh_key::{Algorithm, EcdsaCurve, HashAlg, PrivateKey};
 
 use crate::cipher::CIPHERS;
 use crate::kex::{EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT, EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER};
@@ -161,36 +161,6 @@ impl Preferred {
 impl Default for Preferred {
     fn default() -> Preferred {
         Preferred::DEFAULT
-    }
-}
-
-/// Named algorithms.
-pub trait Named<'a> {
-    /// The name of this algorithm.
-    fn name(&'a self) -> impl AsRef<str> + 'a;
-}
-
-impl Named<'static> for () {
-    fn name(&'static self) -> impl AsRef<str> + 'static {
-        ""
-    }
-}
-
-impl<'a> Named<'a> for PublicKey {
-    fn name(&'a self) -> impl AsRef<str> + 'a {
-        self.algorithm()
-    }
-}
-
-impl<'a> Named<'a> for PrivateKey {
-    fn name(&'a self) -> impl AsRef<str> + 'a {
-        self.algorithm()
-    }
-}
-
-impl<'a> Named<'a> for Certificate {
-    fn name(&'a self) -> impl AsRef<str> + 'a {
-        self.algorithm().to_certificate_type()
     }
 }
 
