@@ -5,6 +5,7 @@ use rand::RngCore;
 use rand_core::OsRng;
 use russh::server::{self, Auth, Msg, Server as _, Session};
 use russh::{client, Channel};
+use russh_keys::key::PrivateKeyWithHashAlg;
 use ssh_key::PrivateKey;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -34,7 +35,10 @@ async fn stream(addr: SocketAddr, data: &[u8]) -> Result<(), anyhow::Error> {
     let key = Arc::new(PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap());
 
     let mut session = russh::client::connect(config, addr, Client).await?;
-    let mut channel = match session.authenticate_publickey("user", key).await {
+    let mut channel = match session
+        .authenticate_publickey("user", PrivateKeyWithHashAlg::new(key, None)?)
+        .await
+    {
         Ok(true) => session.channel_open_session().await?,
         Ok(false) => panic!("Authentication failed"),
         Err(err) => return Err(err.into()),

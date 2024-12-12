@@ -46,6 +46,7 @@ use bytes::Bytes;
 use futures::task::{Context, Poll};
 use futures::Future;
 use log::{debug, error, info, trace};
+use russh_keys::key::PrivateKeyWithHashAlg;
 use russh_keys::map_err;
 use ssh_encoding::{Decode, Encode, Reader};
 use ssh_key::{Certificate, PrivateKey, PublicKey};
@@ -352,7 +353,7 @@ impl<H: Handler> Handle<H> {
     pub async fn authenticate_publickey<U: Into<String>>(
         &mut self,
         user: U,
-        key: Arc<PrivateKey>,
+        key: PrivateKeyWithHashAlg,
     ) -> Result<bool, crate::Error> {
         let user = user.into();
         self.sender

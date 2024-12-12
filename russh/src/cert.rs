@@ -1,13 +1,27 @@
 use core::str;
 
+use russh_keys::helpers::AlgorithmExt;
+use russh_keys::key::PrivateKeyWithHashAlg;
 use ssh_encoding::Decode;
 use ssh_key::public::KeyData;
 use ssh_key::{Algorithm, Certificate, HashAlg, PublicKey};
 
 #[derive(Debug)]
 pub(crate) enum PublicKeyOrCertificate {
-    PublicKey(PublicKey),
+    PublicKey {
+        key: PublicKey,
+        hash_alg: Option<HashAlg>,
+    },
     Certificate(Certificate),
+}
+
+impl From<&PrivateKeyWithHashAlg> for PublicKeyOrCertificate {
+    fn from(key: &PrivateKeyWithHashAlg) -> Self {
+        PublicKeyOrCertificate::PublicKey {
+            key: key.public_key().clone(),
+            hash_alg: key.hash_alg(),
+        }
+    }
 }
 
 impl PublicKeyOrCertificate {
@@ -16,33 +30,14 @@ impl PublicKeyOrCertificate {
         match Algorithm::new_certificate_ext(pubkey_algo) {
             Ok(Algorithm::Other(_)) | Err(ssh_key::Error::Encoding(_)) => {
                 // Did not match a known cert algorithm
-                Ok(PublicKeyOrCertificate::PublicKey(
-                    KeyData::decode(&mut reader)?.into(),
-                ))
+                Ok(PublicKeyOrCertificate::PublicKey {
+                    key: KeyData::decode(&mut reader)?.into(),
+                    hash_alg: Algorithm::new(pubkey_algo)?.hash_alg(),
+                })
             }
             _ => Ok(PublicKeyOrCertificate::Certificate(Certificate::decode(
                 &mut reader,
             )?)),
-        }
-    }
-}
-
-trait AlgorithmExt {
-    fn new_certificate_ext(algo: &str) -> Result<Self, ssh_key::Error>
-    where
-        Self: Sized;
-}
-
-impl AlgorithmExt for Algorithm {
-    fn new_certificate_ext(algo: &str) -> Result<Self, ssh_key::Error> {
-        match algo {
-            "rsa-sha2-256-cert-v01@openssh.com" => Ok(Algorithm::Rsa {
-                hash: Some(HashAlg::Sha256),
-            }),
-            "rsa-sha2-512-cert-v01@openssh.com" => Ok(Algorithm::Rsa {
-                hash: Some(HashAlg::Sha512),
-            }),
-            x => Algorithm::new_certificate(x),
         }
     }
 }

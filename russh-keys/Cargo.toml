@@ -8,7 +8,7 @@ keywords = ["ssh"]
 license = "Apache-2.0"
 name = "russh-keys"
 repository = "https://github.com/warp-tech/russh"
-version = "0.48.1"
+version = "0.49.0"
 rust-version = "1.65"
 
 [dependencies]

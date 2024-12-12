@@ -46,6 +46,54 @@ pub fn safe_rng() -> impl rand::CryptoRng + rand::RngCore {
     rand::thread_rng()
 }
 
+mod private_key_with_hash_alg {
+    use std::ops::Deref;
+    use std::sync::Arc;
+
+    use ssh_key::Algorithm;
+
+    use crate::helpers::AlgorithmExt;
+
+    /// Helper structure to correlate a key and (in case of RSA) a hash algorithm.
+    /// Only used for authentication, not key storage as RSA keys do not inherently
+    /// have a hash algorithm associated with them.
+    #[derive(Clone, Debug)]
+    pub struct PrivateKeyWithHashAlg {
+        key: Arc<crate::PrivateKey>,
+        hash_alg: Option<crate::HashAlg>,
+    }
+
+    impl PrivateKeyWithHashAlg {
+        pub fn new(
+            key: Arc<crate::PrivateKey>,
+            hash_alg: Option<crate::HashAlg>,
+        ) -> Result<Self, crate::Error> {
+            if hash_alg.is_some() && !key.algorithm().is_rsa() {
+                return Err(crate::Error::InvalidParameters);
+            }
+            Ok(Self { key, hash_alg })
+        }
+
+        pub fn algorithm(&self) -> Algorithm {
+            self.key.algorithm().with_hash_alg(self.hash_alg)
+        }
+
+        pub fn hash_alg(&self) -> Option<crate::HashAlg> {
+            self.hash_alg
+        }
+    }
+
+    impl Deref for PrivateKeyWithHashAlg {
+        type Target = crate::PrivateKey;
+
+        fn deref(&self) -> &Self::Target {
+            &self.key
+        }
+    }
+}
+
+pub use private_key_with_hash_alg::PrivateKeyWithHashAlg;
+
 pub const ALL_KEY_TYPES: &[Algorithm] = &[
     Algorithm::Dsa,
     Algorithm::Ecdsa {
