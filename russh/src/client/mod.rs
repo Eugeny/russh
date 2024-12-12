@@ -225,6 +225,7 @@ pub struct Handle<H: Handler> {
     sender: Sender<Msg>,
     receiver: UnboundedReceiver<Reply>,
     join: russh_util::runtime::JoinHandle<Result<(), H::Error>>,
+    channel_buffer_size: usize,
 }
 
 impl<H: Handler> Drop for Handle<H> {
@@ -428,7 +429,7 @@ impl<H: Handler> Handle<H> {
     /// Wait for confirmation that a channel is open
     async fn wait_channel_confirmation(
         &self,
-        mut receiver: UnboundedReceiver<ChannelMsg>,
+        mut receiver: Receiver<ChannelMsg>,
         window_size_ref: WindowSizeRef,
     ) -> Result<Channel<Msg>, crate::Error> {
         loop {
@@ -467,7 +468,7 @@ impl<H: Handler> Handle<H> {
     /// usable when it's confirmed by the server, as indicated by the
     /// `confirmed` field of the corresponding `Channel`.
     pub async fn channel_open_session(&self) -> Result<Channel<Msg>, crate::Error> {
-        let (sender, receiver) = unbounded_channel();
+        let (sender, receiver) = channel(self.channel_buffer_size);
         let channel_ref = ChannelRef::new(sender);
         let window_size_ref = channel_ref.window_size().clone();
 
@@ -485,7 +486,7 @@ impl<H: Handler> Handle<H> {
         originator_address: A,
         originator_port: u32,
     ) -> Result<Channel<Msg>, crate::Error> {
-        let (sender, receiver) = unbounded_channel();
+        let (sender, receiver) = channel(self.channel_buffer_size);
         let channel_ref = ChannelRef::new(sender);
         let window_size_ref = channel_ref.window_size().clone();
 
@@ -516,7 +517,7 @@ impl<H: Handler> Handle<H> {
         originator_address: B,
         originator_port: u32,
     ) -> Result<Channel<Msg>, crate::Error> {
-        let (sender, receiver) = unbounded_channel();
+        let (sender, receiver) = channel(self.channel_buffer_size);
         let channel_ref = ChannelRef::new(sender);
         let window_size_ref = channel_ref.window_size().clone();
 
@@ -538,7 +539,7 @@ impl<H: Handler> Handle<H> {
         &self,
         socket_path: S,
     ) -> Result<Channel<Msg>, crate::Error> {
-        let (sender, receiver) = unbounded_channel();
+        let (sender, receiver) = channel(self.channel_buffer_size);
         let channel_ref = ChannelRef::new(sender);
         let window_size_ref = channel_ref.window_size().clone();
 
@@ -750,6 +751,7 @@ where
             config.maximum_packet_size
         );
     }
+    let channel_buffer_size = config.channel_buffer_size;
     let mut session = Session::new(
         config.window_size,
         CommonSession {
@@ -790,6 +792,7 @@ where
         sender: handle_sender,
         receiver: handle_receiver,
         join,
+        channel_buffer_size,
     })
 }
 
@@ -1274,16 +1277,6 @@ impl Session {
         }
         Ok(())
     }
-
-    /// Send a `ChannelMsg` from the background handler to the client.
-    pub fn send_channel_msg(&self, channel: ChannelId, msg: ChannelMsg) -> bool {
-        if let Some(chan) = self.channels.get(&channel) {
-            chan.send(msg).unwrap_or(());
-            true
-        } else {
-            false
-        }
-    }
 }
 
 thread_local! {
@@ -1483,6 +1476,8 @@ pub struct Config {
     pub window_size: u32,
     /// The maximal size of a single packet.
     pub maximum_packet_size: u32,
+    /// Buffer size for each channel (a number of unprocessed messages to store before propagating backpressure to the TCP stream)
+    pub channel_buffer_size: usize,
     /// Lists of preferred algorithms.
     pub preferred: negotiation::Preferred,
     /// Time after which the connection is garbage-collected.
@@ -1506,6 +1501,7 @@ impl Default for Config {
             limits: Limits::default(),
             window_size: 2097152,
             maximum_packet_size: 32768,
+            channel_buffer_size: 100,
             preferred: Default::default(),
             inactivity_timeout: None,
             keepalive_interval: None,
