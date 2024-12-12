@@ -135,17 +135,15 @@ impl<
                 self.agent = Some(agent.clone());
                 if !agent.can_list(&self.connection_info).await {
                     writebuf.push(msg::FAILURE);
-                } else {
-                    if let Ok(keys) = self.keys.0.read() {
-                        writebuf.push(msg::IDENTITIES_ANSWER);
-                        writebuf.push_u32_be(keys.len() as u32);
-                        for (public_key_bytes, key) in keys.iter() {
-                            writebuf.extend_ssh_string(public_key_bytes);
-                            writebuf.extend_ssh_string(key.name.as_bytes());
-                        }
-                    } else {
-                        writebuf.push(msg::FAILURE)
+                } else if let Ok(keys) = self.keys.0.read() {
+                    writebuf.push(msg::IDENTITIES_ANSWER);
+                    writebuf.push_u32_be(keys.len() as u32);
+                    for (public_key_bytes, key) in keys.iter() {
+                        writebuf.extend_ssh_string(public_key_bytes);
+                        writebuf.extend_ssh_string(key.name.as_bytes());
                     }
+                } else {
+                    writebuf.push(msg::FAILURE)
                 }
             }
             Ok(SIGN_REQUEST) => {
