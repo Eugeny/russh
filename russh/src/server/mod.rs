@@ -79,7 +79,7 @@ pub struct Config {
     pub window_size: u32,
     /// The maximal size of a single packet.
     pub maximum_packet_size: u32,
-    /// Buffer size for created channels.
+    /// Buffer size for each channel (a number of unprocessed messages to store before propagating backpressure to the TCP stream)
     pub channel_buffer_size: usize,
     /// Internal event buffer size
     pub event_buffer_size: usize,
