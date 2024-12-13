@@ -47,39 +47,32 @@ fn pkcs8_pki_into_keypair_data(pki: PrivateKeyInfo<'_>) -> Result<KeypairData, E
             )?;
             Ok(KeypairData::Rsa(pk.try_into()?))
         }
-        sec1::ALGORITHM_OID => {
-            let sk = &sec1::EcPrivateKey::try_from(pki.private_key)?;
-            dbg!(sk.private_key);
-            dbg!(sk.public_key);
-            dbg!(sk.parameters);
-            dbg!(sk.parameters.and_then(|x| x.named_curve()));
-            Ok(KeypairData::Ecdsa(
-                match pki.algorithm.parameters_oid()? {
-                    NistP256::OID => {
-                        let sk = p256::SecretKey::try_from(pki)?;
-                        EcdsaKeypair::NistP256 {
-                            public: sk.public_key().into(),
-                            private: sk.into(),
-                        }
+        sec1::ALGORITHM_OID => Ok(KeypairData::Ecdsa(
+            match pki.algorithm.parameters_oid()? {
+                NistP256::OID => {
+                    let sk = p256::SecretKey::try_from(pki)?;
+                    EcdsaKeypair::NistP256 {
+                        public: sk.public_key().into(),
+                        private: sk.into(),
                     }
-                    NistP384::OID => {
-                        let sk = p384::SecretKey::try_from(pki)?;
-                        EcdsaKeypair::NistP384 {
-                            public: sk.public_key().into(),
-                            private: sk.into(),
-                        }
+                }
+                NistP384::OID => {
+                    let sk = p384::SecretKey::try_from(pki)?;
+                    EcdsaKeypair::NistP384 {
+                        public: sk.public_key().into(),
+                        private: sk.into(),
                     }
-                    NistP521::OID => {
-                        let sk = p521::SecretKey::try_from(pki)?;
-                        EcdsaKeypair::NistP521 {
-                            public: sk.public_key().into(),
-                            private: sk.into(),
-                        }
+                }
+                NistP521::OID => {
+                    let sk = p521::SecretKey::try_from(pki)?;
+                    EcdsaKeypair::NistP521 {
+                        public: sk.public_key().into(),
+                        private: sk.into(),
                     }
-                    oid => return Err(Error::UnknownAlgorithm(oid)),
-                },
-            ))
-        }
+                }
+                oid => return Err(Error::UnknownAlgorithm(oid)),
+            },
+        )),
         oid => Err(Error::UnknownAlgorithm(oid)),
     }
 }

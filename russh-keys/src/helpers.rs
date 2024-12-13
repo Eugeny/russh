@@ -77,7 +77,6 @@ mod signature_workarounds {
         let mut buf = Vec::new();
         Algorithm::Rsa { hash: hash_alg }.encode(&mut buf)?;
         signature.to_vec().encode(&mut buf)?;
-        dbg!(&buf);
         Ok(buf)
     }
 
@@ -87,7 +86,6 @@ mod signature_workarounds {
         key: &PrivateKeyWithHashAlg,
         data: &[u8],
     ) -> ssh_key::Result<Vec<u8>> {
-        dbg!(&key);
         Ok(match key.key_data() {
             ssh_key::private::KeypairData::Rsa(rsa_keypair) => {
                 let pk = rsa::RsaPrivateKey::from_components(
