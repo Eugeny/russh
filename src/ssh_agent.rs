@@ -11,7 +11,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::select;
 use tokio_util::sync::CancellationToken;
 
-use crate::msg;
+use crate::msg::{self, EXTENSION};
 use anyhow::Error;
 
 use super::msg::{REQUEST_IDENTITIES, SIGN_REQUEST};
@@ -39,6 +39,7 @@ pub trait Agent<I>: Clone + Send + 'static {
     fn confirm(
         &self,
         _pk: Key,
+        _data: &[u8],
         _connection_info: &I,
     ) -> impl std::future::Future<Output = bool> + Send {
         async { true }
@@ -46,6 +47,14 @@ pub trait Agent<I>: Clone + Send + 'static {
 
     fn can_list(&self, _connection_info: &I) -> impl std::future::Future<Output = bool> + Send {
         async { true }
+    }
+
+    fn set_is_forwarding(
+        &self,
+        _is_forwarding: bool,
+        _connection_info: &I,
+    ) -> impl std::future::Future<Output = ()> + Send {
+        async {}
     }
 }
 
@@ -157,6 +166,27 @@ impl<
                     writebuf.push(msg::FAILURE)
                 }
             }
+            Ok(EXTENSION) => {
+                let extension_name = r.read_string()?;
+                let extension_name = String::from_utf8(extension_name.to_vec())
+                    .map_err(|_| SSHAgentError::AgentFailure)?;
+
+                // https://raw.githubusercontent.com/openssh/openssh-portable/refs/heads/master/PROTOCOL.agent
+                if extension_name == "session-bind@openssh.com" {
+                    let _hostkey = r.read_string()?;
+                    let _session_identifier = r.read_string()?;
+                    let _signature = r.read_string()?;
+                    let is_forwarding = r.read_byte()? == 1;
+                    let agent = self.agent.take().ok_or(SSHAgentError::AgentFailure)?;
+                    agent
+                        .set_is_forwarding(is_forwarding, &self.connection_info)
+                        .await;
+                    self.agent = Some(agent);
+                    writebuf.push(msg::SUCCESS);
+                } else {
+                    writebuf.push(msg::FAILURE);
+                }
+            }
             _ => writebuf.push(msg::FAILURE),
         }
         let len = writebuf.len() - 4;
@@ -182,7 +212,7 @@ impl<
 
         let data = r.read_string()?;
 
-        let ok = agent.confirm(key.clone(), &self.connection_info).await;
+        let ok = agent.confirm(key, data, &self.connection_info).await;
         if !ok {
             return Ok((agent, false));
         }
