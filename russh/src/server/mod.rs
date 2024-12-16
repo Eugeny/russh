@@ -63,8 +63,6 @@ pub struct Config {
     pub server_id: SshId,
     /// Authentication methods proposed to the client.
     pub methods: auth::MethodSet,
-    /// The authentication banner, usually a warning message shown to the client.
-    pub auth_banner: Option<&'static str>,
     /// Authentication rejections must happen in constant time for
     /// security reasons. Russh does not handle this by default.
     pub auth_rejection_time: std::time::Duration,
@@ -104,7 +102,6 @@ impl Default for Config {
                 env!("CARGO_PKG_VERSION")
             )),
             methods: auth::MethodSet::all(),
-            auth_banner: None,
             auth_rejection_time: std::time::Duration::from_secs(1),
             auth_rejection_time_initial: None,
             keys: Vec::new(),
@@ -128,7 +125,6 @@ impl Debug for Config {
         f.debug_struct("Config")
             .field("server_id", &self.server_id)
             .field("methods", &self.methods)
-            .field("auth_banner", &self.auth_banner)
             .field("auth_rejection_time", &self.auth_rejection_time)
             .field(
                 "auth_rejection_time_initial",
@@ -287,6 +283,13 @@ pub trait Handler: Sized {
     #[allow(unused_variables)]
     async fn auth_succeeded(&mut self, session: &mut Session) -> Result<(), Self::Error> {
         Ok(())
+    }
+
+    /// Called when authentication starts but before it is successful.
+    /// Return value is an authentication banner, usually a warning message shown to the client.
+    #[allow(unused_variables)]
+    async fn authentication_banner(&mut self) -> Result<Option<String>, Self::Error> {
+        Ok(None)
     }
 
     /// Called when the client closes a channel.
