@@ -181,7 +181,7 @@ impl Session {
                 debug!("request: {:?}", request);
                 if request == "ssh-userauth" {
                     let auth_request = server_accept_service(
-                        self.common.config.as_ref().auth_banner,
+                        handler.authentication_banner().await?,
                         self.common.config.as_ref().methods,
                         &mut enc.write,
                     )?;
@@ -242,7 +242,7 @@ impl Session {
 }
 
 fn server_accept_service(
-    banner: Option<&str>,
+    banner: Option<String>,
     methods: MethodSet,
     buffer: &mut CryptoVec,
 ) -> Result<AuthRequest, crate::Error> {
