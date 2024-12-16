@@ -1,3 +1,10 @@
+/*
+    These constants come from:
+
+    5.1. Message numbers
+    https://datatracker.ietf.org/doc/draft-ietf-sshm-ssh-agent
+*/
+
 pub const FAILURE: u8 = 5;
 pub const SUCCESS: u8 = 6;
 pub const IDENTITIES_ANSWER: u8 = 12;
