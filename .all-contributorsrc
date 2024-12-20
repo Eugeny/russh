@@ -454,6 +454,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "eric-seppanen",
+      "name": "Eric Seppanen",
+      "avatar_url": "https://avatars.githubusercontent.com/u/109770420?v=4",
+      "profile": "https://github.com/eric-seppanen",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,
