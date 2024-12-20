@@ -194,7 +194,7 @@ mod test {
     #[test]
     fn test_check_known_hosts() {
         env_logger::try_init().unwrap_or(());
-        let dir = tempdir::TempDir::new("russh").unwrap();
+        let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("known_hosts");
         {
             let mut f = File::create(&path).unwrap();
