@@ -39,6 +39,7 @@ use std::collections::{HashMap, VecDeque};
 use std::convert::TryInto;
 use std::num::Wrapping;
 use std::pin::Pin;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -49,7 +50,7 @@ use log::{debug, error, info, trace};
 use russh_keys::key::PrivateKeyWithHashAlg;
 use russh_keys::map_err;
 use ssh_encoding::{Decode, Encode, Reader};
-use ssh_key::{Certificate, PrivateKey, PublicKey};
+use ssh_key::{Algorithm, Certificate, PrivateKey, PublicKey};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadHalf, WriteHalf};
 use tokio::pin;
 use tokio::sync::mpsc::{
@@ -1319,21 +1320,24 @@ impl KexDhDone {
                         .compute_exchange_hash(&pubkey_vec, &self.exchange, &mut buffer)?;
 
                 debug!("exchange hash: {:?}", hash);
-                let signature = {
+                let (sig_type, signature) = {
                     let mut r = &signature[..];
                     let sig_type = map_err!(String::decode(&mut r))?;
                     debug!("sig_type: {:?}", sig_type);
-                    map_err!(Bytes::decode(&mut r))?
+                    (
+                        map_err!(Algorithm::from_str(&sig_type).map_err(ssh_encoding::Error::from))?,
+                        map_err!(Bytes::decode(&mut r))?,
+                    )
                 };
 
                 debug!("signature: {:?}", signature);
-                let signature = sig_workaround::Sig::new(pubkey.algorithm(), signature.to_vec())
-                    .map_err(|e| {
+                let signature =
+                    sig_workaround::Sig::new(sig_type, signature.to_vec()).map_err(|e| {
                         debug!("signature ctor failed: {e:?}");
                         crate::Error::WrongServerSig
                     })?;
-                if sig_workaround::verify(&pubkey, hash.as_ref(), &signature).is_err() {
-                    debug!("wrong server sig");
+                if let Err(e) = sig_workaround::verify(&pubkey, hash.as_ref(), &signature) {
+                    debug!("wrong server sig: {e:?}");
                     return Err(crate::Error::WrongServerSig.into());
                 }
                 hash
