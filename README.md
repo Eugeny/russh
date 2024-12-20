@@ -103,6 +103,8 @@ This is a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Éti
   * Uses `russh::server` in addition to `russh::client` as part of the smart SSH functionality.
 * [Devolutions Gateway](https://github.com/Devolutions/devolutions-gateway/) - Establish a secure entry point for internal or external segmented networks that require authorized just-in-time (JIT) access.
   * Uses `russh::client` for the web-based SSH client of the standalone web application.
+* [Sandhole](https://github.com/EpicEric/sandhole) - Expose HTTP/SSH/TCP services through SSH port forwarding. A reverse proxy that just works with an OpenSSH client.
+  * Uses `russh::server` for reverse forwarding connections, local forwarding tunnels, and the `ratatui` based admin interface.
 
 ## Contributors ✨
 
