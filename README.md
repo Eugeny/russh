@@ -1,7 +1,7 @@
 # Russh
 
 [![Rust](https://github.com/warp-tech/russh/actions/workflows/rust.yml/badge.svg)](https://github.com/warp-tech/russh/actions/workflows/rust.yml)  <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
-[![All Contributors](https://img.shields.io/badge/all_contributors-50-orange.svg?style=flat-square)](#contributors-)
+[![All Contributors](https://img.shields.io/badge/all_contributors-51-orange.svg?style=flat-square)](#contributors-)
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
 
 Low-level Tokio SSH2 client and server implementation.
@@ -180,6 +180,7 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
     </tr>
     <tr>
       <td align="center" valign="top" width="14.28%"><a href="https://citorva.fr/"><img src="https://avatars.githubusercontent.com/u/16229435?v=4?s=100" width="100px;" alt="citorva"/><br /><sub><b>citorva</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=citorva" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/eric-seppanen"><img src="https://avatars.githubusercontent.com/u/109770420?v=4?s=100" width="100px;" alt="Eric Seppanen"/><br /><sub><b>Eric Seppanen</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=eric-seppanen" title="Code">💻</a></td>
     </tr>
   </tbody>
 </table>
