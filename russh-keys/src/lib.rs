@@ -33,7 +33,7 @@
 //! #[cfg(unix)]
 //! fn main() {
 //!    env_logger::try_init().unwrap_or(());
-//!    let dir = tempdir::TempDir::new("russh").unwrap();
+//!    let dir = tempfile::tempdir().unwrap();
 //!    let agent_path = dir.path().join("agent");
 //!
 //!    let mut core = tokio::runtime::Runtime::new().unwrap();
@@ -834,7 +834,7 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
         env_logger::try_init().unwrap_or(());
         use std::process::Stdio;
 
-        let dir = tempdir::TempDir::new("russh")?;
+        let dir = tempfile::tempdir()?;
         let agent_path = dir.path().join("agent");
         let mut agent = tokio::process::Command::new("ssh-agent")
             .arg("-a")
@@ -901,7 +901,7 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
     #[cfg(unix)]
     fn test_agent() {
         env_logger::try_init().unwrap_or(());
-        let dir = tempdir::TempDir::new("russh").unwrap();
+        let dir = tempfile::tempdir().unwrap();
         let agent_path = dir.path().join("agent");
 
         let core = tokio::runtime::Runtime::new().unwrap();
