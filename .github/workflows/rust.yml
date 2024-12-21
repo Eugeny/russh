@@ -90,4 +90,6 @@ jobs:
     - uses: taiki-e/install-action@cargo-minimal-versions
 
     - name: Check with minimal dependency versions
-      run: cargo minimal-versions check --all-features
+      run: |
+        rustup toolchain add 1.65.0
+        cargo +1.65.0 minimal-versions check --all-features --no-dev-deps

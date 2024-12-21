@@ -74,13 +74,12 @@ tokio = { workspace = true, features = [
   "net",
 ] }
 tokio-stream.workspace = true
-home = "0.5"
-
+home.workspace = true
 
 [target.'cfg(windows)'.dependencies]
-pageant = { version = "0.0.1-beta.3", path = "../pageant" }
+pageant = { version = "0.0.1", path = "../pageant" }
 
 [dev-dependencies]
-env_logger = "0.11"
+env_logger.workspace = true
 tempfile = "3.14.0"
 tokio = { workspace = true, features = ["test-util", "macros", "process"] }

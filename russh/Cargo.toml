@@ -62,9 +62,9 @@ tokio = { workspace = true, features = ["io-util", "sync", "time"] }
 
 [dev-dependencies]
 anyhow = "1.0.4"
-env_logger = "0.11"
+env_logger.workspace = true
 clap = { version = "3.2.3", features = ["derive"] }
-tokio = { version = "1.17.0", features = [
+tokio = { workspace = true, features = [
     "io-std",
     "io-util",
     "rt-multi-thread",
@@ -77,8 +77,8 @@ rand = "0.8.5"
 shell-escape = "0.1"
 tokio-fd = "0.3"
 termion = "2"
-ratatui = "0.29.0"
+ratatui = "0.20.0"
 
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 russh-sftp = "2.0.5"
 tokio.workspace = true

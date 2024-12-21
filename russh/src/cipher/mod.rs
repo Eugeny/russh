@@ -21,9 +21,9 @@ use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::num::Wrapping;
 
+use self::cbc::CbcWrapper;
 use aes::{Aes128, Aes192, Aes256};
 use byteorder::{BigEndian, ByteOrder};
-use cbc::CbcWrapper;
 use ctr::Ctr128BE;
 use delegate::delegate;
 use log::debug;
@@ -243,10 +243,10 @@ pub(crate) trait SealingKey {
     }
 }
 
-pub(crate) async fn read<'a, R: AsyncRead + Unpin>(
-    stream: &'a mut R,
-    buffer: &'a mut SSHBuffer,
-    cipher: &'a mut (dyn OpeningKey + Send),
+pub(crate) async fn read<R: AsyncRead + Unpin>(
+    stream: &mut R,
+    buffer: &mut SSHBuffer,
+    cipher: &mut (dyn OpeningKey + Send),
 ) -> Result<usize, Error> {
     if buffer.len == 0 {
         let mut len = vec![0; cipher.packet_length_to_read_for_block_length()];
@@ -272,10 +272,14 @@ pub(crate) async fn read<'a, R: AsyncRead + Unpin>(
 
     buffer.buffer.resize(buffer.len + 4);
     debug!("read_exact {:?}", buffer.len + 4);
+
+    let l = cipher.packet_length_to_read_for_block_length();
+
     #[allow(clippy::indexing_slicing)] // length checked
     stream
-        .read_exact(&mut buffer.buffer[cipher.packet_length_to_read_for_block_length()..])
+        .read_exact(&mut buffer.buffer[l..])
         .await?;
+
     debug!("read_exact done");
     let seqn = buffer.seqn.0;
     let ciphertext_len = buffer.buffer.len() - cipher.tag_len();
