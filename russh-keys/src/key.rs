@@ -37,7 +37,6 @@ pub trait Verify {
 
 /// Parse a public key from a byte slice.
 pub fn parse_public_key(mut p: &[u8]) -> Result<PublicKey, Error> {
-    use ssh_encoding::Decode;
     Ok(ssh_key::public::KeyData::decode(&mut p)?.into())
 }
 

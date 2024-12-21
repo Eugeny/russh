@@ -717,8 +717,6 @@ pub async fn connect<H: Handler + Send + 'static, A: tokio::net::ToSocketAddrs>(
     addrs: A,
     handler: H,
 ) -> Result<Handle<H>, H::Error> {
-    use russh_keys::map_err;
-
     let socket = map_err!(tokio::net::TcpStream::connect(addrs).await)?;
     connect_stream(config, socket, handler).await
 }
