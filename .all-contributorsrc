@@ -463,6 +463,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "ericseppanen",
+      "name": "Eric Seppanen",
+      "avatar_url": "https://avatars.githubusercontent.com/u/36317762?v=4",
+      "profile": "https://codeandbitters.com/",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,
