@@ -77,7 +77,7 @@ rand = "0.8.5"
 shell-escape = "0.1"
 tokio-fd = "0.3"
 termion = "2"
-ratatui = "0.20.0"
+ratatui = "0.29.0"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 russh-sftp = "2.0.5"
