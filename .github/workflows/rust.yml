@@ -29,10 +29,12 @@ jobs:
     - uses: actions/checkout@v2
 
     - name: Install target
-      run: rustup target add wasm32-wasip1
+      run: |
+        rustup toolchain add 1.81.0
+        rustup target add --toolchain 1.81.0 wasm32-wasip1
 
     - name: Build (all features enabled)
-      run: cargo build --verbose --target wasm32-wasip1 -p russh
+      run: cargo +1.81.0 build --verbose --target wasm32-wasip1 -p russh
 
   Formatting:
     runs-on: ubuntu-24.04
