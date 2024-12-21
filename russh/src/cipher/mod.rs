@@ -21,7 +21,6 @@ use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::num::Wrapping;
 
-use self::cbc::CbcWrapper;
 use aes::{Aes128, Aes192, Aes256};
 use byteorder::{BigEndian, ByteOrder};
 use ctr::Ctr128BE;
@@ -31,6 +30,7 @@ use once_cell::sync::Lazy;
 use ssh_encoding::Encode;
 use tokio::io::{AsyncRead, AsyncReadExt};
 
+use self::cbc::CbcWrapper;
 use crate::mac::MacAlgorithm;
 use crate::sshbuffer::SSHBuffer;
 use crate::Error;
@@ -276,9 +276,7 @@ pub(crate) async fn read<R: AsyncRead + Unpin>(
     let l = cipher.packet_length_to_read_for_block_length();
 
     #[allow(clippy::indexing_slicing)] // length checked
-    stream
-        .read_exact(&mut buffer.buffer[l..])
-        .await?;
+    stream.read_exact(&mut buffer.buffer[l..]).await?;
 
     debug!("read_exact done");
     let seqn = buffer.seqn.0;
