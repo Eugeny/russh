@@ -80,3 +80,14 @@ jobs:
         cargo test --verbose --all-features
       env:
         RUST_BACKTRACE: 1
+
+  Minimal-versions:
+    runs-on: ubuntu-24.04
+
+    steps:
+    - uses: actions/checkout@v2
+    - uses: taiki-e/install-action@cargo-hack
+    - uses: taiki-e/install-action@cargo-minimal-versions
+
+    - name: Check with minimal dependency versions
+      run: cargo minimal-versions check --all-features
