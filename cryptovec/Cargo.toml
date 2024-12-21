@@ -17,7 +17,7 @@ ssh-encoding = { workspace = true, optional = true }
 winapi = {version = "0.3", features = ["basetsd", "minwindef", "memoryapi"]}
 
 [dev-dependencies]
-wasm-bindgen-test = "0.3"
+wasm-bindgen-test = "0.3.46"
 
 [features]
 ssh-encoding = ["dep:ssh-encoding"]
