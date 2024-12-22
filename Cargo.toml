@@ -16,9 +16,11 @@ byteorder = "1.4"
 bytes = "1.7"
 digest = "0.10"
 delegate = "0.13"
+env_logger = "0.6"
 futures = "0.3"
+home = "=0.5.5" # 0.5.6 changes MSRV
 hmac = "0.12"
-log = "0.4"
+log = "0.4.11"
 rand = "0.8"
 rsa = "0.9"
 sha1 = { version = "0.10.5", features = ["oid"] }
@@ -34,5 +36,5 @@ ssh-key = { version = "0.6.3", features = [
     "encryption",
 ] }
 thiserror = "1.0.30"
-tokio = { version = "1.40.0" }
+tokio = { version = "1.17.0" }
 tokio-stream = { version = "0.1.3", features = ["net", "sync"] }

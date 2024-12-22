@@ -1,7 +1,7 @@
 use std::convert::TryFrom;
 use std::future::Future;
 use std::io;
-use std::num::NonZero;
+use std::num::NonZeroUsize;
 use std::ops::DerefMut;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -77,7 +77,7 @@ where
         }
     }
 
-    fn poll_writable(&mut self, cx: &mut Context<'_>, buf_len: usize) -> Poll<NonZero<usize>> {
+    fn poll_writable(&mut self, cx: &mut Context<'_>, buf_len: usize) -> Poll<NonZeroUsize> {
         let window_size = self.window_size.clone();
         let window_size_fut = self
             .window_size_fut
@@ -87,7 +87,7 @@ where
 
         let writable = (self.max_packet_size).min(*window_size).min(buf_len as u32) as usize;
 
-        match NonZero::try_from(writable) {
+        match NonZeroUsize::try_from(writable) {
             Ok(w) => {
                 *window_size -= writable as u32;
                 if *window_size > 0 {
@@ -109,7 +109,7 @@ where
         &mut self,
         cx: &mut Context<'_>,
         buf: &[u8],
-    ) -> Poll<(ChannelMsg, NonZero<usize>)> {
+    ) -> Poll<(ChannelMsg, NonZeroUsize)> {
         let writable = ready!(self.poll_writable(cx, buf.len()));
 
         let mut data = CryptoVec::new_zeroed(writable.into());

@@ -267,8 +267,6 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
         writebuf: &mut CryptoVec,
     ) -> Result<bool, Error> {
         let (blob, key_pair) = {
-            use ssh_encoding::Decode;
-
             let private_key =
                 ssh_key::private::PrivateKey::new(ssh_key::private::KeypairData::decode(r)?, "")?;
             let _comment = String::decode(r)?;
