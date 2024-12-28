@@ -97,7 +97,7 @@ mod algorithm {
     }
 }
 
-use crate::key::PrivateKeyWithHashAlg;
-
 #[doc(hidden)]
 pub use algorithm::AlgorithmExt;
+
+use crate::key::PrivateKeyWithHashAlg;

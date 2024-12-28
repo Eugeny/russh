@@ -69,8 +69,8 @@ use crate::session::{
 use crate::ssh_read::SshRead;
 use crate::sshbuffer::{SSHBuffer, SshId};
 use crate::{
-    auth, msg, negotiation, strict_kex_violation, ChannelId, ChannelOpenFailure,
-    CryptoVec, Disconnect, Limits, Sig,
+    auth, msg, negotiation, strict_kex_violation, ChannelId, ChannelOpenFailure, CryptoVec,
+    Disconnect, Limits, Sig,
 };
 
 mod encrypted;
