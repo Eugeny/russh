@@ -19,7 +19,7 @@ use std::ops::Deref;
 
 use bytes::Bytes;
 use log::{debug, error, info, trace, warn};
-use russh_keys::helpers::{map_err, sign_workaround_encoded, AlgorithmExt, EncodedExt};
+use russh_keys::helpers::{map_err, sign_with_hash_alg, AlgorithmExt, EncodedExt};
 use ssh_encoding::{Decode, Encode};
 
 use crate::cert::PublicKeyOrCertificate;
@@ -1058,7 +1058,7 @@ impl Encrypted {
                     self.client_make_to_sign(user, &PublicKeyOrCertificate::from(key), buffer)?;
 
                 // Extend with self-signature.
-                sign_workaround_encoded(key, buffer)?.encode(&mut *buffer)?;
+                sign_with_hash_alg(key, buffer)?.encode(&mut *buffer)?;
 
                 push_packet!(self.write, {
                     #[allow(clippy::indexing_slicing)] // length checked

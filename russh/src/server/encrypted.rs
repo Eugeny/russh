@@ -24,8 +24,9 @@ use log::{debug, error, info, trace, warn};
 use negotiation::Select;
 use russh_keys::helpers::NameList;
 use russh_keys::map_err;
+use signature::Verifier;
 use ssh_encoding::{Decode, Encode, Reader};
-use ssh_key::PublicKey;
+use ssh_key::{PublicKey, Signature};
 use tokio::time::Instant;
 use {msg, negotiation};
 
@@ -33,7 +34,6 @@ use super::super::*;
 use super::*;
 use crate::msg::SSH_OPEN_ADMINISTRATIVELY_PROHIBITED;
 use crate::parsing::{ChannelOpenConfirmation, ChannelType, OpenChannelMessage};
-use crate::sig_workaround;
 
 impl Session {
     /// Returns false iff a request was rejected.
@@ -468,9 +468,7 @@ impl Encrypted {
 
                     let encoded_signature = map_err!(Vec::<u8>::decode(r))?;
 
-                    let sig = map_err!(sig_workaround::Sig::decode(
-                        &mut encoded_signature.as_slice()
-                    ))?;
+                    let sig = map_err!(Signature::decode(&mut encoded_signature.as_slice()))?;
 
                     let is_valid = if sent_pk_ok && user == auth_user {
                         true
@@ -492,7 +490,7 @@ impl Encrypted {
                             map_err!(session_id.encode(&mut *buf))?;
                             buf.extend(sig_init_buffer);
 
-                            Ok(sig_workaround::verify(&pubkey, &buf, &sig).is_ok())
+                            Ok(Verifier::verify(&pubkey, &buf, &sig).is_ok())
                         })? {
                             debug!("signature verified");
                             let auth = match pk_or_cert {

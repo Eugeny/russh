@@ -1,4 +1,6 @@
 use ssh_encoding::Encode;
+use ssh_key::private::KeypairData;
+use ssh_key::Algorithm;
 
 #[doc(hidden)]
 pub trait EncodedExt {
@@ -42,73 +44,17 @@ macro_rules! map_err {
 
 pub use map_err;
 
-mod signature_workarounds {
-    use rsa::{Pkcs1v15Sign, RsaPrivateKey};
-    use sha1::Sha1;
-    use sha2::{Digest, Sha256, Sha512};
-    use ssh_encoding::Encode;
-    use ssh_key::{Algorithm, HashAlg};
-
-    use crate::helpers::EncodedExt;
-    use crate::key::PrivateKeyWithHashAlg;
-
-    fn sign_rsa_with_hash_alg_encoded(
-        key: &RsaPrivateKey,
-        message: &[u8],
-        hash_alg: Option<HashAlg>,
-    ) -> ssh_key::Result<Vec<u8>> {
-        let signature = key.sign(
-            match hash_alg {
-                Some(HashAlg::Sha256) => Pkcs1v15Sign::new::<sha2::Sha256>(),
-                Some(HashAlg::Sha512) => Pkcs1v15Sign::new::<sha2::Sha512>(),
-                None => Pkcs1v15Sign::new::<sha1::Sha1>(),
-                _ => unreachable!(),
-            },
-            &match hash_alg {
-                Some(HashAlg::Sha256) => Sha256::digest(message).to_vec(),
-                Some(HashAlg::Sha512) => Sha512::digest(message).to_vec(),
-                None => Sha1::digest(message).to_vec(),
-                _ => unreachable!(),
-            },
-        )?;
-
-        // due to internal stable ssh_key hijinks, it's impossible to construct a pure ssh-rsa signature in any way so we just encode it manually
-
-        let mut buf = Vec::new();
-        Algorithm::Rsa { hash: hash_alg }.encode(&mut buf)?;
-        signature.to_vec().encode(&mut buf)?;
-        Ok(buf)
-    }
-
-    // TODO only needed until https://github.com/RustCrypto/SSH/pull/318 is released
-    // and until RSA-SHA1 signatures are implemented
-    pub fn sign_workaround_encoded(
-        key: &PrivateKeyWithHashAlg,
-        data: &[u8],
-    ) -> ssh_key::Result<Vec<u8>> {
-        Ok(match key.key_data() {
-            ssh_key::private::KeypairData::Rsa(rsa_keypair) => {
-                let pk = rsa::RsaPrivateKey::from_components(
-                    <rsa::BigUint as std::convert::TryFrom<_>>::try_from(&rsa_keypair.public.n)?,
-                    <rsa::BigUint as std::convert::TryFrom<_>>::try_from(&rsa_keypair.public.e)?,
-                    <rsa::BigUint as std::convert::TryFrom<_>>::try_from(&rsa_keypair.private.d)?,
-                    vec![
-                        <rsa::BigUint as std::convert::TryFrom<_>>::try_from(
-                            &rsa_keypair.private.p,
-                        )?,
-                        <rsa::BigUint as std::convert::TryFrom<_>>::try_from(
-                            &rsa_keypair.private.q,
-                        )?,
-                    ],
-                )?;
-                let Algorithm::Rsa { hash } = key.algorithm() else {
-                    unreachable!();
-                };
-                sign_rsa_with_hash_alg_encoded(&pk, data, hash)?
-            }
-            keypair => signature::Signer::try_sign(keypair, data)?.encoded()?,
-        })
-    }
+#[doc(hidden)]
+pub fn sign_with_hash_alg(key: &PrivateKeyWithHashAlg, data: &[u8]) -> ssh_key::Result<Vec<u8>> {
+    Ok(match key.key_data() {
+        KeypairData::Rsa(rsa_keypair) => {
+            let Algorithm::Rsa { hash } = key.algorithm() else {
+                unreachable!();
+            };
+            signature::Signer::try_sign(&(rsa_keypair, hash), data)?.encoded()?
+        }
+        keypair => signature::Signer::try_sign(keypair, data)?.encoded()?,
+    })
 }
 
 mod algorithm {
@@ -151,5 +97,7 @@ mod algorithm {
     }
 }
 
+use crate::key::PrivateKeyWithHashAlg;
+
 #[doc(hidden)]
-pub use {algorithm::AlgorithmExt, signature_workarounds::sign_workaround_encoded};
+pub use algorithm::AlgorithmExt;

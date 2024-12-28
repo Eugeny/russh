@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::ops::DerefMut;
 
 use log::debug;
-use russh_keys::helpers::sign_workaround_encoded;
+use russh_keys::helpers::sign_with_hash_alg;
 use russh_keys::key::PrivateKeyWithHashAlg;
 use ssh_encoding::Encode;
 use ssh_key::Algorithm;
@@ -149,7 +149,7 @@ impl KexDh {
                 debug!("hash: {:?}", hash);
                 debug!("key: {:?}", key);
 
-                sign_workaround_encoded(
+                sign_with_hash_alg(
                     &PrivateKeyWithHashAlg::new(Arc::new(key.clone()), signature_hash_alg)?,
                     &hash,
                 )?
