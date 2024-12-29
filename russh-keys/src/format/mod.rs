@@ -44,6 +44,9 @@ enum Format {
 /// Decode a secret key, possibly deciphering it with the supplied
 /// password.
 pub fn decode_secret_key(secret: &str, password: Option<&str>) -> Result<PrivateKey, Error> {
+    if secret.trim().starts_with("PuTTY-User-Key-File-") {
+        return Ok(PrivateKey::from_ppk(secret, password.map(Into::into))?);
+    }
     let mut format = None;
     let secret = {
         let mut started = false;
