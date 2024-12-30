@@ -125,6 +125,7 @@ impl AppServer {
             keys: vec![
                 russh_keys::PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap(),
             ],
+            nodelay: true,
             ..Default::default()
         };
 
