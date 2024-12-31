@@ -23,7 +23,7 @@ use ssh_encoding::Encode;
 use tokio::sync::oneshot;
 
 use crate::cipher::SealingKey;
-use crate::kex::KexAlgorithm;
+use crate::kex::{KexAlgorithm, KexAlgorithmImplementor};
 use crate::sshbuffer::SSHBuffer;
 use crate::{
     auth, cipher, mac, msg, negotiation, ChannelId, ChannelParams, CryptoVec, Disconnect, Limits,
@@ -35,7 +35,7 @@ pub(crate) struct Encrypted {
 
     // It's always Some, except when we std::mem::replace it temporarily.
     pub exchange: Option<Exchange>,
-    pub kex: Box<dyn KexAlgorithm + Send>,
+    pub kex: KexAlgorithm,
     pub key: usize,
     pub client_mac: mac::Name,
     pub server_mac: mac::Name,
@@ -590,7 +590,7 @@ pub(crate) struct KexDh {
 
 pub(crate) struct KexDhDone {
     pub exchange: Exchange,
-    pub kex: Box<dyn KexAlgorithm + Send>,
+    pub kex: KexAlgorithm,
     pub key: usize,
     pub session_id: Option<CryptoVec>,
     pub names: negotiation::Names,
@@ -642,7 +642,7 @@ impl KexDhDone {
 pub(crate) struct NewKeys {
     pub exchange: Exchange,
     pub names: negotiation::Names,
-    pub kex: Box<dyn KexAlgorithm + Send>,
+    pub kex: KexAlgorithm,
     pub key: usize,
     pub cipher: cipher::CipherPair,
     pub session_id: CryptoVec,

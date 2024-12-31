@@ -66,6 +66,7 @@ use crate::session::{
     CommonSession, EncryptedState, Exchange, GlobalRequestResponse, Kex, KexDhDone, KexInit,
     NewKeys,
 };
+use crate::kex::KexAlgorithmImplementor;
 use crate::ssh_read::SshRead;
 use crate::sshbuffer::{SSHBuffer, SshId};
 use crate::{

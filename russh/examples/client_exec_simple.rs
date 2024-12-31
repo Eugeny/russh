@@ -92,7 +92,7 @@ impl Session {
 
         let mut session = client::connect(config, addrs, sh).await?;
         let auth_res = session
-            .authenticate_publickey(user, PrivateKeyWithHashAlg::new(Arc::new(key_pair), None)?)
+            .authenticate_publickey(user, PrivateKeyWithHashAlg::new(Arc::new(key_pair), Some(HashAlg::Sha512))?)
             .await?;
 
         if !auth_res {

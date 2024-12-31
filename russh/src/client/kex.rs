@@ -1,8 +1,9 @@
 use log::{debug, trace};
+use russh_cryptovec::CryptoVec;
 
 use crate::cipher::SealingKey;
 use crate::client::Config;
-use crate::kex::KEXES;
+use crate::kex::{KexAlgorithmImplementor, KEXES};
 use crate::negotiation;
 use crate::negotiation::Select;
 use crate::session::{KexDhDone, KexInit};
@@ -29,28 +30,20 @@ impl KexInit {
             self.client_write(config, cipher, write_buffer)?
         }
 
-        // This function is called from the public API.
-        //
-        // In order to simplify the public API, we reuse the
-        // self.exchange.client_kex buffer to send an extra packet,
-        // then truncate that buffer. Without that, we would need an
-        // extra buffer.
-        let i0 = self.exchange.client_kex_init.len();
-        debug!("i0 = {:?}", i0);
-
         let mut kex = KEXES
             .get(&algo.kex)
             .ok_or(crate::Error::UnknownAlgo)?
             .make();
 
+        let mut buf = CryptoVec::new();
+
         kex.client_dh(
             &mut self.exchange.client_ephemeral,
-            &mut self.exchange.client_kex_init,
+            &mut buf,
         )?;
 
         #[allow(clippy::indexing_slicing)] // length checked
-        cipher.write(&self.exchange.client_kex_init[i0..], write_buffer);
-        self.exchange.client_kex_init.resize(i0);
+        cipher.write(&buf, write_buffer);
 
         debug!("moving to kexdhdone, exchange = {:?}", self.exchange);
         Ok(KexDhDone {

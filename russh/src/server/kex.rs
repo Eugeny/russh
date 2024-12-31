@@ -9,7 +9,7 @@ use ssh_key::Algorithm;
 
 use super::*;
 use crate::cipher::SealingKey;
-use crate::kex::KEXES;
+use crate::kex::{KexAlgorithmImplementor, KEXES};
 use crate::negotiation::{is_key_compatible_with_algo, Select};
 use crate::{msg, negotiation};
 

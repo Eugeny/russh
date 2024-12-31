@@ -25,6 +25,7 @@ use ssh_encoding::{Decode, Encode};
 use crate::cert::PublicKeyOrCertificate;
 use crate::client::{Handler, Msg, Prompt, Reply, Session};
 use crate::keys::key::parse_public_key;
+use crate::kex::KexAlgorithmImplementor;
 use crate::negotiation::Select;
 use crate::parsing::{ChannelOpenConfirmation, ChannelType, OpenChannelMessage};
 use crate::session::{Encrypted, EncryptedState, GlobalRequestResponse, Kex, KexInit};
