@@ -32,7 +32,13 @@ use dh::{
 };
 use digest::Digest;
 use ecdh_nistp::{EcdhNistP256KexType, EcdhNistP384KexType, EcdhNistP521KexType};
+use enum_dispatch::enum_dispatch;
 use once_cell::sync::Lazy;
+use p256::NistP256;
+use p384::NistP384;
+use p521::NistP521;
+use sha1::Sha1;
+use sha2::{Sha256, Sha384, Sha512};
 use ssh_encoding::{Encode, Writer};
 
 use crate::cipher::CIPHERS;
@@ -40,18 +46,50 @@ use crate::mac::{self, MACS};
 use crate::session::Exchange;
 use crate::{cipher, CryptoVec};
 
-pub(crate) trait KexType {
-    fn make(&self) -> Box<dyn KexAlgorithm + Send>;
+#[enum_dispatch(KexAlgorithmImplementor)]
+pub(crate) enum KexAlgorithm {
+    DhGroupKexSha1(dh::DhGroupKex<Sha1>),
+    DhGroupKexSha256(dh::DhGroupKex<Sha256>),
+    DhGroupKexSha512(dh::DhGroupKex<Sha512>),
+    Curve25519Kex(curve25519::Curve25519Kex),
+    EcdhNistP256Kex(ecdh_nistp::EcdhNistPKex<NistP256, Sha256>),
+    EcdhNistP384Kex(ecdh_nistp::EcdhNistPKex<NistP384, Sha384>),
+    EcdhNistP521Kex(ecdh_nistp::EcdhNistPKex<NistP521, Sha512>),
+    None(none::NoneKexAlgorithm),
 }
 
-impl Debug for dyn KexAlgorithm + Send {
+pub(crate) trait KexType {
+    fn make(&self) -> KexAlgorithm;
+}
+
+impl Debug for KexAlgorithm {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "KexAlgorithm")
     }
 }
 
-pub(crate) trait KexAlgorithm {
+#[enum_dispatch]
+pub(crate) trait KexAlgorithmImplementor {
     fn skip_exchange(&self) -> bool;
+
+    fn server_dh_gex_init(
+        &mut self,
+        _exchange: &mut Exchange,
+        _payload: &[u8],
+    ) -> Result<(), crate::Error> {
+        Err(crate::Error::KexInit)
+    }
+
+    #[allow(dead_code)]
+    fn client_dh_gex_init(
+        &mut self,
+        _gex_min: u32,
+        _gex_n: u32,
+        _gex_max: u32,
+        _buf: &mut CryptoVec,
+    ) -> Result<(), crate::Error> {
+        Err(crate::Error::KexInit)
+    }
 
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     fn server_dh(&mut self, exchange: &mut Exchange, payload: &[u8]) -> Result<(), crate::Error>;
@@ -59,7 +97,7 @@ pub(crate) trait KexAlgorithm {
     fn client_dh(
         &mut self,
         client_ephemeral: &mut CryptoVec,
-        buf: &mut CryptoVec,
+        writer: &mut impl Writer,
     ) -> Result<(), crate::Error>;
 
     fn compute_shared_secret(&mut self, remote_pubkey_: &[u8]) -> Result<(), crate::Error>;
