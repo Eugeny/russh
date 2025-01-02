@@ -38,7 +38,7 @@ use std::task::{Context, Poll};
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::future::Future;
-use log::{debug, error};
+use log::{debug, error, warn};
 use russh_keys::map_err;
 use russh_util::runtime::JoinHandle;
 use ssh_key::{Certificate, PrivateKey};
@@ -91,6 +91,8 @@ pub struct Config {
     pub keepalive_interval: Option<std::time::Duration>,
     /// If this many keepalives have been sent without reply, close the connection.
     pub keepalive_max: usize,
+    /// If active, invoke `set_nodelay(true)` on client sockets; disabled by default (i.e. Nagle's algorithm is active).
+    pub nodelay: bool,
 }
 
 impl Default for Config {
@@ -115,6 +117,7 @@ impl Default for Config {
             inactivity_timeout: Some(std::time::Duration::from_secs(600)),
             keepalive_interval: None,
             keepalive_max: 3,
+            nodelay: false,
         }
     }
 }
@@ -757,7 +760,14 @@ pub trait Server {
                             let config = config.clone();
                             let handler = self.new_client(socket.peer_addr().ok());
                             let error_tx = error_tx.clone();
+
                             russh_util::runtime::spawn(async move {
+                                if config.nodelay {
+                                    if let Err(e) = socket.set_nodelay(true) {
+                                        warn!("set_nodelay() failed: {e:?}");
+                                    }
+                                }
+
                                 let session = match run_stream(config, socket, handler).await {
                                     Ok(s) => s,
                                     Err(e) => {
@@ -766,6 +776,7 @@ pub trait Server {
                                         return
                                     }
                                 };
+
                                 match session.await {
                                     Ok(_) => debug!("Connection closed"),
                                     Err(e) => {
@@ -775,9 +786,11 @@ pub trait Server {
                                 }
                             });
                         }
+
                         _ => break,
                     }
                 },
+
                 Some(error) = error_rx.recv() => {
                     self.handle_session_error(error);
                 }
