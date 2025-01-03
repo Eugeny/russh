@@ -17,7 +17,7 @@ use std::borrow::Cow;
 use log::debug;
 use rand::RngCore;
 use russh_keys::helpers::NameList;
-use ssh_encoding::{Decode, Encode};
+use ssh_encoding::{Decode, Encode, Writer};
 use ssh_key::{Algorithm, EcdsaCurve, HashAlg, PrivateKey};
 
 use crate::cipher::CIPHERS;
@@ -377,16 +377,18 @@ impl Select for Client {
 
 pub fn write_kex(
     prefs: &Preferred,
-    buf: &mut CryptoVec,
+    buf: &mut impl Writer,
     server_config: Option<&Config>,
 ) -> Result<(), Error> {
     // buf.clear();
-    buf.push(msg::KEXINIT);
+    msg::KEXINIT.encode(buf)?;
 
     let mut cookie = [0; 16];
     rand::thread_rng().fill_bytes(&mut cookie);
+    for i in 0..16 {
+        cookie[i].encode(buf)?;
+    }
 
-    buf.extend(&cookie); // cookie
     NameList(
         prefs
             .kex
@@ -479,7 +481,7 @@ pub fn write_kex(
     Vec::<String>::new().encode(buf)?; // languages client to server
     Vec::<String>::new().encode(buf)?; // languages server to client
 
-    buf.push(0); // doesn't follow
-    buf.extend(&[0, 0, 0, 0]); // reserved
+    0u8.encode(buf)?; // doesn't follow
+    0u32.encode(buf)?; // reserved
     Ok(())
 }

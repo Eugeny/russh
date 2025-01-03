@@ -46,6 +46,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use futures::task::{Context, Poll};
 use futures::Future;
+use kex::ClientKex;
 use log::{debug, error, info, trace};
 use russh_keys::key::PrivateKeyWithHashAlg;
 use russh_keys::map_err;
@@ -61,17 +62,16 @@ use tokio::sync::oneshot;
 
 use crate::channels::{Channel, ChannelMsg, ChannelRef, WindowSizeRef};
 use crate::cipher::{self, clear, CipherPair, OpeningKey};
+use crate::kex::{Kex, KexAlgorithmImplementor, KexProgress};
 use crate::keys::key::parse_public_key;
 use crate::session::{
-    CommonSession, EncryptedState, Exchange, GlobalRequestResponse, Kex, KexDhDone, KexInit,
-    NewKeys,
+    CommonSession, EncryptedState, Exchange, GlobalRequestResponse, KexDhDone, KexInit, NewKeys,
 };
-use crate::kex::KexAlgorithmImplementor;
 use crate::ssh_read::SshRead;
-use crate::sshbuffer::{SSHBuffer, SshId};
+use crate::sshbuffer::{IncomingSshPacket, PacketWriter, SSHBuffer, SshId};
 use crate::{
     auth, msg, negotiation, strict_kex_violation, ChannelId, ChannelOpenFailure, CryptoVec,
-    Disconnect, Limits, Sig,
+    Disconnect, Error, Limits, Sig,
 };
 
 mod encrypted;
@@ -85,6 +85,7 @@ mod session;
 /// allows sending messages to the server.
 #[derive(Debug)]
 pub struct Session {
+    kex: Option<ClientKex>,
     common: CommonSession<Arc<Config>>,
     receiver: Receiver<Msg>,
     sender: UnboundedSender<Reply>,
@@ -757,7 +758,6 @@ where
         config.window_size,
         CommonSession {
             write_buffer,
-            kex: None,
             auth_user: String::new(),
             auth_attempts: 0,
             auth_method: None, // Client only.
@@ -808,6 +808,26 @@ async fn start_reading<R: AsyncRead + Unpin>(
 }
 
 impl Session {
+    fn maybe_decompress(&mut self, buffer: &SSHBuffer) -> Result<IncomingSshPacket, Error> {
+        if let Some(ref mut enc) = self.common.encrypted {
+            let mut decomp = CryptoVec::new();
+            Ok(IncomingSshPacket {
+                #[allow(clippy::indexing_slicing)] // length checked
+                buffer: enc.decompress.decompress(
+                    &buffer.buffer[5..],
+                    &mut decomp,
+                )?.into(),
+                seqn: buffer.seqn,
+            })
+        } else {
+            Ok(IncomingSshPacket {
+                #[allow(clippy::indexing_slicing)] // length checked
+                buffer: buffer.buffer[5..].into(),
+                seqn: buffer.seqn,
+            })
+        }
+    }
+
     fn new(
         target_window_size: u32,
         common: CommonSession<Arc<Config>>,
@@ -819,6 +839,7 @@ impl Session {
             common,
             receiver,
             sender,
+            kex: None,
             target_window_size,
             inbound_channel_sender,
             inbound_channel_receiver,
@@ -892,7 +913,6 @@ impl Session {
             map_err!(stream_write.flush().await)?;
         }
         self.common.write_buffer.buffer.clear();
-        let mut decomp = CryptoVec::new();
 
         let buffer = SSHBuffer::new();
 
@@ -928,27 +948,15 @@ impl Session {
                         break
                     }
 
-                    let buf = if let Some(ref mut enc) = self.common.encrypted {
+                    let mut pkt = self.maybe_decompress(&buffer)?;
+                    dbg!(&pkt);
+                    if !pkt.buffer.is_empty() {
                         #[allow(clippy::indexing_slicing)] // length checked
-                        if let Ok(buf) = enc.decompress.decompress(
-                            &buffer.buffer[5..],
-                            &mut decomp,
-                        ) {
-                            buf
-                        } else {
-                            break
-                        }
-                    } else {
-                        #[allow(clippy::indexing_slicing)] // length checked
-                        &buffer.buffer[5..]
-                    };
-                    if !buf.is_empty() {
-                        #[allow(clippy::indexing_slicing)] // length checked
-                        if buf[0] == crate::msg::DISCONNECT {
-                            result = self.process_disconnect(&buf[1..]);
+                        if pkt.buffer[0] == crate::msg::DISCONNECT {
+                            result = self.process_disconnect(&pkt.buffer[1..]); // TODO pass pkt
                         } else {
                             self.common.received_data = true;
-                            reply(self, handler, kex_done_signal, &mut buffer.seqn, buf).await?;
+                            reply(self, handler, kex_done_signal, &mut pkt).await?;
                         }
                     }
 
@@ -1222,34 +1230,26 @@ impl Session {
     }
 
     fn is_rekeying(&self) -> bool {
-        if let Some(ref enc) = self.common.encrypted {
-            enc.rekey.is_some()
-        } else {
-            true
-        }
+        self.kex.is_some()
     }
 
     fn read_ssh_id(&mut self, sshid: &[u8]) -> Result<(), crate::Error> {
         // self.read_buffer.bytes += sshid.bytes_read + 2;
-        let mut exchange = Exchange::new();
-        exchange.server_id.extend(sshid);
-        // Preparing the response
-        exchange
-            .client_id
-            .extend(self.common.config.client_id.as_kex_hash_bytes());
-        let mut kexinit = KexInit {
-            exchange,
-            algo: None,
-            sent: false,
-            session_id: None,
-        };
+        let mut kex = ClientKex::new(
+            self.common.config.clone(),
+            &self.common.config.client_id,
+            sshid,
+            None,
+        );
+
+        let kexinit_data = kex.kexinit()?;
         self.common.write_buffer.buffer.clear();
-        kexinit.client_write(
-            self.common.config.as_ref(),
-            &mut *self.common.cipher.local_to_remote,
-            &mut self.common.write_buffer,
-        )?;
-        self.common.kex = Some(Kex::Init(kexinit));
+        self.common
+            .cipher
+            .local_to_remote
+            .write(&kexinit_data, &mut self.common.write_buffer);
+
+        self.kex = Some(kex);
         Ok(())
     }
 
@@ -1263,16 +1263,22 @@ impl Session {
                 &mut self.common.write_buffer,
             )? {
                 info!("Re-exchanging keys");
-                if enc.rekey.is_none() {
-                    if let Some(exchange) = enc.exchange.take() {
-                        let mut kexinit = KexInit::initiate_rekey(exchange, &enc.session_id);
-                        kexinit.client_write(
-                            self.common.config.as_ref(),
-                            &mut *self.common.cipher.local_to_remote,
-                            &mut self.common.write_buffer,
-                        )?;
-                        enc.rekey = Some(Kex::Init(kexinit))
-                    }
+                if self.kex.is_none() {
+                    let mut kex = ClientKex::new(
+                        self.common.config.clone(),
+                        &self.common.config.client_id,
+                        &self.common.remote_sshid,
+                        Some(enc.session_id.clone()),
+                    );
+
+                    let kexinit_data = kex.kexinit()?;
+                    self.common.write_buffer.buffer.clear();
+                    self.common
+                        .cipher
+                        .local_to_remote
+                        .write(&kexinit_data, &mut self.common.write_buffer);
+
+                    self.kex = Some(kex);
                 }
             }
         }
@@ -1280,85 +1286,16 @@ impl Session {
     }
 }
 
-thread_local! {
-    static HASH_BUFFER: RefCell<CryptoVec> = RefCell::new(CryptoVec::new());
-}
-
-impl KexDhDone {
-    async fn server_key_check<H: Handler, R: Reader>(
-        mut self,
-        rekey: bool,
-        handler: &mut H,
-        r: &mut R,
-    ) -> Result<NewKeys, H::Error> {
-        let pubkey = map_err!(Bytes::decode(r))?; // server public key.
-        let pubkey = map_err!(parse_public_key(&pubkey))?;
-        debug!("server_public_Key: {:?}", pubkey);
-        if !rekey {
-            let check = handler.check_server_key(&pubkey).await?;
-            if !check {
-                return Err(crate::Error::UnknownKey.into());
-            }
-        }
-        HASH_BUFFER.with(|buffer| {
-            let mut buffer = buffer.borrow_mut();
-            buffer.clear();
-            let hash = {
-                let server_ephemeral = map_err!(Bytes::decode(r))?;
-                self.exchange.server_ephemeral.extend(&server_ephemeral);
-                let signature = map_err!(Bytes::decode(r))?;
-
-                self.kex
-                    .compute_shared_secret(&self.exchange.server_ephemeral)?;
-                debug!("kexdhdone.exchange = {:?}", self.exchange);
-
-                let mut pubkey_vec = CryptoVec::new();
-                map_err!(map_err!(pubkey.to_bytes())?.encode(&mut pubkey_vec))?;
-
-                let hash =
-                    self.kex
-                        .compute_exchange_hash(&pubkey_vec, &self.exchange, &mut buffer)?;
-
-                debug!("exchange hash: {:?}", hash);
-                let (sig_type, signature) = {
-                    let mut r = &signature[..];
-                    let sig_type = map_err!(String::decode(&mut r))?;
-                    debug!("sig_type: {:?}", sig_type);
-                    (
-                        map_err!(Algorithm::from_str(&sig_type).map_err(ssh_encoding::Error::from))?,
-                        map_err!(Bytes::decode(&mut r))?,
-                    )
-                };
-
-                debug!("signature: {:?}", signature);
-                let signature =
-                    Signature::new(sig_type, signature.to_vec()).map_err(|e| {
-                        debug!("signature ctor failed: {e:?}");
-                        crate::Error::WrongServerSig
-                    })?;
-                if let Err(e) = Verifier::verify(&pubkey, hash.as_ref(), &signature) {
-                    debug!("wrong server sig: {e:?}");
-                    return Err(crate::Error::WrongServerSig.into());
-                }
-                hash
-            };
-            let mut newkeys = self.compute_keys(hash, false)?;
-            newkeys.sent = true;
-            Ok(newkeys)
-        })
-    }
-}
-
 async fn reply<H: Handler>(
     session: &mut Session,
     handler: &mut H,
     kex_done_signal: &mut Option<tokio::sync::oneshot::Sender<()>>,
-    seqn: &mut Wrapping<u32>,
-    buf: &[u8],
+    pkt: &mut IncomingSshPacket,
 ) -> Result<(), H::Error> {
-    if let Some(message_type) = buf.first() {
+    if let Some(message_type) = pkt.buffer.first() {
+        dbg!(message_type);
         if session.common.strict_kex && session.common.encrypted.is_none() {
-            let seqno = seqn.0 - 1; // was incremented after read()
+            let seqno = pkt.seqn.0 - 1; // was incremented after read()
             if let Some(expected) = STRICT_KEX_MSG_ORDER.get(seqno as usize) {
                 if message_type != expected {
                     return Err(strict_kex_violation(*message_type, seqno as usize).into());
@@ -1371,91 +1308,65 @@ async fn reply<H: Handler>(
         }
     }
 
-    match session.common.kex.take() {
-        Some(Kex::Init(kexinit)) => {
-            if kexinit.algo.is_some()
-                || buf.first() == Some(&msg::KEXINIT)
-                || session.common.encrypted.is_none()
-            {
-                let done = kexinit.client_parse(
-                    session.common.config.as_ref(),
-                    &mut *session.common.cipher.local_to_remote,
-                    buf,
-                    &mut session.common.write_buffer,
-                )?;
+    if let Some(kex) = session.kex.take() {
+        let mut writer = PacketWriter::new(
+            session.common.cipher.local_to_remote.as_mut(),
+            &mut session.common.write_buffer,
+        );
 
-                // seqno has already been incremented after read()
-                if done.names.strict_kex && seqn.0 != 1 {
-                    return Err(strict_kex_violation(msg::KEXINIT, seqn.0 as usize - 1).into());
+        let progress = kex.step(Some(pkt), &mut writer)?;
+        debug!("kex step, result={progress:?}");
+
+        match progress {
+            KexProgress::NeedsReply { kex, reset_seqn } => {
+                session.kex = Some(kex);
+                if reset_seqn {
+                    session.common.maybe_reset_seqn();
                 }
-
-                if done.kex.skip_exchange() {
-                    session.common.encrypted(
-                        initial_encrypted_state(session),
-                        done.compute_keys(CryptoVec::new(), false)?,
-                    );
-
-                    if let Some(sender) = kex_done_signal.take() {
-                        sender.send(()).unwrap_or(());
-                    }
-                } else {
-                    session.common.kex = Some(Kex::DhDone(done));
-                }
-                session.flush()?;
             }
-            Ok(())
-        }
-        Some(Kex::DhDone(mut kexdhdone)) => {
-            if kexdhdone.names.ignore_guessed {
-                kexdhdone.names.ignore_guessed = false;
-                session.common.kex = Some(Kex::DhDone(kexdhdone));
-                Ok(())
-            } else if buf.first() == Some(&msg::KEX_ECDH_REPLY) {
-                // We've sent ECDH_INIT, waiting for ECDH_REPLY
+            KexProgress::Done {
+                server_host_key,
+                mut newkeys,
+            } => {
+                writer.packet(|w| {
+                    msg::NEWKEYS.encode(w)?;
+                    Ok(())
+                })?;
+                drop(writer);
 
-                #[allow(clippy::indexing_slicing)] // length checked
-                let kex = kexdhdone
-                    .server_key_check(false, handler, &mut &buf[1..])
-                    .await?;
+                if let Some(server_host_key) = &server_host_key {
+                    let check = handler.check_server_key(server_host_key).await?;
+                    if !check {
+                        return Err(crate::Error::UnknownKey.into());
+                    }
+                }
 
-                session.common.strict_kex = session.common.strict_kex || kex.names.strict_kex;
-                session.common.kex = Some(Kex::Keys(kex));
+                newkeys.sent = true;
+
+                session.common.strict_kex = session.common.strict_kex || newkeys.names.strict_kex;
+                // session.kex = Some(Kex::Keys(newkeys));
+
+                if let Some(sender) = kex_done_signal.take() {
+                    sender.send(()).unwrap_or(());
+                }
+
                 session
                     .common
-                    .cipher
-                    .local_to_remote
-                    .write(&[msg::NEWKEYS], &mut session.common.write_buffer);
-                session.flush()?;
-                session.common.maybe_reset_seqn();
-                Ok(())
-            } else {
-                error!("Wrong packet received");
-                Err(crate::Error::Inconsistent.into())
+                    .encrypted(initial_encrypted_state(session), newkeys);
+                // Ok, NEWKEYS received, now encrypted.
+                if session.common.strict_kex {
+                    pkt.seqn = Wrapping(0);
+                }
+                //TODO
             }
         }
-        Some(Kex::Keys(newkeys)) => {
-            debug!("newkeys received");
-            if buf.first() != Some(&msg::NEWKEYS) {
-                return Err(crate::Error::Kex.into());
-            }
-            if let Some(sender) = kex_done_signal.take() {
-                sender.send(()).unwrap_or(());
-            }
-            session
-                .common
-                .encrypted(initial_encrypted_state(session), newkeys);
-            // Ok, NEWKEYS received, now encrypted.
-            if session.common.strict_kex {
-                *seqn = Wrapping(0);
-            }
-            Ok(())
-        }
-        Some(kex) => {
-            session.common.kex = Some(kex);
-            Ok(())
-        }
-        None => session.client_read_encrypted(handler, seqn, buf).await,
+
+        session.flush()?;
+
+        return Ok(());
     }
+
+    session.client_read_encrypted(handler, pkt).await
 }
 
 fn initial_encrypted_state(session: &Session) -> EncryptedState {

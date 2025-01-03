@@ -892,12 +892,7 @@ async fn read_ssh_id<R: AsyncRead + Unpin>(
     } else {
         read.read_ssh_id().await?
     };
-    let mut exchange = Exchange::new();
-    exchange.client_id.extend(sshid);
-    // Preparing the response
-    exchange
-        .server_id
-        .extend(config.as_ref().server_id.as_kex_hash_bytes());
+    let exchange = Exchange::new(sshid, config.as_ref().server_id.as_kex_hash_bytes());
     let mut kexinit = KexInit {
         exchange,
         algo: None,
@@ -916,7 +911,7 @@ async fn read_ssh_id<R: AsyncRead + Unpin>(
     )?;
     Ok(CommonSession {
         write_buffer,
-        kex: Some(Kex::Init(kexinit)),
+        // kex: Some(Kex::Init(kexinit)),
         auth_user: String::new(),
         auth_method: None, // Client only.
         auth_attempts: 0,
@@ -958,67 +953,67 @@ async fn reply<H: Handler + Send>(
 
     // Handle key exchange/re-exchange.
     if session.common.encrypted.is_none() {
-        match session.common.kex.take() {
-            Some(Kex::Init(kexinit)) => {
-                if kexinit.algo.is_some() || buf.first() == Some(&msg::KEXINIT) {
-                    session.common.kex = Some(kexinit.server_parse(
-                        session.common.config.as_ref(),
-                        &mut *session.common.cipher.local_to_remote,
-                        buf,
-                        &mut session.common.write_buffer,
-                    )?);
-                    if let Some(Kex::Dh(KexDh { ref names, .. })) = session.common.kex {
-                        session.common.strict_kex = names.strict_kex;
-                    }
-                    // seqno has already been incremented after read()
-                    if session.common.strict_kex && seqn.0 != 1 {
-                        return Err(strict_kex_violation(msg::KEXINIT, seqn.0 as usize - 1).into());
-                    }
-                    return Ok(());
-                } else {
-                    // Else, i.e. if the other side has not started
-                    // the key exchange, process its packets by simple
-                    // not returning.
-                    session.common.kex = Some(Kex::Init(kexinit))
-                }
-            }
-            Some(Kex::Dh(kexdh)) => {
-                session.common.kex = Some(kexdh.parse(
-                    session.common.config.as_ref(),
-                    &mut *session.common.cipher.local_to_remote,
-                    buf,
-                    &mut session.common.write_buffer,
-                )?);
-                if let Some(Kex::Keys(_)) = session.common.kex {
-                    // just sent NEWKEYS
-                    session.common.maybe_reset_seqn();
-                }
-                return Ok(());
-            }
-            Some(Kex::Keys(newkeys)) => {
-                if buf.first() != Some(&msg::NEWKEYS) {
-                    return Err(Error::Kex.into());
-                }
-                // Ok, NEWKEYS received, now encrypted.
-                session.common.encrypted(
-                    EncryptedState::WaitingAuthServiceRequest {
-                        sent: false,
-                        accepted: false,
-                    },
-                    newkeys,
-                );
-                session.maybe_send_ext_info()?;
-                if session.common.strict_kex {
-                    *seqn = Wrapping(0);
-                }
-                return Ok(());
-            }
-            Some(kex) => {
-                session.common.kex = Some(kex);
-                return Ok(());
-            }
-            None => {}
-        }
+        // match session.common.kex.take() {
+        //     Some(Kex::Init(kexinit)) => {
+        //         if kexinit.algo.is_some() || buf.first() == Some(&msg::KEXINIT) {
+        //             session.common.kex = Some(kexinit.server_parse(
+        //                 session.common.config.as_ref(),
+        //                 &mut *session.common.cipher.local_to_remote,
+        //                 buf,
+        //                 &mut session.common.write_buffer,
+        //             )?);
+        //             if let Some(Kex::Dh(KexDh { ref names, .. })) = session.common.kex {
+        //                 session.common.strict_kex = names.strict_kex;
+        //             }
+        //             // seqno has already been incremented after read()
+        //             if session.common.strict_kex && seqn.0 != 1 {
+        //                 return Err(strict_kex_violation(msg::KEXINIT, seqn.0 as usize - 1).into());
+        //             }
+        //             return Ok(());
+        //         } else {
+        //             // Else, i.e. if the other side has not started
+        //             // the key exchange, process its packets by simple
+        //             // not returning.
+        //             session.common.kex = Some(Kex::Init(kexinit))
+        //         }
+        //     }
+        //     Some(Kex::Dh(kexdh)) => {
+        //         session.common.kex = Some(kexdh.parse(
+        //             session.common.config.as_ref(),
+        //             &mut *session.common.cipher.local_to_remote,
+        //             buf,
+        //             &mut session.common.write_buffer,
+        //         )?);
+        //         if let Some(Kex::Keys(_)) = session.common.kex {
+        //             // just sent NEWKEYS
+        //             session.common.maybe_reset_seqn();
+        //         }
+        //         return Ok(());
+        //     }
+        //     Some(Kex::Keys(newkeys)) => {
+        //         if buf.first() != Some(&msg::NEWKEYS) {
+        //             return Err(Error::Kex.into());
+        //         }
+        //         // Ok, NEWKEYS received, now encrypted.
+        //         session.common.encrypted(
+        //             EncryptedState::WaitingAuthServiceRequest {
+        //                 sent: false,
+        //                 accepted: false,
+        //             },
+        //             newkeys,
+        //         );
+        //         session.maybe_send_ext_info()?;
+        //         if session.common.strict_kex {
+        //             *seqn = Wrapping(0);
+        //         }
+        //         return Ok(());
+        //     }
+        //     Some(kex) => {
+        //         session.common.kex = Some(kex);
+        //         return Ok(());
+        //     }
+        //     None => {}
+        // }
         Ok(())
     } else {
         Ok(session.server_read_encrypted(handler, seqn, buf).await?)

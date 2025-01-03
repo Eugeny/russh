@@ -27,6 +27,7 @@ use crate::kex::{KexAlgorithm, KexAlgorithmImplementor};
 use crate::sshbuffer::SSHBuffer;
 use crate::{
     auth, cipher, mac, msg, negotiation, ChannelId, ChannelParams, CryptoVec, Disconnect, Limits,
+    SshId,
 };
 
 #[derive(Debug)]
@@ -40,7 +41,6 @@ pub(crate) struct Encrypted {
     pub client_mac: mac::Name,
     pub server_mac: mac::Name,
     pub session_id: CryptoVec,
-    pub rekey: Option<Kex>,
     pub channels: HashMap<ChannelId, ChannelParams>,
     pub last_channel_id: Wrapping<u32>,
     pub write: CryptoVec,
@@ -63,7 +63,6 @@ pub(crate) struct CommonSession<Config> {
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub(crate) auth_attempts: usize,
     pub write_buffer: SSHBuffer,
-    pub kex: Option<Kex>,
     pub cipher: cipher::CipherPair,
     pub wants_reply: bool,
     pub disconnected: bool,
@@ -122,7 +121,7 @@ impl<C> CommonSession<C> {
             server_mac: newkeys.names.server_mac,
             session_id: newkeys.session_id,
             state,
-            rekey: None,
+            // rekey: None,
             channels: HashMap::new(),
             last_channel_id: Wrapping(1),
             write: CryptoVec::new(),
@@ -386,7 +385,9 @@ impl Encrypted {
     pub fn data(&mut self, channel: ChannelId, buf0: CryptoVec) -> Result<(), crate::Error> {
         if let Some(channel) = self.channels.get_mut(&channel) {
             assert!(channel.confirmed);
-            if !channel.pending_data.is_empty() || self.rekey.is_some() {
+            if !channel.pending_data.is_empty() {
+                // TODO Restore
+                // if !channel.pending_data.is_empty() || self.rekey.is_some() {
                 channel.pending_data.push_back((buf0, None, 0));
                 return Ok(());
             }
@@ -423,7 +424,7 @@ impl Encrypted {
     pub fn flush(
         &mut self,
         limits: &Limits,
-        cipher: &mut dyn SealingKey,
+        cipher: &mut (dyn SealingKey + Send),
         write_buffer: &mut SSHBuffer,
     ) -> Result<bool, crate::Error> {
         // If there are pending packets (and we've not started to rekey), flush them.
@@ -511,14 +512,11 @@ pub struct Exchange {
 }
 
 impl Exchange {
-    pub fn new() -> Self {
+    pub fn new(client_id: &[u8], server_id: &[u8]) -> Self {
         Exchange {
-            client_id: CryptoVec::new(),
-            server_id: CryptoVec::new(),
-            client_kex_init: CryptoVec::new(),
-            server_kex_init: CryptoVec::new(),
-            client_ephemeral: CryptoVec::new(),
-            server_ephemeral: CryptoVec::new(),
+            client_id: client_id.into(),
+            server_id: server_id.into(),
+            ..Default::default()
         }
     }
 }

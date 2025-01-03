@@ -40,11 +40,38 @@ use p521::NistP521;
 use sha1::Sha1;
 use sha2::{Sha256, Sha384, Sha512};
 use ssh_encoding::{Encode, Writer};
+use ssh_key::PublicKey;
 
 use crate::cipher::CIPHERS;
 use crate::mac::{self, MACS};
-use crate::session::Exchange;
-use crate::{cipher, CryptoVec};
+use crate::session::{Exchange, NewKeys};
+use crate::sshbuffer::{IncomingSshPacket, PacketWriter};
+use crate::{cipher, CryptoVec, Error};
+
+#[derive(Debug)]
+pub(crate) enum KexProgress<T> {
+    NeedsReply {
+        kex: T,
+        reset_seqn: bool,
+    },
+    Done {
+        server_host_key: Option<PublicKey>,
+        newkeys: NewKeys,
+    },
+}
+
+pub(crate) trait Kex
+where
+    Self: Sized,
+{
+    fn kexinit(&mut self) -> Result<CryptoVec, Error>;
+
+    fn step(
+        self,
+        input: Option<&mut IncomingSshPacket>,
+        writer: &mut PacketWriter,
+    ) -> Result<KexProgress<Self>, Error>;
+}
 
 #[enum_dispatch(KexAlgorithmImplementor)]
 pub(crate) enum KexAlgorithm {

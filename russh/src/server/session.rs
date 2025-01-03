@@ -423,11 +423,11 @@ impl Handle {
 
 impl Session {
     pub(crate) fn is_rekeying(&self) -> bool {
-        if let Some(ref enc) = self.common.encrypted {
-            enc.rekey.is_some()
-        } else {
+        // if let Some(ref enc) = self.common.encrypted {
+        //     enc.rekey.is_some()
+        // } else {
             true
-        }
+        // }
     }
 
     pub(crate) async fn run<H, R>(
@@ -692,7 +692,8 @@ impl Session {
                 &self.common.config.as_ref().limits,
                 &mut *self.common.cipher.local_to_remote,
                 &mut self.common.write_buffer,
-            )? && enc.rekey.is_none()
+            )?
+            //  && enc.rekey.is_none()
             {
                 debug!("starting rekeying");
                 if let Some(exchange) = enc.exchange.take() {
@@ -702,7 +703,7 @@ impl Session {
                         &mut *self.common.cipher.local_to_remote,
                         &mut self.common.write_buffer,
                     )?;
-                    enc.rekey = Some(Kex::Init(kexinit))
+                    // enc.rekey = Some(Kex::Init(kexinit))
                 }
             }
         }

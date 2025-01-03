@@ -15,6 +15,9 @@
 
 use std::num::Wrapping;
 
+use cipher::SealingKey;
+use ssh_encoding::Writer;
+
 use super::*;
 
 /// The SSH client/server identification string.
@@ -84,5 +87,36 @@ impl SSHBuffer {
 
     pub fn send_ssh_id(&mut self, id: &SshId) {
         id.write(&mut self.buffer);
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct IncomingSshPacket {
+    pub buffer: CryptoVec,
+    pub seqn: Wrapping<u32>,
+}
+
+pub struct PacketWriter<'a> {
+    cipher: &'a mut (dyn SealingKey + Send),
+    write_buffer: &'a mut SSHBuffer,
+}
+
+impl<'a> PacketWriter<'a> {
+    pub fn new(cipher: &'a mut (dyn SealingKey + Send), write_buffer: &'a mut SSHBuffer) -> Self {
+        Self {
+            cipher,
+            write_buffer,
+        }
+    }
+
+    pub fn packet<F: FnOnce(&mut CryptoVec) -> Result<(), Error>>(
+        &mut self,
+        f: F,
+    ) -> Result<(), Error> {
+        let mut buf = CryptoVec::new();
+        f(&mut buf)?;
+        dbg!("packet writeR", &buf[..]);
+        self.cipher.write(&buf, self.write_buffer);
+        Ok(())
     }
 }
