@@ -165,14 +165,14 @@ impl Session {
         self.process_packet(client, &pkt.buffer).await
     }
 
-    async fn process_packet<H: Handler>(
+    pub(crate) async fn process_packet<H: Handler>(
         &mut self,
         client: &mut H,
         buf: &[u8],
     ) -> Result<(), H::Error> {
         // If we've successfully read a packet.
         trace!("process_packet buf = {:?} bytes", buf.len());
-        trace!("buf = {:?}", buf);
+        dbg!("enc", &buf[..]);
         let mut is_authenticated = false;
         if let Some(ref mut enc) = self.common.encrypted {
             match enc.state {

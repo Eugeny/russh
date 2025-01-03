@@ -41,6 +41,7 @@ use std::num::Wrapping;
 use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Instant;
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -64,6 +65,7 @@ use crate::channels::{Channel, ChannelMsg, ChannelRef, WindowSizeRef};
 use crate::cipher::{self, clear, CipherPair, OpeningKey};
 use crate::kex::{Kex, KexAlgorithmImplementor, KexProgress};
 use crate::keys::key::parse_public_key;
+use crate::msg::{ALL_KEX_MESSAGES, STRICT_KEX_MSG_ORDER};
 use crate::session::{
     CommonSession, EncryptedState, Exchange, GlobalRequestResponse, KexDhDone, KexInit, NewKeys,
 };
@@ -78,6 +80,34 @@ mod encrypted;
 mod kex;
 mod session;
 
+#[derive(Debug)]
+enum SessionKexState {
+    Idle,
+    InProgress(ClientKex),
+    Taken, // some async activity still going on such as host key checks
+}
+
+impl SessionKexState {
+    fn active(&self) -> bool {
+        match self {
+            SessionKexState::Idle => false,
+            SessionKexState::InProgress(_) => true,
+            SessionKexState::Taken => true,
+        }
+    }
+
+    fn take(&mut self) -> Self {
+        // TODO maybe make this take a guarded closure
+        std::mem::replace(
+            self,
+            match self {
+                SessionKexState::Idle => SessionKexState::Idle,
+                _ => SessionKexState::Taken,
+            },
+        )
+    }
+}
+
 /// Actual client session's state.
 ///
 /// It is in charge of multiplexing and keeping track of various channels
@@ -85,7 +115,7 @@ mod session;
 /// allows sending messages to the server.
 #[derive(Debug)]
 pub struct Session {
-    kex: Option<ClientKex>,
+    kex: SessionKexState,
     common: CommonSession<Arc<Config>>,
     receiver: Receiver<Msg>,
     sender: UnboundedSender<Reply>,
@@ -97,8 +127,6 @@ pub struct Session {
     inbound_channel_receiver: Receiver<Msg>,
     open_global_requests: VecDeque<GlobalRequestResponse>,
 }
-
-const STRICT_KEX_MSG_ORDER: &[u8] = &[msg::KEXINIT, msg::KEX_ECDH_REPLY, msg::NEWKEYS];
 
 impl Drop for Session {
     fn drop(&mut self) {
@@ -185,6 +213,7 @@ pub enum Msg {
         language_tag: String,
     },
     Channel(ChannelId, ChannelMsg),
+    Rekey,
 }
 
 impl From<(ChannelId, ChannelMsg)> for Msg {
@@ -691,6 +720,16 @@ impl<H: Handler> Handle<H> {
                 _ => unreachable!(),
             })
     }
+
+    // Perform a rekey at the next opportunity
+    pub async fn rekey_soon(&self) -> Result<(), Error> {
+        self.sender
+            .send(Msg::Rekey)
+            .await
+            .map_err(|_| Error::SendError)?;
+
+        Ok(())
+    }
 }
 
 impl<H: Handler> Future for Handle<H> {
@@ -778,7 +817,7 @@ where
         session_receiver,
         session_sender,
     );
-    session.read_ssh_id(sshid)?;
+    session.begin_rekey()?;
     let (kex_done_signal, kex_done_signal_rx) = oneshot::channel();
     let join = russh_util::runtime::spawn(session.run(stream, handler, Some(kex_done_signal)));
 
@@ -839,7 +878,7 @@ impl Session {
             common,
             receiver,
             sender,
-            kex: None,
+            kex: SessionKexState::Idle,
             target_window_size,
             inbound_channel_sender,
             inbound_channel_receiver,
@@ -976,7 +1015,7 @@ impl Session {
                     debug!("timeout");
                     return Err(crate::Error::InactivityTimeout.into());
                 }
-                msg = self.receiver.recv(), if !self.is_rekeying() => {
+                msg = self.receiver.recv(), if !self.kex.active() => {
                     match msg {
                         Some(msg) => self.handle_msg(msg)?,
                         None => {
@@ -986,21 +1025,21 @@ impl Session {
                     };
 
                     // eagerly take all outgoing messages so writes are batched
-                    while !self.is_rekeying() {
+                    while !self.kex.active() {
                         match self.receiver.try_recv() {
                             Ok(next) => self.handle_msg(next)?,
                             Err(_) => break
                         }
                     }
                 }
-                msg = self.inbound_channel_receiver.recv(), if !self.is_rekeying() => {
+                msg = self.inbound_channel_receiver.recv(), if !self.kex.active() => {
                     match msg {
                         Some(msg) => self.handle_msg(msg)?,
                         None => (),
                     }
 
                     // eagerly take all outgoing messages so writes are batched
-                    while !self.is_rekeying() {
+                    while !self.kex.active() {
                         match self.inbound_channel_receiver.try_recv() {
                             Ok(next) => self.handle_msg(next)?,
                             Err(_) => break
@@ -1220,6 +1259,7 @@ impl Session {
                 self.agent_forward(id, want_reply)?
             }
             Msg::Channel(id, ChannelMsg::Close) => self.close(id)?,
+            Msg::Rekey => self.initiate_rekey()?,
             msg => {
                 // should be unreachable, since the receiver only gets
                 // messages from methods implemented within russh
@@ -1229,27 +1269,21 @@ impl Session {
         Ok(())
     }
 
-    fn is_rekeying(&self) -> bool {
-        self.kex.is_some()
-    }
-
-    fn read_ssh_id(&mut self, sshid: &[u8]) -> Result<(), crate::Error> {
-        // self.read_buffer.bytes += sshid.bytes_read + 2;
+    fn begin_rekey(&mut self) -> Result<(), crate::Error> {
         let mut kex = ClientKex::new(
             self.common.config.clone(),
             &self.common.config.client_id,
-            sshid,
-            None,
+            &self.common.remote_sshid,
+            self.common.encrypted.as_ref().map(|e| e.session_id.clone()),
         );
 
-        let kexinit_data = kex.kexinit()?;
-        self.common.write_buffer.buffer.clear();
-        self.common
-            .cipher
-            .local_to_remote
-            .write(&kexinit_data, &mut self.common.write_buffer);
+        let mut writer = PacketWriter::new(
+            self.common.cipher.local_to_remote.as_mut(),
+            &mut self.common.write_buffer,
+        );
 
-        self.kex = Some(kex);
+        kex.kexinit(&mut writer)?;
+        self.kex = SessionKexState::InProgress(kex);
         Ok(())
     }
 
@@ -1263,24 +1297,18 @@ impl Session {
                 &mut self.common.write_buffer,
             )? {
                 info!("Re-exchanging keys");
-                if self.kex.is_none() {
-                    let mut kex = ClientKex::new(
-                        self.common.config.clone(),
-                        &self.common.config.client_id,
-                        &self.common.remote_sshid,
-                        Some(enc.session_id.clone()),
-                    );
-
-                    let kexinit_data = kex.kexinit()?;
-                    self.common.write_buffer.buffer.clear();
-                    self.common
-                        .cipher
-                        .local_to_remote
-                        .write(&kexinit_data, &mut self.common.write_buffer);
-
-                    self.kex = Some(kex);
+                if !self.kex.active() {
+                    self.begin_rekey()?;
                 }
             }
+        }
+        Ok(())
+    }
+
+    pub fn initiate_rekey(&mut self) -> Result<(), Error> {
+        if let Some(ref mut enc) = self.common.encrypted {
+            enc.rekey_wanted = true;
+            self.flush()?
         }
         Ok(())
     }
@@ -1293,6 +1321,7 @@ async fn reply<H: Handler>(
     pkt: &mut IncomingSshPacket,
 ) -> Result<(), H::Error> {
     if let Some(message_type) = pkt.buffer.first() {
+        debug!("Received msg type {message_type:?}");
         dbg!(message_type);
         if session.common.strict_kex && session.common.encrypted.is_none() {
             let seqno = pkt.seqn.0 - 1; // was incremented after read()
@@ -1308,56 +1337,85 @@ async fn reply<H: Handler>(
         }
     }
 
-    if let Some(kex) = session.kex.take() {
-        let mut writer = PacketWriter::new(
-            session.common.cipher.local_to_remote.as_mut(),
-            &mut session.common.write_buffer,
-        );
+    let is_kex_msg = pkt
+        .buffer
+        .first()
+        .is_some_and(|m| ALL_KEX_MESSAGES.iter().any(|&k| &k == m));
 
-        let progress = kex.step(Some(pkt), &mut writer)?;
-        debug!("kex step, result={progress:?}");
+    if is_kex_msg {
+        if let SessionKexState::InProgress(kex) = session.kex.take() {
+            let mut writer = PacketWriter::new(
+                session.common.cipher.local_to_remote.as_mut(),
+                &mut session.common.write_buffer,
+            );
 
-        match progress {
-            KexProgress::NeedsReply { kex, reset_seqn } => {
-                session.kex = Some(kex);
-                if reset_seqn {
-                    session.common.reset_seqn();
-                }
-            }
-            KexProgress::Done {
-                server_host_key,
-                mut newkeys,
-            } => {
-                drop(writer);
+            let progress = kex.step(Some(pkt), &mut writer)?;
+            debug!("kex step, result={progress:?}");
 
-                if let Some(server_host_key) = &server_host_key {
-                    let check = handler.check_server_key(server_host_key).await?;
-                    if !check {
-                        return Err(crate::Error::UnknownKey.into());
+            match progress {
+                KexProgress::NeedsReply { kex, reset_seqn } => {
+                    session.kex = SessionKexState::InProgress(kex);
+                    if reset_seqn {
+                        session.common.reset_seqn();
                     }
                 }
+                KexProgress::Done {
+                    server_host_key,
+                    newkeys,
+                } => {
+                    drop(writer);
 
-                newkeys.sent = true;
+                    session.common.strict_kex =
+                        session.common.strict_kex || newkeys.names.strict_kex;
 
-                session.common.strict_kex = session.common.strict_kex || newkeys.names.strict_kex;
+                    if let Some(ref mut enc) = session.common.encrypted {
+                        // This is a rekey
+                        enc.last_rekey = Instant::now();
+                        session.common.write_buffer.bytes = 0;
+                        enc.flush_all_pending()?;
+                        let mut pending = std::mem::take(&mut session.pending_reads);
+                        for p in pending.drain(..) {
+                            session.process_packet(handler, &p).await?;
+                        }
+                        session.pending_reads = pending;
+                        session.pending_len = 0;
+                        session.common.newkeys(newkeys);
+                    } else {
+                        // This is the initial kex
+                        if let Some(server_host_key) = &server_host_key {
+                            let check = handler.check_server_key(server_host_key).await?;
+                            if !check {
+                                return Err(crate::Error::UnknownKey.into());
+                            }
+                        }
 
-                if let Some(sender) = kex_done_signal.take() {
-                    sender.send(()).unwrap_or(());
-                }
+                        session
+                            .common
+                            .encrypted(initial_encrypted_state(session), newkeys);
 
-                session
-                    .common
-                    .encrypted(initial_encrypted_state(session), newkeys);
+                        if let Some(sender) = kex_done_signal.take() {
+                            sender.send(()).unwrap_or(());
+                        }
 
-                if session.common.strict_kex {
-                    pkt.seqn = Wrapping(0);
+                        session.kex = SessionKexState::Idle;
+                    }
+
+                    if session.common.strict_kex {
+                        pkt.seqn = Wrapping(0);
+                    }
                 }
             }
+
+            session.flush()?;
+
+            return Ok(());
         }
+    }
 
-        session.flush()?;
-
-        return Ok(());
+    if pkt.buffer.first() == Some(&msg::KEXINIT) {
+        // Not currently in a rekey but received KEXINIT
+        info!("Server has initiated rekey");
+        session.begin_rekey()?;
     }
 
     session.client_read_encrypted(handler, pkt).await

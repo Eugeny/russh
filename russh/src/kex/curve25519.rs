@@ -127,7 +127,9 @@ impl KexAlgorithmImplementor for Curve25519Kex {
 
         buffer.extend(key);
         exchange.client_ephemeral.encode(buffer)?;
+        dbg!(&exchange.client_ephemeral[..]);
         exchange.server_ephemeral.encode(buffer)?;
+        dbg!(&exchange.server_ephemeral[..]);
 
         if let Some(ref shared) = self.shared_secret {
             encode_mpint(&shared.0, buffer)?;
@@ -135,10 +137,12 @@ impl KexAlgorithmImplementor for Curve25519Kex {
 
         use sha2::Digest;
         let mut hasher = sha2::Sha256::new();
+        // dbg!(&buffer[..]);
         hasher.update(&buffer);
 
         let mut res = CryptoVec::new();
         res.extend(hasher.finalize().as_slice());
+        dbg!(&res[..]);
         Ok(res)
     }
 

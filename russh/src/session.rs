@@ -15,6 +15,7 @@
 
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
+use std::mem::replace;
 use std::num::Wrapping;
 
 use byteorder::{BigEndian, ByteOrder};
@@ -51,6 +52,7 @@ pub(crate) struct Encrypted {
     pub compress: crate::compression::Compress,
     pub decompress: crate::compression::Decompress,
     pub compress_buffer: CryptoVec,
+    pub rekey_wanted: bool,
 }
 
 #[derive(Debug)]
@@ -101,6 +103,7 @@ impl ChannelFlushResult {
 
 impl<C> CommonSession<C> {
     pub fn newkeys(&mut self, newkeys: NewKeys) {
+        // TODO move into encrypted
         if let Some(ref mut enc) = self.encrypted {
             enc.exchange = Some(newkeys.exchange);
             enc.kex = newkeys.kex;
@@ -132,6 +135,7 @@ impl<C> CommonSession<C> {
             compress: crate::compression::Compress::None,
             compress_buffer: CryptoVec::new(),
             decompress: crate::compression::Decompress::None,
+            rekey_wanted: false,
         });
         self.cipher = newkeys.cipher;
         self.strict_kex = newkeys.names.strict_kex;
@@ -439,7 +443,7 @@ impl Encrypted {
                 let len = BigEndian::read_u32(&self.write[self.write_cursor..]) as usize;
                 #[allow(clippy::indexing_slicing)]
                 let to_write = &self.write[(self.write_cursor + 4)..(self.write_cursor + 4 + len)];
-                trace!("server_write_encrypted, buf = {:?}", to_write);
+                trace!("session_write_encrypted, buf = {:?}", to_write);
                 #[allow(clippy::indexing_slicing)]
                 let packet = self
                     .compress
@@ -460,7 +464,9 @@ impl Encrypted {
 
         let now = russh_util::time::Instant::now();
         let dur = now.duration_since(self.last_rekey);
-        Ok(write_buffer.bytes >= limits.rekey_write_limit || dur >= limits.rekey_time_limit)
+        Ok(replace(&mut self.rekey_wanted, false)
+            || write_buffer.bytes >= limits.rekey_write_limit
+            || dur >= limits.rekey_time_limit)
     }
     pub fn new_channel_id(&mut self) -> ChannelId {
         self.last_channel_id += Wrapping(1);
@@ -635,7 +641,6 @@ impl KexDhDone {
             key: self.key,
             cipher: c,
             session_id,
-            sent: false,
         })
     }
 }
@@ -648,7 +653,6 @@ pub(crate) struct NewKeys {
     pub key: usize,
     pub cipher: cipher::CipherPair,
     pub session_id: CryptoVec,
-    pub sent: bool,
 }
 
 #[derive(Debug)]

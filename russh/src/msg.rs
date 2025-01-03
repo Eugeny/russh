@@ -76,3 +76,6 @@ mod server {
     pub const SERVICE_REQUEST: u8 = 5;
     pub const SSH_OPEN_ADMINISTRATIVELY_PROHIBITED: u8 = 1;
 }
+
+pub(crate) const STRICT_KEX_MSG_ORDER: &[u8] = &[KEXINIT, KEX_ECDH_REPLY, NEWKEYS];
+pub(crate) const ALL_KEX_MESSAGES: &[u8] = &[KEXINIT, KEX_ECDH_INIT, KEX_ECDH_REPLY, NEWKEYS];

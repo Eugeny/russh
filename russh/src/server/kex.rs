@@ -21,7 +21,7 @@ impl KexInit {
     pub fn server_parse(
         mut self,
         config: &Config,
-        cipher: &mut dyn SealingKey,
+        cipher: &mut (dyn SealingKey + Send),
         buf: &[u8],
         write_buffer: &mut SSHBuffer,
     ) -> Result<Kex, Error> {
@@ -60,18 +60,18 @@ impl KexInit {
     pub fn server_write(
         &mut self,
         config: &Config,
-        cipher: &mut dyn SealingKey,
+        cipher: &mut (dyn SealingKey + Send),
         write_buffer: &mut SSHBuffer,
     ) -> Result<(), Error> {
         self.exchange.server_kex_init.clear();
-        negotiation::write_kex(
+        let mut writer = PacketWriter::new(cipher, write_buffer);
+        self.exchange.server_kex_init = negotiation::write_kex(
             &config.preferred,
-            &mut self.exchange.server_kex_init,
+            &mut writer,
             Some(config),
         )?;
         debug!("server kex init: {:?}", &self.exchange.server_kex_init[..]);
         self.sent = true;
-        cipher.write(&self.exchange.server_kex_init, write_buffer);
         Ok(())
     }
 }

@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 ///
 /// Run this example with:
 /// cargo run --example client_exec_simple -- -k <private key path> <host> <command>
@@ -19,7 +20,7 @@ use tokio::net::ToSocketAddrs;
 #[tokio::main]
 async fn main() -> Result<()> {
     env_logger::builder()
-        .filter_level(log::LevelFilter::Trace)
+        .filter_level(log::LevelFilter::Debug)
         .init();
 
     // CLI options are defined later in this file
@@ -84,6 +85,10 @@ impl Session {
         let key_pair = load_secret_key(key_path, None)?;
         let config = client::Config {
             inactivity_timeout: Some(Duration::from_secs(5)),
+            preferred: Preferred {
+                cipher: Cow::Owned(vec![russh::cipher::AES_256_CTR]),
+                ..Default::default()
+            },
             ..<_>::default()
         };
 
@@ -103,6 +108,8 @@ impl Session {
     }
 
     async fn call(&mut self, command: &str) -> Result<u32> {
+        // self.session.rekey_soon().await?;
+
         let mut channel = self.session.channel_open_session().await?;
         channel.exec(true, command).await?;
 

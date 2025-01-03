@@ -64,12 +64,12 @@ pub(crate) trait Kex
 where
     Self: Sized,
 {
-    fn kexinit(&mut self) -> Result<CryptoVec, Error>;
+    fn kexinit(&mut self, output: &mut PacketWriter) -> Result<(), Error>;
 
     fn step(
         self,
         input: Option<&mut IncomingSshPacket>,
-        writer: &mut PacketWriter,
+        output: &mut PacketWriter,
     ) -> Result<KexProgress<Self>, Error>;
 }
 

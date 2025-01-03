@@ -9,7 +9,7 @@ use crate::session::Exchange;
 use crate::sshbuffer::PacketWriter;
 use crate::{msg, negotiation, strict_kex_violation, Error, SshId};
 use bytes::Bytes;
-use log::{debug, trace};
+use log::{debug, error, trace};
 use russh_cryptovec::CryptoVec;
 use russh_keys::key::parse_public_key;
 use signature::Verifier;
@@ -63,15 +63,14 @@ impl ClientKex {
 }
 
 impl Kex for ClientKex {
-    fn kexinit(&mut self) -> Result<CryptoVec, Error> {
-        self.exchange.client_kex_init.clear();
-        negotiation::write_kex(
+    fn kexinit(&mut self, output: &mut PacketWriter) -> Result<(), Error> {
+        self.exchange.client_kex_init = negotiation::write_kex(
             &self.config.preferred,
-            &mut self.exchange.client_kex_init,
+            output,
             None,
         )?;
 
-        Ok(self.exchange.client_kex_init.clone())
+        Ok(())
     }
 
     fn step(
@@ -85,6 +84,7 @@ impl Kex for ClientKex {
                     return Err(Error::KexInit);
                 };
                 if input.buffer.first() != Some(&msg::KEXINIT) {
+                    error!("Unexpected kex message at this stage: {:?}", input.buffer.first());
                     return Err(Error::KexInit);
                 }
 
@@ -152,6 +152,7 @@ impl Kex for ClientKex {
 
                 // We've sent ECDH_INIT, waiting for ECDH_REPLY
                 if input.buffer.first() != Some(&msg::KEX_ECDH_REPLY) {
+                    error!("Unexpected kex message at this stage: {:?}", input.buffer.first());
                     return Err(Error::KexInit);
                 }
 
@@ -231,16 +232,16 @@ impl Kex for ClientKex {
                 server_host_key,
                 newkeys,
             } => {
-                debug!("newkeys received");
                 let Some(input) = input else {
                     return Err(Error::KexInit);
                 };
 
-                // We've sent ECDH_INIT, waiting for ECDH_REPLY
                 if input.buffer.first() != Some(&msg::NEWKEYS) {
+                    error!("Unexpected kex message at this stage: {:?}", input.buffer.first());
                     return Err(Error::Kex);
                 }
 
+                debug!("newkeys received");
                 Ok(KexProgress::Done {
                     newkeys,
                     server_host_key: Some(server_host_key),
@@ -278,6 +279,5 @@ fn compute_keys(
         key: 0,
         cipher: c,
         session_id: session_id.clone(),
-        sent: true,
     })
 }

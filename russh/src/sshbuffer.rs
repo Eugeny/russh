@@ -69,7 +69,7 @@ fn test_ssh_id() {
 pub struct SSHBuffer {
     pub buffer: CryptoVec,
     pub len: usize, // next packet length.
-    pub bytes: usize,
+    pub bytes: usize, // total bytes written since the last rekey
     // Sequence numbers are on 32 bits and wrap.
     // https://tools.ietf.org/html/rfc4253#section-6.4
     pub seqn: Wrapping<u32>,
@@ -109,13 +109,18 @@ impl<'a> PacketWriter<'a> {
         }
     }
 
+    /// Sends and returns the packet contents
     pub fn packet<F: FnOnce(&mut CryptoVec) -> Result<(), Error>>(
         &mut self,
         f: F,
-    ) -> Result<(), Error> {
+    ) -> Result<CryptoVec, Error> {
         let mut buf = CryptoVec::new();
         f(&mut buf)?;
+        if let Some(message_type) = buf.first() {
+            debug!("Sending msg type {message_type:?}");
+        }
+        self.write_buffer.buffer.clear();
         self.cipher.write(&buf, self.write_buffer);
-        Ok(())
+        Ok(buf)
     }
 }

@@ -24,6 +24,7 @@ use crate::cipher::CIPHERS;
 use crate::kex::{EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT, EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::server::Config;
+use crate::sshbuffer::PacketWriter;
 use crate::{cipher, compression, kex, mac, msg, AlgorithmKind, CryptoVec, Error};
 
 #[cfg(target_arch = "wasm32")]
@@ -377,111 +378,113 @@ impl Select for Client {
 
 pub fn write_kex(
     prefs: &Preferred,
-    buf: &mut impl Writer,
+    writer: &mut PacketWriter,
     server_config: Option<&Config>,
-) -> Result<(), Error> {
-    // buf.clear();
-    msg::KEXINIT.encode(buf)?;
+) -> Result<CryptoVec, Error> {
+    writer.packet(|w| {
+        // buf.clear();
+        msg::KEXINIT.encode(w)?;
 
-    let mut cookie = [0; 16];
-    rand::thread_rng().fill_bytes(&mut cookie);
-    for i in 0..16 {
-        cookie[i].encode(buf)?;
-    }
+        let mut cookie = [0; 16];
+        rand::thread_rng().fill_bytes(&mut cookie);
+        for i in 0..16 {
+            cookie[i].encode(w)?;
+        }
 
-    NameList(
-        prefs
-            .kex
-            .iter()
-            .filter(|k| {
-                !(if server_config.is_some() {
-                    [
-                        crate::kex::EXTENSION_SUPPORT_AS_CLIENT,
-                        crate::kex::EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT,
-                    ]
-                } else {
-                    [
-                        crate::kex::EXTENSION_SUPPORT_AS_SERVER,
-                        crate::kex::EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER,
-                    ]
-                })
-                .contains(*k)
-            })
-            .map(|x| x.as_ref().to_owned())
-            .collect(),
-    )
-    .encode(buf)?; // kex algo
-
-    if let Some(server_config) = server_config {
-        // Only advertise host key algorithms that we have keys for.
         NameList(
             prefs
-                .key
+                .kex
                 .iter()
-                .filter(|algo| {
-                    server_config
-                        .keys
-                        .iter()
-                        .any(|k| is_key_compatible_with_algo(k, algo))
+                .filter(|k| {
+                    !(if server_config.is_some() {
+                        [
+                            crate::kex::EXTENSION_SUPPORT_AS_CLIENT,
+                            crate::kex::EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT,
+                        ]
+                    } else {
+                        [
+                            crate::kex::EXTENSION_SUPPORT_AS_SERVER,
+                            crate::kex::EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER,
+                        ]
+                    })
+                    .contains(*k)
                 })
-                .map(|x| x.to_string())
+                .map(|x| x.as_ref().to_owned())
                 .collect(),
         )
-        .encode(buf)?;
-    } else {
-        NameList(prefs.key.iter().map(ToString::to_string).collect()).encode(buf)?;
-    }
+        .encode(w)?; // kex algo
 
-    // cipher client to server
-    NameList(
-        prefs
-            .cipher
-            .iter()
-            .map(|x| x.as_ref().to_string())
-            .collect(),
-    )
-    .encode(buf)?;
+        if let Some(server_config) = server_config {
+            // Only advertise host key algorithms that we have keys for.
+            NameList(
+                prefs
+                    .key
+                    .iter()
+                    .filter(|algo| {
+                        server_config
+                            .keys
+                            .iter()
+                            .any(|k| is_key_compatible_with_algo(k, algo))
+                    })
+                    .map(|x| x.to_string())
+                    .collect(),
+            )
+            .encode(w)?;
+        } else {
+            NameList(prefs.key.iter().map(ToString::to_string).collect()).encode(w)?;
+        }
 
-    // cipher server to client
-    NameList(
-        prefs
-            .cipher
-            .iter()
-            .map(|x| x.as_ref().to_string())
-            .collect(),
-    )
-    .encode(buf)?;
+        // cipher client to server
+        NameList(
+            prefs
+                .cipher
+                .iter()
+                .map(|x| x.as_ref().to_string())
+                .collect(),
+        )
+        .encode(w)?;
 
-    // mac client to server
-    NameList(prefs.mac.iter().map(|x| x.as_ref().to_string()).collect()).encode(buf)?;
+        // cipher server to client
+        NameList(
+            prefs
+                .cipher
+                .iter()
+                .map(|x| x.as_ref().to_string())
+                .collect(),
+        )
+        .encode(w)?;
 
-    // mac server to client
-    NameList(prefs.mac.iter().map(|x| x.as_ref().to_string()).collect()).encode(buf)?;
+        // mac client to server
+        NameList(prefs.mac.iter().map(|x| x.as_ref().to_string()).collect()).encode(w)?;
 
-    // compress client to server
-    NameList(
-        prefs
-            .compression
-            .iter()
-            .map(|x| x.as_ref().to_string())
-            .collect(),
-    )
-    .encode(buf)?;
+        // mac server to client
+        NameList(prefs.mac.iter().map(|x| x.as_ref().to_string()).collect()).encode(w)?;
 
-    // compress server to client
-    NameList(
-        prefs
-            .compression
-            .iter()
-            .map(|x| x.as_ref().to_string())
-            .collect(),
-    )
-    .encode(buf)?;
+        // compress client to server
+        NameList(
+            prefs
+                .compression
+                .iter()
+                .map(|x| x.as_ref().to_string())
+                .collect(),
+        )
+        .encode(w)?;
 
-    Vec::<String>::new().encode(buf)?; // languages client to server
-    Vec::<String>::new().encode(buf)?; // languages server to client
+        // compress server to client
+        NameList(
+            prefs
+                .compression
+                .iter()
+                .map(|x| x.as_ref().to_string())
+                .collect(),
+        )
+        .encode(w)?;
 
-    0u8.encode(buf)?; // doesn't follow
-    0u32.encode(buf)?; // reserved
-    Ok(())
+        Vec::<String>::new().encode(w)?; // languages client to server
+        Vec::<String>::new().encode(w)?; // languages server to client
+
+        0u8.encode(w)?; // doesn't follow
+        0u32.encode(w)?; // reserved
+        Ok(())
+    })
 }
