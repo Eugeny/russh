@@ -29,7 +29,7 @@ signature = "2.2"
 ssh-encoding = { version = "0.2", features = [
     "bytes",
 ], path = "../RustCrypto-SSH/ssh-encoding" }
-ssh-key = { version = "0.6.7-internal.4", features = [
+ssh-key = { version = "0.6.7-internal.5", features = [
     "ed25519",
     "rsa",
     "rsa-sha1",

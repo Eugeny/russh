@@ -108,7 +108,7 @@ impl Session {
     }
 
     async fn call(&mut self, command: &str) -> Result<u32> {
-        // self.session.rekey_soon().await?;
+        self.session.rekey_soon().await?;
 
         let mut channel = self.session.channel_open_session().await?;
         channel.exec(true, command).await?;

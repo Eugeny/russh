@@ -468,6 +468,7 @@ impl Encrypted {
             || write_buffer.bytes >= limits.rekey_write_limit
             || dur >= limits.rekey_time_limit)
     }
+
     pub fn new_channel_id(&mut self) -> ChannelId {
         self.last_channel_id += Wrapping(1);
         while self

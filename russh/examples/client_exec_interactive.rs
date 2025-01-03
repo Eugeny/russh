@@ -133,6 +133,7 @@ impl Session {
     }
 
     async fn call(&mut self, command: &str) -> Result<u32> {
+        self.session.rekey_soon().await?;
         let mut channel = self.session.channel_open_session().await?;
 
         // This example doesn't terminal resizing after the connection is established

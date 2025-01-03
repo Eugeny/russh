@@ -60,15 +60,16 @@ impl ClientKex {
             state: ClientKexState::Created,
         }
     }
+
+    fn is_rekey(&self) -> bool {
+        self.session_id.is_some()
+    }
 }
 
 impl Kex for ClientKex {
     fn kexinit(&mut self, output: &mut PacketWriter) -> Result<(), Error> {
-        self.exchange.client_kex_init = negotiation::write_kex(
-            &self.config.preferred,
-            output,
-            None,
-        )?;
+        self.exchange.client_kex_init =
+            negotiation::write_kex(&self.config.preferred, output, None)?;
 
         Ok(())
     }
@@ -84,7 +85,10 @@ impl Kex for ClientKex {
                     return Err(Error::KexInit);
                 };
                 if input.buffer.first() != Some(&msg::KEXINIT) {
-                    error!("Unexpected kex message at this stage: {:?}", input.buffer.first());
+                    error!(
+                        "Unexpected kex message at this stage: {:?}",
+                        input.buffer.first()
+                    );
                     return Err(Error::KexInit);
                 }
 
@@ -99,7 +103,7 @@ impl Kex for ClientKex {
                 // debug!("write = {:?}", &write_buffer.buffer[..]);
 
                 // seqno has already been incremented after read()
-                if algo.strict_kex && input.seqn.0 != 1 {
+                if algo.strict_kex && input.seqn.0 != 1 && !self.is_rekey() {
                     return Err(
                         strict_kex_violation(msg::KEXINIT, input.seqn.0 as usize - 1).into(),
                     );
@@ -152,7 +156,10 @@ impl Kex for ClientKex {
 
                 // We've sent ECDH_INIT, waiting for ECDH_REPLY
                 if input.buffer.first() != Some(&msg::KEX_ECDH_REPLY) {
-                    error!("Unexpected kex message at this stage: {:?}", input.buffer.first());
+                    error!(
+                        "Unexpected kex message at this stage: {:?}",
+                        input.buffer.first()
+                    );
                     return Err(Error::KexInit);
                 }
 
@@ -182,7 +189,7 @@ impl Kex for ClientKex {
                     }
                 })?;
 
-                debug!("exchange hash: {:?}", &hash[..]);
+                dbg!("exchange hash", &hash[..]);
                 let (sig_type, signature) = {
                     let mut r = &signature[..];
                     let sig_type = String::decode(&mut r)?;
@@ -237,7 +244,10 @@ impl Kex for ClientKex {
                 };
 
                 if input.buffer.first() != Some(&msg::NEWKEYS) {
-                    error!("Unexpected kex message at this stage: {:?}", input.buffer.first());
+                    error!(
+                        "Unexpected kex message at this stage: {:?}",
+                        input.buffer.first()
+                    );
                     return Err(Error::Kex);
                 }
 

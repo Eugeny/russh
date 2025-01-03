@@ -723,6 +723,7 @@ impl<H: Handler> Handle<H> {
 
     // Perform a rekey at the next opportunity
     pub async fn rekey_soon(&self) -> Result<(), Error> {
+        dbg!("rekey sender");
         self.sender
             .send(Msg::Rekey)
             .await
@@ -1116,6 +1117,7 @@ impl Session {
     }
 
     fn handle_msg(&mut self, msg: Msg) -> Result<(), crate::Error> {
+        dbg!(&msg);
         match msg {
             Msg::Authenticate { user, method } => {
                 self.write_auth_request_if_needed(&user, method)?;
@@ -1306,8 +1308,10 @@ impl Session {
     }
 
     pub fn initiate_rekey(&mut self) -> Result<(), Error> {
+        dbg!("rekey atmpt");
         if let Some(ref mut enc) = self.common.encrypted {
             enc.rekey_wanted = true;
+            dbg!("rekeying");
             self.flush()?
         }
         Ok(())
@@ -1397,12 +1401,15 @@ async fn reply<H: Handler>(
                             sender.send(()).unwrap_or(());
                         }
 
-                        session.kex = SessionKexState::Idle;
                     }
+
+                    session.kex = SessionKexState::Idle;
 
                     if session.common.strict_kex {
                         pkt.seqn = Wrapping(0);
                     }
+
+                    debug!("kex done");
                 }
             }
 
