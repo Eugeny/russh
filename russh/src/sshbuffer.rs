@@ -115,7 +115,6 @@ impl<'a> PacketWriter<'a> {
     ) -> Result<(), Error> {
         let mut buf = CryptoVec::new();
         f(&mut buf)?;
-        dbg!("packet writeR", &buf[..]);
         self.cipher.write(&buf, self.write_buffer);
         Ok(())
     }

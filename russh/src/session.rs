@@ -175,8 +175,12 @@ impl<C> CommonSession<C> {
 
     pub(crate) fn maybe_reset_seqn(&mut self) {
         if self.strict_kex {
-            self.write_buffer.seqn = Wrapping(0);
+            self.reset_seqn();
         }
+    }
+
+    pub(crate) fn reset_seqn(&mut self) {
+        self.write_buffer.seqn = Wrapping(0);
     }
 }
 

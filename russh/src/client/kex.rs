@@ -98,13 +98,6 @@ impl Kex for ClientKex {
                 debug!("algo = {:?}", algo);
                 // debug!("write = {:?}", &write_buffer.buffer[..]);
 
-                let mut kex = KEXES.get(&algo.kex).ok_or(Error::UnknownAlgo)?.make();
-
-                output.packet(|w| {
-                    kex.client_dh(&mut self.exchange.client_ephemeral, w)?;
-                    Ok(())
-                })?;
-
                 // seqno has already been incremented after read()
                 if algo.strict_kex && input.seqn.0 != 1 {
                     return Err(
@@ -188,7 +181,7 @@ impl Kex for ClientKex {
                     }
                 })?;
 
-                debug!("exchange hash: {:?}", hash);
+                debug!("exchange hash: {:?}", &hash[..]);
                 let (sig_type, signature) = {
                     let mut r = &signature[..];
                     let sig_type = String::decode(&mut r)?;
@@ -217,6 +210,13 @@ impl Kex for ClientKex {
                     self.session_id.as_ref(),
                 )?;
 
+                output.packet(|w| {
+                    msg::NEWKEYS.encode(w)?;
+                    Ok(())
+                })?;
+
+                let reset_seqn = newkeys.names.strict_kex;
+
                 self.state = ClientKexState::WaitingForNewKeys {
                     server_host_key,
                     newkeys,
@@ -224,7 +224,7 @@ impl Kex for ClientKex {
 
                 Ok(KexProgress::NeedsReply {
                     kex: self,
-                    reset_seqn: true,
+                    reset_seqn,
                 })
             }
             ClientKexState::WaitingForNewKeys {

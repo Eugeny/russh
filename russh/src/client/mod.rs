@@ -949,7 +949,6 @@ impl Session {
                     }
 
                     let mut pkt = self.maybe_decompress(&buffer)?;
-                    dbg!(&pkt);
                     if !pkt.buffer.is_empty() {
                         #[allow(clippy::indexing_slicing)] // length checked
                         if pkt.buffer[0] == crate::msg::DISCONNECT {
@@ -957,6 +956,7 @@ impl Session {
                         } else {
                             self.common.received_data = true;
                             reply(self, handler, kex_done_signal, &mut pkt).await?;
+                            buffer.seqn = pkt.seqn; // TODO reply changes seqn internall, find cleaner way
                         }
                     }
 
@@ -1321,17 +1321,13 @@ async fn reply<H: Handler>(
             KexProgress::NeedsReply { kex, reset_seqn } => {
                 session.kex = Some(kex);
                 if reset_seqn {
-                    session.common.maybe_reset_seqn();
+                    session.common.reset_seqn();
                 }
             }
             KexProgress::Done {
                 server_host_key,
                 mut newkeys,
             } => {
-                writer.packet(|w| {
-                    msg::NEWKEYS.encode(w)?;
-                    Ok(())
-                })?;
                 drop(writer);
 
                 if let Some(server_host_key) = &server_host_key {
@@ -1344,7 +1340,6 @@ async fn reply<H: Handler>(
                 newkeys.sent = true;
 
                 session.common.strict_kex = session.common.strict_kex || newkeys.names.strict_kex;
-                // session.kex = Some(Kex::Keys(newkeys));
 
                 if let Some(sender) = kex_done_signal.take() {
                     sender.send(()).unwrap_or(());
@@ -1353,11 +1348,10 @@ async fn reply<H: Handler>(
                 session
                     .common
                     .encrypted(initial_encrypted_state(session), newkeys);
-                // Ok, NEWKEYS received, now encrypted.
+
                 if session.common.strict_kex {
                     pkt.seqn = Wrapping(0);
                 }
-                //TODO
             }
         }
 
