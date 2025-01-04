@@ -214,6 +214,7 @@ pub(crate) trait Select {
             AlgorithmKind::Kex,
         )
         .is_ok();
+
         if strict_kex_requested && strict_kex_provided {
             debug!("strict kex enabled")
         }
@@ -241,7 +242,6 @@ pub(crate) trait Select {
             AlgorithmKind::Cipher,
         )?;
         String::decode(&mut r)?; // cipher server-to-client.
-        debug!("kex {}", line!());
 
         // MAC
 
@@ -278,7 +278,6 @@ pub(crate) trait Select {
 
         // Compression
 
-        debug!("kex {}", line!());
         // client-to-server compression.
         let client_compression = compression::Compression::new(
             &Self::select(
@@ -289,7 +288,6 @@ pub(crate) trait Select {
             .1,
         );
 
-        debug!("kex {}", line!());
         // server-to-client compression.
         let server_compression = compression::Compression::new(
             &Self::select(
@@ -299,7 +297,6 @@ pub(crate) trait Select {
             )?
             .1,
         );
-        debug!("client_compression = {:?}", client_compression);
         String::decode(&mut r)?; // languages client-to-server
         String::decode(&mut r)?; // languages server-to-client
 

@@ -1,7 +1,7 @@
 use std::pin::Pin;
 
 use futures::task::*;
-use log::debug;
+use log::{debug, trace};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, ReadBuf};
 
 use crate::{CryptoVec, Error};
@@ -61,7 +61,7 @@ impl<R: AsyncRead + Unpin> AsyncRead for SshRead<R> {
         buf: &mut ReadBuf,
     ) -> Poll<Result<(), std::io::Error>> {
         if let Some(mut id) = self.id.take() {
-            debug!("id {:?} {:?}", id.total, id.bytes_read);
+            trace!("id {:?} {:?}", id.total, id.bytes_read);
             if id.total > id.bytes_read {
                 let total = id.total.min(id.bytes_read + buf.remaining());
                 #[allow(clippy::indexing_slicing)] // length checked
@@ -118,16 +118,16 @@ impl<R: AsyncRead + Unpin> SshRead<R> {
         let ssh_id = self.id.as_mut().unwrap();
         loop {
             let mut i = 0;
-            debug!("read_ssh_id: reading");
+            trace!("read_ssh_id: reading");
 
             #[allow(clippy::indexing_slicing)] // length checked
             let n = AsyncReadExt::read(&mut self.r, &mut ssh_id.buf[ssh_id.total..]).await?;
-            debug!("read {:?}", n);
+            trace!("read {:?}", n);
 
             ssh_id.total += n;
             #[allow(clippy::indexing_slicing)] // length checked
             {
-                debug!("{:?}", std::str::from_utf8(&ssh_id.buf[..ssh_id.total]));
+                trace!("{:?}", std::str::from_utf8(&ssh_id.buf[..ssh_id.total]));
             }
             if n == 0 {
                 return Err(Error::Disconnect);
@@ -165,7 +165,7 @@ impl<R: AsyncRead + Unpin> SshRead<R> {
                 ssh_id.total = 0;
                 ssh_id.bytes_read = 0;
             }
-            debug!("bytes_read: {:?}", ssh_id.bytes_read);
+            trace!("bytes_read: {:?}", ssh_id.bytes_read);
         }
     }
 }

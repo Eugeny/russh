@@ -127,7 +127,7 @@ impl PacketWriter {
 
     pub fn packet_raw(&mut self, buf: &[u8]) -> Result<(), Error> {
         if let Some(message_type) = buf.first() {
-            debug!("Sending msg type {message_type:?}");
+            debug!("> msg type {message_type:?}, len {}", buf.len());
             let packet = self.compress.compress(&buf, &mut self.compress_buffer)?;
             self.cipher.write(&packet, &mut self.write_buffer);
         }

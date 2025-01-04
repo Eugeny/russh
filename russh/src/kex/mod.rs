@@ -44,6 +44,7 @@ use ssh_key::PublicKey;
 
 use crate::cipher::CIPHERS;
 use crate::mac::{self, MACS};
+use crate::negotiation::Names;
 use crate::session::{Exchange, NewKeys};
 use crate::sshbuffer::{IncomingSshPacket, PacketWriter};
 use crate::{cipher, CryptoVec, Error};
@@ -79,6 +80,32 @@ impl<K: Kex> SessionKexState<K> {
                 _ => SessionKexState::Taken,
             },
         )
+    }
+}
+
+#[derive(Debug)]
+pub(crate) enum KexCause {
+    Initial,
+    Rekey { strict: bool, session_id: CryptoVec },
+}
+
+impl KexCause {
+    pub fn is_strict_kex(&self, names: &Names) -> bool {
+        names.strict_kex || matches!(self, Self::Rekey { strict: true, .. })
+    }
+
+    pub fn is_rekey(&self) -> bool {
+        match self {
+            Self::Initial => false,
+            Self::Rekey { .. } => true,
+        }
+    }
+
+    pub fn session_id(&self) -> Option<&CryptoVec> {
+        match self {
+            Self::Initial => None,
+            Self::Rekey { session_id, .. } => Some(session_id),
+        }
     }
 }
 

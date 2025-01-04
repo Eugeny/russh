@@ -101,7 +101,11 @@ impl Session {
         }
 
         let config = client::Config {
-            inactivity_timeout: Some(Duration::from_secs(5)),
+            limits: Limits {
+                rekey_time_limit: std::time::Duration::from_secs(3),
+                ..Default::default()
+
+            },            // inactivity_timeout: Some(Duration::from_secs(5)),
             ..<_>::default()
         };
 
@@ -180,7 +184,6 @@ impl Session {
                         ChannelMsg::Data { ref data } => {
                             stdout.write_all(data).await?;
                             stdout.flush().await?;
-                            self.session.rekey_soon().await?;
                         }
                         // The command has returned an exit code
                         ChannelMsg::ExitStatus { exit_status } => {

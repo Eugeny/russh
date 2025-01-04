@@ -89,7 +89,11 @@ impl Session {
                 cipher: Cow::Owned(vec![russh::cipher::AES_256_CTR]),
                 ..Default::default()
             },
-            ..<_>::default()
+            limits: Limits {
+                rekey_time_limit: std::time::Duration::from_secs(2),
+                ..Default::default()
+
+            },              ..<_>::default()
         };
 
         let config = Arc::new(config);

@@ -1,5 +1,4 @@
 use std::collections::{HashMap, VecDeque};
-use std::mem::take;
 use std::sync::Arc;
 
 use channels::WindowSizeRef;
@@ -14,7 +13,7 @@ use tokio::sync::oneshot;
 
 use super::*;
 use crate::channels::{Channel, ChannelMsg, ChannelRef};
-use crate::kex::{Kex, SessionKexState, EXTENSION_SUPPORT_AS_CLIENT};
+use crate::kex::{Kex, KexCause, SessionKexState, EXTENSION_SUPPORT_AS_CLIENT};
 use crate::msg;
 
 /// A connected server session. This type is unique to a client.
@@ -1192,11 +1191,18 @@ impl Session {
     }
 
     pub(crate) fn begin_rekey(&mut self) -> Result<(), Error> {
+        debug!("beginning re-key");
         let mut kex = ServerKex::new(
             self.common.config.clone(),
             &self.common.remote_sshid,
             &self.common.config.server_id,
-            self.common.encrypted.as_ref().map(|e| e.session_id.clone()),
+            match self.common.encrypted {
+                None => KexCause::Initial,
+                Some(ref enc) => KexCause::Rekey {
+                    strict: self.common.strict_kex,
+                    session_id: enc.session_id.clone(),
+                },
+            },
         );
 
         kex.kexinit(&mut self.common.packet_writer)?;

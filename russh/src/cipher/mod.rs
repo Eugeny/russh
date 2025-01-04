@@ -25,7 +25,7 @@ use aes::{Aes128, Aes192, Aes256};
 use byteorder::{BigEndian, ByteOrder};
 use ctr::Ctr128BE;
 use delegate::delegate;
-use log::debug;
+use log::trace;
 use once_cell::sync::Lazy;
 use ssh_encoding::Encode;
 use tokio::io::{AsyncRead, AsyncReadExt};
@@ -210,12 +210,12 @@ pub(crate) trait SealingKey {
         //
         // The variables `payload`, `packet_length` and `padding_length` refer
         // to the protocol fields of the same names.
-        debug!("writing, seqn = {:?}", buffer.seqn.0);
+        trace!("writing, seqn = {:?}", buffer.seqn.0);
 
         let padding_length = self.padding_length(payload);
-        debug!("padding length {:?}", padding_length);
+        trace!("padding length {:?}", padding_length);
         let packet_length = PADDING_LENGTH_LEN + payload.len() + padding_length;
-        debug!("packet_length {:?}", packet_length);
+        trace!("packet_length {:?}", packet_length);
         let offset = buffer.buffer.len();
 
         // Maximum packet length:
@@ -252,12 +252,12 @@ pub(crate) async fn read<R: AsyncRead + Unpin>(
         let mut len = vec![0; cipher.packet_length_to_read_for_block_length()];
 
         stream.read_exact(&mut len).await?;
-        debug!("reading, len = {:?}", len);
+        trace!("reading, len = {:?}", len);
         {
             let seqn = buffer.seqn.0;
             buffer.buffer.clear();
             buffer.buffer.extend(&len);
-            debug!("reading, seqn = {:?}", seqn);
+            trace!("reading, seqn = {:?}", seqn);
             let len = cipher.decrypt_packet_length(seqn, &len);
             let len = BigEndian::read_u32(&len) as usize;
 
@@ -266,26 +266,26 @@ pub(crate) async fn read<R: AsyncRead + Unpin>(
             }
 
             buffer.len = len + cipher.tag_len();
-            debug!("reading, clear len = {:?}", buffer.len);
+            trace!("reading, clear len = {:?}", buffer.len);
         }
     }
 
     buffer.buffer.resize(buffer.len + 4);
-    debug!("read_exact {:?}", buffer.len + 4);
+    trace!("read_exact {:?}", buffer.len + 4);
 
     let l = cipher.packet_length_to_read_for_block_length();
 
     #[allow(clippy::indexing_slicing)] // length checked
     stream.read_exact(&mut buffer.buffer[l..]).await?;
 
-    debug!("read_exact done");
+    trace!("read_exact done");
     let seqn = buffer.seqn.0;
     let ciphertext_len = buffer.buffer.len() - cipher.tag_len();
     let (ciphertext, tag) = buffer.buffer.split_at_mut(ciphertext_len);
     let plaintext = cipher.open(seqn, ciphertext, tag)?;
 
     let padding_length = *plaintext.first().to_owned().unwrap_or(&0) as usize;
-    debug!("reading, padding_length {:?}", padding_length);
+    trace!("reading, padding_length {:?}", padding_length);
     let plaintext_end = plaintext
         .len()
         .checked_sub(padding_length)

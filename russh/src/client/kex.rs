@@ -1,8 +1,10 @@
+use core::fmt;
+use std::fmt::{Debug, Formatter};
 use std::str::FromStr;
 use std::sync::Arc;
 
 use crate::client::{Config, NewKeys};
-use crate::kex::{Kex, KexAlgorithm, KexProgress};
+use crate::kex::{Kex, KexAlgorithm, KexCause, KexProgress};
 use crate::kex::{KexAlgorithmImplementor, KEXES};
 use crate::negotiation::{Names, Select};
 use crate::session::Exchange;
@@ -37,12 +39,30 @@ enum ClientKexState {
     },
 }
 
-#[derive(Debug)]
 pub(crate) struct ClientKex {
     exchange: Exchange,
-    session_id: Option<CryptoVec>,
+    cause: KexCause,
     state: ClientKexState,
     config: Arc<Config>,
+}
+
+impl Debug for ClientKex {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let mut s = f.debug_struct("ClientKex");
+        s.field("cause", &self.cause);
+        match self.state {
+            ClientKexState::Created => {
+                s.field("state", &"created");
+            }
+            ClientKexState::WaitingForKexReply { .. } => {
+                s.field("state", &"waiting for a reply");
+            }
+            ClientKexState::WaitingForNewKeys { .. } => {
+                s.field("state", &"waiting for NEWKEYS");
+            }
+        }
+        s.finish()
+    }
 }
 
 impl ClientKex {
@@ -50,19 +70,15 @@ impl ClientKex {
         config: Arc<Config>,
         client_sshid: &SshId,
         server_sshid: &[u8],
-        session_id: Option<CryptoVec>,
+        cause: KexCause,
     ) -> Self {
         let exchange = Exchange::new(client_sshid.as_kex_hash_bytes(), server_sshid);
         Self {
             config,
             exchange,
-            session_id,
+            cause,
             state: ClientKexState::Created,
         }
-    }
-
-    fn is_rekey(&self) -> bool {
-        self.session_id.is_some()
     }
 }
 
@@ -92,24 +108,21 @@ impl Kex for ClientKex {
                     return Err(Error::KexInit);
                 }
 
-                trace!("client parse {:?} {:?}", input.buffer.len(), input.buffer);
-                let algo = {
+                let names = {
                     // read algorithms from packet.
-                    debug!("extending {:?}", &self.exchange.server_kex_init[..]);
                     self.exchange.server_kex_init.extend(&input.buffer);
                     negotiation::Client::read_kex(&input.buffer, &self.config.preferred, None)?
                 };
-                debug!("algo = {:?}", algo);
-                // debug!("write = {:?}", &write_buffer.buffer[..]);
+                debug!("negotiated algorithms: {names:?}");
 
                 // seqno has already been incremented after read()
-                if algo.strict_kex && input.seqn.0 != 1 && !self.is_rekey() {
+                if self.cause.is_strict_kex(&names) && !self.cause.is_rekey() && input.seqn.0 != 1 {
                     return Err(
                         strict_kex_violation(msg::KEXINIT, input.seqn.0 as usize - 1).into(),
                     );
                 }
 
-                let mut kex = KEXES.get(&algo.kex).ok_or(Error::UnknownAlgo)?.make();
+                let mut kex = KEXES.get(&names.kex).ok_or(Error::UnknownAlgo)?.make();
 
                 output.packet(|w| {
                     kex.client_dh(&mut self.exchange.client_ephemeral, w)?;
@@ -120,9 +133,9 @@ impl Kex for ClientKex {
                     let newkeys = compute_keys(
                         CryptoVec::new(),
                         kex,
-                        algo.clone(),
+                        names.clone(),
                         self.exchange.clone(),
-                        self.session_id.as_ref(),
+                        self.cause.session_id(),
                     )?;
 
                     output.packet(|w| {
@@ -136,7 +149,7 @@ impl Kex for ClientKex {
                     });
                 }
 
-                self.state = ClientKexState::WaitingForKexReply { names: algo, kex };
+                self.state = ClientKexState::WaitingForKexReply { names, kex };
 
                 Ok(KexProgress::NeedsReply {
                     kex: self,
@@ -173,14 +186,13 @@ impl Kex for ClientKex {
 
                 let server_host_key = Bytes::decode(r)?; // server public key.
                 let server_host_key = parse_public_key(&server_host_key)?;
-                debug!("server_public_Key: {:?}", server_host_key);
+                debug!("received server host key: {:?}", server_host_key.to_openssh());
 
                 let server_ephemeral = Bytes::decode(r)?;
                 self.exchange.server_ephemeral.extend(&server_ephemeral);
                 let signature = Bytes::decode(r)?;
 
                 kex.compute_shared_secret(&self.exchange.server_ephemeral)?;
-                debug!("kexdhdone.exchange = {:?}", self.exchange);
 
                 let mut pubkey_vec = CryptoVec::new();
                 server_host_key.to_bytes()?.encode(&mut pubkey_vec)?;
@@ -194,21 +206,20 @@ impl Kex for ClientKex {
                     }
                 })?;
 
-                dbg!("exchange hash", &hash[..]);
                 let (sig_type, signature) = {
                     let mut r = &signature[..];
                     let sig_type = String::decode(&mut r)?;
-                    debug!("sig_type: {:?}", sig_type);
+                    debug!("server signature type: {:?}", sig_type);
                     (
                         Algorithm::from_str(&sig_type).map_err(ssh_encoding::Error::from)?,
                         Bytes::decode(&mut r)?,
                     )
                 };
 
-                debug!("signature: {:?}", signature);
+                trace!("signature: {signature:?}");
                 let signature = Signature::new(sig_type, signature.to_vec()).map_err(|e| {
-                    debug!("signature ctor failed: {e:?}");
-                    Error::WrongServerSig
+                    debug!("Signature::new failed: {e:?}");
+                    e
                 })?;
                 if let Err(e) = Verifier::verify(&server_host_key, hash.as_ref(), &signature) {
                     debug!("wrong server sig: {e:?}");
@@ -220,7 +231,7 @@ impl Kex for ClientKex {
                     kex,
                     names.clone(),
                     self.exchange.clone(),
-                    self.session_id.as_ref(),
+                    self.cause.session_id(),
                 )?;
 
                 output.packet(|w| {
@@ -256,7 +267,6 @@ impl Kex for ClientKex {
                     return Err(Error::Kex);
                 }
 
-                debug!("newkeys received");
                 Ok(KexProgress::Done {
                     newkeys,
                     server_host_key: Some(server_host_key),

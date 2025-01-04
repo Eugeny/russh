@@ -1,14 +1,23 @@
+use std::fmt::Debug;
 use std::ops::{Deref, DerefMut, Index, IndexMut, Range, RangeFrom, RangeFull, RangeTo};
 
 use crate::platform::{self, memset, mlock, munlock};
 
 /// A buffer which zeroes its memory on `.clear()`, `.resize()`, and
 /// reallocations, to avoid copying secrets around.
-#[derive(Debug)]
 pub struct CryptoVec {
     p: *mut u8, // `pub(crate)` allows access from platform modules
     size: usize,
     capacity: usize,
+}
+
+impl Debug for CryptoVec {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.size == 0 {
+            return f.write_str("<empty>");
+        }
+        write!(f, "<{:?}>", self.size)
+    }
 }
 
 impl Unpin for CryptoVec {}

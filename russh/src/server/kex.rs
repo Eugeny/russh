@@ -1,15 +1,14 @@
+use core::fmt;
 use std::cell::RefCell;
-use std::ops::DerefMut;
 
 use log::{debug, trace, warn};
 use russh_keys::helpers::sign_with_hash_alg;
 use russh_keys::key::PrivateKeyWithHashAlg;
 use ssh_encoding::Encode;
-use ssh_key::{Algorithm, PublicKey};
+use ssh_key::Algorithm;
 
 use super::*;
-use crate::cipher::SealingKey;
-use crate::kex::{Kex, KexAlgorithm, KexAlgorithmImplementor, KEXES};
+use crate::kex::{Kex, KexAlgorithm, KexAlgorithmImplementor, KexCause, KEXES};
 use crate::negotiation::{is_key_compatible_with_algo, Names, Select};
 use crate::{msg, negotiation};
 
@@ -30,12 +29,30 @@ enum ServerKexState {
     },
 }
 
-#[derive(Debug)]
 pub(crate) struct ServerKex {
     exchange: Exchange,
-    session_id: Option<CryptoVec>,
+    cause: KexCause,
     state: ServerKexState,
     config: Arc<Config>,
+}
+
+impl Debug for ServerKex {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let mut s = f.debug_struct("ClientKex");
+        s.field("cause", &self.cause);
+        match self.state {
+            ServerKexState::Created => {
+                s.field("state", &"created");
+            }
+            ServerKexState::WaitingForKexReply { .. } => {
+                s.field("state", &"waiting for a reply");
+            }
+            ServerKexState::WaitingForNewKeys { .. } => {
+                s.field("state", &"waiting for NEWKEYS");
+            }
+        }
+        s.finish()
+    }
 }
 
 impl ServerKex {
@@ -43,19 +60,15 @@ impl ServerKex {
         config: Arc<Config>,
         client_sshid: &[u8],
         server_sshid: &SshId,
-        session_id: Option<CryptoVec>,
+        cause: KexCause,
     ) -> Self {
         let exchange = Exchange::new(client_sshid, server_sshid.as_kex_hash_bytes());
         Self {
             config,
             exchange,
-            session_id,
+            cause,
             state: ServerKexState::Created,
         }
-    }
-
-    fn is_rekey(&self) -> bool {
-        self.session_id.is_some()
     }
 }
 
@@ -85,10 +98,7 @@ impl Kex for ServerKex {
                     return Err(Error::KexInit);
                 }
 
-                trace!("server parse {:?} {:?}", input.buffer.len(), input.buffer);
-                let algo = {
-                    // read algorithms from packet.
-                    debug!("extending {:?}", &self.exchange.client_kex_init[..]);
+                let names = {
                     self.exchange.client_kex_init.extend(&input.buffer);
                     negotiation::Server::read_kex(
                         &input.buffer,
@@ -96,25 +106,24 @@ impl Kex for ServerKex {
                         Some(&self.config.keys),
                     )?
                 };
-                debug!("algo = {:?}", algo);
-                // debug!("write = {:?}", &write_buffer.buffer[..]);
+                debug!("negotiated: {names:?}");
 
                 // seqno has already been incremented after read()
-                if algo.strict_kex && input.seqn.0 != 1 && !self.is_rekey() {
+                if !self.cause.is_rekey() && self.cause.is_strict_kex(&names) && input.seqn.0 != 1 {
                     return Err(
                         strict_kex_violation(msg::KEXINIT, input.seqn.0 as usize - 1).into(),
                     );
                 }
 
-                let kex = KEXES.get(&algo.kex).ok_or(Error::UnknownAlgo)?.make();
+                let kex = KEXES.get(&names.kex).ok_or(Error::UnknownAlgo)?.make();
 
                 if kex.skip_exchange() {
                     let newkeys = compute_keys(
                         CryptoVec::new(),
                         kex,
-                        algo.clone(),
+                        names.clone(),
                         self.exchange.clone(),
-                        self.session_id.as_ref(),
+                        self.cause.session_id(),
                     )?;
 
                     output.packet(|w| {
@@ -128,7 +137,7 @@ impl Kex for ServerKex {
                     });
                 }
 
-                self.state = ServerKexState::WaitingForKexReply { names: algo, kex };
+                self.state = ServerKexState::WaitingForKexReply { names, kex };
 
                 Ok(KexProgress::NeedsReply {
                     kex: self,
@@ -176,7 +185,7 @@ impl Kex for ServerKex {
                     .iter()
                     .position(|key| is_key_compatible_with_algo(key, &names.key))
                 else {
-                    debug!("unknown key {:?}", names.key);
+                    debug!("we don't have a host key of type {:?}", names.key);
                     return Err(Error::UnknownKey);
                 };
 
@@ -187,43 +196,35 @@ impl Kex for ServerKex {
                     Algorithm::Rsa { hash } => *hash,
                     _ => None,
                 };
-                //---
 
                 let hash = HASH_BUF.with(|buffer| {
                     let mut buffer = buffer.borrow_mut();
                     buffer.clear();
-                    debug!("server kexdhdone.exchange = {:?}", exchange);
 
                     let mut pubkey_vec = CryptoVec::new();
                     key.public_key().to_bytes()?.encode(&mut pubkey_vec)?;
 
                     let hash = kex.compute_exchange_hash(&pubkey_vec, exchange, &mut buffer)?;
-                    debug!("exchange hash: {:?}", hash);
 
                     Ok::<_, Error>(hash)
                 })?;
 
                 // Hash signature
                 debug!("signing with key {:?}", key);
-                debug!("hash: {:?}", hash);
-                debug!("key: {:?}", key);
                 let signature = sign_with_hash_alg(
                     &PrivateKeyWithHashAlg::new(Arc::new(key.clone()), signature_hash_alg)?,
                     &hash,
                 )?;
 
                 output.packet(|w| {
-                    warn!("sending ecdh reply");
                     msg::KEX_ECDH_REPLY.encode(w)?;
                     key.public_key().to_bytes()?.encode(w)?;
-                    // Server ephemeral
                     exchange.server_ephemeral.encode(w)?;
                     signature.encode(w)?;
                     Ok(())
                 })?;
 
                 output.packet(|w| {
-                    warn!("sending newkeys");
                     msg::NEWKEYS.encode(w)?;
                     Ok(())
                 })?;
@@ -233,10 +234,10 @@ impl Kex for ServerKex {
                     kex,
                     names.clone(),
                     self.exchange.clone(),
-                    self.session_id.as_ref(),
+                    self.cause.session_id(),
                 )?;
 
-                let reset_seqn = newkeys.names.strict_kex;
+                let reset_seqn = self.cause.is_strict_kex(&newkeys.names);
 
                 self.state = ServerKexState::WaitingForNewKeys { newkeys };
 
@@ -258,7 +259,7 @@ impl Kex for ServerKex {
                     return Err(Error::Kex);
                 }
 
-                debug!("newkeys received");
+                debug!("new keys received");
                 Ok(KexProgress::Done {
                     newkeys,
                     server_host_key: None,
@@ -267,151 +268,6 @@ impl Kex for ServerKex {
         }
     }
 }
-
-// impl KexInit {
-    //     pub fn server_parse(
-    //         mut self,
-    //         config: &Config,
-    //         cipher: &mut (dyn SealingKey + Send),
-    //         buf: &[u8],
-    //         write_buffer: &mut SSHBuffer,
-    //     ) -> Result<OldKex, Error> {
-    //         if buf.first() == Some(&msg::KEXINIT) {
-    //             let algo = {
-    //                 // read algorithms from packet.
-    //                 self.exchange.client_kex_init.extend(buf);
-    //                 super::negotiation::Server::read_kex(buf, &config.preferred, Some(&config.keys))?
-    //             };
-    //             if !self.sent {
-    //                 self.server_write(config, cipher, write_buffer)?
-    //             }
-
-    //             let Some(matching_key_index) = config
-    //                 .keys
-    //                 .iter()
-    //                 .position(|key| is_key_compatible_with_algo(key, &algo.key))
-    //             else {
-    //                 debug!("unknown key {:?}", algo.key);
-    //                 return Err(Error::UnknownKey);
-    //             };
-
-    //             let next_kex = OldKex::Dh(KexDh {
-    //                 exchange: self.exchange,
-    //                 key: matching_key_index,
-    //                 names: algo,
-    //                 session_id: self.session_id,
-    //             });
-
-    //             Ok(next_kex)
-    //         } else {
-    //             Ok(OldKex::Init(self))
-    //         }
-    //     }
-
-//     pub fn server_write(
-//         &mut self,
-//         config: &Config,
-//         cipher: &mut (dyn SealingKey + Send),
-//         write_buffer: &mut SSHBuffer,
-//     ) -> Result<(), Error> {
-//         self.exchange.server_kex_init.clear();
-//         let mut writer = PacketWriter::new(cipher, write_buffer);
-//         self.exchange.server_kex_init =
-//             negotiation::write_kex(&config.preferred, &mut writer, Some(config))?;
-//         debug!("server kex init: {:?}", &self.exchange.server_kex_init[..]);
-//         self.sent = true;
-//         Ok(())
-//     }
-// }
-
-// impl KexDh {
-//     pub fn parse(
-//         mut self,
-//         config: &Config,
-//         cipher: &mut dyn SealingKey,
-//         buf: &[u8],
-//         write_buffer: &mut SSHBuffer,
-//     ) -> Result<OldKex, Error> {
-//         if self.names.ignore_guessed {
-//             // If we need to ignore this packet.
-//             self.names.ignore_guessed = false;
-//             Ok(OldKex::Dh(self))
-//         } else {
-//             // Else, process it.
-//             let Some((&msg::KEX_ECDH_INIT, mut r)) = buf.split_first() else {
-//                 return Err(Error::Inconsistent);
-//             };
-
-//             self.exchange
-//                 .client_ephemeral
-//                 .extend(&Bytes::decode(&mut r)?);
-
-//             let mut kex = KEXES.get(&self.names.kex).ok_or(Error::UnknownAlgo)?.make();
-
-//             kex.server_dh(&mut self.exchange, buf)?;
-
-//             // Look up the key we'll be using to sign the exchange hash
-//             #[allow(clippy::indexing_slicing)] // key index checked
-//             let key = &config.keys[self.key];
-//             let signature_hash_alg = match &self.names.key {
-//                 Algorithm::Rsa { hash } => *hash,
-//                 _ => None,
-//             };
-
-//             // Then, we fill the write buffer right away, so that we
-//             // can output it immediately when the time comes.
-//             let kexdhdone = KexDhDone {
-//                 exchange: self.exchange,
-//                 kex,
-//                 key: self.key,
-//                 names: self.names,
-//                 session_id: self.session_id,
-//             };
-
-//             let hash: Result<_, Error> = HASH_BUF.with(|buffer| {
-//                 let mut buffer = buffer.borrow_mut();
-//                 buffer.clear();
-//                 debug!("server kexdhdone.exchange = {:?}", kexdhdone.exchange);
-
-//                 let mut pubkey_vec = CryptoVec::new();
-//                 key.public_key().to_bytes()?.encode(&mut pubkey_vec)?;
-
-//                 let hash = kexdhdone.kex.compute_exchange_hash(
-//                     &pubkey_vec,
-//                     &kexdhdone.exchange,
-//                     &mut buffer,
-//                 )?;
-//                 debug!("exchange hash: {:?}", hash);
-//                 buffer.clear();
-//                 buffer.push(msg::KEX_ECDH_REPLY);
-//                 key.public_key().to_bytes()?.encode(buffer.deref_mut())?;
-
-//                 // Server ephemeral
-//                 kexdhdone
-//                     .exchange
-//                     .server_ephemeral
-//                     .encode(buffer.deref_mut())?;
-
-//                 // Hash signature
-//                 debug!("signing with key {:?}", kexdhdone.key);
-//                 debug!("hash: {:?}", hash);
-//                 debug!("key: {:?}", key);
-
-//                 sign_with_hash_alg(
-//                     &PrivateKeyWithHashAlg::new(Arc::new(key.clone()), signature_hash_alg)?,
-//                     &hash,
-//                 )?
-//                 .encode(&mut *buffer)?;
-
-//                 cipher.write(&buffer, write_buffer);
-//                 cipher.write(&[msg::NEWKEYS], write_buffer);
-//                 Ok(hash)
-//             });
-
-//             Ok(OldKex::Keys(kexdhdone.compute_keys(hash?, true)?))
-//         }
-//     }
-// }
 
 fn compute_keys(
     hash: CryptoVec,

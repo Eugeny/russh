@@ -59,7 +59,7 @@ use tokio::sync::oneshot;
 
 use crate::channels::{Channel, ChannelMsg, ChannelRef, WindowSizeRef};
 use crate::cipher::{self, clear, OpeningKey};
-use crate::kex::{Kex, KexProgress, SessionKexState};
+use crate::kex::{Kex, KexCause, KexProgress, SessionKexState};
 use crate::msg::{ALL_KEX_MESSAGES, STRICT_KEX_MSG_ORDER};
 use crate::session::{CommonSession, EncryptedState, GlobalRequestResponse, NewKeys};
 use crate::ssh_read::SshRead;
@@ -907,10 +907,6 @@ impl Session {
             Err(crate::Error::Disconnect.into());
         self.flush()?;
         if !self.common.packet_writer.buffer().buffer.is_empty() {
-            debug!(
-                "writing {:?} bytes",
-                self.common.packet_writer.buffer().buffer.len()
-            );
             map_err!(
                 stream_write
                     .write_all(&self.common.packet_writer.buffer().buffer)
@@ -1239,11 +1235,18 @@ impl Session {
     }
 
     fn begin_rekey(&mut self) -> Result<(), crate::Error> {
+        debug!("beginning re-key");
         let mut kex = ClientKex::new(
             self.common.config.clone(),
             &self.common.config.client_id,
             &self.common.remote_sshid,
-            self.common.encrypted.as_ref().map(|e| e.session_id.clone()),
+            match &self.common.encrypted {
+                None => KexCause::Initial,
+                Some(enc) => KexCause::Rekey {
+                    strict: self.common.strict_kex,
+                    session_id: enc.session_id.clone(),
+                },
+            },
         );
 
         kex.kexinit(&mut self.common.packet_writer)?;
@@ -1259,7 +1262,6 @@ impl Session {
                 &self.common.config.as_ref().limits,
                 &mut self.common.packet_writer,
             )? {
-                info!("Re-exchanging keys");
                 if !self.kex.active() {
                     self.begin_rekey()?;
                 }
@@ -1287,7 +1289,11 @@ async fn reply<H: Handler>(
 ) -> Result<(), H::Error> {
     // dbg!(&pkt.buffer[..]);
     if let Some(message_type) = pkt.buffer.first() {
-        debug!("Received msg type {message_type:?}");
+        debug!(
+            "< msg type {message_type:?}, seqn {:?}, len {}",
+            pkt.seqn.0,
+            pkt.buffer.len()
+        );
         // dbg!(message_type);
         if session.common.strict_kex && session.common.encrypted.is_none() {
             let seqno = pkt.seqn.0 - 1; // was incremented after read()
@@ -1305,7 +1311,7 @@ async fn reply<H: Handler>(
 
     if pkt.buffer.first() == Some(&msg::KEXINIT) && session.kex == SessionKexState::Idle {
         // Not currently in a rekey but received KEXINIT
-        info!("Server has initiated rekey");
+        debug!("server has initiated re-key");
         session.begin_rekey()?;
         // Kex will consume the packet right away
     }
@@ -1318,12 +1324,13 @@ async fn reply<H: Handler>(
     if is_kex_msg {
         if let SessionKexState::InProgress(kex) = session.kex.take() {
             let progress = kex.step(Some(pkt), &mut session.common.packet_writer)?;
-            debug!("kex step, result={progress:?}");
 
             match progress {
                 KexProgress::NeedsReply { kex, reset_seqn } => {
+                    debug!("kex impl continues: {kex:?}");
                     session.kex = SessionKexState::InProgress(kex);
                     if reset_seqn {
+                        debug!("kex impl requests seqno reset");
                         session.common.reset_seqn();
                     }
                 }
@@ -1331,6 +1338,7 @@ async fn reply<H: Handler>(
                     server_host_key,
                     newkeys,
                 } => {
+                    debug!("kex impl has completed");
                     session.common.strict_kex =
                         session.common.strict_kex || newkeys.names.strict_kex;
 
