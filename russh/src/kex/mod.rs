@@ -133,24 +133,24 @@ impl Debug for KexAlgorithm {
 pub(crate) trait KexAlgorithmImplementor {
     fn skip_exchange(&self) -> bool;
 
-    fn server_dh_gex_init(
-        &mut self,
-        _exchange: &mut Exchange,
-        _payload: &[u8],
-    ) -> Result<(), crate::Error> {
-        Err(crate::Error::KexInit)
-    }
+    // fn server_dh_gex_init(
+    //     &mut self,
+    //     _exchange: &mut Exchange,
+    //     _payload: &[u8],
+    // ) -> Result<(), crate::Error> {
+    //     Err(crate::Error::KexInit)
+    // }
 
-    #[allow(dead_code)]
-    fn client_dh_gex_init(
-        &mut self,
-        _gex_min: u32,
-        _gex_n: u32,
-        _gex_max: u32,
-        _buf: &mut CryptoVec,
-    ) -> Result<(), crate::Error> {
-        Err(crate::Error::KexInit)
-    }
+    // #[allow(dead_code)]
+    // fn client_dh_gex_init(
+    //     &mut self,
+    //     _gex_min: u32,
+    //     _gex_n: u32,
+    //     _gex_max: u32,
+    //     _buf: &mut CryptoVec,
+    // ) -> Result<(), crate::Error> {
+    //     Err(crate::Error::KexInit)
+    // }
 
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     fn server_dh(&mut self, exchange: &mut Exchange, payload: &[u8]) -> Result<(), crate::Error>;

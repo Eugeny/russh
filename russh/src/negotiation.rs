@@ -17,7 +17,7 @@ use std::borrow::Cow;
 use log::debug;
 use rand::RngCore;
 use russh_keys::helpers::NameList;
-use ssh_encoding::{Decode, Encode, Writer};
+use ssh_encoding::{Decode, Encode};
 use ssh_key::{Algorithm, EcdsaCurve, HashAlg, PrivateKey};
 
 use crate::cipher::CIPHERS;

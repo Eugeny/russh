@@ -14,7 +14,6 @@
 //
 use std::cell::RefCell;
 use std::convert::TryInto;
-use std::num::Wrapping;
 use std::ops::Deref;
 
 use bytes::Bytes;
@@ -24,13 +23,11 @@ use ssh_encoding::{Decode, Encode};
 
 use crate::cert::PublicKeyOrCertificate;
 use crate::client::{Handler, Msg, Prompt, Reply, Session};
-use crate::kex::KexAlgorithmImplementor;
 use crate::keys::key::parse_public_key;
-use crate::negotiation::Select;
 use crate::parsing::{ChannelOpenConfirmation, ChannelType, OpenChannelMessage};
 use crate::session::{Encrypted, EncryptedState, GlobalRequestResponse};
 use crate::{
-    auth, msg, negotiation, Channel, ChannelId, ChannelMsg, ChannelOpenFailure, ChannelParams,
+    auth, msg, Channel, ChannelId, ChannelMsg, ChannelOpenFailure, ChannelParams,
     CryptoVec, Sig,
 };
 

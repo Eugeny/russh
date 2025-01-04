@@ -34,26 +34,22 @@
 //!
 //! [Session]: client::Session
 
-use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::convert::TryInto;
 use std::num::Wrapping;
 use std::pin::Pin;
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
-use bytes::Bytes;
 use futures::task::{Context, Poll};
 use futures::Future;
 use kex::ClientKex;
 use log::{debug, error, info, trace};
 use russh_keys::key::PrivateKeyWithHashAlg;
 use russh_keys::map_err;
-use signature::Verifier;
-use ssh_encoding::{Decode, Encode, Reader};
-use ssh_key::{Algorithm, Certificate, PrivateKey, PublicKey, Signature};
+use ssh_encoding::Decode;
+use ssh_key::{Certificate, PrivateKey, PublicKey};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadHalf, WriteHalf};
 use tokio::pin;
 use tokio::sync::mpsc::{
@@ -62,13 +58,10 @@ use tokio::sync::mpsc::{
 use tokio::sync::oneshot;
 
 use crate::channels::{Channel, ChannelMsg, ChannelRef, WindowSizeRef};
-use crate::cipher::{self, clear, CipherPair, OpeningKey};
-use crate::kex::{Kex, KexAlgorithmImplementor, KexProgress, SessionKexState};
-use crate::keys::key::parse_public_key;
+use crate::cipher::{self, clear, OpeningKey};
+use crate::kex::{Kex, KexProgress, SessionKexState};
 use crate::msg::{ALL_KEX_MESSAGES, STRICT_KEX_MSG_ORDER};
-use crate::session::{
-    CommonSession, EncryptedState, Exchange, GlobalRequestResponse, NewKeys,
-};
+use crate::session::{CommonSession, EncryptedState, GlobalRequestResponse, NewKeys};
 use crate::ssh_read::SshRead;
 use crate::sshbuffer::{IncomingSshPacket, PacketWriter, SSHBuffer, SshId};
 use crate::{
@@ -773,7 +766,7 @@ where
             auth_user: String::new(),
             auth_attempts: 0,
             auth_method: None, // Client only.
-                remote_to_local: Box::new(clear::Key),
+            remote_to_local: Box::new(clear::Key),
             encrypted: None,
             config,
             wants_reply: false,
@@ -914,7 +907,10 @@ impl Session {
             Err(crate::Error::Disconnect.into());
         self.flush()?;
         if !self.common.packet_writer.buffer().buffer.is_empty() {
-            debug!("writing {:?} bytes", self.common.packet_writer.buffer().buffer.len());
+            debug!(
+                "writing {:?} bytes",
+                self.common.packet_writer.buffer().buffer.len()
+            );
             map_err!(
                 stream_write
                     .write_all(&self.common.packet_writer.buffer().buffer)
@@ -1035,7 +1031,8 @@ impl Session {
             self.common.packet_writer.buffer().buffer.clear();
             if let Some(ref mut enc) = self.common.encrypted {
                 if let EncryptedState::InitCompression = enc.state {
-                    enc.client_compression.init_compress(&mut self.common.packet_writer.compress());
+                    enc.client_compression
+                        .init_compress(&mut self.common.packet_writer.compress());
                     enc.state = EncryptedState::Authenticated;
                 }
             }

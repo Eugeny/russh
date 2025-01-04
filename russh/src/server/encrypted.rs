@@ -21,14 +21,13 @@ use byteorder::{BigEndian, ByteOrder};
 use bytes::Bytes;
 use cert::PublicKeyOrCertificate;
 use log::{debug, error, info, trace, warn};
-use negotiation::Select;
+use msg;
 use russh_keys::helpers::NameList;
 use russh_keys::map_err;
 use signature::Verifier;
 use ssh_encoding::{Decode, Encode, Reader};
 use ssh_key::{PublicKey, Signature};
 use tokio::time::Instant;
-use {msg, negotiation};
 
 use super::super::*;
 use super::*;
