@@ -13,9 +13,11 @@
 // limitations under the License.
 //
 
+use core::fmt;
 use std::num::Wrapping;
 
 use cipher::SealingKey;
+use compression::Compress;
 use ssh_encoding::Writer;
 
 use super::*;
@@ -68,7 +70,7 @@ fn test_ssh_id() {
 #[derive(Debug, Default)]
 pub struct SSHBuffer {
     pub buffer: CryptoVec,
-    pub len: usize, // next packet length.
+    pub len: usize,   // next packet length.
     pub bytes: usize, // total bytes written since the last rekey
     // Sequence numbers are on 32 bits and wrap.
     // https://tools.ietf.org/html/rfc4253#section-6.4
@@ -96,18 +98,40 @@ pub(crate) struct IncomingSshPacket {
     pub seqn: Wrapping<u32>,
 }
 
-pub struct PacketWriter<'a> {
-    cipher: &'a mut (dyn SealingKey + Send),
-    write_buffer: &'a mut SSHBuffer,
+pub struct PacketWriter {
+    cipher: Box<dyn SealingKey + Send>,
+    compress: Compress,
+    compress_buffer: CryptoVec,
+    write_buffer: SSHBuffer,
 }
 
-impl<'a> PacketWriter<'a> {
-    pub fn new(cipher: &'a mut (dyn SealingKey + Send), write_buffer: &'a mut SSHBuffer) -> Self {
-        write_buffer.buffer.clear();
+impl Debug for PacketWriter {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PacketWriter").finish()
+    }
+}
+
+impl PacketWriter {
+    pub fn clear() -> Self {
+        Self::new(Box::new(cipher::clear::Key {}), Compress::None)
+    }
+
+    pub fn new(cipher: Box<dyn SealingKey + Send>, compress: Compress) -> Self {
         Self {
             cipher,
-            write_buffer,
+            compress,
+            compress_buffer: CryptoVec::new(),
+            write_buffer: SSHBuffer::new(),
         }
+    }
+
+    pub fn packet_raw(&mut self, buf: &[u8]) -> Result<(), Error> {
+        if let Some(message_type) = buf.first() {
+            debug!("Sending msg type {message_type:?}");
+            let packet = self.compress.compress(&buf, &mut self.compress_buffer)?;
+            self.cipher.write(&packet, &mut self.write_buffer);
+        }
+        Ok(())
     }
 
     /// Sends and returns the packet contents
@@ -117,10 +141,23 @@ impl<'a> PacketWriter<'a> {
     ) -> Result<CryptoVec, Error> {
         let mut buf = CryptoVec::new();
         f(&mut buf)?;
-        if let Some(message_type) = buf.first() {
-            debug!("Sending msg type {message_type:?}");
-            self.cipher.write(&buf, self.write_buffer);
-        }
+        self.packet_raw(&buf)?;
         Ok(buf)
+    }
+
+    pub fn buffer(&mut self) -> &mut SSHBuffer {
+        &mut self.write_buffer
+    }
+
+    pub fn compress(&mut self) -> &mut Compress {
+        &mut self.compress
+    }
+
+    pub fn set_cipher(&mut self, cipher: Box<dyn SealingKey + Send>) {
+        self.cipher = cipher;
+    }
+
+    pub fn reset_seqn(&mut self) {
+        self.write_buffer.seqn = Wrapping(0);
     }
 }

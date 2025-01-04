@@ -23,11 +23,12 @@ use log::{debug, trace};
 use ssh_encoding::Encode;
 use tokio::sync::oneshot;
 
-use crate::cipher::SealingKey;
+use crate::cipher::{OpeningKey, SealingKey};
 use crate::kex::{KexAlgorithm, KexAlgorithmImplementor};
-use crate::sshbuffer::SSHBuffer;
+use crate::sshbuffer::{PacketWriter, SSHBuffer};
 use crate::{
-    auth, cipher, mac, msg, negotiation, ChannelId, ChannelParams, CryptoVec, Disconnect, Error, Limits, SshId
+    auth, cipher, mac, msg, negotiation, ChannelId, ChannelParams, CryptoVec, Disconnect, Error,
+    Limits, SshId,
 };
 
 #[derive(Debug)]
@@ -48,13 +49,11 @@ pub(crate) struct Encrypted {
     pub last_rekey: russh_util::time::Instant,
     pub server_compression: crate::compression::Compression,
     pub client_compression: crate::compression::Compression,
-    pub compress: crate::compression::Compress,
     pub decompress: crate::compression::Decompress,
     pub compress_buffer: CryptoVec,
     pub rekey_wanted: bool,
 }
 
-#[derive(Debug)]
 pub(crate) struct CommonSession<Config> {
     pub auth_user: String,
     pub remote_sshid: Vec<u8>,
@@ -63,14 +62,33 @@ pub(crate) struct CommonSession<Config> {
     pub auth_method: Option<auth::Method>,
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub(crate) auth_attempts: usize,
-    pub write_buffer: SSHBuffer,
-    pub cipher: cipher::CipherPair,
+    pub packet_writer: PacketWriter,
+    pub remote_to_local: Box<dyn OpeningKey + Send>,
     pub wants_reply: bool,
     pub disconnected: bool,
     pub buffer: CryptoVec,
     pub strict_kex: bool,
     pub alive_timeouts: usize,
     pub received_data: bool,
+}
+
+impl<C> Debug for CommonSession<C> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CommonSession")
+            .field("auth_user", &self.auth_user)
+            .field("remote_sshid", &self.remote_sshid)
+            .field("encrypted", &self.encrypted)
+            .field("auth_method", &self.auth_method)
+            .field("auth_attempts", &self.auth_attempts)
+            .field("packet_writer", &self.packet_writer)
+            .field("wants_reply", &self.wants_reply)
+            .field("disconnected", &self.disconnected)
+            .field("buffer", &self.buffer)
+            .field("strict_kex", &self.strict_kex)
+            .field("alive_timeouts", &self.alive_timeouts)
+            .field("received_data", &self.received_data)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -109,7 +127,9 @@ impl<C> CommonSession<C> {
             enc.key = newkeys.key;
             enc.client_mac = newkeys.names.client_mac;
             enc.server_mac = newkeys.names.server_mac;
-            self.cipher = newkeys.cipher;
+            self.remote_to_local = newkeys.cipher.remote_to_local;
+            self.packet_writer
+                .set_cipher(newkeys.cipher.local_to_remote);
             self.strict_kex = self.strict_kex || newkeys.names.strict_kex;
         }
     }
@@ -130,12 +150,13 @@ impl<C> CommonSession<C> {
             last_rekey: russh_util::time::Instant::now(),
             server_compression: newkeys.names.server_compression,
             client_compression: newkeys.names.client_compression,
-            compress: crate::compression::Compress::None,
             compress_buffer: CryptoVec::new(),
             decompress: crate::compression::Decompress::None,
             rekey_wanted: false,
         });
-        self.cipher = newkeys.cipher;
+        self.remote_to_local = newkeys.cipher.remote_to_local;
+        self.packet_writer
+            .set_cipher(newkeys.cipher.local_to_remote);
         self.strict_kex = newkeys.names.strict_kex;
     }
 
@@ -160,7 +181,7 @@ impl<C> CommonSession<C> {
             return if let Some(ref mut enc) = self.encrypted {
                 disconnect(&mut enc.write)
             } else {
-                disconnect(&mut self.write_buffer.buffer)
+                disconnect(&mut self.packet_writer.buffer().buffer)
             };
         }
         Ok(())
@@ -182,7 +203,7 @@ impl<C> CommonSession<C> {
     }
 
     pub(crate) fn reset_seqn(&mut self) {
-        self.write_buffer.seqn = Wrapping(0);
+        self.packet_writer.reset_seqn();
     }
 }
 
@@ -430,8 +451,7 @@ impl Encrypted {
     pub fn flush(
         &mut self,
         limits: &Limits,
-        cipher: &mut (dyn SealingKey + Send),
-        write_buffer: &mut SSHBuffer,
+        writer: &mut PacketWriter,
     ) -> Result<bool, crate::Error> {
         // If there are pending packets (and we've not started to rekey), flush them.
         {
@@ -442,11 +462,8 @@ impl Encrypted {
                 #[allow(clippy::indexing_slicing)]
                 let to_write = &self.write[(self.write_cursor + 4)..(self.write_cursor + 4 + len)];
                 trace!("session_write_encrypted, buf = {:?}", to_write);
-                #[allow(clippy::indexing_slicing)]
-                let packet = self
-                    .compress
-                    .compress(to_write, &mut self.compress_buffer)?;
-                cipher.write(packet, write_buffer);
+
+                writer.packet_raw(to_write)?;
                 self.write_cursor += 4 + len
             }
         }
@@ -463,7 +480,7 @@ impl Encrypted {
         let now = russh_util::time::Instant::now();
         let dur = now.duration_since(self.last_rekey);
         Ok(replace(&mut self.rekey_wanted, false)
-            || write_buffer.bytes >= limits.rekey_write_limit
+            || writer.buffer().bytes >= limits.rekey_write_limit
             || dur >= limits.rekey_time_limit)
     }
 

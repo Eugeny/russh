@@ -900,19 +900,14 @@ async fn read_ssh_id<R: AsyncRead + Unpin>(
     } else {
         read.read_ssh_id().await?
     };
-    let cipher = CipherPair {
-        local_to_remote: Box::new(clear::Key),
-        remote_to_local: Box::new(clear::Key),
-    };
-    let write_buffer = SSHBuffer::new();
 
     let session = CommonSession {
-        write_buffer,
+        packet_writer: PacketWriter::clear(),
         // kex: Some(Kex::Init(kexinit)),
         auth_user: String::new(),
         auth_method: None, // Client only.
         auth_attempts: 0,
-        cipher,
+        remote_to_local: Box::new(clear::Key),
         encrypted: None,
         config,
         wants_reply: false,
@@ -963,12 +958,7 @@ async fn reply<H: Handler + Send>(
 
     if is_kex_msg {
         if let SessionKexState::InProgress(kex) = session.kex.take() {
-            let mut writer = PacketWriter::new(
-                session.common.cipher.local_to_remote.as_mut(),
-                &mut session.common.write_buffer,
-            );
-
-            let progress = kex.step(Some(pkt), &mut writer)?;
+            let progress = kex.step(Some(pkt), &mut session.common.packet_writer)?;
             debug!("kex step, result={progress:?}");
 
             match progress {
@@ -979,15 +969,13 @@ async fn reply<H: Handler + Send>(
                     }
                 }
                 KexProgress::Done { newkeys, .. } => {
-                    drop(writer);
-
                     session.common.strict_kex =
                         session.common.strict_kex || newkeys.names.strict_kex;
 
                     if let Some(ref mut enc) = session.common.encrypted {
                         // This is a rekey
                         enc.last_rekey = Instant::now();
-                        session.common.write_buffer.bytes = 0;
+                        session.common.packet_writer.buffer().bytes = 0;
                         enc.flush_all_pending()?;
 
                         let mut pending = std::mem::take(&mut session.pending_reads);

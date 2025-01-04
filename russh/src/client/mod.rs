@@ -769,14 +769,11 @@ where
     let mut session = Session::new(
         config.window_size,
         CommonSession {
-            write_buffer,
+            packet_writer: PacketWriter::clear(),
             auth_user: String::new(),
             auth_attempts: 0,
             auth_method: None, // Client only.
-            cipher: CipherPair {
-                local_to_remote: Box::new(clear::Key),
                 remote_to_local: Box::new(clear::Key),
-            },
             encrypted: None,
             config,
             wants_reply: false,
@@ -916,22 +913,22 @@ impl Session {
         let mut result: Result<RemoteDisconnectInfo, H::Error> =
             Err(crate::Error::Disconnect.into());
         self.flush()?;
-        if !self.common.write_buffer.buffer.is_empty() {
-            debug!("writing {:?} bytes", self.common.write_buffer.buffer.len());
+        if !self.common.packet_writer.buffer().buffer.is_empty() {
+            debug!("writing {:?} bytes", self.common.packet_writer.buffer().buffer.len());
             map_err!(
                 stream_write
-                    .write_all(&self.common.write_buffer.buffer)
+                    .write_all(&self.common.packet_writer.buffer().buffer)
                     .await
             )?;
             map_err!(stream_write.flush().await)?;
         }
-        self.common.write_buffer.buffer.clear();
+        self.common.packet_writer.buffer().buffer.clear();
 
         let buffer = SSHBuffer::new();
 
         // Allow handing out references to the cipher
         let mut opening_cipher = Box::new(clear::Key) as Box<dyn OpeningKey + Send>;
-        std::mem::swap(&mut opening_cipher, &mut self.common.cipher.remote_to_local);
+        std::mem::swap(&mut opening_cipher, &mut self.common.remote_to_local);
 
         let keepalive_timer =
             crate::future_or_pending(self.common.config.keepalive_interval, tokio::time::sleep);
@@ -955,7 +952,7 @@ impl Session {
                         Err(e) => return Err(e.into())
                     };
 
-                    std::mem::swap(&mut opening_cipher, &mut self.common.cipher.remote_to_local);
+                    std::mem::swap(&mut opening_cipher, &mut self.common.remote_to_local);
 
                     if buffer.buffer.len() < 5 {
                         break
@@ -973,7 +970,7 @@ impl Session {
                         }
                     }
 
-                    std::mem::swap(&mut opening_cipher, &mut self.common.cipher.remote_to_local);
+                    std::mem::swap(&mut opening_cipher, &mut self.common.remote_to_local);
                     reading.set(start_reading(stream_read, buffer, opening_cipher));
                 }
                 () = &mut keepalive_timer => {
@@ -1023,22 +1020,22 @@ impl Session {
             };
 
             self.flush()?;
-            if !self.common.write_buffer.buffer.is_empty() {
+            if !self.common.packet_writer.buffer().buffer.is_empty() {
                 trace!(
                     "writing to stream: {:?} bytes",
-                    self.common.write_buffer.buffer.len()
+                    self.common.packet_writer.buffer().buffer.len()
                 );
                 map_err!(
                     stream_write
-                        .write_all(&self.common.write_buffer.buffer)
+                        .write_all(&self.common.packet_writer.buffer().buffer)
                         .await
                 )?;
                 map_err!(stream_write.flush().await)?;
             }
-            self.common.write_buffer.buffer.clear();
+            self.common.packet_writer.buffer().buffer.clear();
             if let Some(ref mut enc) = self.common.encrypted {
                 if let EncryptedState::InitCompression = enc.state {
-                    enc.client_compression.init_compress(&mut enc.compress);
+                    enc.client_compression.init_compress(&mut self.common.packet_writer.compress());
                     enc.state = EncryptedState::Authenticated;
                 }
             }
@@ -1252,12 +1249,7 @@ impl Session {
             self.common.encrypted.as_ref().map(|e| e.session_id.clone()),
         );
 
-        let mut writer = PacketWriter::new(
-            self.common.cipher.local_to_remote.as_mut(),
-            &mut self.common.write_buffer,
-        );
-
-        kex.kexinit(&mut writer)?;
+        kex.kexinit(&mut self.common.packet_writer)?;
         self.kex = SessionKexState::InProgress(kex);
         Ok(())
     }
@@ -1268,8 +1260,7 @@ impl Session {
         if let Some(ref mut enc) = self.common.encrypted {
             if enc.flush(
                 &self.common.config.as_ref().limits,
-                &mut *self.common.cipher.local_to_remote,
-                &mut self.common.write_buffer,
+                &mut self.common.packet_writer,
             )? {
                 info!("Re-exchanging keys");
                 if !self.kex.active() {
@@ -1329,12 +1320,7 @@ async fn reply<H: Handler>(
 
     if is_kex_msg {
         if let SessionKexState::InProgress(kex) = session.kex.take() {
-            let mut writer = PacketWriter::new(
-                session.common.cipher.local_to_remote.as_mut(),
-                &mut session.common.write_buffer,
-            );
-
-            let progress = kex.step(Some(pkt), &mut writer)?;
+            let progress = kex.step(Some(pkt), &mut session.common.packet_writer)?;
             debug!("kex step, result={progress:?}");
 
             match progress {
@@ -1348,15 +1334,13 @@ async fn reply<H: Handler>(
                     server_host_key,
                     newkeys,
                 } => {
-                    drop(writer);
-
                     session.common.strict_kex =
                         session.common.strict_kex || newkeys.names.strict_kex;
 
                     if let Some(ref mut enc) = session.common.encrypted {
                         // This is a rekey
                         enc.last_rekey = Instant::now();
-                        session.common.write_buffer.bytes = 0;
+                        session.common.packet_writer.buffer().bytes = 0;
                         enc.flush_all_pending()?;
                         let mut pending = std::mem::take(&mut session.pending_reads);
                         for p in pending.drain(..) {

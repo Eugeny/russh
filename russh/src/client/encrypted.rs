@@ -920,11 +920,11 @@ impl Session {
                 } => {
                     debug!("sending ssh-userauth service requset");
                     if !*sent {
-                        let p = b"\x05\0\0\0\x0Cssh-userauth";
-                        self.common
-                            .cipher
-                            .local_to_remote
-                            .write(p, &mut self.common.write_buffer);
+                        self.common.packet_writer.packet(|w| {
+                            msg::SERVICE_REQUEST.encode(w)?;
+                            "ssh-userauth".encode(w)?;
+                            Ok(())
+                        })?;
                         *sent = true
                     }
                     accepted

@@ -455,15 +455,19 @@ impl Session {
         R: AsyncRead + AsyncWrite + Unpin + Send + 'static,
     {
         self.flush()?;
-        map_err!(stream.write_all(&self.common.write_buffer.buffer).await)?;
-        self.common.write_buffer.buffer.clear();
+        map_err!(
+            stream
+                .write_all(&self.common.packet_writer.buffer().buffer)
+                .await
+        )?;
+        self.common.packet_writer.buffer().buffer.clear();
 
         let (stream_read, mut stream_write) = stream.split();
         let buffer = SSHBuffer::new();
 
         // Allow handing out references to the cipher
         let mut opening_cipher = Box::new(clear::Key) as Box<dyn OpeningKey + Send>;
-        std::mem::swap(&mut opening_cipher, &mut self.common.cipher.remote_to_local);
+        std::mem::swap(&mut opening_cipher, &mut self.common.remote_to_local);
 
         let keepalive_timer =
             future_or_pending(self.common.config.keepalive_interval, tokio::time::sleep);
@@ -505,7 +509,7 @@ impl Session {
                         Some(_) => {
                             self.common.received_data = true;
                             // TODO it'd be cleaner to just pass cipher to reply()
-                            std::mem::swap(&mut opening_cipher, &mut self.common.cipher.remote_to_local);
+                            std::mem::swap(&mut opening_cipher, &mut self.common.remote_to_local);
 
                             match reply(&mut self, &mut handler, &mut pkt).await {
                                 Ok(_) => {},
@@ -513,7 +517,7 @@ impl Session {
                             }
                             buffer.seqn = pkt.seqn; // TODO reply changes seqn internall, find cleaner way
 
-                            std::mem::swap(&mut opening_cipher, &mut self.common.cipher.remote_to_local);
+                            std::mem::swap(&mut opening_cipher, &mut self.common.remote_to_local);
                         }
                     }
                     reading.set(start_reading(stream_read, buffer, opening_cipher));
@@ -610,10 +614,10 @@ impl Session {
             self.flush()?;
             map_err!(
                 stream_write
-                    .write_all(&self.common.write_buffer.buffer)
+                    .write_all(&self.common.packet_writer.buffer().buffer)
                     .await
             )?;
-            self.common.write_buffer.buffer.clear();
+            self.common.packet_writer.buffer().buffer.clear();
 
             if self.common.received_data {
                 // Reset the number of failed keepalive attempts. We don't
@@ -696,21 +700,13 @@ impl Session {
         if let Some(ref mut enc) = self.common.encrypted {
             if enc.flush(
                 &self.common.config.as_ref().limits,
-                &mut *self.common.cipher.local_to_remote,
-                &mut self.common.write_buffer,
+                &mut self.common.packet_writer,
             )?
             //  && enc.rekey.is_none()
             {
                 debug!("starting rekeying");
                 if let Some(exchange) = enc.exchange.take() {
                     self.begin_rekey()?;
-                    // let mut kexinit = KexInit::initiate_rekey(exchange, &enc.session_id);
-                    // kexinit.server_write(
-                    //     self.common.config.as_ref(),
-                    //     &mut *self.common.cipher.local_to_remote,
-                    //     &mut self.common.write_buffer,
-                    // )?;
-                    // enc.rekey = Some(Kex::Init(kexinit))
                 }
             }
         }
@@ -1203,12 +1199,7 @@ impl Session {
             self.common.encrypted.as_ref().map(|e| e.session_id.clone()),
         );
 
-        let mut writer = PacketWriter::new(
-            self.common.cipher.local_to_remote.as_mut(),
-            &mut self.common.write_buffer,
-        );
-
-        kex.kexinit(&mut writer)?;
+        kex.kexinit(&mut self.common.packet_writer)?;
         self.kex = SessionKexState::InProgress(kex);
         Ok(())
     }

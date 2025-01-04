@@ -198,7 +198,8 @@ impl Session {
                 }
             }
             (EncryptedState::InitCompression, Some((msg, mut r))) => {
-                enc.server_compression.init_compress(&mut enc.compress);
+                enc.server_compression
+                    .init_compress(&mut self.common.packet_writer.compress());
                 enc.state = EncryptedState::Authenticated;
                 self.server_read_authenticated(handler, *msg, &mut r).await
             }
