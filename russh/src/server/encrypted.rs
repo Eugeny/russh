@@ -40,16 +40,8 @@ impl Session {
     pub(crate) async fn server_read_encrypted<H: Handler + Send>(
         &mut self,
         handler: &mut H,
-        seqn: &mut Wrapping<u32>,
-        buf: &[u8],
+        pkt: &mut IncomingSshPacket,
     ) -> Result<(), H::Error> {
-        #[allow(clippy::indexing_slicing)] // length checked
-        {
-            trace!(
-                "server_read_encrypted, buf = {:?}",
-                &buf[..buf.len().min(20)]
-            );
-        }
         // Either this packet is a KEXINIT, in which case we start a key re-exchange.
 
         #[allow(clippy::unwrap_used)]
@@ -107,32 +99,9 @@ impl Session {
         //         if buf.first() != Some(&msg::NEWKEYS) {
         //             return Err(Error::Kex.into());
         //         }
-        //         self.common.write_buffer.bytes = 0;
-        //         enc.last_rekey = std::time::Instant::now();
-
-        //         // Ok, NEWKEYS received, now encrypted.
-        //         enc.flush_all_pending()?;
-        //         let mut pending = std::mem::take(&mut self.pending_reads);
-        //         for p in pending.drain(..) {
-        //             self.process_packet(handler, &p).await?;
-        //         }
-        //         self.pending_reads = pending;
-        //         self.pending_len = 0;
-        //         self.common.newkeys(newkeys);
-        //         if self.common.strict_kex {
-        //             *seqn = Wrapping(0);
-        //         }
-        //         self.flush()?;
         //         return Ok(());
         //     }
         //     Some(Kex::Init(k)) => {
-        //         if let Some(ref algo) = k.algo {
-        //             if self.common.strict_kex && !algo.strict_kex {
-        //                 return Err(strict_kex_violation(msg::KEXINIT, 0).into());
-        //             }
-        //         }
-
-        //         enc.rekey = Some(Kex::Init(k));
 
         //         self.pending_len += buf.len() as u32;
         //         if self.pending_len > 2 * self.target_window_size {
@@ -146,10 +115,10 @@ impl Session {
         //         enc.rekey = rek
         //     }
         // }
-        self.process_packet(handler, buf).await
+        self.process_packet(handler, &pkt.buffer).await
     }
 
-    async fn process_packet<H: Handler + Send>(
+    pub(crate) async fn process_packet<H: Handler + Send>(
         &mut self,
         handler: &mut H,
         buf: &[u8],

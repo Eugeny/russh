@@ -103,6 +103,7 @@ pub struct PacketWriter<'a> {
 
 impl<'a> PacketWriter<'a> {
     pub fn new(cipher: &'a mut (dyn SealingKey + Send), write_buffer: &'a mut SSHBuffer) -> Self {
+        write_buffer.buffer.clear();
         Self {
             cipher,
             write_buffer,
@@ -118,9 +119,8 @@ impl<'a> PacketWriter<'a> {
         f(&mut buf)?;
         if let Some(message_type) = buf.first() {
             debug!("Sending msg type {message_type:?}");
+            self.cipher.write(&buf, self.write_buffer);
         }
-        self.write_buffer.buffer.clear();
-        self.cipher.write(&buf, self.write_buffer);
         Ok(buf)
     }
 }

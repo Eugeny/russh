@@ -127,9 +127,9 @@ impl KexAlgorithmImplementor for Curve25519Kex {
 
         buffer.extend(key);
         exchange.client_ephemeral.encode(buffer)?;
-        dbg!(&exchange.client_ephemeral[..]);
+        // dbg!(&exchange.client_ephemeral[..]);
         exchange.server_ephemeral.encode(buffer)?;
-        dbg!(&exchange.server_ephemeral[..]);
+        // dbg!(&exchange.server_ephemeral[..]);
 
         if let Some(ref shared) = self.shared_secret {
             encode_mpint(&shared.0, buffer)?;
@@ -142,7 +142,7 @@ impl KexAlgorithmImplementor for Curve25519Kex {
 
         let mut res = CryptoVec::new();
         res.extend(hasher.finalize().as_slice());
-        dbg!(&res[..]);
+        // dbg!(&res[..]);
         Ok(res)
     }
 

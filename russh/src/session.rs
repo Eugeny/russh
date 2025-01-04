@@ -27,8 +27,7 @@ use crate::cipher::SealingKey;
 use crate::kex::{KexAlgorithm, KexAlgorithmImplementor};
 use crate::sshbuffer::SSHBuffer;
 use crate::{
-    auth, cipher, mac, msg, negotiation, ChannelId, ChannelParams, CryptoVec, Disconnect, Limits,
-    SshId,
+    auth, cipher, mac, msg, negotiation, ChannelId, ChannelParams, CryptoVec, Disconnect, Error, Limits, SshId
 };
 
 #[derive(Debug)]
@@ -124,7 +123,6 @@ impl<C> CommonSession<C> {
             server_mac: newkeys.names.server_mac,
             session_id: newkeys.session_id,
             state,
-            // rekey: None,
             channels: HashMap::new(),
             last_channel_id: Wrapping(1),
             write: CryptoVec::new(),
@@ -393,9 +391,9 @@ impl Encrypted {
     pub fn data(&mut self, channel: ChannelId, buf0: CryptoVec) -> Result<(), crate::Error> {
         if let Some(channel) = self.channels.get_mut(&channel) {
             assert!(channel.confirmed);
+            // TODO Restore
+            // if !channel.pending_data.is_empty() || self.rekey.is_some() {
             if !channel.pending_data.is_empty() {
-                // TODO Restore
-                // if !channel.pending_data.is_empty() || self.rekey.is_some() {
                 channel.pending_data.push_back((buf0, None, 0));
                 return Ok(());
             }
@@ -532,119 +530,78 @@ impl Exchange {
     }
 }
 
-#[derive(Debug)]
-pub(crate) enum Kex {
-    /// Version number sent. `algo` and `sent` tell wether kexinit has
-    /// been received, and sent, respectively.
-    Init(KexInit),
+// #[derive(Debug)]
+// pub(crate) struct KexInit {
+//     pub algo: Option<negotiation::Names>,
+//     pub exchange: Exchange,
+//     pub session_id: Option<CryptoVec>,
+//     pub sent: bool,
+// }
 
-    /// Algorithms have been determined, the DH algorithm should run.
-    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
-    Dh(KexDh),
+// impl KexInit {
+//     pub fn received_rekey(ex: Exchange, algo: negotiation::Names, session_id: &CryptoVec) -> Self {
+//         let mut kexinit = KexInit {
+//             exchange: ex,
+//             algo: Some(algo),
+//             sent: false,
+//             session_id: Some(session_id.clone()),
+//         };
+//         kexinit.exchange.client_kex_init.clear();
+//         kexinit.exchange.server_kex_init.clear();
+//         kexinit.exchange.client_ephemeral.clear();
+//         kexinit.exchange.server_ephemeral.clear();
+//         kexinit
+//     }
 
-    /// The kex has run.
-    DhDone(KexDhDone),
+//     pub fn initiate_rekey(ex: Exchange, session_id: &CryptoVec) -> Self {
+//         let mut kexinit = KexInit {
+//             exchange: ex,
+//             algo: None,
+//             sent: true,
+//             session_id: Some(session_id.clone()),
+//         };
+//         kexinit.exchange.client_kex_init.clear();
+//         kexinit.exchange.server_kex_init.clear();
+//         kexinit.exchange.client_ephemeral.clear();
+//         kexinit.exchange.server_ephemeral.clear();
+//         kexinit
+//     }
+// }
 
-    /// The DH is over, we've sent the NEWKEYS packet, and are waiting
-    /// the NEWKEYS from the other side.
-    Keys(NewKeys),
-}
-
-#[derive(Debug)]
-pub(crate) struct KexInit {
-    pub algo: Option<negotiation::Names>,
-    pub exchange: Exchange,
-    pub session_id: Option<CryptoVec>,
-    pub sent: bool,
-}
-
-impl KexInit {
-    pub fn received_rekey(ex: Exchange, algo: negotiation::Names, session_id: &CryptoVec) -> Self {
-        let mut kexinit = KexInit {
-            exchange: ex,
-            algo: Some(algo),
-            sent: false,
-            session_id: Some(session_id.clone()),
-        };
-        kexinit.exchange.client_kex_init.clear();
-        kexinit.exchange.server_kex_init.clear();
-        kexinit.exchange.client_ephemeral.clear();
-        kexinit.exchange.server_ephemeral.clear();
-        kexinit
-    }
-
-    pub fn initiate_rekey(ex: Exchange, session_id: &CryptoVec) -> Self {
-        let mut kexinit = KexInit {
-            exchange: ex,
-            algo: None,
-            sent: true,
-            session_id: Some(session_id.clone()),
-        };
-        kexinit.exchange.client_kex_init.clear();
-        kexinit.exchange.server_kex_init.clear();
-        kexinit.exchange.client_ephemeral.clear();
-        kexinit.exchange.server_ephemeral.clear();
-        kexinit
-    }
-}
-
-#[derive(Debug)]
-#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
-pub(crate) struct KexDh {
-    pub exchange: Exchange,
-    pub names: negotiation::Names,
-    pub key: usize,
-    pub session_id: Option<CryptoVec>,
-}
-
-pub(crate) struct KexDhDone {
-    pub exchange: Exchange,
-    pub kex: KexAlgorithm,
-    pub key: usize,
-    pub session_id: Option<CryptoVec>,
-    pub names: negotiation::Names,
-}
-
-impl Debug for KexDhDone {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "KexDhDone")
-    }
-}
-
-impl KexDhDone {
-    pub fn compute_keys(self, hash: CryptoVec, is_server: bool) -> Result<NewKeys, crate::Error> {
-        let session_id = if let Some(session_id) = self.session_id {
-            session_id
-        } else {
-            hash.clone()
-        };
-        // Now computing keys.
-        let c = self.kex.compute_keys(
-            &session_id,
-            &hash,
-            self.names.cipher,
-            if is_server {
-                self.names.client_mac
-            } else {
-                self.names.server_mac
-            },
-            if is_server {
-                self.names.server_mac
-            } else {
-                self.names.client_mac
-            },
-            is_server,
-        )?;
-        Ok(NewKeys {
-            exchange: self.exchange,
-            names: self.names,
-            kex: self.kex,
-            key: self.key,
-            cipher: c,
-            session_id,
-        })
-    }
-}
+// impl KexDhDone {
+//     pub fn compute_keys(self, hash: CryptoVec, is_server: bool) -> Result<NewKeys, crate::Error> {
+//         let session_id = if let Some(session_id) = self.session_id {
+//             session_id
+//         } else {
+//             hash.clone()
+//         };
+//         // Now computing keys.
+//         let c = self.kex.compute_keys(
+//             &session_id,
+//             &hash,
+//             self.names.cipher,
+//             if is_server {
+//                 self.names.client_mac
+//             } else {
+//                 self.names.server_mac
+//             },
+//             if is_server {
+//                 self.names.server_mac
+//             } else {
+//                 self.names.client_mac
+//             },
+//             is_server,
+//         )?;
+//         Ok(NewKeys {
+//             exchange: self.exchange,
+//             names: self.names,
+//             kex: self.kex,
+//             key: self.key,
+//             cipher: c,
+//             session_id,
+//         })
+//     }
+// }
 
 #[derive(Debug)]
 pub(crate) struct NewKeys {

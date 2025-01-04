@@ -28,7 +28,7 @@ use crate::kex::KexAlgorithmImplementor;
 use crate::keys::key::parse_public_key;
 use crate::negotiation::Select;
 use crate::parsing::{ChannelOpenConfirmation, ChannelType, OpenChannelMessage};
-use crate::session::{Encrypted, EncryptedState, GlobalRequestResponse, Kex, KexInit};
+use crate::session::{Encrypted, EncryptedState, GlobalRequestResponse};
 use crate::{
     auth, msg, negotiation, Channel, ChannelId, ChannelMsg, ChannelOpenFailure, ChannelParams,
     CryptoVec, Sig,
@@ -172,7 +172,7 @@ impl Session {
     ) -> Result<(), H::Error> {
         // If we've successfully read a packet.
         trace!("process_packet buf = {:?} bytes", buf.len());
-        dbg!("enc", &buf[..]);
+        // dbg!("enc", &buf[..]);
         let mut is_authenticated = false;
         if let Some(ref mut enc) = self.common.encrypted {
             match enc.state {

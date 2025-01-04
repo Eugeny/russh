@@ -49,6 +49,40 @@ use crate::sshbuffer::{IncomingSshPacket, PacketWriter};
 use crate::{cipher, CryptoVec, Error};
 
 #[derive(Debug)]
+pub(crate) enum SessionKexState<K: Kex> {
+    Idle,
+    InProgress(K),
+    Taken, // some async activity still going on such as host key checks
+}
+
+impl<K: Kex> PartialEq for SessionKexState<K> {
+    fn eq(&self, other: &Self) -> bool {
+        core::mem::discriminant(self) == core::mem::discriminant(other)
+    }
+}
+
+impl<K: Kex> SessionKexState<K> {
+    pub fn active(&self) -> bool {
+        match self {
+            SessionKexState::Idle => false,
+            SessionKexState::InProgress(_) => true,
+            SessionKexState::Taken => true,
+        }
+    }
+
+    pub fn take(&mut self) -> Self {
+        // TODO maybe make this take a guarded closure
+        std::mem::replace(
+            self,
+            match self {
+                SessionKexState::Idle => SessionKexState::Idle,
+                _ => SessionKexState::Taken,
+            },
+        )
+    }
+}
+
+#[derive(Debug)]
 pub(crate) enum KexProgress<T> {
     NeedsReply {
         kex: T,

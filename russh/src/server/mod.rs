@@ -34,11 +34,13 @@ use std::num::Wrapping;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
+use std::time::Instant;
 
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::future::Future;
-use log::{debug, error};
+use log::{debug, error, info};
+use msg::ALL_KEX_MESSAGES;
 use russh_keys::map_err;
 use russh_util::runtime::JoinHandle;
 use ssh_key::{Certificate, PrivateKey};
@@ -47,6 +49,7 @@ use tokio::net::{TcpListener, ToSocketAddrs};
 use tokio::pin;
 
 use crate::cipher::{clear, CipherPair, OpeningKey};
+use crate::kex::{Kex, KexProgress, SessionKexState};
 use crate::session::*;
 use crate::ssh_read::*;
 use crate::sshbuffer::*;
@@ -867,8 +870,9 @@ where
         sender,
         channel_buffer_size: config.channel_buffer_size,
     };
+
     let common = read_ssh_id(config, &mut stream).await?;
-    let session = Session {
+    let mut session = Session {
         target_window_size: common.config.window_size,
         common,
         receiver,
@@ -877,7 +881,11 @@ where
         pending_len: 0,
         channels: HashMap::new(),
         open_global_requests: VecDeque::new(),
+        kex: SessionKexState::Idle,
     };
+
+    session.begin_rekey()?;
+
     let join = russh_util::runtime::spawn(session.run(stream, handler));
 
     Ok(RunningSession { handle, join })
@@ -892,24 +900,13 @@ async fn read_ssh_id<R: AsyncRead + Unpin>(
     } else {
         read.read_ssh_id().await?
     };
-    let exchange = Exchange::new(sshid, config.as_ref().server_id.as_kex_hash_bytes());
-    let mut kexinit = KexInit {
-        exchange,
-        algo: None,
-        sent: false,
-        session_id: None,
-    };
-    let mut cipher = CipherPair {
+    let cipher = CipherPair {
         local_to_remote: Box::new(clear::Key),
         remote_to_local: Box::new(clear::Key),
     };
-    let mut write_buffer = SSHBuffer::new();
-    kexinit.server_write(
-        config.as_ref(),
-        &mut *cipher.local_to_remote,
-        &mut write_buffer,
-    )?;
-    Ok(CommonSession {
+    let write_buffer = SSHBuffer::new();
+
+    let session = CommonSession {
         write_buffer,
         // kex: Some(Kex::Init(kexinit)),
         auth_user: String::new(),
@@ -925,7 +922,8 @@ async fn read_ssh_id<R: AsyncRead + Unpin>(
         alive_timeouts: 0,
         received_data: false,
         remote_sshid: sshid.into(),
-    })
+    };
+    Ok(session)
 }
 
 const STRICT_KEX_MSG_ORDER: &[u8] = &[msg::KEXINIT, msg::KEX_ECDH_INIT, msg::NEWKEYS];
@@ -933,12 +931,12 @@ const STRICT_KEX_MSG_ORDER: &[u8] = &[msg::KEXINIT, msg::KEX_ECDH_INIT, msg::NEW
 async fn reply<H: Handler + Send>(
     session: &mut Session,
     handler: &mut H,
-    seqn: &mut Wrapping<u32>,
-    buf: &[u8],
+    pkt: &mut IncomingSshPacket,
 ) -> Result<(), H::Error> {
-    if let Some(message_type) = buf.first() {
+    if let Some(message_type) = pkt.buffer.first() {
+        debug!("Received msg type {message_type:?}");
         if session.common.strict_kex && session.common.encrypted.is_none() {
-            let seqno = seqn.0 - 1; // was incremented after read()
+            let seqno = pkt.seqn.0 - 1; // was incremented after read()
             if let Some(expected) = STRICT_KEX_MSG_ORDER.get(seqno as usize) {
                 if message_type != expected {
                     return Err(strict_kex_violation(*message_type, seqno as usize).into());
@@ -951,71 +949,85 @@ async fn reply<H: Handler + Send>(
         }
     }
 
-    // Handle key exchange/re-exchange.
-    if session.common.encrypted.is_none() {
-        // match session.common.kex.take() {
-        //     Some(Kex::Init(kexinit)) => {
-        //         if kexinit.algo.is_some() || buf.first() == Some(&msg::KEXINIT) {
-        //             session.common.kex = Some(kexinit.server_parse(
-        //                 session.common.config.as_ref(),
-        //                 &mut *session.common.cipher.local_to_remote,
-        //                 buf,
-        //                 &mut session.common.write_buffer,
-        //             )?);
-        //             if let Some(Kex::Dh(KexDh { ref names, .. })) = session.common.kex {
-        //                 session.common.strict_kex = names.strict_kex;
-        //             }
-        //             // seqno has already been incremented after read()
-        //             if session.common.strict_kex && seqn.0 != 1 {
-        //                 return Err(strict_kex_violation(msg::KEXINIT, seqn.0 as usize - 1).into());
-        //             }
-        //             return Ok(());
-        //         } else {
-        //             // Else, i.e. if the other side has not started
-        //             // the key exchange, process its packets by simple
-        //             // not returning.
-        //             session.common.kex = Some(Kex::Init(kexinit))
-        //         }
-        //     }
-        //     Some(Kex::Dh(kexdh)) => {
-        //         session.common.kex = Some(kexdh.parse(
-        //             session.common.config.as_ref(),
-        //             &mut *session.common.cipher.local_to_remote,
-        //             buf,
-        //             &mut session.common.write_buffer,
-        //         )?);
-        //         if let Some(Kex::Keys(_)) = session.common.kex {
-        //             // just sent NEWKEYS
-        //             session.common.maybe_reset_seqn();
-        //         }
-        //         return Ok(());
-        //     }
-        //     Some(Kex::Keys(newkeys)) => {
-        //         if buf.first() != Some(&msg::NEWKEYS) {
-        //             return Err(Error::Kex.into());
-        //         }
-        //         // Ok, NEWKEYS received, now encrypted.
-        //         session.common.encrypted(
-        //             EncryptedState::WaitingAuthServiceRequest {
-        //                 sent: false,
-        //                 accepted: false,
-        //             },
-        //             newkeys,
-        //         );
-        //         session.maybe_send_ext_info()?;
-        //         if session.common.strict_kex {
-        //             *seqn = Wrapping(0);
-        //         }
-        //         return Ok(());
-        //     }
-        //     Some(kex) => {
-        //         session.common.kex = Some(kex);
-        //         return Ok(());
-        //     }
-        //     None => {}
-        // }
-        Ok(())
-    } else {
-        Ok(session.server_read_encrypted(handler, seqn, buf).await?)
+    if pkt.buffer.first() == Some(&msg::KEXINIT) && session.kex == SessionKexState::Idle {
+        // Not currently in a rekey but received KEXINIT
+        info!("Client has initiated rekey");
+        session.begin_rekey()?;
+        // Kex will consume the packet right away
     }
+
+    let is_kex_msg = pkt
+        .buffer
+        .first()
+        .is_some_and(|m| ALL_KEX_MESSAGES.iter().any(|&k| &k == m));
+
+    if is_kex_msg {
+        if let SessionKexState::InProgress(kex) = session.kex.take() {
+            let mut writer = PacketWriter::new(
+                session.common.cipher.local_to_remote.as_mut(),
+                &mut session.common.write_buffer,
+            );
+
+            let progress = kex.step(Some(pkt), &mut writer)?;
+            debug!("kex step, result={progress:?}");
+
+            match progress {
+                KexProgress::NeedsReply { kex, reset_seqn } => {
+                    session.kex = SessionKexState::InProgress(kex);
+                    if reset_seqn {
+                        session.common.reset_seqn();
+                    }
+                }
+                KexProgress::Done { newkeys, .. } => {
+                    drop(writer);
+
+                    session.common.strict_kex =
+                        session.common.strict_kex || newkeys.names.strict_kex;
+
+                    if let Some(ref mut enc) = session.common.encrypted {
+                        // This is a rekey
+                        enc.last_rekey = Instant::now();
+                        session.common.write_buffer.bytes = 0;
+                        enc.flush_all_pending()?;
+
+                        let mut pending = std::mem::take(&mut session.pending_reads);
+                        for p in pending.drain(..) {
+                            session.process_packet(handler, &p).await?;
+                        }
+                        session.pending_reads = pending;
+                        session.pending_len = 0;
+                        session.common.newkeys(newkeys);
+                        session.flush()?;
+                    } else {
+                        // This is the initial kex
+
+                        session.common.encrypted(
+                            EncryptedState::WaitingAuthServiceRequest {
+                                sent: false,
+                                accepted: false,
+                            },
+                            newkeys,
+                        );
+
+                        session.maybe_send_ext_info()?;
+                    }
+
+                    session.kex = SessionKexState::Idle;
+
+                    if session.common.strict_kex {
+                        pkt.seqn = Wrapping(0);
+                    }
+
+                    debug!("kex done");
+                }
+            }
+
+            session.flush()?;
+
+            return Ok(());
+        }
+    }
+
+    // Handle key exchange/re-exchange.
+    Ok(session.server_read_encrypted(handler, pkt).await?)
 }

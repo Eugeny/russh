@@ -125,6 +125,11 @@ impl Kex for ClientKex {
                         self.session_id.as_ref(),
                     )?;
 
+                    output.packet(|w| {
+                        msg::NEWKEYS.encode(w)?;
+                        Ok(())
+                    })?;
+
                     return Ok(KexProgress::Done {
                         newkeys,
                         server_host_key: None,
