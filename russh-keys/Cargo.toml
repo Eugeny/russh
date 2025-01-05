@@ -77,7 +77,7 @@ tokio-stream.workspace = true
 home.workspace = true
 
 [target.'cfg(windows)'.dependencies]
-pageant = { version = "0.0.1", path = "../pageant" }
+pageant = { version = "0.0.2", path = "../pageant" }
 
 [dev-dependencies]
 env_logger.workspace = true
