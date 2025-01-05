@@ -118,7 +118,6 @@ impl ChannelFlushResult {
 
 impl<C> CommonSession<C> {
     pub fn newkeys(&mut self, newkeys: NewKeys) {
-        // TODO move into encrypted
         if let Some(ref mut enc) = self.encrypted {
             enc.exchange = Some(newkeys.exchange);
             enc.kex = newkeys.kex;
@@ -400,12 +399,15 @@ impl Encrypted {
         Ok(buf_len)
     }
 
-    pub fn data(&mut self, channel: ChannelId, buf0: CryptoVec) -> Result<(), crate::Error> {
+    pub fn data(
+        &mut self,
+        channel: ChannelId,
+        buf0: CryptoVec,
+        is_rekeying: bool,
+    ) -> Result<(), crate::Error> {
         if let Some(channel) = self.channels.get_mut(&channel) {
             assert!(channel.confirmed);
-            // TODO Restore
-            // if !channel.pending_data.is_empty() || self.rekey.is_some() {
-            if !channel.pending_data.is_empty() {
+            if !channel.pending_data.is_empty() && is_rekeying {
                 channel.pending_data.push_back((buf0, None, 0));
                 return Ok(());
             }
@@ -424,10 +426,11 @@ impl Encrypted {
         channel: ChannelId,
         ext: u32,
         buf0: CryptoVec,
+        is_rekeying: bool,
     ) -> Result<(), crate::Error> {
         if let Some(channel) = self.channels.get_mut(&channel) {
             assert!(channel.confirmed);
-            if !channel.pending_data.is_empty() {
+            if !channel.pending_data.is_empty() && is_rekeying{
                 channel.pending_data.push_back((buf0, Some(ext), 0));
                 return Ok(());
             }

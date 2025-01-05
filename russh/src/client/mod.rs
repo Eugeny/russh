@@ -901,8 +901,7 @@ impl Session {
         handler: &mut H,
         kex_done_signal: &mut Option<tokio::sync::oneshot::Sender<()>>,
     ) -> Result<RemoteDisconnectInfo, H::Error> {
-        let mut result: Result<RemoteDisconnectInfo, H::Error> =
-            Err(crate::Error::Disconnect.into());
+        let mut result: Result<RemoteDisconnectInfo, H::Error> = Err(Error::Disconnect.into());
         self.flush()?;
 
         map_err!(self.common.packet_writer.flush_into(stream_write).await)?;
@@ -945,7 +944,7 @@ impl Session {
                     if !pkt.buffer.is_empty() {
                         #[allow(clippy::indexing_slicing)] // length checked
                         if pkt.buffer[0] == crate::msg::DISCONNECT {
-                            result = self.process_disconnect(&pkt.buffer[1..]); // TODO pass pkt
+                            result = self.process_disconnect(&pkt).map_err(H::Error::from);
                         } else {
                             self.common.received_data = true;
                             reply(self, handler, kex_done_signal, &mut pkt).await?;
@@ -1042,15 +1041,17 @@ impl Session {
         result
     }
 
-    fn process_disconnect<E: From<crate::Error> + Send>(
+    fn process_disconnect(
         &mut self,
-        mut r: &[u8],
-    ) -> Result<RemoteDisconnectInfo, E> {
+        pkt: &IncomingSshPacket,
+    ) -> Result<RemoteDisconnectInfo, Error> {
+        let mut r = &pkt.buffer[..];
+        u8::decode(&mut r)?; // skip message type
         self.common.disconnected = true;
 
-        let reason_code = map_err!(u32::decode(&mut r))?.try_into()?;
-        let message = map_err!(String::decode(&mut r))?;
-        let lang_tag = map_err!(String::decode(&mut r))?;
+        let reason_code = u32::decode(&mut r)?.try_into()?;
+        let message = String::decode(&mut r)?;
+        let lang_tag = String::decode(&mut r)?;
 
         Ok(RemoteDisconnectInfo {
             reason_code,
