@@ -24,6 +24,8 @@ use ssh_encoding::Encode;
 use tokio::sync::oneshot;
 
 use crate::cipher::OpeningKey;
+use crate::client::GexParams;
+use crate::kex::dh::groups::DhGroup;
 use crate::kex::{KexAlgorithm, KexAlgorithmImplementor};
 use crate::sshbuffer::PacketWriter;
 use crate::{
@@ -529,6 +531,7 @@ pub struct Exchange {
     pub server_kex_init: CryptoVec,
     pub client_ephemeral: CryptoVec,
     pub server_ephemeral: CryptoVec,
+    pub gex: Option<(GexParams, DhGroup)>,
 }
 
 impl Exchange {

@@ -39,7 +39,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use futures::future::Future;
 use log::{debug, error, info, warn};
-use msg::is_kex_msg;
+use msg::{is_kex_msg, validate_client_msg_strict_kex};
 use russh_keys::map_err;
 use russh_util::runtime::JoinHandle;
 use russh_util::time::Instant;
@@ -934,8 +934,6 @@ async fn read_ssh_id<R: AsyncRead + Unpin>(
     Ok(session)
 }
 
-const STRICT_KEX_MSG_ORDER: &[u8] = &[msg::KEXINIT, msg::KEX_ECDH_INIT, msg::NEWKEYS];
-
 async fn reply<H: Handler + Send>(
     session: &mut Session,
     handler: &mut H,
@@ -949,11 +947,7 @@ async fn reply<H: Handler + Send>(
         );
         if session.common.strict_kex && session.common.encrypted.is_none() {
             let seqno = pkt.seqn.0 - 1; // was incremented after read()
-            if let Some(expected) = STRICT_KEX_MSG_ORDER.get(seqno as usize) {
-                if message_type != expected {
-                    return Err(strict_kex_violation(*message_type, seqno as usize).into());
-                }
-            }
+            validate_client_msg_strict_kex(*message_type, seqno as usize)?;
         }
 
         if [msg::IGNORE, msg::UNIMPLEMENTED, msg::DEBUG].contains(message_type) {

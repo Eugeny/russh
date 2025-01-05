@@ -16,7 +16,7 @@
 //!
 //! This module exports kex algorithm names for use with [Preferred].
 mod curve25519;
-mod dh;
+pub(crate) mod dh;
 mod ecdh_nistp;
 mod none;
 use std::cell::RefCell;
@@ -27,8 +27,9 @@ use std::ops::DerefMut;
 
 use curve25519::Curve25519KexType;
 use delegate::delegate;
+use dh::groups::DhGroup;
 use dh::{
-    DhGroup14Sha1KexType, DhGroup14Sha256KexType, DhGroup16Sha512KexType, DhGroup1Sha1KexType,
+    DhGexSha1KexType, DhGexSha256KexType, DhGroup14Sha1KexType, DhGroup14Sha256KexType, DhGroup16Sha512KexType, DhGroup1Sha1KexType
 };
 use digest::Digest;
 use ecdh_nistp::{EcdhNistP256KexType, EcdhNistP384KexType, EcdhNistP521KexType};
@@ -160,25 +161,37 @@ impl Debug for KexAlgorithm {
 #[enum_dispatch]
 pub(crate) trait KexAlgorithmImplementor {
     fn skip_exchange(&self) -> bool;
+    fn is_dh_gex(&self) -> bool {
+        false
+    }
 
-    // fn server_dh_gex_init(
-    //     &mut self,
-    //     _exchange: &mut Exchange,
-    //     _payload: &[u8],
-    // ) -> Result<(), crate::Error> {
-    //     Err(crate::Error::KexInit)
-    // }
+    fn server_dh_gex_init(
+        &mut self,
+        _exchange: &mut Exchange,
+        _payload: &[u8],
+    ) -> Result<(), crate::Error> {
+        Err(crate::Error::KexInit)
+    }
 
-    // #[allow(dead_code)]
-    // fn client_dh_gex_init(
-    //     &mut self,
-    //     _gex_min: u32,
-    //     _gex_n: u32,
-    //     _gex_max: u32,
-    //     _buf: &mut CryptoVec,
-    // ) -> Result<(), crate::Error> {
-    //     Err(crate::Error::KexInit)
-    // }
+    #[allow(dead_code)]
+    #[allow(unused_variables)]
+    fn client_dh_gex_init(
+        &mut self,
+        gex_min: u32,
+        gex_n: u32,
+        gex_max: u32,
+        writer: &mut impl Writer,
+    ) -> Result<(), crate::Error> {
+        Err(crate::Error::KexInit)
+    }
+
+    #[allow(dead_code)]
+    fn client_dh_gex_group(
+        &mut self,
+        _group: DhGroup,
+    ) -> Result<(), crate::Error> {
+        Err(crate::Error::KexInit)
+    }
 
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     fn server_dh(&mut self, exchange: &mut Exchange, payload: &[u8]) -> Result<(), crate::Error>;
@@ -235,6 +248,10 @@ impl TryFrom<&str> for Name {
 pub const CURVE25519: Name = Name("curve25519-sha256");
 /// `curve25519-sha256@libssh.org`
 pub const CURVE25519_PRE_RFC_8731: Name = Name("curve25519-sha256@libssh.org");
+/// `diffie-hellman-group-exchange-sha1`
+pub const DH_GEX_SHA1: Name = Name("diffie-hellman-group-exchange-sha1");
+/// `diffie-hellman-group-exchange-sha256`
+pub const DH_GEX_SHA256: Name = Name("diffie-hellman-group-exchange-sha256");
 /// `diffie-hellman-group1-sha1`
 pub const DH_G1_SHA1: Name = Name("diffie-hellman-group1-sha1");
 /// `diffie-hellman-group14-sha1`
@@ -261,6 +278,8 @@ pub const EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT: Name = Name("kex-strict-c-v00@
 pub const EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER: Name = Name("kex-strict-s-v00@openssh.com");
 
 const _CURVE25519: Curve25519KexType = Curve25519KexType {};
+const _DH_GEX_SHA1: DhGexSha1KexType = DhGexSha1KexType {};
+const _DH_GEX_SHA256: DhGexSha256KexType = DhGexSha256KexType {};
 const _DH_G1_SHA1: DhGroup1Sha1KexType = DhGroup1Sha1KexType {};
 const _DH_G14_SHA1: DhGroup14Sha1KexType = DhGroup14Sha1KexType {};
 const _DH_G14_SHA256: DhGroup14Sha256KexType = DhGroup14Sha256KexType {};
@@ -273,6 +292,8 @@ const _NONE: none::NoneKexType = none::NoneKexType {};
 pub const ALL_KEX_ALGORITHMS: &[&Name] = &[
     &CURVE25519,
     &CURVE25519_PRE_RFC_8731,
+    &DH_GEX_SHA1,
+    &DH_GEX_SHA256,
     &DH_G1_SHA1,
     &DH_G14_SHA1,
     &DH_G14_SHA256,
@@ -288,6 +309,8 @@ pub(crate) static KEXES: Lazy<HashMap<&'static Name, &(dyn KexType + Send + Sync
         let mut h: HashMap<&'static Name, &(dyn KexType + Send + Sync)> = HashMap::new();
         h.insert(&CURVE25519, &_CURVE25519);
         h.insert(&CURVE25519_PRE_RFC_8731, &_CURVE25519);
+        h.insert(&DH_GEX_SHA1, &_DH_GEX_SHA1);
+        h.insert(&DH_GEX_SHA256, &_DH_GEX_SHA256);
         h.insert(&DH_G16_SHA512, &_DH_G16_SHA512);
         h.insert(&DH_G14_SHA256, &_DH_G14_SHA256);
         h.insert(&DH_G14_SHA1, &_DH_G14_SHA1);

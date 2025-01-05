@@ -60,13 +60,13 @@ use tokio::sync::oneshot;
 use crate::channels::{Channel, ChannelMsg, ChannelRef, WindowSizeRef};
 use crate::cipher::{self, clear, OpeningKey};
 use crate::kex::{Kex, KexCause, KexProgress, SessionKexState};
-use crate::msg::{is_kex_msg, STRICT_KEX_MSG_ORDER};
+use crate::msg::{is_kex_msg, validate_server_msg_strict_kex};
 use crate::session::{CommonSession, EncryptedState, GlobalRequestResponse, NewKeys};
 use crate::ssh_read::SshRead;
 use crate::sshbuffer::{IncomingSshPacket, PacketWriter, SSHBuffer, SshId};
 use crate::{
-    auth, msg, negotiation, strict_kex_violation, ChannelId, ChannelOpenFailure, CryptoVec,
-    Disconnect, Error, Limits, Sig,
+    auth, msg, negotiation, ChannelId, ChannelOpenFailure, CryptoVec, Disconnect, Error, Limits,
+    Sig,
 };
 
 mod encrypted;
@@ -1273,11 +1273,7 @@ async fn reply<H: Handler>(
         );
         if session.common.strict_kex && session.common.encrypted.is_none() {
             let seqno = pkt.seqn.0 - 1; // was incremented after read()
-            if let Some(expected) = STRICT_KEX_MSG_ORDER.get(seqno as usize) {
-                if message_type != expected {
-                    return Err(strict_kex_violation(*message_type, seqno as usize).into());
-                }
-            }
+            validate_server_msg_strict_kex(*message_type, seqno as usize)?;
         }
 
         if [msg::IGNORE, msg::UNIMPLEMENTED, msg::DEBUG].contains(message_type) {
@@ -1376,6 +1372,27 @@ fn initial_encrypted_state(session: &Session) -> EncryptedState {
 }
 
 /// The configuration of clients.
+#[derive(Debug, Clone)]
+pub struct GexParams {
+    /// Minimum DH group size (in bits) for DH GEX exchanges.
+    pub min_group_size: u32,
+    /// Preferred DH group size (in bits) for DH GEX exchanges.
+    pub preferred_group_size: u32,
+    /// Maximum DH group size (in bits) for DH GEX exchanges.
+    pub max_group_size: u32,
+}
+
+impl Default for GexParams {
+    fn default() -> GexParams {
+        GexParams {
+            min_group_size: 3072,
+            preferred_group_size: 3072,
+            max_group_size: 8192,
+        }
+    }
+}
+
+/// The configuration of clients.
 #[derive(Debug)]
 pub struct Config {
     /// The client ID string sent at the beginning of the protocol.
@@ -1398,6 +1415,8 @@ pub struct Config {
     pub keepalive_max: usize,
     /// Whether to expect and wait for an authentication call.
     pub anonymous: bool,
+    /// DH dynamic group exchange parameters.
+    pub gex: GexParams,
 }
 
 impl Default for Config {
@@ -1417,6 +1436,7 @@ impl Default for Config {
             keepalive_interval: None,
             keepalive_max: 3,
             anonymous: false,
+            gex: Default::default(),
         }
     }
 }

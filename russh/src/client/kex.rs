@@ -9,10 +9,11 @@ use russh_cryptovec::CryptoVec;
 use russh_keys::key::parse_public_key;
 use signature::Verifier;
 use ssh_encoding::{Decode, Encode};
-use ssh_key::{PublicKey, Signature};
+use ssh_key::{Mpint, PublicKey, Signature};
 
 use super::IncomingSshPacket;
 use crate::client::{Config, NewKeys};
+use crate::kex::dh::groups::DhGroup;
 use crate::kex::{Kex, KexAlgorithm, KexAlgorithmImplementor, KexCause, KexProgress, KEXES};
 use crate::negotiation::{Names, Select};
 use crate::session::Exchange;
@@ -27,7 +28,11 @@ thread_local! {
 #[allow(clippy::large_enum_variant)]
 enum ClientKexState {
     Created,
-    WaitingForKexReply {
+    WaitingForGexResponse {
+        names: Names,
+        kex: KexAlgorithm,
+    },
+    WaitingForServerDh {
         // both KexInit and DH init sent
         names: Names,
         kex: KexAlgorithm,
@@ -53,8 +58,11 @@ impl Debug for ClientKex {
             ClientKexState::Created => {
                 s.field("state", &"created");
             }
-            ClientKexState::WaitingForKexReply { .. } => {
-                s.field("state", &"waiting for a reply");
+            ClientKexState::WaitingForGexResponse { .. } => {
+                s.field("state", &"waiting for GEX response");
+            }
+            ClientKexState::WaitingForServerDh { .. } => {
+                s.field("state", &"waiting for DH response");
             }
             ClientKexState::WaitingForNewKeys { .. } => {
                 s.field("state", &"waiting for NEWKEYS");
@@ -126,11 +134,6 @@ impl Kex for ClientKex {
 
                 let mut kex = KEXES.get(&names.kex).ok_or(Error::UnknownAlgo)?.make();
 
-                output.packet(|w| {
-                    kex.client_dh(&mut self.exchange.client_ephemeral, w)?;
-                    Ok(())
-                })?;
-
                 if kex.skip_exchange() {
                     // Non-standard no-kex exchange
                     let newkeys = compute_keys(
@@ -152,14 +155,75 @@ impl Kex for ClientKex {
                     });
                 }
 
-                self.state = ClientKexState::WaitingForKexReply { names, kex };
+                if kex.is_dh_gex() {
+                    // TODO values
+                    output.packet(|w| {
+                        kex.client_dh_gex_init(
+                            self.config.gex.min_group_size,
+                            self.config.gex.preferred_group_size,
+                            self.config.gex.max_group_size,
+                            w,
+                        )?;
+                        Ok(())
+                    })?;
+
+                    self.state = ClientKexState::WaitingForGexResponse { names, kex };
+                } else {
+                    output.packet(|w| {
+                        kex.client_dh(&mut self.exchange.client_ephemeral, w)?;
+                        Ok(())
+                    })?;
+
+                    self.state = ClientKexState::WaitingForServerDh { names, kex };
+                }
 
                 Ok(KexProgress::NeedsReply {
                     kex: self,
                     reset_seqn: false,
                 })
             }
-            ClientKexState::WaitingForKexReply { mut names, mut kex } => {
+            ClientKexState::WaitingForGexResponse { names, mut kex } => {
+                let Some(input) = input else {
+                    return Err(Error::KexInit);
+                };
+
+                if input.buffer.first() != Some(&msg::KEX_DH_GEX_GROUP) {
+                    error!(
+                        "Unexpected kex message at this stage: {:?}",
+                        input.buffer.first()
+                    );
+                    return Err(Error::KexInit);
+                }
+
+                #[allow(clippy::indexing_slicing)] // length checked
+                let mut r = &input.buffer[1..];
+
+                let prime = Mpint::decode(&mut r)?;
+                let gen = Mpint::decode(&mut r)?;
+                debug!("received gex group: prime={}, gen={}", prime, gen);
+                //todo validate group
+
+                let group = DhGroup {
+                    prime: prime.as_bytes().to_vec().into(),
+                    generator: gen.as_bytes().to_vec().into(),
+                    exp_size: 0,
+                };
+
+                let exchange = &mut self.exchange;
+                exchange.gex = Some((self.config.gex.clone(), group.clone()));
+                kex.client_dh_gex_group(group)?;
+                output.packet(|w| {
+                    kex.client_dh(&mut exchange.client_ephemeral, w)?;
+                    Ok(())
+                })?;
+                self.state = ClientKexState::WaitingForServerDh { names, kex };
+
+                Ok(KexProgress::NeedsReply {
+                    kex: self,
+                    reset_seqn: false,
+                })
+            }
+            ClientKexState::WaitingForServerDh { mut names, mut kex } => {
                 // At this point, we've sent ECDH_INTI and
                 // are waiting for the ECDH_REPLY from the server.
 
@@ -171,14 +235,19 @@ impl Kex for ClientKex {
                     // Ignore the next packet if (1) it follows and (2) it's not the correct guess.
                     debug!("ignoring guessed kex");
                     names.ignore_guessed = false;
-                    self.state = ClientKexState::WaitingForKexReply { names, kex };
+                    self.state = ClientKexState::WaitingForServerDh { names, kex };
                     return Ok(KexProgress::NeedsReply {
                         kex: self,
                         reset_seqn: false,
                     });
                 }
 
-                if input.buffer.first() != Some(&msg::KEX_ECDH_REPLY) {
+                if input.buffer.first()
+                    != Some(match kex.is_dh_gex() {
+                        true => &msg::KEX_DH_GEX_REPLY,
+                        false => &msg::KEX_ECDH_REPLY,
+                    })
+                {
                     error!(
                         "Unexpected kex message at this stage: {:?}",
                         input.buffer.first()
