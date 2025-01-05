@@ -374,7 +374,7 @@ impl Select for Client {
     }
 }
 
-pub fn write_kex(
+pub(crate) fn write_kex(
     prefs: &Preferred,
     writer: &mut PacketWriter,
     server_config: Option<&Config>,

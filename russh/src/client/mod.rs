@@ -686,7 +686,7 @@ impl<H: Handler> Handle<H> {
             })
     }
 
-    // Perform a rekey at the next opportunity
+    /// Asynchronously perform a session re-key at the next opportunity
     pub async fn rekey_soon(&self) -> Result<(), Error> {
         self.sender
             .send(Msg::Rekey)
@@ -1249,6 +1249,7 @@ impl Session {
         Ok(())
     }
 
+    /// Immediately trigger a session re-key after flushing all pending packets
     pub fn initiate_rekey(&mut self) -> Result<(), Error> {
         if let Some(ref mut enc) = self.common.encrypted {
             enc.rekey_wanted = true;
