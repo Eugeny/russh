@@ -904,15 +904,8 @@ impl Session {
         let mut result: Result<RemoteDisconnectInfo, H::Error> =
             Err(crate::Error::Disconnect.into());
         self.flush()?;
-        if !self.common.packet_writer.buffer().buffer.is_empty() {
-            map_err!(
-                stream_write
-                    .write_all(&self.common.packet_writer.buffer().buffer)
-                    .await
-            )?;
-            map_err!(stream_write.flush().await)?;
-        }
-        self.common.packet_writer.buffer().buffer.clear();
+
+        map_err!(self.common.packet_writer.flush_into(stream_write).await)?;
 
         let buffer = SSHBuffer::new();
 
@@ -1010,19 +1003,8 @@ impl Session {
             };
 
             self.flush()?;
-            if !self.common.packet_writer.buffer().buffer.is_empty() {
-                trace!(
-                    "writing to stream: {:?} bytes",
-                    self.common.packet_writer.buffer().buffer.len()
-                );
-                map_err!(
-                    stream_write
-                        .write_all(&self.common.packet_writer.buffer().buffer)
-                        .await
-                )?;
-                map_err!(stream_write.flush().await)?;
-            }
-            self.common.packet_writer.buffer().buffer.clear();
+            map_err!(self.common.packet_writer.flush_into(stream_write).await)?;
+
             if let Some(ref mut enc) = self.common.encrypted {
                 if let EncryptedState::InitCompression = enc.state {
                     enc.client_compression

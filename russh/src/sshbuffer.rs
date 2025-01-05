@@ -18,6 +18,7 @@ use std::num::Wrapping;
 
 use cipher::SealingKey;
 use compression::Compress;
+use tokio::io::{AsyncWrite, AsyncWriteExt};
 
 use super::*;
 
@@ -158,5 +159,14 @@ impl PacketWriter {
 
     pub fn reset_seqn(&mut self) {
         self.write_buffer.seqn = Wrapping(0);
+    }
+
+    pub async fn flush_into<W: AsyncWrite + Unpin>(&mut self, w: &mut W) -> std::io::Result<()> {
+        if !self.write_buffer.buffer.is_empty() {
+            w.write_all(&self.write_buffer.buffer).await?;
+            w.flush().await?;
+            self.write_buffer.buffer.clear();
+        }
+        Ok(())
     }
 }

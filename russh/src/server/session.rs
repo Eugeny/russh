@@ -454,12 +454,8 @@ impl Session {
         R: AsyncRead + AsyncWrite + Unpin + Send + 'static,
     {
         self.flush()?;
-        map_err!(
-            stream
-                .write_all(&self.common.packet_writer.buffer().buffer)
-                .await
-        )?;
-        self.common.packet_writer.buffer().buffer.clear();
+
+        map_err!(self.common.packet_writer.flush_into(&mut stream).await)?;
 
         let (stream_read, mut stream_write) = stream.split();
         let buffer = SSHBuffer::new();
@@ -610,12 +606,13 @@ impl Session {
                 }
             }
             self.flush()?;
+
             map_err!(
-                stream_write
-                    .write_all(&self.common.packet_writer.buffer().buffer)
+                self.common
+                    .packet_writer
+                    .flush_into(&mut stream_write)
                     .await
             )?;
-            self.common.packet_writer.buffer().buffer.clear();
 
             if self.common.received_data {
                 // Reset the number of failed keepalive attempts. We don't
@@ -699,8 +696,7 @@ impl Session {
             if enc.flush(
                 &self.common.config.as_ref().limits,
                 &mut self.common.packet_writer,
-            )?
-            //  && enc.rekey.is_none()
+            )? && self.kex == SessionKexState::Idle
             {
                 debug!("starting rekeying");
                 if enc.exchange.take().is_some() {
