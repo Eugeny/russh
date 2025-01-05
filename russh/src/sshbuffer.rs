@@ -98,7 +98,7 @@ pub(crate) struct IncomingSshPacket {
     pub seqn: Wrapping<u32>,
 }
 
-pub struct PacketWriter {
+pub(crate) struct PacketWriter {
     cipher: Box<dyn SealingKey + Send>,
     compress: Compress,
     compress_buffer: CryptoVec,

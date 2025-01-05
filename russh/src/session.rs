@@ -430,7 +430,7 @@ impl Encrypted {
     ) -> Result<(), crate::Error> {
         if let Some(channel) = self.channels.get_mut(&channel) {
             assert!(channel.confirmed);
-            if !channel.pending_data.is_empty() && is_rekeying{
+            if !channel.pending_data.is_empty() && is_rekeying {
                 channel.pending_data.push_back((buf0, Some(ext), 0));
                 return Ok(());
             }
