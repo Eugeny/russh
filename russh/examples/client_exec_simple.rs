@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 ///
 /// Run this example with:
 /// cargo run --example client_exec_simple -- -k <private key path> <host> <command>
@@ -85,14 +84,6 @@ impl Session {
         let key_pair = load_secret_key(key_path, None)?;
         let config = client::Config {
             inactivity_timeout: Some(Duration::from_secs(5)),
-            preferred: Preferred {
-                cipher: Cow::Owned(vec![russh::cipher::AES_256_CTR]),
-                ..Default::default()
-            },
-            limits: Limits {
-                rekey_time_limit: std::time::Duration::from_secs(2),
-                ..Default::default()
-            },
             ..<_>::default()
         };
 
@@ -112,8 +103,6 @@ impl Session {
     }
 
     async fn call(&mut self, command: &str) -> Result<u32> {
-        self.session.rekey_soon().await?;
-
         let mut channel = self.session.channel_open_session().await?;
         channel.exec(true, command).await?;
 

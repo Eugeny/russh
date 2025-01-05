@@ -49,7 +49,6 @@ mod compress {
         config.preferred = Preferred::COMPRESSED;
         let config = Arc::new(config);
 
-        dbg!(&addr);
         let mut session = client::connect(config, addr, Client {}).await.unwrap();
         let authenticated = session
             .authenticate_publickey(

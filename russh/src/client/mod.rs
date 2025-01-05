@@ -688,7 +688,6 @@ impl<H: Handler> Handle<H> {
 
     // Perform a rekey at the next opportunity
     pub async fn rekey_soon(&self) -> Result<(), Error> {
-        // dbg!("rekey sender");
         self.sender
             .send(Msg::Rekey)
             .await
@@ -806,7 +805,6 @@ async fn start_reading<R: AsyncRead + Unpin>(
 ) -> Result<(usize, R, SSHBuffer, Box<dyn OpeningKey + Send>), crate::Error> {
     buffer.buffer.clear();
     let n = cipher::read(&mut stream_read, &mut buffer, &mut *cipher).await?;
-    // dbg!("buffer contents", &buffer.buffer[..]);
     Ok((n, stream_read, buffer, cipher))
 }
 
@@ -1080,7 +1078,6 @@ impl Session {
     }
 
     fn handle_msg(&mut self, msg: Msg) -> Result<(), crate::Error> {
-        // dbg!(&msg);
         match msg {
             Msg::Authenticate { user, method } => {
                 self.write_auth_request_if_needed(&user, method)?;
@@ -1270,10 +1267,8 @@ impl Session {
     }
 
     pub fn initiate_rekey(&mut self) -> Result<(), Error> {
-        // dbg!("rekey atmpt");
         if let Some(ref mut enc) = self.common.encrypted {
             enc.rekey_wanted = true;
-            // dbg!("rekeying");
             self.flush()?
         }
         Ok(())
@@ -1286,14 +1281,12 @@ async fn reply<H: Handler>(
     kex_done_signal: &mut Option<tokio::sync::oneshot::Sender<()>>,
     pkt: &mut IncomingSshPacket,
 ) -> Result<(), H::Error> {
-    // dbg!(&pkt.buffer[..]);
     if let Some(message_type) = pkt.buffer.first() {
         debug!(
             "< msg type {message_type:?}, seqn {:?}, len {}",
             pkt.seqn.0,
             pkt.buffer.len()
         );
-        // dbg!(message_type);
         if session.common.strict_kex && session.common.encrypted.is_none() {
             let seqno = pkt.seqn.0 - 1; // was incremented after read()
             if let Some(expected) = STRICT_KEX_MSG_ORDER.get(seqno as usize) {

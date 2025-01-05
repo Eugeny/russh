@@ -1,16 +1,15 @@
 use core::fmt;
 use std::cell::RefCell;
 use std::fmt::{Debug, Formatter};
-use std::str::FromStr;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use log::{debug, error, trace};
+use log::{debug, error};
 use russh_cryptovec::CryptoVec;
 use russh_keys::key::parse_public_key;
 use signature::Verifier;
 use ssh_encoding::{Decode, Encode};
-use ssh_key::{Algorithm, PublicKey, Signature};
+use ssh_key::{PublicKey, Signature};
 
 use super::IncomingSshPacket;
 use crate::client::{Config, NewKeys};
@@ -97,6 +96,8 @@ impl Kex for ClientKex {
     ) -> Result<KexProgress<Self>, Error> {
         match self.state {
             ClientKexState::Created => {
+                // At this point we expect to read the KEXINIT from the other side
+
                 let Some(input) = input else {
                     return Err(Error::KexInit);
                 };
@@ -131,6 +132,7 @@ impl Kex for ClientKex {
                 })?;
 
                 if kex.skip_exchange() {
+                    // Non-standard no-kex exchange
                     let newkeys = compute_keys(
                         CryptoVec::new(),
                         kex,
@@ -158,6 +160,9 @@ impl Kex for ClientKex {
                 })
             }
             ClientKexState::WaitingForKexReply { mut names, mut kex } => {
+                // At this point, we've sent ECDH_INTI and
+                // are waiting for the ECDH_REPLY from the server.
+
                 let Some(input) = input else {
                     return Err(Error::KexInit);
                 };
@@ -173,7 +178,6 @@ impl Kex for ClientKex {
                     });
                 }
 
-                // We've sent ECDH_INIT, waiting for ECDH_REPLY
                 if input.buffer.first() != Some(&msg::KEX_ECDH_REPLY) {
                     error!(
                         "Unexpected kex message at this stage: {:?}",
@@ -194,8 +198,6 @@ impl Kex for ClientKex {
 
                 let server_ephemeral = Bytes::decode(r)?;
                 self.exchange.server_ephemeral.extend(&server_ephemeral);
-                let signature = Bytes::decode(r)?;
-
                 kex.compute_shared_secret(&self.exchange.server_ephemeral)?;
 
                 let mut pubkey_vec = CryptoVec::new();
@@ -210,21 +212,9 @@ impl Kex for ClientKex {
                     }
                 })?;
 
-                let (sig_type, signature) = {
-                    let mut r = &signature[..];
-                    let sig_type = String::decode(&mut r)?;
-                    debug!("server signature type: {:?}", sig_type);
-                    (
-                        Algorithm::from_str(&sig_type).map_err(ssh_encoding::Error::from)?,
-                        Bytes::decode(&mut r)?,
-                    )
-                };
+                let signature = Bytes::decode(r)?;
+                let signature = Signature::decode(&mut &signature[..])?;
 
-                trace!("signature: {signature:?}");
-                let signature = Signature::new(sig_type, signature.to_vec()).map_err(|e| {
-                    debug!("Signature::new failed: {e:?}");
-                    e
-                })?;
                 if let Err(e) = Verifier::verify(&server_host_key, hash.as_ref(), &signature) {
                     debug!("wrong server sig: {e:?}");
                     return Err(Error::WrongServerSig);
@@ -259,6 +249,8 @@ impl Kex for ClientKex {
                 server_host_key,
                 newkeys,
             } => {
+                // At this point the exchange is complete
+                // and we're waiting for a KEWKEYS packet
                 let Some(input) = input else {
                     return Err(Error::KexInit);
                 };

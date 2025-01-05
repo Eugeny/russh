@@ -22,12 +22,8 @@ async fn main() {
         keys: vec![
             russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519).unwrap(),
         ],
-        limits: Limits {
-            rekey_time_limit: std::time::Duration::from_secs(3),
-            ..Default::default()
-        },
         preferred: Preferred {
-            // kex: Cow::Borrowed(&[CURVE25519]),
+            // key: Cow::Borrowed(&[CERT_ECDSA_SHA2_P256]),
             ..Preferred::default()
         },
         ..Default::default()
