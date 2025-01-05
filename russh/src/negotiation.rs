@@ -36,6 +36,7 @@ pub struct Config {
 #[derive(Debug, Clone)]
 pub struct Names {
     pub kex: kex::Name,
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub key: Algorithm,
     pub cipher: cipher::Name,
     pub client_mac: mac::Name,

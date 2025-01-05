@@ -1,10 +1,10 @@
-use core::str;
-
-use russh_keys::helpers::AlgorithmExt;
 use russh_keys::key::PrivateKeyWithHashAlg;
-use ssh_encoding::Decode;
-use ssh_key::public::KeyData;
-use ssh_key::{Algorithm, Certificate, HashAlg, PublicKey};
+use ssh_key::{Certificate, HashAlg, PublicKey};
+#[cfg(not(target_arch = "wasm32"))]
+use {
+    russh_keys::helpers::AlgorithmExt, ssh_encoding::Decode, ssh_key::public::KeyData,
+    ssh_key::Algorithm,
+};
 
 #[derive(Debug)]
 pub(crate) enum PublicKeyOrCertificate {
@@ -25,6 +25,7 @@ impl From<&PrivateKeyWithHashAlg> for PublicKeyOrCertificate {
 }
 
 impl PublicKeyOrCertificate {
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn decode(pubkey_algo: &str, buf: &[u8]) -> Result<Self, ssh_key::Error> {
         let mut reader = buf;
         match Algorithm::new_certificate_ext(pubkey_algo) {

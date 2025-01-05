@@ -39,7 +39,6 @@ use std::convert::TryInto;
 use std::num::Wrapping;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::time::Instant;
 
 use async_trait::async_trait;
 use futures::task::{Context, Poll};
@@ -48,6 +47,7 @@ use kex::ClientKex;
 use log::{debug, error, trace};
 use russh_keys::key::PrivateKeyWithHashAlg;
 use russh_keys::map_err;
+use russh_util::time::Instant;
 use ssh_encoding::Decode;
 use ssh_key::{Certificate, PrivateKey, PublicKey};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadHalf, WriteHalf};

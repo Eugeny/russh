@@ -34,7 +34,6 @@ use std::num::Wrapping;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use std::time::Instant;
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -43,6 +42,7 @@ use log::{debug, error, info, warn};
 use msg::is_kex_msg;
 use russh_keys::map_err;
 use russh_util::runtime::JoinHandle;
+use russh_util::time::Instant;
 use ssh_key::{Certificate, PrivateKey};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, ToSocketAddrs};
