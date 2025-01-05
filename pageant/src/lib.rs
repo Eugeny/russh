@@ -4,6 +4,13 @@
 //!
 //! This crate only implements the transport, not the actual SSH agent protocol.
 
+#![deny(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic
+)]
+
 #[cfg(windows)]
 mod pageant_impl;
 
