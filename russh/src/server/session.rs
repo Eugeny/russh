@@ -479,7 +479,6 @@ impl Session {
         let reading = start_reading(stream_read, buffer, opening_cipher);
         pin!(reading);
         let mut is_reading = None;
-        let mut decomp = CryptoVec::new();
 
         #[allow(clippy::panic)] // false positive in macro
         while !self.common.disconnected {
@@ -704,7 +703,7 @@ impl Session {
             //  && enc.rekey.is_none()
             {
                 debug!("starting rekeying");
-                if let Some(exchange) = enc.exchange.take() {
+                if enc.exchange.take().is_some() {
                     self.begin_rekey()?;
                 }
             }

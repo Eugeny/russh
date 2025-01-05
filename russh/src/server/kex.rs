@@ -1,7 +1,7 @@
 use core::fmt;
 use std::cell::RefCell;
 
-use log::{debug, trace, warn};
+use log::debug;
 use russh_keys::helpers::sign_with_hash_alg;
 use russh_keys::key::PrivateKeyWithHashAlg;
 use ssh_encoding::Encode;
@@ -17,6 +17,7 @@ thread_local! {
 }
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 enum ServerKexState {
     Created,
     WaitingForKexReply {
@@ -110,9 +111,10 @@ impl Kex for ServerKex {
 
                 // seqno has already been incremented after read()
                 if !self.cause.is_rekey() && self.cause.is_strict_kex(&names) && input.seqn.0 != 1 {
-                    return Err(
-                        strict_kex_violation(msg::KEXINIT, input.seqn.0 as usize - 1).into(),
-                    );
+                    return Err(strict_kex_violation(
+                        msg::KEXINIT,
+                        input.seqn.0 as usize - 1,
+                    ));
                 }
 
                 let kex = KEXES.get(&names.kex).ok_or(Error::UnknownAlgo)?.make();
@@ -283,7 +285,7 @@ fn compute_keys(
     };
     // Now computing keys.
     let c = kex.compute_keys(
-        &session_id,
+        session_id,
         &hash,
         names.cipher,
         names.client_mac,

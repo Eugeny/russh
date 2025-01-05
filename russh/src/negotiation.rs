@@ -384,8 +384,8 @@ pub fn write_kex(
 
         let mut cookie = [0; 16];
         rand::thread_rng().fill_bytes(&mut cookie);
-        for i in 0..16 {
-            cookie[i].encode(w)?;
+        for b in cookie {
+            b.encode(w)?;
         }
 
         NameList(

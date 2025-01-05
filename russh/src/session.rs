@@ -23,12 +23,11 @@ use log::{debug, trace};
 use ssh_encoding::Encode;
 use tokio::sync::oneshot;
 
-use crate::cipher::{OpeningKey, SealingKey};
+use crate::cipher::OpeningKey;
 use crate::kex::{KexAlgorithm, KexAlgorithmImplementor};
-use crate::sshbuffer::{PacketWriter, SSHBuffer};
+use crate::sshbuffer::PacketWriter;
 use crate::{
-    auth, cipher, mac, msg, negotiation, ChannelId, ChannelParams, CryptoVec, Disconnect, Error,
-    Limits, SshId,
+    auth, cipher, mac, msg, negotiation, ChannelId, ChannelParams, CryptoVec, Disconnect, Limits,
 };
 
 #[derive(Debug)]
@@ -50,7 +49,6 @@ pub(crate) struct Encrypted {
     pub server_compression: crate::compression::Compression,
     pub client_compression: crate::compression::Compression,
     pub decompress: crate::compression::Decompress,
-    pub compress_buffer: CryptoVec,
     pub rekey_wanted: bool,
 }
 
@@ -150,7 +148,6 @@ impl<C> CommonSession<C> {
             last_rekey: russh_util::time::Instant::now(),
             server_compression: newkeys.names.server_compression,
             client_compression: newkeys.names.client_compression,
-            compress_buffer: CryptoVec::new(),
             decompress: crate::compression::Decompress::None,
             rekey_wanted: false,
         });
@@ -194,12 +191,6 @@ impl<C> CommonSession<C> {
             enc.byte(channel, msg)?
         }
         Ok(())
-    }
-
-    pub(crate) fn maybe_reset_seqn(&mut self) {
-        if self.strict_kex {
-            self.reset_seqn();
-        }
     }
 
     pub(crate) fn reset_seqn(&mut self) {

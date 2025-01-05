@@ -1,15 +1,9 @@
 use core::fmt;
+use std::cell::RefCell;
 use std::fmt::{Debug, Formatter};
 use std::str::FromStr;
 use std::sync::Arc;
 
-use crate::client::{Config, NewKeys};
-use crate::kex::{Kex, KexAlgorithm, KexCause, KexProgress};
-use crate::kex::{KexAlgorithmImplementor, KEXES};
-use crate::negotiation::{Names, Select};
-use crate::session::Exchange;
-use crate::sshbuffer::PacketWriter;
-use crate::{msg, negotiation, strict_kex_violation, Error, SshId};
 use bytes::Bytes;
 use log::{debug, error, trace};
 use russh_cryptovec::CryptoVec;
@@ -17,15 +11,21 @@ use russh_keys::key::parse_public_key;
 use signature::Verifier;
 use ssh_encoding::{Decode, Encode};
 use ssh_key::{Algorithm, PublicKey, Signature};
-use std::cell::RefCell;
 
 use super::IncomingSshPacket;
+use crate::client::{Config, NewKeys};
+use crate::kex::{Kex, KexAlgorithm, KexAlgorithmImplementor, KexCause, KexProgress, KEXES};
+use crate::negotiation::{Names, Select};
+use crate::session::Exchange;
+use crate::sshbuffer::PacketWriter;
+use crate::{msg, negotiation, strict_kex_violation, Error, SshId};
 
 thread_local! {
     static HASH_BUFFER: RefCell<CryptoVec> = RefCell::new(CryptoVec::new());
 }
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 enum ClientKexState {
     Created,
     WaitingForKexReply {
@@ -117,9 +117,10 @@ impl Kex for ClientKex {
 
                 // seqno has already been incremented after read()
                 if self.cause.is_strict_kex(&names) && !self.cause.is_rekey() && input.seqn.0 != 1 {
-                    return Err(
-                        strict_kex_violation(msg::KEXINIT, input.seqn.0 as usize - 1).into(),
-                    );
+                    return Err(strict_kex_violation(
+                        msg::KEXINIT,
+                        input.seqn.0 as usize - 1,
+                    ));
                 }
 
                 let mut kex = KEXES.get(&names.kex).ok_or(Error::UnknownAlgo)?.make();
@@ -186,7 +187,10 @@ impl Kex for ClientKex {
 
                 let server_host_key = Bytes::decode(r)?; // server public key.
                 let server_host_key = parse_public_key(&server_host_key)?;
-                debug!("received server host key: {:?}", server_host_key.to_openssh());
+                debug!(
+                    "received server host key: {:?}",
+                    server_host_key.to_openssh()
+                );
 
                 let server_ephemeral = Bytes::decode(r)?;
                 self.exchange.server_ephemeral.extend(&server_ephemeral);
@@ -290,7 +294,7 @@ fn compute_keys(
     };
     // Now computing keys.
     let c = kex.compute_keys(
-        &session_id,
+        session_id,
         &hash,
         names.cipher,
         names.server_mac,

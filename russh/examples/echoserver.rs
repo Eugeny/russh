@@ -25,7 +25,6 @@ async fn main() {
         limits: Limits {
             rekey_time_limit: std::time::Duration::from_secs(3),
             ..Default::default()
-
         },
         preferred: Preferred {
             // kex: Cow::Borrowed(&[CURVE25519]),

@@ -40,7 +40,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use futures::future::Future;
 use log::{debug, error, info, warn};
-use msg::ALL_KEX_MESSAGES;
+use msg::is_kex_msg;
 use russh_keys::map_err;
 use russh_util::runtime::JoinHandle;
 use ssh_key::{Certificate, PrivateKey};
@@ -942,7 +942,11 @@ async fn reply<H: Handler + Send>(
     pkt: &mut IncomingSshPacket,
 ) -> Result<(), H::Error> {
     if let Some(message_type) = pkt.buffer.first() {
-        debug!("< msg type {message_type:?}, seqn {:?}, len {}", pkt.seqn.0, pkt.buffer.len());
+        debug!(
+            "< msg type {message_type:?}, seqn {:?}, len {}",
+            pkt.seqn.0,
+            pkt.buffer.len()
+        );
         if session.common.strict_kex && session.common.encrypted.is_none() {
             let seqno = pkt.seqn.0 - 1; // was incremented after read()
             if let Some(expected) = STRICT_KEX_MSG_ORDER.get(seqno as usize) {
@@ -964,10 +968,7 @@ async fn reply<H: Handler + Send>(
         // Kex will consume the packet right away
     }
 
-    let is_kex_msg = pkt
-        .buffer
-        .first()
-        .is_some_and(|m| ALL_KEX_MESSAGES.iter().any(|&k| &k == m));
+    let is_kex_msg = pkt.buffer.first().cloned().map(is_kex_msg).unwrap_or(false);
 
     if is_kex_msg {
         if let SessionKexState::InProgress(kex) = session.kex.take() {
@@ -1032,5 +1033,5 @@ async fn reply<H: Handler + Send>(
     }
 
     // Handle key exchange/re-exchange.
-    Ok(session.server_read_encrypted(handler, pkt).await?)
+    session.server_read_encrypted(handler, pkt).await
 }

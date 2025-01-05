@@ -6,7 +6,6 @@ use std::convert::TryFrom;
 use std::env;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -104,8 +103,7 @@ impl Session {
             limits: Limits {
                 rekey_time_limit: std::time::Duration::from_secs(3),
                 ..Default::default()
-
-            },            // inactivity_timeout: Some(Duration::from_secs(5)),
+            }, // inactivity_timeout: Some(Duration::from_secs(5)),
             ..<_>::default()
         };
 

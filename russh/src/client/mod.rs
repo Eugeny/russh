@@ -45,7 +45,7 @@ use async_trait::async_trait;
 use futures::task::{Context, Poll};
 use futures::Future;
 use kex::ClientKex;
-use log::{debug, error, info, trace};
+use log::{debug, error, trace};
 use russh_keys::key::PrivateKeyWithHashAlg;
 use russh_keys::map_err;
 use ssh_encoding::Decode;
@@ -60,7 +60,7 @@ use tokio::sync::oneshot;
 use crate::channels::{Channel, ChannelMsg, ChannelRef, WindowSizeRef};
 use crate::cipher::{self, clear, OpeningKey};
 use crate::kex::{Kex, KexCause, KexProgress, SessionKexState};
-use crate::msg::{ALL_KEX_MESSAGES, STRICT_KEX_MSG_ORDER};
+use crate::msg::{is_kex_msg, STRICT_KEX_MSG_ORDER};
 use crate::session::{CommonSession, EncryptedState, GlobalRequestResponse, NewKeys};
 use crate::ssh_read::SshRead;
 use crate::sshbuffer::{IncomingSshPacket, PacketWriter, SSHBuffer, SshId};
@@ -1028,7 +1028,7 @@ impl Session {
             if let Some(ref mut enc) = self.common.encrypted {
                 if let EncryptedState::InitCompression = enc.state {
                     enc.client_compression
-                        .init_compress(&mut self.common.packet_writer.compress());
+                        .init_compress(self.common.packet_writer.compress());
                     enc.state = EncryptedState::Authenticated;
                 }
             }
@@ -1261,10 +1261,9 @@ impl Session {
             if enc.flush(
                 &self.common.config.as_ref().limits,
                 &mut self.common.packet_writer,
-            )? {
-                if !self.kex.active() {
-                    self.begin_rekey()?;
-                }
+            )? && !self.kex.active()
+            {
+                self.begin_rekey()?;
             }
         }
         Ok(())
@@ -1316,10 +1315,7 @@ async fn reply<H: Handler>(
         // Kex will consume the packet right away
     }
 
-    let is_kex_msg = pkt
-        .buffer
-        .first()
-        .is_some_and(|m| ALL_KEX_MESSAGES.iter().any(|&k| &k == m));
+    let is_kex_msg = pkt.buffer.first().cloned().map(is_kex_msg).unwrap_or(false);
 
     if is_kex_msg {
         if let SessionKexState::InProgress(kex) = session.kex.take() {

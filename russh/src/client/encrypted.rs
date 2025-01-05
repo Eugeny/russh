@@ -21,17 +21,15 @@ use log::{debug, error, info, trace, warn};
 use russh_keys::helpers::{map_err, sign_with_hash_alg, AlgorithmExt, EncodedExt};
 use ssh_encoding::{Decode, Encode};
 
+use super::IncomingSshPacket;
 use crate::cert::PublicKeyOrCertificate;
 use crate::client::{Handler, Msg, Prompt, Reply, Session};
 use crate::keys::key::parse_public_key;
 use crate::parsing::{ChannelOpenConfirmation, ChannelType, OpenChannelMessage};
 use crate::session::{Encrypted, EncryptedState, GlobalRequestResponse};
 use crate::{
-    auth, msg, Channel, ChannelId, ChannelMsg, ChannelOpenFailure, ChannelParams,
-    CryptoVec, Sig,
+    auth, msg, Channel, ChannelId, ChannelMsg, ChannelOpenFailure, ChannelParams, CryptoVec, Sig,
 };
-
-use super::IncomingSshPacket;
 
 thread_local! {
     static SIGNATURE_BUFFER: RefCell<CryptoVec> = RefCell::new(CryptoVec::new());

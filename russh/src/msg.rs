@@ -78,4 +78,8 @@ mod server {
 }
 
 pub(crate) const STRICT_KEX_MSG_ORDER: &[u8] = &[KEXINIT, KEX_ECDH_REPLY, NEWKEYS];
-pub(crate) const ALL_KEX_MESSAGES: &[u8] = &[KEXINIT, KEX_ECDH_INIT, KEX_ECDH_REPLY, NEWKEYS];
+const ALL_KEX_MESSAGES: &[u8] = &[KEXINIT, KEX_ECDH_INIT, KEX_ECDH_REPLY, NEWKEYS];
+
+pub(crate) fn is_kex_msg(msg: u8) -> bool {
+    ALL_KEX_MESSAGES.contains(&msg)
+}

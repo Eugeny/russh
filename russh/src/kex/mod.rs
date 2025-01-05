@@ -110,6 +110,7 @@ impl KexCause {
 }
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum KexProgress<T> {
     NeedsReply {
         kex: T,

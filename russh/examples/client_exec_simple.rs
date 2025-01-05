@@ -92,8 +92,8 @@ impl Session {
             limits: Limits {
                 rekey_time_limit: std::time::Duration::from_secs(2),
                 ..Default::default()
-
-            },              ..<_>::default()
+            },
+            ..<_>::default()
         };
 
         let config = Arc::new(config);

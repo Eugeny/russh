@@ -18,7 +18,6 @@ use std::num::Wrapping;
 
 use cipher::SealingKey;
 use compression::Compress;
-use ssh_encoding::Writer;
 
 use super::*;
 
@@ -128,8 +127,8 @@ impl PacketWriter {
     pub fn packet_raw(&mut self, buf: &[u8]) -> Result<(), Error> {
         if let Some(message_type) = buf.first() {
             debug!("> msg type {message_type:?}, len {}", buf.len());
-            let packet = self.compress.compress(&buf, &mut self.compress_buffer)?;
-            self.cipher.write(&packet, &mut self.write_buffer);
+            let packet = self.compress.compress(buf, &mut self.compress_buffer)?;
+            self.cipher.write(packet, &mut self.write_buffer);
         }
         Ok(())
     }
