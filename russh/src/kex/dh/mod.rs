@@ -12,6 +12,7 @@ use ssh_encoding::{Encode, Writer};
 
 use self::groups::{DhGroup, DH_GROUP1, DH_GROUP14, DH_GROUP16};
 use super::{compute_keys, KexAlgorithm, KexAlgorithmImplementor, KexType};
+use crate::client::GexParams;
 use crate::session::Exchange;
 use crate::{cipher, mac, msg, CryptoVec, Error};
 
@@ -114,15 +115,13 @@ impl<D: Digest> KexAlgorithmImplementor for DhGroupKex<D> {
 
     fn client_dh_gex_init(
         &mut self,
-        gex_min: u32,
-        gex_n: u32,
-        gex_max: u32,
+        gex: &GexParams,
         writer: &mut impl Writer,
     ) -> Result<(), Error> {
         msg::KEX_DH_GEX_REQUEST.encode(writer)?;
-        gex_min.encode(writer)?;
-        gex_n.encode(writer)?;
-        gex_max.encode(writer)?;
+        (gex.min_group_size() as u32).encode(writer)?;
+        (gex.preferred_group_size() as u32).encode(writer)?;
+        (gex.max_group_size() as u32).encode(writer)?;
         Ok(())
     }
 
@@ -255,9 +254,7 @@ impl<D: Digest> KexAlgorithmImplementor for DhGroupKex<D> {
         buffer.extend(key);
 
         if let Some((gex_params, dh_group)) = &exchange.gex {
-            gex_params.min_group_size.encode(buffer)?;
-            gex_params.preferred_group_size.encode(buffer)?;
-            gex_params.max_group_size.encode(buffer)?;
+            gex_params.encode(buffer)?;
             dh_group.prime.encode(buffer)?;
             dh_group.generator.encode(buffer)?;
         }
@@ -295,5 +292,18 @@ impl<D: Digest> KexAlgorithmImplementor for DhGroupKex<D> {
             local_to_remote_mac,
             is_server,
         )
+    }
+}
+
+impl Encode for GexParams {
+    fn encoded_len(&self) -> Result<usize, ssh_encoding::Error> {
+        Ok(0u32.encoded_len()? * 3)
+    }
+
+    fn encode(&self, writer: &mut impl Writer) -> Result<(), ssh_encoding::Error> {
+        (self.min_group_size() as u32).encode(writer)?;
+        (self.preferred_group_size() as u32).encode(writer)?;
+        (self.max_group_size() as u32).encode(writer)?;
+        Ok(())
     }
 }

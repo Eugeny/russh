@@ -44,6 +44,7 @@ use ssh_encoding::{Encode, Writer};
 use ssh_key::PublicKey;
 
 use crate::cipher::CIPHERS;
+use crate::client::GexParams;
 use crate::mac::{self, MACS};
 use crate::negotiation::Names;
 use crate::session::{Exchange, NewKeys};
@@ -165,21 +166,19 @@ pub(crate) trait KexAlgorithmImplementor {
         false
     }
 
-    fn server_dh_gex_init(
-        &mut self,
-        _exchange: &mut Exchange,
-        _payload: &[u8],
-    ) -> Result<(), crate::Error> {
-        Err(crate::Error::KexInit)
-    }
+    // fn server_dh_gex_init(
+    //     &mut self,
+    //     _exchange: &mut Exchange,
+    //     _payload: &[u8],
+    // ) -> Result<(), crate::Error> {
+    //     Err(crate::Error::KexInit)
+    // }
 
     #[allow(dead_code)]
     #[allow(unused_variables)]
     fn client_dh_gex_init(
         &mut self,
-        gex_min: u32,
-        gex_n: u32,
-        gex_max: u32,
+        gex: &GexParams,
         writer: &mut impl Writer,
     ) -> Result<(), crate::Error> {
         Err(crate::Error::KexInit)

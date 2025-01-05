@@ -86,7 +86,7 @@ impl Session {
         let config = client::Config {
             inactivity_timeout: Some(Duration::from_secs(5)),
             preferred: Preferred {
-                kex: Cow::Owned(vec![russh::kex::DH_GEX_SHA1]),
+                kex: Cow::Owned(vec![russh::kex::DH_GEX_SHA256]),
                 ..Default::default()
             },
             ..<_>::default()

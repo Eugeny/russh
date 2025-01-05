@@ -38,7 +38,7 @@ impl Deref for DhGroupUInt {
 pub struct DhGroup {
     pub(crate) prime: DhGroupUInt,
     pub(crate) generator: DhGroupUInt,
-    pub(crate) exp_size: u64,
+    // pub(crate) exp_size: u64,
 }
 
 impl Debug for DhGroup {
@@ -49,7 +49,6 @@ impl Debug for DhGroup {
                 "generator",
                 &format!("<{} bytes>", self.generator.deref().len()),
             )
-            .field("exp_size", &self.exp_size)
             .finish()
     }
 }
@@ -69,7 +68,7 @@ pub const DH_GROUP1: DhGroup = DhGroup {
         .as_slice(),
     ),
     generator: DhGroupUInt::new(&[2]),
-    exp_size: 256,
+    // exp_size: 256,
 };
 
 pub const DH_GROUP14: DhGroup = DhGroup {
@@ -92,7 +91,7 @@ pub const DH_GROUP14: DhGroup = DhGroup {
         .as_slice(),
     ),
     generator: DhGroupUInt::new(&[2]),
-    exp_size: 256,
+    // exp_size: 256,
 };
 
 pub const DH_GROUP16: DhGroup = DhGroup {
@@ -126,14 +125,13 @@ pub const DH_GROUP16: DhGroup = DhGroup {
         .as_slice(),
     ),
     generator: DhGroupUInt::new(&[2]),
-    exp_size: 512,
+    // exp_size: 512,
 };
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub(crate) struct DH {
     prime_num: BigUint,
     generator: BigUint,
-    // exp_size: u64,
     private_key: BigUint,
     public_key: BigUint,
     shared_secret: BigUint,
@@ -142,9 +140,8 @@ pub(crate) struct DH {
 impl DH {
     pub fn new(group: &DhGroup) -> Self {
         Self {
-            prime_num: BigUint::from_bytes_be(&*group.prime),
-            generator: BigUint::from_bytes_be(&*group.generator),
-            // exp_size: group.exp_size,
+            prime_num: BigUint::from_bytes_be(&group.prime),
+            generator: BigUint::from_bytes_be(&group.generator),
             private_key: BigUint::default(),
             public_key: BigUint::default(),
             shared_secret: BigUint::default(),

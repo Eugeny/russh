@@ -313,6 +313,9 @@ pub enum Error {
 
     #[error("SshEncoding: {0}")]
     SshEncoding(#[from] ssh_encoding::Error),
+
+    #[error("Invalid config: {0}")]
+    InvalidConfig(String),
 }
 
 pub(crate) fn strict_kex_violation(message_type: u8, sequence_number: usize) -> crate::Error {

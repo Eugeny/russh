@@ -1371,15 +1371,56 @@ fn initial_encrypted_state(session: &Session) -> EncryptedState {
     }
 }
 
-/// The configuration of clients.
+/// Parameters for dynamic group Diffie-Hellman key exchanges.
 #[derive(Debug, Clone)]
 pub struct GexParams {
-    /// Minimum DH group size (in bits) for DH GEX exchanges.
-    pub min_group_size: u32,
-    /// Preferred DH group size (in bits) for DH GEX exchanges.
-    pub preferred_group_size: u32,
-    /// Maximum DH group size (in bits) for DH GEX exchanges.
-    pub max_group_size: u32,
+    /// Minimum DH group size (in bits)
+    min_group_size: usize,
+    /// Preferred DH group size (in bits)
+    preferred_group_size: usize,
+    /// Maximum DH group size (in bits)
+    max_group_size: usize,
+}
+
+impl GexParams {
+    pub fn new(
+        min_group_size: usize,
+        preferred_group_size: usize,
+        max_group_size: usize,
+    ) -> Result<Self, Error> {
+        if min_group_size < 2048 {
+            return Err(Error::InvalidConfig(
+                "min_group_size must be at least 2048 bits".into(),
+            ));
+        }
+        if preferred_group_size < min_group_size {
+            return Err(Error::InvalidConfig(
+                "preferred_group_size must be at least as large as min_group_size".into(),
+            ));
+        }
+        if max_group_size < preferred_group_size {
+            return Err(Error::InvalidConfig(
+                "max_group_size must be at least as large as preferred_group_size".into(),
+            ));
+        }
+        Ok(GexParams {
+            min_group_size,
+            preferred_group_size,
+            max_group_size,
+        })
+    }
+
+    pub fn min_group_size(&self) -> usize {
+        self.min_group_size
+    }
+
+    pub fn preferred_group_size(&self) -> usize {
+        self.preferred_group_size
+    }
+
+    pub fn max_group_size(&self) -> usize {
+        self.max_group_size
+    }
 }
 
 impl Default for GexParams {
