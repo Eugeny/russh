@@ -5,6 +5,7 @@ use std::task::{Context, Poll};
 
 use bytes::BytesMut;
 use delegate::delegate;
+use log::debug;
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, DuplexStream, ReadBuf};
 use windows::core::HSTRING;
@@ -61,7 +62,12 @@ impl PageantStream {
                     break;
                 }
                 let msg = buf.split().freeze();
-                let response = query_pageant_direct(cookie.clone(), &msg).unwrap();
+                let Ok(response) = query_pageant_direct(cookie.clone(), &msg).map_err(|e| {
+                    debug!("Pageant query failed: {:?}", e);
+                    e
+                }) else {
+                    break;
+                };
                 two.write_all(&response).await?
             }
             std::io::Result::Ok(())
@@ -160,7 +166,12 @@ impl MemoryMap {
             return Err(Error::Overflow);
         }
 
+        if data.is_empty() {
+            return Ok(());
+        }
+
         unsafe {
+            #[allow(clippy::indexing_slicing)] // length checked
             std::ptr::copy_nonoverlapping(
                 &data[0] as *const u8,
                 self.view.Value.add(self.pos) as *mut u8,
@@ -278,6 +289,10 @@ pub fn query_pageant_direct(cookie: String, msg: &[u8]) -> Result<Vec<u8>, Error
 
     map.seek(0);
     let mut buf = map.read(4);
+    if buf.len() < 4 {
+        return Err(Error::NoResponse);
+    }
+    #[allow(clippy::indexing_slicing)] // length checked
     let size = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]) as usize;
     buf.extend(map.read(size));
 
