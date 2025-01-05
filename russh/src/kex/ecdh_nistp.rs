@@ -11,10 +11,10 @@ use p256::NistP256;
 use p384::NistP384;
 use p521::NistP521;
 use sha2::{Digest, Sha256, Sha384, Sha512};
-use ssh_encoding::Encode;
+use ssh_encoding::{Encode, Writer};
 
-use super::encode_mpint;
-use crate::kex::{compute_keys, KexAlgorithm, KexType};
+use super::{encode_mpint, KexAlgorithm};
+use crate::kex::{compute_keys, KexAlgorithmImplementor, KexType};
 use crate::mac::{self};
 use crate::session::Exchange;
 use crate::{cipher, msg, CryptoVec};
@@ -22,36 +22,39 @@ use crate::{cipher, msg, CryptoVec};
 pub struct EcdhNistP256KexType {}
 
 impl KexType for EcdhNistP256KexType {
-    fn make(&self) -> Box<dyn KexAlgorithm + Send> {
-        Box::new(EcdhNistPKex::<NistP256, Sha256> {
+    fn make(&self) -> KexAlgorithm {
+        EcdhNistPKex::<NistP256, Sha256> {
             local_secret: None,
             shared_secret: None,
             _digest: PhantomData,
-        }) as Box<dyn KexAlgorithm + Send>
+        }
+        .into()
     }
 }
 
 pub struct EcdhNistP384KexType {}
 
 impl KexType for EcdhNistP384KexType {
-    fn make(&self) -> Box<dyn KexAlgorithm + Send> {
-        Box::new(EcdhNistPKex::<NistP384, Sha384> {
+    fn make(&self) -> KexAlgorithm {
+        EcdhNistPKex::<NistP384, Sha384> {
             local_secret: None,
             shared_secret: None,
             _digest: PhantomData,
-        }) as Box<dyn KexAlgorithm + Send>
+        }
+        .into()
     }
 }
 
 pub struct EcdhNistP521KexType {}
 
 impl KexType for EcdhNistP521KexType {
-    fn make(&self) -> Box<dyn KexAlgorithm + Send> {
-        Box::new(EcdhNistPKex::<NistP521, Sha512> {
+    fn make(&self) -> KexAlgorithm {
+        EcdhNistPKex::<NistP521, Sha512> {
             local_secret: None,
             shared_secret: None,
             _digest: PhantomData,
-        }) as Box<dyn KexAlgorithm + Send>
+        }
+        .into()
     }
 }
 
@@ -71,7 +74,7 @@ impl<C: Curve + CurveArithmetic, D: Digest> std::fmt::Debug for EcdhNistPKex<C, 
     }
 }
 
-impl<C: Curve + CurveArithmetic, D: Digest> KexAlgorithm for EcdhNistPKex<C, D>
+impl<C: Curve + CurveArithmetic, D: Digest> KexAlgorithmImplementor for EcdhNistPKex<C, D>
 where
     C: PointCompression,
     FieldBytesSize<C>: ModulusSize,
@@ -120,7 +123,7 @@ where
     fn client_dh(
         &mut self,
         client_ephemeral: &mut CryptoVec,
-        buf: &mut CryptoVec,
+        writer: &mut impl Writer,
     ) -> Result<(), crate::Error> {
         let client_secret =
             elliptic_curve::ecdh::EphemeralSecret::<C>::random(&mut rand_core::OsRng);
@@ -130,8 +133,8 @@ where
         client_ephemeral.clear();
         client_ephemeral.extend(&client_pubkey.to_sec1_bytes());
 
-        buf.push(msg::KEX_ECDH_INIT);
-        client_pubkey.to_sec1_bytes().encode(buf)?;
+        msg::KEX_ECDH_INIT.encode(writer)?;
+        client_pubkey.to_sec1_bytes().encode(writer)?;
 
         self.local_secret = Some(client_secret);
         Ok(())

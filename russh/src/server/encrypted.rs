@@ -21,14 +21,13 @@ use byteorder::{BigEndian, ByteOrder};
 use bytes::Bytes;
 use cert::PublicKeyOrCertificate;
 use log::{debug, error, info, trace, warn};
-use negotiation::Select;
+use msg;
 use russh_keys::helpers::NameList;
 use russh_keys::map_err;
 use signature::Verifier;
 use ssh_encoding::{Decode, Encode, Reader};
 use ssh_key::{PublicKey, Signature};
 use tokio::time::Instant;
-use {msg, negotiation};
 
 use super::super::*;
 use super::*;
@@ -40,116 +39,12 @@ impl Session {
     pub(crate) async fn server_read_encrypted<H: Handler + Send>(
         &mut self,
         handler: &mut H,
-        seqn: &mut Wrapping<u32>,
-        buf: &[u8],
+        pkt: &mut IncomingSshPacket,
     ) -> Result<(), H::Error> {
-        #[allow(clippy::indexing_slicing)] // length checked
-        {
-            trace!(
-                "server_read_encrypted, buf = {:?}",
-                &buf[..buf.len().min(20)]
-            );
-        }
-        // Either this packet is a KEXINIT, in which case we start a key re-exchange.
-
-        #[allow(clippy::unwrap_used)]
-        let enc = self.common.encrypted.as_mut().unwrap();
-        if buf.first() == Some(&msg::KEXINIT) {
-            debug!("Received rekeying request");
-            // If we're not currently rekeying, but `buf` is a rekey request
-            if let Some(Kex::Init(kexinit)) = enc.rekey.take() {
-                enc.rekey = Some(kexinit.server_parse(
-                    self.common.config.as_ref(),
-                    &mut *self.common.cipher.local_to_remote,
-                    buf,
-                    &mut self.common.write_buffer,
-                )?);
-            } else if let Some(exchange) = enc.exchange.take() {
-                let kexinit = KexInit::received_rekey(
-                    exchange,
-                    negotiation::Server::read_kex(
-                        buf,
-                        &self.common.config.as_ref().preferred,
-                        Some(&self.common.config.as_ref().keys),
-                    )?,
-                    &enc.session_id,
-                );
-                enc.rekey = Some(kexinit.server_parse(
-                    self.common.config.as_ref(),
-                    &mut *self.common.cipher.local_to_remote,
-                    buf,
-                    &mut self.common.write_buffer,
-                )?);
-            }
-            if let Some(Kex::Dh(KexDh { ref names, .. })) = enc.rekey {
-                self.common.strict_kex = self.common.strict_kex || names.strict_kex;
-            }
-            self.flush()?;
-            return Ok(());
-        }
-
-        match enc.rekey.take() {
-            Some(Kex::Dh(kexdh)) => {
-                enc.rekey = Some(kexdh.parse(
-                    self.common.config.as_ref(),
-                    &mut *self.common.cipher.local_to_remote,
-                    buf,
-                    &mut self.common.write_buffer,
-                )?);
-                if let Some(Kex::Keys(_)) = enc.rekey {
-                    // just sent NEWKEYS
-                    self.common.maybe_reset_seqn();
-                }
-                self.flush()?;
-                return Ok(());
-            }
-            Some(Kex::Keys(newkeys)) => {
-                if buf.first() != Some(&msg::NEWKEYS) {
-                    return Err(Error::Kex.into());
-                }
-                self.common.write_buffer.bytes = 0;
-                enc.last_rekey = std::time::Instant::now();
-
-                // Ok, NEWKEYS received, now encrypted.
-                enc.flush_all_pending()?;
-                let mut pending = std::mem::take(&mut self.pending_reads);
-                for p in pending.drain(..) {
-                    self.process_packet(handler, &p).await?;
-                }
-                self.pending_reads = pending;
-                self.pending_len = 0;
-                self.common.newkeys(newkeys);
-                if self.common.strict_kex {
-                    *seqn = Wrapping(0);
-                }
-                self.flush()?;
-                return Ok(());
-            }
-            Some(Kex::Init(k)) => {
-                if let Some(ref algo) = k.algo {
-                    if self.common.strict_kex && !algo.strict_kex {
-                        return Err(strict_kex_violation(msg::KEXINIT, 0).into());
-                    }
-                }
-
-                enc.rekey = Some(Kex::Init(k));
-
-                self.pending_len += buf.len() as u32;
-                if self.pending_len > 2 * self.target_window_size {
-                    return Err(Error::Pending.into());
-                }
-                self.pending_reads.push(CryptoVec::from_slice(buf));
-                return Ok(());
-            }
-            rek => {
-                trace!("rek = {:?}", rek);
-                enc.rekey = rek
-            }
-        }
-        self.process_packet(handler, buf).await
+        self.process_packet(handler, &pkt.buffer).await
     }
 
-    async fn process_packet<H: Handler + Send>(
+    pub(crate) async fn process_packet<H: Handler + Send>(
         &mut self,
         handler: &mut H,
         buf: &[u8],
@@ -229,7 +124,8 @@ impl Session {
                 }
             }
             (EncryptedState::InitCompression, Some((msg, mut r))) => {
-                enc.server_compression.init_compress(&mut enc.compress);
+                enc.server_compression
+                    .init_compress(self.common.packet_writer.compress());
                 enc.state = EncryptedState::Authenticated;
                 self.server_read_authenticated(handler, *msg, &mut r).await
             }

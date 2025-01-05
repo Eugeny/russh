@@ -32,26 +32,153 @@ use dh::{
 };
 use digest::Digest;
 use ecdh_nistp::{EcdhNistP256KexType, EcdhNistP384KexType, EcdhNistP521KexType};
+use enum_dispatch::enum_dispatch;
 use once_cell::sync::Lazy;
+use p256::NistP256;
+use p384::NistP384;
+use p521::NistP521;
+use sha1::Sha1;
+use sha2::{Sha256, Sha384, Sha512};
 use ssh_encoding::{Encode, Writer};
+use ssh_key::PublicKey;
 
 use crate::cipher::CIPHERS;
 use crate::mac::{self, MACS};
-use crate::session::Exchange;
-use crate::{cipher, CryptoVec};
+use crate::negotiation::Names;
+use crate::session::{Exchange, NewKeys};
+use crate::sshbuffer::{IncomingSshPacket, PacketWriter};
+use crate::{cipher, CryptoVec, Error};
 
-pub(crate) trait KexType {
-    fn make(&self) -> Box<dyn KexAlgorithm + Send>;
+#[derive(Debug)]
+pub(crate) enum SessionKexState<K: Kex> {
+    Idle,
+    InProgress(K),
+    Taken, // some async activity still going on such as host key checks
 }
 
-impl Debug for dyn KexAlgorithm + Send {
+impl<K: Kex> PartialEq for SessionKexState<K> {
+    fn eq(&self, other: &Self) -> bool {
+        core::mem::discriminant(self) == core::mem::discriminant(other)
+    }
+}
+
+impl<K: Kex> SessionKexState<K> {
+    pub fn active(&self) -> bool {
+        match self {
+            SessionKexState::Idle => false,
+            SessionKexState::InProgress(_) => true,
+            SessionKexState::Taken => true,
+        }
+    }
+
+    pub fn take(&mut self) -> Self {
+        // TODO maybe make this take a guarded closure
+        std::mem::replace(
+            self,
+            match self {
+                SessionKexState::Idle => SessionKexState::Idle,
+                _ => SessionKexState::Taken,
+            },
+        )
+    }
+}
+
+#[derive(Debug)]
+pub(crate) enum KexCause {
+    Initial,
+    Rekey { strict: bool, session_id: CryptoVec },
+}
+
+impl KexCause {
+    pub fn is_strict_kex(&self, names: &Names) -> bool {
+        names.strict_kex || matches!(self, Self::Rekey { strict: true, .. })
+    }
+
+    pub fn is_rekey(&self) -> bool {
+        match self {
+            Self::Initial => false,
+            Self::Rekey { .. } => true,
+        }
+    }
+
+    pub fn session_id(&self) -> Option<&CryptoVec> {
+        match self {
+            Self::Initial => None,
+            Self::Rekey { session_id, .. } => Some(session_id),
+        }
+    }
+}
+
+#[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
+pub(crate) enum KexProgress<T> {
+    NeedsReply {
+        kex: T,
+        reset_seqn: bool,
+    },
+    Done {
+        server_host_key: Option<PublicKey>,
+        newkeys: NewKeys,
+    },
+}
+
+pub(crate) trait Kex
+where
+    Self: Sized,
+{
+    fn kexinit(&mut self, output: &mut PacketWriter) -> Result<(), Error>;
+
+    fn step(
+        self,
+        input: Option<&mut IncomingSshPacket>,
+        output: &mut PacketWriter,
+    ) -> Result<KexProgress<Self>, Error>;
+}
+
+#[enum_dispatch(KexAlgorithmImplementor)]
+pub(crate) enum KexAlgorithm {
+    DhGroupKexSha1(dh::DhGroupKex<Sha1>),
+    DhGroupKexSha256(dh::DhGroupKex<Sha256>),
+    DhGroupKexSha512(dh::DhGroupKex<Sha512>),
+    Curve25519Kex(curve25519::Curve25519Kex),
+    EcdhNistP256Kex(ecdh_nistp::EcdhNistPKex<NistP256, Sha256>),
+    EcdhNistP384Kex(ecdh_nistp::EcdhNistPKex<NistP384, Sha384>),
+    EcdhNistP521Kex(ecdh_nistp::EcdhNistPKex<NistP521, Sha512>),
+    None(none::NoneKexAlgorithm),
+}
+
+pub(crate) trait KexType {
+    fn make(&self) -> KexAlgorithm;
+}
+
+impl Debug for KexAlgorithm {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "KexAlgorithm")
     }
 }
 
-pub(crate) trait KexAlgorithm {
+#[enum_dispatch]
+pub(crate) trait KexAlgorithmImplementor {
     fn skip_exchange(&self) -> bool;
+
+    // fn server_dh_gex_init(
+    //     &mut self,
+    //     _exchange: &mut Exchange,
+    //     _payload: &[u8],
+    // ) -> Result<(), crate::Error> {
+    //     Err(crate::Error::KexInit)
+    // }
+
+    // #[allow(dead_code)]
+    // fn client_dh_gex_init(
+    //     &mut self,
+    //     _gex_min: u32,
+    //     _gex_n: u32,
+    //     _gex_max: u32,
+    //     _buf: &mut CryptoVec,
+    // ) -> Result<(), crate::Error> {
+    //     Err(crate::Error::KexInit)
+    // }
 
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     fn server_dh(&mut self, exchange: &mut Exchange, payload: &[u8]) -> Result<(), crate::Error>;
@@ -59,7 +186,7 @@ pub(crate) trait KexAlgorithm {
     fn client_dh(
         &mut self,
         client_ephemeral: &mut CryptoVec,
-        buf: &mut CryptoVec,
+        writer: &mut impl Writer,
     ) -> Result<(), crate::Error>;
 
     fn compute_shared_secret(&mut self, remote_pubkey_: &[u8]) -> Result<(), crate::Error>;

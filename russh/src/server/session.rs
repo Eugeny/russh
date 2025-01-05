@@ -2,6 +2,7 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
 use channels::WindowSizeRef;
+use kex::ServerKex;
 use log::debug;
 use negotiation::parse_kex_algo_list;
 use russh_keys::helpers::NameList;
@@ -12,7 +13,7 @@ use tokio::sync::oneshot;
 
 use super::*;
 use crate::channels::{Channel, ChannelMsg, ChannelRef};
-use crate::kex::EXTENSION_SUPPORT_AS_CLIENT;
+use crate::kex::{Kex, KexCause, SessionKexState, EXTENSION_SUPPORT_AS_CLIENT};
 use crate::msg;
 
 /// A connected server session. This type is unique to a client.
@@ -26,6 +27,7 @@ pub struct Session {
     pub(crate) pending_len: u32,
     pub(crate) channels: HashMap<ChannelId, ChannelRef>,
     pub(crate) open_global_requests: VecDeque<GlobalRequestResponse>,
+    pub(crate) kex: SessionKexState<ServerKex>,
 }
 
 #[derive(Debug)]
@@ -422,11 +424,23 @@ impl Handle {
 }
 
 impl Session {
-    pub(crate) fn is_rekeying(&self) -> bool {
-        if let Some(ref enc) = self.common.encrypted {
-            enc.rekey.is_some()
+    fn maybe_decompress(&mut self, buffer: &SSHBuffer) -> Result<IncomingSshPacket, Error> {
+        if let Some(ref mut enc) = self.common.encrypted {
+            let mut decomp = CryptoVec::new();
+            Ok(IncomingSshPacket {
+                #[allow(clippy::indexing_slicing)] // length checked
+                buffer: enc.decompress.decompress(
+                    &buffer.buffer[5..],
+                    &mut decomp,
+                )?.into(),
+                seqn: buffer.seqn,
+            })
         } else {
-            true
+            Ok(IncomingSshPacket {
+                #[allow(clippy::indexing_slicing)] // length checked
+                buffer: buffer.buffer[5..].into(),
+                seqn: buffer.seqn,
+            })
         }
     }
 
@@ -440,15 +454,15 @@ impl Session {
         R: AsyncRead + AsyncWrite + Unpin + Send + 'static,
     {
         self.flush()?;
-        map_err!(stream.write_all(&self.common.write_buffer.buffer).await)?;
-        self.common.write_buffer.buffer.clear();
+
+        map_err!(self.common.packet_writer.flush_into(&mut stream).await)?;
 
         let (stream_read, mut stream_write) = stream.split();
         let buffer = SSHBuffer::new();
 
         // Allow handing out references to the cipher
         let mut opening_cipher = Box::new(clear::Key) as Box<dyn OpeningKey + Send>;
-        std::mem::swap(&mut opening_cipher, &mut self.common.cipher.remote_to_local);
+        std::mem::swap(&mut opening_cipher, &mut self.common.remote_to_local);
 
         let keepalive_timer =
             future_or_pending(self.common.config.keepalive_interval, tokio::time::sleep);
@@ -461,7 +475,6 @@ impl Session {
         let reading = start_reading(stream_read, buffer, opening_cipher);
         pin!(reading);
         let mut is_reading = None;
-        let mut decomp = CryptoVec::new();
 
         #[allow(clippy::panic)] // false positive in macro
         while !self.common.disconnected {
@@ -477,37 +490,28 @@ impl Session {
                         is_reading = Some((stream_read, buffer, opening_cipher));
                         break
                     }
-                    #[allow(clippy::indexing_slicing)] // length checked
-                    let buf = if let Some(ref mut enc) = self.common.encrypted {
-                        let d = enc.decompress.decompress(
-                            &buffer.buffer[5..],
-                            &mut decomp,
-                        );
-                        if let Ok(buf) = d {
-                            buf
-                        } else {
-                            debug!("err = {:?}", d);
-                            is_reading = Some((stream_read, buffer, opening_cipher));
-                            break
-                        }
-                    } else {
-                        &buffer.buffer[5..]
-                    };
-                    if !buf.is_empty() {
-                        #[allow(clippy::indexing_slicing)] // length checked
-                        if buf[0] == crate::msg::DISCONNECT {
+
+                    let mut pkt = self.maybe_decompress(&buffer)?;
+
+                    match pkt.buffer.first() {
+                        None => (),
+                        Some(&crate::msg::DISCONNECT) => {
                             debug!("break");
                             is_reading = Some((stream_read, buffer, opening_cipher));
                             break;
-                        } else {
+                        }
+                        Some(_) => {
                             self.common.received_data = true;
-                            std::mem::swap(&mut opening_cipher, &mut self.common.cipher.remote_to_local);
                             // TODO it'd be cleaner to just pass cipher to reply()
-                            match reply(&mut self, &mut handler, &mut buffer.seqn, buf).await {
+                            std::mem::swap(&mut opening_cipher, &mut self.common.remote_to_local);
+
+                            match reply(&mut self, &mut handler, &mut pkt).await {
                                 Ok(_) => {},
                                 Err(e) => return Err(e),
                             }
-                            std::mem::swap(&mut opening_cipher, &mut self.common.cipher.remote_to_local);
+                            buffer.seqn = pkt.seqn; // TODO reply changes seqn internall, find cleaner way
+
+                            std::mem::swap(&mut opening_cipher, &mut self.common.remote_to_local);
                         }
                     }
                     reading.set(start_reading(stream_read, buffer, opening_cipher));
@@ -525,7 +529,7 @@ impl Session {
                     debug!("timeout");
                     return Err(crate::Error::InactivityTimeout.into());
                 }
-                msg = self.receiver.recv(), if !self.is_rekeying() => {
+                msg = self.receiver.recv(), if !self.kex.active() => {
                     match msg {
                         Some(Msg::Channel(id, ChannelMsg::Data { data })) => {
                             self.data(id, data)?;
@@ -602,12 +606,13 @@ impl Session {
                 }
             }
             self.flush()?;
+
             map_err!(
-                stream_write
-                    .write_all(&self.common.write_buffer.buffer)
+                self.common
+                    .packet_writer
+                    .flush_into(&mut stream_write)
                     .await
             )?;
-            self.common.write_buffer.buffer.clear();
 
             if self.common.received_data {
                 // Reset the number of failed keepalive attempts. We don't
@@ -690,19 +695,12 @@ impl Session {
         if let Some(ref mut enc) = self.common.encrypted {
             if enc.flush(
                 &self.common.config.as_ref().limits,
-                &mut *self.common.cipher.local_to_remote,
-                &mut self.common.write_buffer,
-            )? && enc.rekey.is_none()
+                &mut self.common.packet_writer,
+            )? && self.kex == SessionKexState::Idle
             {
                 debug!("starting rekeying");
-                if let Some(exchange) = enc.exchange.take() {
-                    let mut kexinit = KexInit::initiate_rekey(exchange, &enc.session_id);
-                    kexinit.server_write(
-                        self.common.config.as_ref(),
-                        &mut *self.common.cipher.local_to_remote,
-                        &mut self.common.write_buffer,
-                    )?;
-                    enc.rekey = Some(Kex::Init(kexinit))
+                if enc.exchange.take().is_some() {
+                    self.begin_rekey()?;
                 }
             }
         }
@@ -844,7 +842,7 @@ impl Session {
     /// processed by the event loop) is returned.
     pub fn data(&mut self, channel: ChannelId, data: CryptoVec) -> Result<(), Error> {
         if let Some(ref mut enc) = self.common.encrypted {
-            enc.data(channel, data)
+            enc.data(channel, data, self.kex.active())
         } else {
             unreachable!()
         }
@@ -863,7 +861,7 @@ impl Session {
         data: CryptoVec,
     ) -> Result<(), Error> {
         if let Some(ref mut enc) = self.common.encrypted {
-            enc.extended_data(channel, extended, data)
+            enc.extended_data(channel, extended, data, self.kex.active())
         } else {
             unreachable!()
         }
@@ -1184,6 +1182,26 @@ impl Session {
                 .encode(&mut enc.write)?;
             });
         }
+        Ok(())
+    }
+
+    pub(crate) fn begin_rekey(&mut self) -> Result<(), Error> {
+        debug!("beginning re-key");
+        let mut kex = ServerKex::new(
+            self.common.config.clone(),
+            &self.common.remote_sshid,
+            &self.common.config.server_id,
+            match self.common.encrypted {
+                None => KexCause::Initial,
+                Some(ref enc) => KexCause::Rekey {
+                    strict: self.common.strict_kex,
+                    session_id: enc.session_id.clone(),
+                },
+            },
+        );
+
+        kex.kexinit(&mut self.common.packet_writer)?;
+        self.kex = SessionKexState::InProgress(kex);
         Ok(())
     }
 }

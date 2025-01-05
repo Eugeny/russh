@@ -25,6 +25,7 @@ pub const UNIMPLEMENTED: u8 = 3;
 #[allow(dead_code)]
 pub const DEBUG: u8 = 4;
 
+pub const SERVICE_REQUEST: u8 = 5;
 pub const SERVICE_ACCEPT: u8 = 6;
 pub const EXT_INFO: u8 = 7;
 pub const KEXINIT: u8 = 20;
@@ -73,6 +74,12 @@ mod server {
     // https://tools.ietf.org/html/rfc4256#section-5
     pub const USERAUTH_INFO_REQUEST: u8 = 60;
     pub const USERAUTH_PK_OK: u8 = 60;
-    pub const SERVICE_REQUEST: u8 = 5;
     pub const SSH_OPEN_ADMINISTRATIVELY_PROHIBITED: u8 = 1;
+}
+
+pub(crate) const STRICT_KEX_MSG_ORDER: &[u8] = &[KEXINIT, KEX_ECDH_REPLY, NEWKEYS];
+const ALL_KEX_MESSAGES: &[u8] = &[KEXINIT, KEX_ECDH_INIT, KEX_ECDH_REPLY, NEWKEYS];
+
+pub(crate) fn is_kex_msg(msg: u8) -> bool {
+    ALL_KEX_MESSAGES.contains(&msg)
 }

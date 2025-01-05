@@ -13,7 +13,12 @@
 // limitations under the License.
 //
 
+use core::fmt;
 use std::num::Wrapping;
+
+use cipher::SealingKey;
+use compression::Compress;
+use tokio::io::{AsyncWrite, AsyncWriteExt};
 
 use super::*;
 
@@ -65,8 +70,8 @@ fn test_ssh_id() {
 #[derive(Debug, Default)]
 pub struct SSHBuffer {
     pub buffer: CryptoVec,
-    pub len: usize, // next packet length.
-    pub bytes: usize,
+    pub len: usize,   // next packet length.
+    pub bytes: usize, // total bytes written since the last rekey
     // Sequence numbers are on 32 bits and wrap.
     // https://tools.ietf.org/html/rfc4253#section-6.4
     pub seqn: Wrapping<u32>,
@@ -84,5 +89,84 @@ impl SSHBuffer {
 
     pub fn send_ssh_id(&mut self, id: &SshId) {
         id.write(&mut self.buffer);
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct IncomingSshPacket {
+    pub buffer: CryptoVec,
+    pub seqn: Wrapping<u32>,
+}
+
+pub(crate) struct PacketWriter {
+    cipher: Box<dyn SealingKey + Send>,
+    compress: Compress,
+    compress_buffer: CryptoVec,
+    write_buffer: SSHBuffer,
+}
+
+impl Debug for PacketWriter {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PacketWriter").finish()
+    }
+}
+
+impl PacketWriter {
+    pub fn clear() -> Self {
+        Self::new(Box::new(cipher::clear::Key {}), Compress::None)
+    }
+
+    pub fn new(cipher: Box<dyn SealingKey + Send>, compress: Compress) -> Self {
+        Self {
+            cipher,
+            compress,
+            compress_buffer: CryptoVec::new(),
+            write_buffer: SSHBuffer::new(),
+        }
+    }
+
+    pub fn packet_raw(&mut self, buf: &[u8]) -> Result<(), Error> {
+        if let Some(message_type) = buf.first() {
+            debug!("> msg type {message_type:?}, len {}", buf.len());
+            let packet = self.compress.compress(buf, &mut self.compress_buffer)?;
+            self.cipher.write(packet, &mut self.write_buffer);
+        }
+        Ok(())
+    }
+
+    /// Sends and returns the packet contents
+    pub fn packet<F: FnOnce(&mut CryptoVec) -> Result<(), Error>>(
+        &mut self,
+        f: F,
+    ) -> Result<CryptoVec, Error> {
+        let mut buf = CryptoVec::new();
+        f(&mut buf)?;
+        self.packet_raw(&buf)?;
+        Ok(buf)
+    }
+
+    pub fn buffer(&mut self) -> &mut SSHBuffer {
+        &mut self.write_buffer
+    }
+
+    pub fn compress(&mut self) -> &mut Compress {
+        &mut self.compress
+    }
+
+    pub fn set_cipher(&mut self, cipher: Box<dyn SealingKey + Send>) {
+        self.cipher = cipher;
+    }
+
+    pub fn reset_seqn(&mut self) {
+        self.write_buffer.seqn = Wrapping(0);
+    }
+
+    pub async fn flush_into<W: AsyncWrite + Unpin>(&mut self, w: &mut W) -> std::io::Result<()> {
+        if !self.write_buffer.buffer.is_empty() {
+            w.write_all(&self.write_buffer.buffer).await?;
+            w.flush().await?;
+            self.write_buffer.buffer.clear();
+        }
+        Ok(())
     }
 }
