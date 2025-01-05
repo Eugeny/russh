@@ -5,6 +5,7 @@ use std::task::{Context, Poll};
 
 use bytes::BytesMut;
 use delegate::delegate;
+use log::debug;
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, DuplexStream, ReadBuf};
 use windows::core::HSTRING;
@@ -61,7 +62,12 @@ impl PageantStream {
                     break;
                 }
                 let msg = buf.split().freeze();
-                let response = query_pageant_direct(cookie.clone(), &msg).unwrap();
+                let Ok(response) = query_pageant_direct(cookie.clone(), &msg).map_err(|e| {
+                    debug!("Pageant query failed: {:?}", e);
+                    e
+                }) else {
+                    break;
+                };
                 two.write_all(&response).await?
             }
             std::io::Result::Ok(())

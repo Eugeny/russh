@@ -13,6 +13,7 @@ rust-version = "1.65"
 futures.workspace = true
 thiserror.workspace = true
 rand.workspace = true
+log.workspace = true
 tokio = { workspace = true, features = ["io-util", "rt"] }
 bytes.workspace = true
 delegate.workspace = true
