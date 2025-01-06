@@ -56,7 +56,8 @@ mod compress {
                 PrivateKeyWithHashAlg::new(Arc::new(client_key), None).unwrap(),
             )
             .await
-            .unwrap();
+            .unwrap()
+            .success();
         assert!(authenticated);
         let mut channel = session.channel_open_session().await.unwrap();
 
@@ -200,7 +201,7 @@ mod channels {
                 )
                 .await
                 .unwrap();
-            assert!(authenticated);
+            assert!(authenticated.success());
             session
         });
 

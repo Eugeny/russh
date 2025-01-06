@@ -13,10 +13,11 @@
 // limitations under the License.
 //
 
+use std::ops::Deref;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use bitflags::bitflags;
 use russh_keys::helpers::NameList;
 use russh_keys::key::PrivateKeyWithHashAlg;
 use ssh_key::{Certificate, PrivateKey};
@@ -25,24 +26,106 @@ use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::CryptoVec;
 
-bitflags! {
-    /// Set of authentication methods, represented by bit flags.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub struct MethodSet: u32 {
-        /// The SSH `none` method (no authentication).
-        const NONE = 1;
-        /// The SSH `password` method (plaintext passwords).
-        const PASSWORD = 2;
-        /// The SSH `publickey` method (sign a challenge sent by the
-        /// server).
-        const PUBLICKEY = 4;
-        /// The SSH `hostbased` method (certain hostnames are allowed
-        /// by the server).
-        const HOSTBASED = 8;
-        /// The SSH `keyboard-interactive` method (answer to a
-        /// challenge, where the "challenge" can be a password prompt,
-        /// a bytestring to sign with a smartcard, or something else).
-        const KEYBOARD_INTERACTIVE = 16;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MethodKind {
+    None,
+    Password,
+    PublicKey,
+    HostBased,
+    KeyboardInteractive,
+}
+
+impl From<&MethodKind> for &'static str {
+    fn from(value: &MethodKind) -> Self {
+        match value {
+            MethodKind::None => "none",
+            MethodKind::Password => "password",
+            MethodKind::PublicKey => "publickey",
+            MethodKind::HostBased => "hostbased",
+            MethodKind::KeyboardInteractive => "keyboard-interactive",
+        }
+    }
+}
+
+impl FromStr for MethodKind {
+    fn from_str(b: &str) -> Result<MethodKind, Self::Err> {
+        match b {
+            "none" => Ok(MethodKind::None),
+            "password" => Ok(MethodKind::Password),
+            "publickey" => Ok(MethodKind::PublicKey),
+            "hostbased" => Ok(MethodKind::HostBased),
+            "keyboard-interactive" => Ok(MethodKind::KeyboardInteractive),
+            _ => Err(()),
+        }
+    }
+
+    type Err = ();
+}
+
+impl From<&MethodKind> for String {
+    fn from(value: &MethodKind) -> Self {
+        <&str>::from(value).to_string()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MethodSet(Vec<MethodKind>);
+
+impl Deref for MethodSet {
+    type Target = [MethodKind];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<&MethodSet> for NameList {
+    fn from(value: &MethodSet) -> Self {
+        Self(value.iter().map(|x| x.into()).collect())
+    }
+}
+
+impl From<&NameList> for MethodSet {
+    fn from(value: &NameList) -> Self {
+        Self(
+            value
+                .0
+                .iter()
+                .filter_map(|x| MethodKind::from_str(x).ok())
+                .collect(),
+        )
+    }
+}
+
+impl MethodSet {
+    pub fn empty() -> Self {
+        Self(Vec::new())
+    }
+
+    pub fn all() -> Self {
+        Self(vec![
+            MethodKind::None,
+            MethodKind::Password,
+            MethodKind::PublicKey,
+            MethodKind::HostBased,
+            MethodKind::KeyboardInteractive,
+        ])
+    }
+
+    pub fn remove(&mut self, method: MethodKind) {
+        self.0.retain(|x| *x != method);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AuthResult {
+    Success,
+    Failure { remaining_methods: MethodSet },
+}
+
+impl AuthResult {
+    pub fn success(&self) -> bool {
+        matches!(self, AuthResult::Success)
     }
 }
 
@@ -100,44 +183,6 @@ pub enum Method {
         submethods: String,
     },
     // Hostbased,
-}
-
-impl From<MethodSet> for &'static str {
-    fn from(value: MethodSet) -> Self {
-        match value {
-            MethodSet::NONE => "none",
-            MethodSet::PASSWORD => "password",
-            MethodSet::PUBLICKEY => "publickey",
-            MethodSet::HOSTBASED => "hostbased",
-            MethodSet::KEYBOARD_INTERACTIVE => "keyboard-interactive",
-            _ => "",
-        }
-    }
-}
-
-impl From<MethodSet> for String {
-    fn from(value: MethodSet) -> Self {
-        <&str>::from(value).to_string()
-    }
-}
-
-impl From<MethodSet> for NameList {
-    fn from(value: MethodSet) -> Self {
-        Self(value.into_iter().map(|x| x.into()).collect())
-    }
-}
-
-impl MethodSet {
-    pub(crate) fn from_str(b: &str) -> Option<MethodSet> {
-        match b {
-            "none" => Some(MethodSet::NONE),
-            "password" => Some(MethodSet::PASSWORD),
-            "publickey" => Some(MethodSet::PUBLICKEY),
-            "hostbased" => Some(MethodSet::HOSTBASED),
-            "keyboard-interactive" => Some(MethodSet::KEYBOARD_INTERACTIVE),
-            _ => None,
-        }
-    }
 }
 
 #[doc(hidden)]

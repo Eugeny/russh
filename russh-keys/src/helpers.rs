@@ -1,4 +1,6 @@
-use ssh_encoding::Encode;
+use std::fmt::Debug;
+
+use ssh_encoding::{Decode, Encode};
 use ssh_key::private::KeypairData;
 use ssh_key::Algorithm;
 
@@ -17,9 +19,19 @@ impl<E: Encode> EncodedExt for E {
 
 pub struct NameList(pub Vec<String>);
 
+impl Debug for NameList {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
 impl NameList {
     pub fn as_encoded_string(&self) -> String {
         self.0.join(",")
+    }
+
+    pub fn from_encoded_string(value: &str) -> Self {
+        Self(value.split(',').map(|x| x.to_string()).collect())
     }
 }
 
@@ -31,6 +43,15 @@ impl Encode for NameList {
     fn encode(&self, writer: &mut impl ssh_encoding::Writer) -> Result<(), ssh_encoding::Error> {
         self.as_encoded_string().encode(writer)
     }
+}
+
+impl Decode for NameList {
+    fn decode(reader: &mut impl ssh_encoding::Reader) -> Result<Self, ssh_encoding::Error> {
+        let s = String::decode(reader)?;
+        Ok(Self::from_encoded_string(&s))
+    }
+
+    type Error = ssh_encoding::Error;
 }
 
 #[macro_export]

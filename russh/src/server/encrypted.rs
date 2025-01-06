@@ -77,7 +77,7 @@ impl Session {
                 if request == "ssh-userauth" {
                     let auth_request = server_accept_service(
                         handler.authentication_banner().await?,
-                        self.common.config.as_ref().methods,
+                        self.common.config.as_ref().methods.clone(),
                         &mut enc.write,
                     )?;
                     *accepted = true;
@@ -204,7 +204,7 @@ impl Encrypted {
                     {
                         auth_request.methods = proceed_with_methods;
                     } else {
-                        auth_request.methods -= MethodSet::PASSWORD;
+                        auth_request.methods.remove(MethodKind::Password);
                     }
                     auth_request.partial_success = false;
                     reject_auth_request(until, &mut self.write, auth_request).await?;
@@ -242,7 +242,7 @@ impl Encrypted {
                     {
                         auth_request.methods = proceed_with_methods;
                     } else {
-                        auth_request.methods -= MethodSet::NONE;
+                        auth_request.methods.remove(MethodKind::None);
                     }
                     auth_request.partial_success = false;
                     reject_auth_request(until, &mut self.write, auth_request).await?;
@@ -481,7 +481,7 @@ async fn reject_auth_request(
     debug!("rejecting {:?}", auth_request);
     push_packet!(write, {
         write.push(msg::USERAUTH_FAILURE);
-        NameList::from(auth_request.methods).encode(write)?;
+        NameList::from(&auth_request.methods).encode(write)?;
         write.push(auth_request.partial_success as u8);
     });
     auth_request.current = None;

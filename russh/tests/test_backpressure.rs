@@ -43,6 +43,7 @@ async fn stream(addr: SocketAddr, data: &[u8], tx: watch::Sender<()>) -> Result<
     let channel = match session
         .authenticate_publickey("user", PrivateKeyWithHashAlg::new(key, None).unwrap())
         .await
+        .map(|x| x.success())
     {
         Ok(true) => session.channel_open_session().await?,
         Ok(false) => panic!("Authentication failed"),
