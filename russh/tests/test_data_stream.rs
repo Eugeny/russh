@@ -38,6 +38,7 @@ async fn stream(addr: SocketAddr, data: &[u8]) -> Result<(), anyhow::Error> {
     let mut channel = match session
         .authenticate_publickey("user", PrivateKeyWithHashAlg::new(key, None)?)
         .await
+        .map(|x| x.success())
     {
         Ok(true) => session.channel_open_session().await?,
         Ok(false) => panic!("Authentication failed"),

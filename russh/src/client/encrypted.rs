@@ -18,7 +18,7 @@ use std::ops::Deref;
 
 use bytes::Bytes;
 use log::{debug, error, info, trace, warn};
-use russh_keys::helpers::{map_err, sign_with_hash_alg, AlgorithmExt, EncodedExt};
+use russh_keys::helpers::{map_err, sign_with_hash_alg, AlgorithmExt, EncodedExt, NameList};
 use ssh_encoding::{Decode, Encode};
 
 use super::IncomingSshPacket;
@@ -28,7 +28,8 @@ use crate::keys::key::parse_public_key;
 use crate::parsing::{ChannelOpenConfirmation, ChannelType, OpenChannelMessage};
 use crate::session::{Encrypted, EncryptedState, GlobalRequestResponse};
 use crate::{
-    auth, msg, Channel, ChannelId, ChannelMsg, ChannelOpenFailure, ChannelParams, CryptoVec, Sig,
+    auth, msg, Channel, ChannelId, ChannelMsg, ChannelOpenFailure, ChannelParams, CryptoVec,
+    MethodSet, Sig,
 };
 
 thread_local! {
@@ -134,18 +135,17 @@ impl Session {
                         Some((&msg::USERAUTH_FAILURE, mut r)) => {
                             debug!("userauth_failure");
 
-                            let remaining_methods = map_err!(String::decode(&mut r))?;
+                            let remaining_methods: MethodSet =
+                                (&map_err!(NameList::decode(&mut r))?).into();
                             debug!("remaining methods {remaining_methods:?}",);
-                            auth_request.methods = auth::MethodSet::empty();
-                            for method in remaining_methods.split(',') {
-                                if let Some(m) = auth::MethodSet::from_str(method) {
-                                    auth_request.methods |= m
-                                }
-                            }
+                            auth_request.methods = remaining_methods.clone();
+
                             let no_more_methods = auth_request.methods.is_empty();
                             self.common.auth_method = None;
                             self.sender
-                                .send(Reply::AuthFailure)
+                                .send(Reply::AuthFailure {
+                                    proceed_with_methods: remaining_methods,
+                                })
                                 .map_err(|_| crate::Error::SendError)?;
 
                             // If no other authentication method is allowed by the server, give up.

@@ -116,7 +116,7 @@ impl Session {
                 .authenticate_publickey(user, PrivateKeyWithHashAlg::new(Arc::new(key_pair), None)?)
                 .await?;
 
-            if !auth_res {
+            if !auth_res.success() {
                 anyhow::bail!("Authentication (with publickey) failed");
             }
         } else {
@@ -124,7 +124,7 @@ impl Session {
                 .authenticate_openssh_cert(user, Arc::new(key_pair), openssh_cert.unwrap())
                 .await?;
 
-            if !auth_res {
+            if !auth_res.success() {
                 anyhow::bail!("Authentication (with publickey+cert) failed");
             }
         }
