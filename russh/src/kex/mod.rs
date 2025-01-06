@@ -236,9 +236,9 @@ impl TryFrom<&str> for Name {
 pub const CURVE25519: Name = Name("curve25519-sha256");
 /// `curve25519-sha256@libssh.org`
 pub const CURVE25519_PRE_RFC_8731: Name = Name("curve25519-sha256@libssh.org");
-/// `diffie-hellman-group-exchange-sha1`
+/// `diffie-hellman-group-exchange-sha1`.
 pub const DH_GEX_SHA1: Name = Name("diffie-hellman-group-exchange-sha1");
-/// `diffie-hellman-group-exchange-sha256`
+/// `diffie-hellman-group-exchange-sha256`.
 pub const DH_GEX_SHA256: Name = Name("diffie-hellman-group-exchange-sha256");
 /// `diffie-hellman-group1-sha1`
 pub const DH_G1_SHA1: Name = Name("diffie-hellman-group1-sha1");

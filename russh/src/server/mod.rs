@@ -50,7 +50,7 @@ use tokio::net::{TcpListener, ToSocketAddrs};
 use tokio::pin;
 
 use crate::cipher::{clear, OpeningKey};
-use crate::kex::dh::groups::DhGroup;
+use crate::kex::dh::groups::{DhGroup, BUILTIN_SAFE_DH_GROUPS, DH_GROUP14};
 use crate::kex::{KexProgress, SessionKexState};
 use crate::session::*;
 use crate::ssh_read::*;
@@ -730,14 +730,16 @@ pub trait Handler: Sized {
         Ok(false)
     }
 
-    /// Implement when enabling the `diffie-hellman-group-exchange-*` key exchange methods.
+    /// Override when enabling the `diffie-hellman-group-exchange-*` key exchange methods.
     /// Should return a Diffie-Hellman group with a safe prime whose length is
     /// between `gex_params.min_group_size` and `gex_params.max_group_size` and
     /// (if possible) over and as close as possible to `gex_params.preferred_group_size`.
     ///
     /// OpenSSH uses a pre-generated database of safe primes stored in `/etc/ssh/moduli`
     ///
-    /// The default implementation returns `None`, aborting the key exchange
+    /// The default implementation picks a group from a very short static list
+    /// of built-in standard groups and is not really taking advantage of the security
+    /// offered by these kex methods.
     ///
     /// See https://datatracker.ietf.org/doc/html/rfc4419#section-3
     #[allow(unused_variables)]
@@ -745,7 +747,27 @@ pub trait Handler: Sized {
         &mut self,
         gex_params: &GexParams,
     ) -> Result<Option<DhGroup>, Self::Error> {
-        Ok(None)
+        let mut best_group = &DH_GROUP14;
+
+        // Find _some_ matching group
+        for group in BUILTIN_SAFE_DH_GROUPS.iter() {
+            if group.bit_size() >= gex_params.min_group_size()
+                && group.bit_size() <= gex_params.max_group_size()
+            {
+                best_group = *group;
+                break;
+            }
+        }
+
+        // Find _closest_ matching group
+        for group in BUILTIN_SAFE_DH_GROUPS.iter() {
+            if group.bit_size() > gex_params.preferred_group_size() {
+                best_group = *group;
+                break;
+            }
+        }
+
+        Ok(Some(best_group.clone()))
     }
 }
 

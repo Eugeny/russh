@@ -1,11 +1,8 @@
-use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use kex::dh::groups::DhGroup;
 use rand_core::OsRng;
-use russh::client::GexParams;
 use russh::keys::*;
 use russh::server::{Msg, Server as _, Session};
 use russh::*;
@@ -26,7 +23,7 @@ async fn main() {
             russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519).unwrap(),
         ],
         preferred: Preferred {
-            kex: Cow::Owned(vec![russh::kex::DH_GEX_SHA256]),
+            // kex: std::borrow::Cow::Owned(vec![russh::kex::DH_GEX_SHA256]),
             ..Preferred::default()
         },
         ..Default::default()
@@ -135,13 +132,6 @@ impl server::Handler for Server {
             let _ = channel.eof().await;
         });
         Ok(true)
-    }
-
-    async fn lookup_dh_gex_group(
-        &mut self,
-        gex_params: &GexParams,
-    ) -> Result<Option<DhGroup>, Self::Error> {
-        Ok(Some(russh::kex::dh::groups::DH_GROUP16))
     }
 }
 

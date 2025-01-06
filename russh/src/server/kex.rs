@@ -183,9 +183,6 @@ impl ServerKex {
                 let prime = biguint_to_mpint(&BigUint::from_bytes_be(&dh_group.prime));
                 let generator = biguint_to_mpint(&BigUint::from_bytes_be(&dh_group.generator));
 
-                dbg!(&prime);
-                dbg!(&generator);
-
                 self.exchange.gex = Some((gex_params, dh_group.clone()));
                 kex.dh_gex_set_group(dh_group)?;
 

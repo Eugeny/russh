@@ -156,7 +156,6 @@ impl Kex for ClientKex {
                 }
 
                 if kex.is_dh_gex() {
-                    // TODO values
                     output.packet(|w| {
                         kex.client_dh_gex_init(&self.config.gex, w)?;
                         Ok(())
@@ -196,24 +195,21 @@ impl Kex for ClientKex {
                 let prime = Mpint::decode(&mut r)?;
                 let gen = Mpint::decode(&mut r)?;
                 debug!("received gex group: prime={}, gen={}", prime, gen);
-                //todo validate group
-
-                let Some(prime_bit_length) = prime.as_positive_bytes().map(|x| x.len() * 8) else {
-                    warn!("negative DH prime received");
-                    return Err(Error::KexInit);
-                };
-
-                if prime_bit_length < self.config.gex.min_group_size
-                    || prime_bit_length > self.config.gex.max_group_size
-                {
-                    warn!("DH prime size ({prime_bit_length} bits) not within acceptable range");
-                    return Err(Error::KexInit);
-                }
 
                 let group = DhGroup {
                     prime: prime.as_bytes().to_vec().into(),
                     generator: gen.as_bytes().to_vec().into(),
                 };
+
+                if group.bit_size() < self.config.gex.min_group_size
+                    || group.bit_size() > self.config.gex.max_group_size
+                {
+                    warn!(
+                        "DH prime size ({} bits) not within requested range",
+                        group.bit_size()
+                    );
+                    return Err(Error::KexInit);
+                }
 
                 let exchange = &mut self.exchange;
                 exchange.gex = Some((self.config.gex.clone(), group.clone()));

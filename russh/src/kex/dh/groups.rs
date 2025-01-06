@@ -41,6 +41,15 @@ pub struct DhGroup {
     // pub(crate) exp_size: u64,
 }
 
+impl DhGroup {
+    pub fn bit_size(&self) -> usize {
+        let Some(fsb_idx) = self.prime.deref().iter().position(|&x| x != 0) else {
+            return 0;
+        };
+        (self.prime.deref().len() - fsb_idx) * 8
+    }
+}
+
 impl Debug for DhGroup {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DhGroup")
@@ -184,3 +193,5 @@ impl DH {
         public_key > &one && public_key < &prime_minus_one
     }
 }
+
+pub(crate) const BUILTIN_SAFE_DH_GROUPS: &[&DhGroup] = &[&DH_GROUP14, &DH_GROUP16];
