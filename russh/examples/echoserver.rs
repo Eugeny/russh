@@ -23,7 +23,7 @@ async fn main() {
             russh_keys::PrivateKey::random(&mut OsRng, russh_keys::Algorithm::Ed25519).unwrap(),
         ],
         preferred: Preferred {
-            // key: Cow::Borrowed(&[CERT_ECDSA_SHA2_P256]),
+            // kex: std::borrow::Cow::Owned(vec![russh::kex::DH_GEX_SHA256]),
             ..Preferred::default()
         },
         ..Default::default()

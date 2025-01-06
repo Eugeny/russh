@@ -92,7 +92,7 @@
 use std::convert::TryFrom;
 use std::fmt::{Debug, Display, Formatter};
 
-use log::debug;
+use log::{debug, warn};
 use parsing::ChannelOpenConfirmation;
 pub use russh_cryptovec::CryptoVec;
 use ssh_encoding::{Decode, Encode};
@@ -313,10 +313,13 @@ pub enum Error {
 
     #[error("SshEncoding: {0}")]
     SshEncoding(#[from] ssh_encoding::Error),
+
+    #[error("Invalid config: {0}")]
+    InvalidConfig(String),
 }
 
 pub(crate) fn strict_kex_violation(message_type: u8, sequence_number: usize) -> crate::Error {
-    debug!(
+    warn!(
         "strict kex violated at sequence no. {:?}, message type: {:?}",
         sequence_number, message_type
     );

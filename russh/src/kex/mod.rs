@@ -16,7 +16,7 @@
 //!
 //! This module exports kex algorithm names for use with [Preferred].
 mod curve25519;
-mod dh;
+pub mod dh;
 mod ecdh_nistp;
 mod none;
 use std::cell::RefCell;
@@ -27,8 +27,10 @@ use std::ops::DerefMut;
 
 use curve25519::Curve25519KexType;
 use delegate::delegate;
+use dh::groups::DhGroup;
 use dh::{
-    DhGroup14Sha1KexType, DhGroup14Sha256KexType, DhGroup16Sha512KexType, DhGroup1Sha1KexType,
+    DhGexSha1KexType, DhGexSha256KexType, DhGroup14Sha1KexType, DhGroup14Sha256KexType,
+    DhGroup16Sha512KexType, DhGroup1Sha1KexType,
 };
 use digest::Digest;
 use ecdh_nistp::{EcdhNistP256KexType, EcdhNistP384KexType, EcdhNistP521KexType};
@@ -43,26 +45,26 @@ use ssh_encoding::{Encode, Writer};
 use ssh_key::PublicKey;
 
 use crate::cipher::CIPHERS;
+use crate::client::GexParams;
 use crate::mac::{self, MACS};
 use crate::negotiation::Names;
 use crate::session::{Exchange, NewKeys};
-use crate::sshbuffer::{IncomingSshPacket, PacketWriter};
 use crate::{cipher, CryptoVec, Error};
 
 #[derive(Debug)]
-pub(crate) enum SessionKexState<K: Kex> {
+pub(crate) enum SessionKexState<K> {
     Idle,
     InProgress(K),
     Taken, // some async activity still going on such as host key checks
 }
 
-impl<K: Kex> PartialEq for SessionKexState<K> {
+impl<K> PartialEq for SessionKexState<K> {
     fn eq(&self, other: &Self) -> bool {
         core::mem::discriminant(self) == core::mem::discriminant(other)
     }
 }
 
-impl<K: Kex> SessionKexState<K> {
+impl<K> SessionKexState<K> {
     pub fn active(&self) -> bool {
         match self {
             SessionKexState::Idle => false,
@@ -122,19 +124,6 @@ pub(crate) enum KexProgress<T> {
     },
 }
 
-pub(crate) trait Kex
-where
-    Self: Sized,
-{
-    fn kexinit(&mut self, output: &mut PacketWriter) -> Result<(), Error>;
-
-    fn step(
-        self,
-        input: Option<&mut IncomingSshPacket>,
-        output: &mut PacketWriter,
-    ) -> Result<KexProgress<Self>, Error>;
-}
-
 #[enum_dispatch(KexAlgorithmImplementor)]
 pub(crate) enum KexAlgorithm {
     DhGroupKexSha1(dh::DhGroupKex<Sha1>),
@@ -160,43 +149,41 @@ impl Debug for KexAlgorithm {
 #[enum_dispatch]
 pub(crate) trait KexAlgorithmImplementor {
     fn skip_exchange(&self) -> bool;
+    fn is_dh_gex(&self) -> bool {
+        false
+    }
 
-    // fn server_dh_gex_init(
-    //     &mut self,
-    //     _exchange: &mut Exchange,
-    //     _payload: &[u8],
-    // ) -> Result<(), crate::Error> {
-    //     Err(crate::Error::KexInit)
-    // }
+    #[allow(unused_variables)]
+    fn client_dh_gex_init(
+        &mut self,
+        gex: &GexParams,
+        writer: &mut impl Writer,
+    ) -> Result<(), Error> {
+        Err(Error::KexInit)
+    }
 
-    // #[allow(dead_code)]
-    // fn client_dh_gex_init(
-    //     &mut self,
-    //     _gex_min: u32,
-    //     _gex_n: u32,
-    //     _gex_max: u32,
-    //     _buf: &mut CryptoVec,
-    // ) -> Result<(), crate::Error> {
-    //     Err(crate::Error::KexInit)
-    // }
+    #[allow(unused_variables)]
+    fn dh_gex_set_group(&mut self, group: DhGroup) -> Result<(), Error> {
+        Err(Error::KexInit)
+    }
 
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
-    fn server_dh(&mut self, exchange: &mut Exchange, payload: &[u8]) -> Result<(), crate::Error>;
+    fn server_dh(&mut self, exchange: &mut Exchange, payload: &[u8]) -> Result<(), Error>;
 
     fn client_dh(
         &mut self,
         client_ephemeral: &mut CryptoVec,
         writer: &mut impl Writer,
-    ) -> Result<(), crate::Error>;
+    ) -> Result<(), Error>;
 
-    fn compute_shared_secret(&mut self, remote_pubkey_: &[u8]) -> Result<(), crate::Error>;
+    fn compute_shared_secret(&mut self, remote_pubkey_: &[u8]) -> Result<(), Error>;
 
     fn compute_exchange_hash(
         &self,
         key: &CryptoVec,
         exchange: &Exchange,
         buffer: &mut CryptoVec,
-    ) -> Result<CryptoVec, crate::Error>;
+    ) -> Result<CryptoVec, Error>;
 
     fn compute_keys(
         &self,
@@ -206,7 +193,7 @@ pub(crate) trait KexAlgorithmImplementor {
         remote_to_local_mac: mac::Name,
         local_to_remote_mac: mac::Name,
         is_server: bool,
-    ) -> Result<super::cipher::CipherPair, crate::Error>;
+    ) -> Result<super::cipher::CipherPair, Error>;
 }
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone, Hash)]
@@ -235,6 +222,10 @@ impl TryFrom<&str> for Name {
 pub const CURVE25519: Name = Name("curve25519-sha256");
 /// `curve25519-sha256@libssh.org`
 pub const CURVE25519_PRE_RFC_8731: Name = Name("curve25519-sha256@libssh.org");
+/// `diffie-hellman-group-exchange-sha1`.
+pub const DH_GEX_SHA1: Name = Name("diffie-hellman-group-exchange-sha1");
+/// `diffie-hellman-group-exchange-sha256`.
+pub const DH_GEX_SHA256: Name = Name("diffie-hellman-group-exchange-sha256");
 /// `diffie-hellman-group1-sha1`
 pub const DH_G1_SHA1: Name = Name("diffie-hellman-group1-sha1");
 /// `diffie-hellman-group14-sha1`
@@ -261,6 +252,8 @@ pub const EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT: Name = Name("kex-strict-c-v00@
 pub const EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER: Name = Name("kex-strict-s-v00@openssh.com");
 
 const _CURVE25519: Curve25519KexType = Curve25519KexType {};
+const _DH_GEX_SHA1: DhGexSha1KexType = DhGexSha1KexType {};
+const _DH_GEX_SHA256: DhGexSha256KexType = DhGexSha256KexType {};
 const _DH_G1_SHA1: DhGroup1Sha1KexType = DhGroup1Sha1KexType {};
 const _DH_G14_SHA1: DhGroup14Sha1KexType = DhGroup14Sha1KexType {};
 const _DH_G14_SHA256: DhGroup14Sha256KexType = DhGroup14Sha256KexType {};
@@ -273,6 +266,8 @@ const _NONE: none::NoneKexType = none::NoneKexType {};
 pub const ALL_KEX_ALGORITHMS: &[&Name] = &[
     &CURVE25519,
     &CURVE25519_PRE_RFC_8731,
+    &DH_GEX_SHA1,
+    &DH_GEX_SHA256,
     &DH_G1_SHA1,
     &DH_G14_SHA1,
     &DH_G14_SHA256,
@@ -288,6 +283,8 @@ pub(crate) static KEXES: Lazy<HashMap<&'static Name, &(dyn KexType + Send + Sync
         let mut h: HashMap<&'static Name, &(dyn KexType + Send + Sync)> = HashMap::new();
         h.insert(&CURVE25519, &_CURVE25519);
         h.insert(&CURVE25519_PRE_RFC_8731, &_CURVE25519);
+        h.insert(&DH_GEX_SHA1, &_DH_GEX_SHA1);
+        h.insert(&DH_GEX_SHA256, &_DH_GEX_SHA256);
         h.insert(&DH_G16_SHA512, &_DH_G16_SHA512);
         h.insert(&DH_G14_SHA256, &_DH_G14_SHA256);
         h.insert(&DH_G14_SHA1, &_DH_G14_SHA1);
@@ -315,21 +312,17 @@ pub(crate) fn compute_keys<D: Digest>(
     remote_to_local_mac: mac::Name,
     local_to_remote_mac: mac::Name,
     is_server: bool,
-) -> Result<super::cipher::CipherPair, crate::Error> {
-    let cipher = CIPHERS.get(&cipher).ok_or(crate::Error::UnknownAlgo)?;
-    let remote_to_local_mac = MACS
-        .get(&remote_to_local_mac)
-        .ok_or(crate::Error::UnknownAlgo)?;
-    let local_to_remote_mac = MACS
-        .get(&local_to_remote_mac)
-        .ok_or(crate::Error::UnknownAlgo)?;
+) -> Result<super::cipher::CipherPair, Error> {
+    let cipher = CIPHERS.get(&cipher).ok_or(Error::UnknownAlgo)?;
+    let remote_to_local_mac = MACS.get(&remote_to_local_mac).ok_or(Error::UnknownAlgo)?;
+    let local_to_remote_mac = MACS.get(&local_to_remote_mac).ok_or(Error::UnknownAlgo)?;
 
     // https://tools.ietf.org/html/rfc4253#section-7.2
     BUFFER.with(|buffer| {
         KEY_BUF.with(|key| {
             NONCE_BUF.with(|nonce| {
                 MAC_BUF.with(|mac| {
-                    let compute_key = |c, key: &mut CryptoVec, len| -> Result<(), crate::Error> {
+                    let compute_key = |c, key: &mut CryptoVec, len| -> Result<(), Error> {
                         let mut buffer = buffer.borrow_mut();
                         buffer.clear();
                         key.clear();
@@ -424,7 +417,7 @@ pub(crate) fn compute_keys<D: Digest>(
 // NOTE: using MpInt::from_bytes().encode() will randomly fail,
 // I'm assuming it's due to specific byte values / padding but no time to investigate
 #[allow(clippy::indexing_slicing)] // length is known
-pub(crate) fn encode_mpint<W: Writer>(s: &[u8], w: &mut W) -> Result<(), crate::Error> {
+pub(crate) fn encode_mpint<W: Writer>(s: &[u8], w: &mut W) -> Result<(), Error> {
     // Skip initial 0s.
     let mut i = 0;
     while i < s.len() && s[i] == 0 {

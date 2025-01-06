@@ -59,14 +59,14 @@ use tokio::sync::oneshot;
 
 use crate::channels::{Channel, ChannelMsg, ChannelRef, WindowSizeRef};
 use crate::cipher::{self, clear, OpeningKey};
-use crate::kex::{Kex, KexCause, KexProgress, SessionKexState};
-use crate::msg::{is_kex_msg, STRICT_KEX_MSG_ORDER};
+use crate::kex::{KexCause, KexProgress, SessionKexState};
+use crate::msg::{is_kex_msg, validate_server_msg_strict_kex};
 use crate::session::{CommonSession, EncryptedState, GlobalRequestResponse, NewKeys};
 use crate::ssh_read::SshRead;
 use crate::sshbuffer::{IncomingSshPacket, PacketWriter, SSHBuffer, SshId};
 use crate::{
-    auth, msg, negotiation, strict_kex_violation, ChannelId, ChannelOpenFailure, CryptoVec,
-    Disconnect, Error, Limits, Sig,
+    auth, msg, negotiation, ChannelId, ChannelOpenFailure, CryptoVec, Disconnect, Error, Limits,
+    Sig,
 };
 
 mod encrypted;
@@ -1273,11 +1273,7 @@ async fn reply<H: Handler>(
         );
         if session.common.strict_kex && session.common.encrypted.is_none() {
             let seqno = pkt.seqn.0 - 1; // was incremented after read()
-            if let Some(expected) = STRICT_KEX_MSG_ORDER.get(seqno as usize) {
-                if message_type != expected {
-                    return Err(strict_kex_violation(*message_type, seqno as usize).into());
-                }
-            }
+            validate_server_msg_strict_kex(*message_type, seqno as usize)?;
         }
 
         if [msg::IGNORE, msg::UNIMPLEMENTED, msg::DEBUG].contains(message_type) {
@@ -1375,6 +1371,74 @@ fn initial_encrypted_state(session: &Session) -> EncryptedState {
     }
 }
 
+/// Parameters for dynamic group Diffie-Hellman key exchanges.
+#[derive(Debug, Clone)]
+pub struct GexParams {
+    /// Minimum DH group size (in bits)
+    min_group_size: usize,
+    /// Preferred DH group size (in bits)
+    preferred_group_size: usize,
+    /// Maximum DH group size (in bits)
+    max_group_size: usize,
+}
+
+impl GexParams {
+    pub fn new(
+        min_group_size: usize,
+        preferred_group_size: usize,
+        max_group_size: usize,
+    ) -> Result<Self, Error> {
+        let this = Self {
+            min_group_size,
+            preferred_group_size,
+            max_group_size,
+        };
+        this.validate()?;
+        Ok(this)
+    }
+
+    pub(crate) fn validate(&self) -> Result<(), Error> {
+        if self.min_group_size < 2048 {
+            return Err(Error::InvalidConfig(
+                "min_group_size must be at least 2048 bits".into(),
+            ));
+        }
+        if self.preferred_group_size < self.min_group_size {
+            return Err(Error::InvalidConfig(
+                "preferred_group_size must be at least as large as min_group_size".into(),
+            ));
+        }
+        if self.max_group_size < self.preferred_group_size {
+            return Err(Error::InvalidConfig(
+                "max_group_size must be at least as large as preferred_group_size".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn min_group_size(&self) -> usize {
+        self.min_group_size
+    }
+
+    pub fn preferred_group_size(&self) -> usize {
+        self.preferred_group_size
+    }
+
+    pub fn max_group_size(&self) -> usize {
+        self.max_group_size
+    }
+}
+
+impl Default for GexParams {
+    fn default() -> GexParams {
+        GexParams {
+            min_group_size: 3072,
+            preferred_group_size: 8192,
+            max_group_size: 8192,
+        }
+    }
+}
+
 /// The configuration of clients.
 #[derive(Debug)]
 pub struct Config {
@@ -1398,6 +1462,8 @@ pub struct Config {
     pub keepalive_max: usize,
     /// Whether to expect and wait for an authentication call.
     pub anonymous: bool,
+    /// DH dynamic group exchange parameters.
+    pub gex: GexParams,
 }
 
 impl Default for Config {
@@ -1417,6 +1483,7 @@ impl Default for Config {
             keepalive_interval: None,
             keepalive_max: 3,
             anonymous: false,
+            gex: Default::default(),
         }
     }
 }

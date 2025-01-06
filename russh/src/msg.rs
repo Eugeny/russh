@@ -17,6 +17,8 @@
 #[cfg(not(target_arch = "wasm32"))]
 pub use server::*;
 
+use crate::{strict_kex_violation, Error};
+
 pub const DISCONNECT: u8 = 1;
 #[allow(dead_code)]
 pub const IGNORE: u8 = 2;
@@ -34,6 +36,10 @@ pub const NEWKEYS: u8 = 21;
 // http://tools.ietf.org/html/rfc5656#section-7.1
 pub const KEX_ECDH_INIT: u8 = 30;
 pub const KEX_ECDH_REPLY: u8 = 31;
+pub const KEX_DH_GEX_REQUEST: u8 = 34;
+pub const KEX_DH_GEX_GROUP: u8 = 31;
+pub const KEX_DH_GEX_INIT: u8 = 32;
+pub const KEX_DH_GEX_REPLY: u8 = 33;
 
 // https://tools.ietf.org/html/rfc4250#section-4.1.2
 pub const USERAUTH_REQUEST: u8 = 50;
@@ -77,8 +83,74 @@ mod server {
     pub const SSH_OPEN_ADMINISTRATIVELY_PROHIBITED: u8 = 1;
 }
 
-pub(crate) const STRICT_KEX_MSG_ORDER: &[u8] = &[KEXINIT, KEX_ECDH_REPLY, NEWKEYS];
-const ALL_KEX_MESSAGES: &[u8] = &[KEXINIT, KEX_ECDH_INIT, KEX_ECDH_REPLY, NEWKEYS];
+/// Validate a message+seqno against a strict kex order pattern
+/// Returns:
+/// - `Some(true)` if the message is valid at this position
+/// - `Some(false)` if the message is invalid at this position
+/// - `None` if the `seqno` is not covered by strict kex
+fn validate_msg_strict_kex(msg_type: u8, seqno: usize, order: &[u8]) -> Option<bool> {
+    order.get(seqno).map(|expected| expected == &msg_type)
+}
+
+/// Validate a message+seqno against multiple strict kex order patterns
+fn validate_msg_strict_kex_alt_order(msg_type: u8, seqno: usize, orders: &[&[u8]]) -> Option<bool> {
+    let mut valid = None; // did not match yet
+    for order in orders {
+        let result = validate_msg_strict_kex(msg_type, seqno, order);
+        valid = match (valid, result) {
+            // If we matched a valid msg, it's now valid forever
+            (Some(true), _) | (_, Some(true)) => Some(true),
+            // If we matched an invalid msg and we didn't find a valid one yet, it's now invalid
+            (None | Some(false), Some(false)) => Some(false),
+            // If the message was beyond the current pattern, no change
+            (x, None) => x,
+        };
+    }
+    valid
+}
+
+pub(crate) fn validate_client_msg_strict_kex(msg_type: u8, seqno: usize) -> Result<(), Error> {
+    if Some(false)
+        == validate_msg_strict_kex_alt_order(
+            msg_type,
+            seqno,
+            &[
+                &[KEXINIT, KEX_ECDH_INIT, NEWKEYS],
+                &[KEXINIT, KEX_DH_GEX_REQUEST, KEX_DH_GEX_INIT, NEWKEYS],
+            ],
+        )
+    {
+        return Err(strict_kex_violation(msg_type, seqno));
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_server_msg_strict_kex(msg_type: u8, seqno: usize) -> Result<(), Error> {
+    if Some(false)
+        == validate_msg_strict_kex_alt_order(
+            msg_type,
+            seqno,
+            &[
+                &[KEXINIT, KEX_ECDH_REPLY, NEWKEYS],
+                &[KEXINIT, KEX_DH_GEX_GROUP, KEX_DH_GEX_REPLY, NEWKEYS],
+            ],
+        )
+    {
+        return Err(strict_kex_violation(msg_type, seqno));
+    }
+    Ok(())
+}
+
+const ALL_KEX_MESSAGES: &[u8] = &[
+    KEXINIT,
+    KEX_ECDH_INIT,
+    KEX_ECDH_REPLY,
+    KEX_DH_GEX_GROUP,
+    KEX_DH_GEX_INIT,
+    KEX_DH_GEX_REPLY,
+    KEX_DH_GEX_REQUEST,
+    NEWKEYS,
+];
 
 pub(crate) fn is_kex_msg(msg: u8) -> bool {
     ALL_KEX_MESSAGES.contains(&msg)

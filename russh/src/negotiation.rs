@@ -91,6 +91,7 @@ impl Preferred {
 const SAFE_KEX_ORDER: &[kex::Name] = &[
     kex::CURVE25519,
     kex::CURVE25519_PRE_RFC_8731,
+    kex::DH_GEX_SHA256,
     kex::DH_G16_SHA512,
     kex::DH_G14_SHA256,
     kex::EXTENSION_SUPPORT_AS_CLIENT,
