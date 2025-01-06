@@ -59,7 +59,7 @@ use tokio::sync::oneshot;
 
 use crate::channels::{Channel, ChannelMsg, ChannelRef, WindowSizeRef};
 use crate::cipher::{self, clear, OpeningKey};
-use crate::kex::{Kex, KexCause, KexProgress, SessionKexState};
+use crate::kex::{KexCause, KexProgress, SessionKexState};
 use crate::msg::{is_kex_msg, validate_server_msg_strict_kex};
 use crate::session::{CommonSession, EncryptedState, GlobalRequestResponse, NewKeys};
 use crate::ssh_read::SshRead;

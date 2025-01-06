@@ -49,7 +49,6 @@ use crate::client::GexParams;
 use crate::mac::{self, MACS};
 use crate::negotiation::Names;
 use crate::session::{Exchange, NewKeys};
-use crate::sshbuffer::{IncomingSshPacket, PacketWriter};
 use crate::{cipher, CryptoVec, Error};
 
 #[derive(Debug)]
@@ -123,19 +122,6 @@ pub(crate) enum KexProgress<T> {
         server_host_key: Option<PublicKey>,
         newkeys: NewKeys,
     },
-}
-
-pub(crate) trait Kex
-where
-    Self: Sized,
-{
-    fn kexinit(&mut self, output: &mut PacketWriter) -> Result<(), Error>;
-
-    fn step(
-        self,
-        input: Option<&mut IncomingSshPacket>,
-        output: &mut PacketWriter,
-    ) -> Result<KexProgress<Self>, Error>;
 }
 
 #[enum_dispatch(KexAlgorithmImplementor)]

@@ -14,7 +14,7 @@ use ssh_key::{Mpint, PublicKey, Signature};
 use super::IncomingSshPacket;
 use crate::client::{Config, NewKeys};
 use crate::kex::dh::groups::DhGroup;
-use crate::kex::{Kex, KexAlgorithm, KexAlgorithmImplementor, KexCause, KexProgress, KEXES};
+use crate::kex::{KexAlgorithm, KexAlgorithmImplementor, KexCause, KexProgress, KEXES};
 use crate::negotiation::{Names, Select};
 use crate::session::Exchange;
 use crate::sshbuffer::PacketWriter;
@@ -87,17 +87,15 @@ impl ClientKex {
             state: ClientKexState::Created,
         }
     }
-}
 
-impl Kex for ClientKex {
-    fn kexinit(&mut self, output: &mut PacketWriter) -> Result<(), Error> {
+    pub fn kexinit(&mut self, output: &mut PacketWriter) -> Result<(), Error> {
         self.exchange.client_kex_init =
             negotiation::write_kex(&self.config.preferred, output, None)?;
 
         Ok(())
     }
 
-    fn step(
+    pub fn step(
         mut self,
         input: Option<&mut IncomingSshPacket>,
         output: &mut PacketWriter,
