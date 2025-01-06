@@ -1388,26 +1388,32 @@ impl GexParams {
         preferred_group_size: usize,
         max_group_size: usize,
     ) -> Result<Self, Error> {
-        if min_group_size < 2048 {
+        let this = Self {
+            min_group_size,
+            preferred_group_size,
+            max_group_size,
+        };
+        this.validate()?;
+        Ok(this)
+    }
+
+    pub(crate) fn validate(&self) -> Result<(), Error> {
+        if self.min_group_size < 2048 {
             return Err(Error::InvalidConfig(
                 "min_group_size must be at least 2048 bits".into(),
             ));
         }
-        if preferred_group_size < min_group_size {
+        if self.preferred_group_size < self.min_group_size {
             return Err(Error::InvalidConfig(
                 "preferred_group_size must be at least as large as min_group_size".into(),
             ));
         }
-        if max_group_size < preferred_group_size {
+        if self.max_group_size < self.preferred_group_size {
             return Err(Error::InvalidConfig(
                 "max_group_size must be at least as large as preferred_group_size".into(),
             ));
         }
-        Ok(GexParams {
-            min_group_size,
-            preferred_group_size,
-            max_group_size,
-        })
+        Ok(())
     }
 
     pub fn min_group_size(&self) -> usize {
@@ -1427,7 +1433,7 @@ impl Default for GexParams {
     fn default() -> GexParams {
         GexParams {
             min_group_size: 3072,
-            preferred_group_size: 3072,
+            preferred_group_size: 8192,
             max_group_size: 8192,
         }
     }

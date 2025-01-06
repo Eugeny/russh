@@ -37,6 +37,7 @@ use std::task::{Context, Poll};
 
 use async_trait::async_trait;
 use bytes::Bytes;
+use client::GexParams;
 use futures::future::Future;
 use log::{debug, error, info, warn};
 use msg::{is_kex_msg, validate_client_msg_strict_kex};
@@ -49,7 +50,8 @@ use tokio::net::{TcpListener, ToSocketAddrs};
 use tokio::pin;
 
 use crate::cipher::{clear, OpeningKey};
-use crate::kex::{Kex, KexProgress, SessionKexState};
+use crate::kex::dh::groups::DhGroup;
+use crate::kex::{KexProgress, SessionKexState};
 use crate::session::*;
 use crate::ssh_read::*;
 use crate::sshbuffer::*;
@@ -727,6 +729,24 @@ pub trait Handler: Sized {
     ) -> Result<bool, Self::Error> {
         Ok(false)
     }
+
+    /// Implement when enabling the `diffie-hellman-group-exchange-*` key exchange methods.
+    /// Should return a Diffie-Hellman group with a safe prime whose length is
+    /// between `gex_params.min_group_size` and `gex_params.max_group_size` and
+    /// (if possible) over and as close as possible to `gex_params.preferred_group_size`.
+    ///
+    /// OpenSSH uses a pre-generated database of safe primes stored in `/etc/ssh/moduli`
+    ///
+    /// The default implementation returns `None`, aborting the key exchange
+    ///
+    /// See https://datatracker.ietf.org/doc/html/rfc4419#section-3
+    #[allow(unused_variables)]
+    async fn lookup_dh_gex_group(
+        &mut self,
+        gex_params: &GexParams,
+    ) -> Result<Option<DhGroup>, Self::Error> {
+        Ok(None)
+    }
 }
 
 #[async_trait]
@@ -966,7 +986,9 @@ async fn reply<H: Handler + Send>(
 
     if is_kex_msg {
         if let SessionKexState::InProgress(kex) = session.kex.take() {
-            let progress = kex.step(Some(pkt), &mut session.common.packet_writer)?;
+            let progress = kex
+                .step(Some(pkt), &mut session.common.packet_writer, handler)
+                .await?;
 
             match progress {
                 KexProgress::NeedsReply { kex, reset_seqn } => {

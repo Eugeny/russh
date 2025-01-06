@@ -28,11 +28,11 @@ thread_local! {
 #[allow(clippy::large_enum_variant)]
 enum ClientKexState {
     Created,
-    WaitingForGexResponse {
+    WaitingForGexReply {
         names: Names,
         kex: KexAlgorithm,
     },
-    WaitingForServerDh {
+    WaitingForDhReply {
         // both KexInit and DH init sent
         names: Names,
         kex: KexAlgorithm,
@@ -58,10 +58,10 @@ impl Debug for ClientKex {
             ClientKexState::Created => {
                 s.field("state", &"created");
             }
-            ClientKexState::WaitingForGexResponse { .. } => {
+            ClientKexState::WaitingForGexReply { .. } => {
                 s.field("state", &"waiting for GEX response");
             }
-            ClientKexState::WaitingForServerDh { .. } => {
+            ClientKexState::WaitingForDhReply { .. } => {
                 s.field("state", &"waiting for DH response");
             }
             ClientKexState::WaitingForNewKeys { .. } => {
@@ -162,14 +162,14 @@ impl Kex for ClientKex {
                         Ok(())
                     })?;
 
-                    self.state = ClientKexState::WaitingForGexResponse { names, kex };
+                    self.state = ClientKexState::WaitingForGexReply { names, kex };
                 } else {
                     output.packet(|w| {
                         kex.client_dh(&mut self.exchange.client_ephemeral, w)?;
                         Ok(())
                     })?;
 
-                    self.state = ClientKexState::WaitingForServerDh { names, kex };
+                    self.state = ClientKexState::WaitingForDhReply { names, kex };
                 }
 
                 Ok(KexProgress::NeedsReply {
@@ -177,7 +177,7 @@ impl Kex for ClientKex {
                     reset_seqn: false,
                 })
             }
-            ClientKexState::WaitingForGexResponse { names, mut kex } => {
+            ClientKexState::WaitingForGexReply { names, mut kex } => {
                 let Some(input) = input else {
                     return Err(Error::KexInit);
                 };
@@ -217,19 +217,19 @@ impl Kex for ClientKex {
 
                 let exchange = &mut self.exchange;
                 exchange.gex = Some((self.config.gex.clone(), group.clone()));
-                kex.client_dh_gex_group(group)?;
+                kex.dh_gex_set_group(group)?;
                 output.packet(|w| {
                     kex.client_dh(&mut exchange.client_ephemeral, w)?;
                     Ok(())
                 })?;
-                self.state = ClientKexState::WaitingForServerDh { names, kex };
+                self.state = ClientKexState::WaitingForDhReply { names, kex };
 
                 Ok(KexProgress::NeedsReply {
                     kex: self,
                     reset_seqn: false,
                 })
             }
-            ClientKexState::WaitingForServerDh { mut names, mut kex } => {
+            ClientKexState::WaitingForDhReply { mut names, mut kex } => {
                 // At this point, we've sent ECDH_INTI and
                 // are waiting for the ECDH_REPLY from the server.
 
@@ -241,7 +241,7 @@ impl Kex for ClientKex {
                     // Ignore the next packet if (1) it follows and (2) it's not the correct guess.
                     debug!("ignoring guessed kex");
                     names.ignore_guessed = false;
-                    self.state = ClientKexState::WaitingForServerDh { names, kex };
+                    self.state = ClientKexState::WaitingForDhReply { names, kex };
                     return Ok(KexProgress::NeedsReply {
                         kex: self,
                         reset_seqn: false,

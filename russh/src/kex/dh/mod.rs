@@ -4,11 +4,11 @@ use std::marker::PhantomData;
 use byteorder::{BigEndian, ByteOrder};
 use digest::Digest;
 use groups::DH;
-use log::{debug, error};
+use log::{error, trace};
 use num_bigint::BigUint;
 use sha1::Sha1;
 use sha2::{Sha256, Sha512};
-use ssh_encoding::{Encode, Writer};
+use ssh_encoding::{Decode, Encode, Reader, Writer};
 
 use self::groups::{DhGroup, DH_GROUP1, DH_GROUP14, DH_GROUP16};
 use super::{compute_keys, KexAlgorithm, KexAlgorithmImplementor, KexType};
@@ -16,7 +16,7 @@ use crate::client::GexParams;
 use crate::session::Exchange;
 use crate::{cipher, mac, msg, CryptoVec, Error};
 
-pub struct DhGexSha1KexType {}
+pub(crate) struct DhGexSha1KexType {}
 
 impl KexType for DhGexSha1KexType {
     fn make(&self) -> KexAlgorithm {
@@ -24,7 +24,7 @@ impl KexType for DhGexSha1KexType {
     }
 }
 
-pub struct DhGexSha256KexType {}
+pub(crate) struct DhGexSha256KexType {}
 
 impl KexType for DhGexSha256KexType {
     fn make(&self) -> KexAlgorithm {
@@ -32,7 +32,7 @@ impl KexType for DhGexSha256KexType {
     }
 }
 
-pub struct DhGroup1Sha1KexType {}
+pub(crate) struct DhGroup1Sha1KexType {}
 
 impl KexType for DhGroup1Sha1KexType {
     fn make(&self) -> KexAlgorithm {
@@ -40,7 +40,7 @@ impl KexType for DhGroup1Sha1KexType {
     }
 }
 
-pub struct DhGroup14Sha1KexType {}
+pub(crate) struct DhGroup14Sha1KexType {}
 
 impl KexType for DhGroup14Sha1KexType {
     fn make(&self) -> KexAlgorithm {
@@ -48,7 +48,7 @@ impl KexType for DhGroup14Sha1KexType {
     }
 }
 
-pub struct DhGroup14Sha256KexType {}
+pub(crate) struct DhGroup14Sha256KexType {}
 
 impl KexType for DhGroup14Sha256KexType {
     fn make(&self) -> KexAlgorithm {
@@ -56,7 +56,7 @@ impl KexType for DhGroup14Sha256KexType {
     }
 }
 
-pub struct DhGroup16Sha512KexType {}
+pub(crate) struct DhGroup16Sha512KexType {}
 
 impl KexType for DhGroup16Sha512KexType {
     fn make(&self) -> KexAlgorithm {
@@ -65,7 +65,7 @@ impl KexType for DhGroup16Sha512KexType {
 }
 
 #[doc(hidden)]
-pub struct DhGroupKex<D: Digest> {
+pub(crate) struct DhGroupKex<D: Digest> {
     dh: Option<DH>,
     shared_secret: Option<Vec<u8>>,
     is_dh_gex: bool,
@@ -73,7 +73,7 @@ pub struct DhGroupKex<D: Digest> {
 }
 
 impl<D: Digest> DhGroupKex<D> {
-    pub fn new(group: Option<&DhGroup>) -> DhGroupKex<D> {
+    pub(crate) fn new(group: Option<&DhGroup>) -> DhGroupKex<D> {
         DhGroupKex {
             dh: group.map(DH::new),
             shared_secret: None,
@@ -92,7 +92,7 @@ impl<D: Digest> std::fmt::Debug for DhGroupKex<D> {
     }
 }
 
-fn biguint_to_mpint(biguint: &BigUint) -> Vec<u8> {
+pub(crate) fn biguint_to_mpint(biguint: &BigUint) -> Vec<u8> {
     let mut mpint = Vec::new();
     let bytes = biguint.to_bytes_be();
     if let Some(b) = bytes.first() {
@@ -126,22 +126,22 @@ impl<D: Digest> KexAlgorithmImplementor for DhGroupKex<D> {
     }
 
     #[allow(dead_code)]
-    fn client_dh_gex_group(&mut self, group: DhGroup) -> Result<(), crate::Error> {
+    fn dh_gex_set_group(&mut self, group: DhGroup) -> Result<(), crate::Error> {
         self.dh = Some(DH::new(&group));
         Ok(())
     }
 
     #[doc(hidden)]
     fn server_dh(&mut self, exchange: &mut Exchange, payload: &[u8]) -> Result<(), Error> {
-        debug!("server_dh");
-
         let Some(dh) = self.dh.as_mut() else {
             error!("DH kex sequence error, dh is None in server_dh");
             return Err(Error::Inconsistent);
         };
 
         let client_pubkey = {
-            if payload.first() != Some(&msg::KEX_ECDH_INIT) {
+            if payload.first() != Some(&msg::KEX_ECDH_INIT)
+                && payload.first() != Some(&msg::KEX_DH_GEX_INIT)
+            {
                 return Err(Error::Inconsistent);
             }
 
@@ -157,7 +157,7 @@ impl<D: Digest> KexAlgorithmImplementor for DhGroupKex<D> {
                 .ok_or(Error::Inconsistent)?
         };
 
-        debug!("client_pubkey: {:?}", client_pubkey);
+        trace!("client_pubkey: {:?}", client_pubkey);
 
         dh.generate_private_key(true);
         let server_pubkey = &dh.generate_public_key();
@@ -255,8 +255,8 @@ impl<D: Digest> KexAlgorithmImplementor for DhGroupKex<D> {
 
         if let Some((gex_params, dh_group)) = &exchange.gex {
             gex_params.encode(buffer)?;
-            dh_group.prime.encode(buffer)?;
-            dh_group.generator.encode(buffer)?;
+            biguint_to_mpint(&BigUint::from_bytes_be(&*dh_group.prime)).encode(buffer)?;
+            biguint_to_mpint(&BigUint::from_bytes_be(&*dh_group.generator)).encode(buffer)?;
         }
 
         exchange.client_ephemeral.encode(buffer)?;
@@ -306,4 +306,19 @@ impl Encode for GexParams {
         (self.max_group_size() as u32).encode(writer)?;
         Ok(())
     }
+}
+
+impl Decode for GexParams {
+    fn decode(reader: &mut impl Reader) -> Result<Self, Error> {
+        let min_group_size = u32::decode(reader)? as usize;
+        let preferred_group_size = u32::decode(reader)? as usize;
+        let max_group_size = u32::decode(reader)? as usize;
+        Ok(GexParams::new(
+            min_group_size,
+            preferred_group_size,
+            max_group_size,
+        )?)
+    }
+
+    type Error = Error;
 }

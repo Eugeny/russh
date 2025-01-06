@@ -16,7 +16,7 @@
 //!
 //! This module exports kex algorithm names for use with [Preferred].
 mod curve25519;
-pub(crate) mod dh;
+pub mod dh;
 mod ecdh_nistp;
 mod none;
 use std::cell::RefCell;
@@ -29,7 +29,8 @@ use curve25519::Curve25519KexType;
 use delegate::delegate;
 use dh::groups::DhGroup;
 use dh::{
-    DhGexSha1KexType, DhGexSha256KexType, DhGroup14Sha1KexType, DhGroup14Sha256KexType, DhGroup16Sha512KexType, DhGroup1Sha1KexType
+    DhGexSha1KexType, DhGexSha256KexType, DhGroup14Sha1KexType, DhGroup14Sha256KexType,
+    DhGroup16Sha512KexType, DhGroup1Sha1KexType,
 };
 use digest::Digest;
 use ecdh_nistp::{EcdhNistP256KexType, EcdhNistP384KexType, EcdhNistP521KexType};
@@ -52,19 +53,19 @@ use crate::sshbuffer::{IncomingSshPacket, PacketWriter};
 use crate::{cipher, CryptoVec, Error};
 
 #[derive(Debug)]
-pub(crate) enum SessionKexState<K: Kex> {
+pub(crate) enum SessionKexState<K> {
     Idle,
     InProgress(K),
     Taken, // some async activity still going on such as host key checks
 }
 
-impl<K: Kex> PartialEq for SessionKexState<K> {
+impl<K> PartialEq for SessionKexState<K> {
     fn eq(&self, other: &Self) -> bool {
         core::mem::discriminant(self) == core::mem::discriminant(other)
     }
 }
 
-impl<K: Kex> SessionKexState<K> {
+impl<K> SessionKexState<K> {
     pub fn active(&self) -> bool {
         match self {
             SessionKexState::Idle => false,
@@ -166,49 +167,37 @@ pub(crate) trait KexAlgorithmImplementor {
         false
     }
 
-    // fn server_dh_gex_init(
-    //     &mut self,
-    //     _exchange: &mut Exchange,
-    //     _payload: &[u8],
-    // ) -> Result<(), crate::Error> {
-    //     Err(crate::Error::KexInit)
-    // }
-
-    #[allow(dead_code)]
     #[allow(unused_variables)]
     fn client_dh_gex_init(
         &mut self,
         gex: &GexParams,
         writer: &mut impl Writer,
-    ) -> Result<(), crate::Error> {
-        Err(crate::Error::KexInit)
+    ) -> Result<(), Error> {
+        Err(Error::KexInit)
     }
 
-    #[allow(dead_code)]
-    fn client_dh_gex_group(
-        &mut self,
-        _group: DhGroup,
-    ) -> Result<(), crate::Error> {
-        Err(crate::Error::KexInit)
+    #[allow(unused_variables)]
+    fn dh_gex_set_group(&mut self, group: DhGroup) -> Result<(), Error> {
+        Err(Error::KexInit)
     }
 
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
-    fn server_dh(&mut self, exchange: &mut Exchange, payload: &[u8]) -> Result<(), crate::Error>;
+    fn server_dh(&mut self, exchange: &mut Exchange, payload: &[u8]) -> Result<(), Error>;
 
     fn client_dh(
         &mut self,
         client_ephemeral: &mut CryptoVec,
         writer: &mut impl Writer,
-    ) -> Result<(), crate::Error>;
+    ) -> Result<(), Error>;
 
-    fn compute_shared_secret(&mut self, remote_pubkey_: &[u8]) -> Result<(), crate::Error>;
+    fn compute_shared_secret(&mut self, remote_pubkey_: &[u8]) -> Result<(), Error>;
 
     fn compute_exchange_hash(
         &self,
         key: &CryptoVec,
         exchange: &Exchange,
         buffer: &mut CryptoVec,
-    ) -> Result<CryptoVec, crate::Error>;
+    ) -> Result<CryptoVec, Error>;
 
     fn compute_keys(
         &self,
@@ -218,7 +207,7 @@ pub(crate) trait KexAlgorithmImplementor {
         remote_to_local_mac: mac::Name,
         local_to_remote_mac: mac::Name,
         is_server: bool,
-    ) -> Result<super::cipher::CipherPair, crate::Error>;
+    ) -> Result<super::cipher::CipherPair, Error>;
 }
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone, Hash)]
@@ -337,21 +326,21 @@ pub(crate) fn compute_keys<D: Digest>(
     remote_to_local_mac: mac::Name,
     local_to_remote_mac: mac::Name,
     is_server: bool,
-) -> Result<super::cipher::CipherPair, crate::Error> {
-    let cipher = CIPHERS.get(&cipher).ok_or(crate::Error::UnknownAlgo)?;
+) -> Result<super::cipher::CipherPair, Error> {
+    let cipher = CIPHERS.get(&cipher).ok_or(Error::UnknownAlgo)?;
     let remote_to_local_mac = MACS
         .get(&remote_to_local_mac)
-        .ok_or(crate::Error::UnknownAlgo)?;
+        .ok_or(Error::UnknownAlgo)?;
     let local_to_remote_mac = MACS
         .get(&local_to_remote_mac)
-        .ok_or(crate::Error::UnknownAlgo)?;
+        .ok_or(Error::UnknownAlgo)?;
 
     // https://tools.ietf.org/html/rfc4253#section-7.2
     BUFFER.with(|buffer| {
         KEY_BUF.with(|key| {
             NONCE_BUF.with(|nonce| {
                 MAC_BUF.with(|mac| {
-                    let compute_key = |c, key: &mut CryptoVec, len| -> Result<(), crate::Error> {
+                    let compute_key = |c, key: &mut CryptoVec, len| -> Result<(), Error> {
                         let mut buffer = buffer.borrow_mut();
                         buffer.clear();
                         key.clear();
@@ -446,7 +435,7 @@ pub(crate) fn compute_keys<D: Digest>(
 // NOTE: using MpInt::from_bytes().encode() will randomly fail,
 // I'm assuming it's due to specific byte values / padding but no time to investigate
 #[allow(clippy::indexing_slicing)] // length is known
-pub(crate) fn encode_mpint<W: Writer>(s: &[u8], w: &mut W) -> Result<(), crate::Error> {
+pub(crate) fn encode_mpint<W: Writer>(s: &[u8], w: &mut W) -> Result<(), Error> {
     // Skip initial 0s.
     let mut i = 0;
     while i < s.len() && s[i] == 0 {

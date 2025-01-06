@@ -1,14 +1,17 @@
 use core::fmt;
 use std::cell::RefCell;
 
+use client::GexParams;
 use log::debug;
+use num_bigint::BigUint;
 use russh_keys::helpers::sign_with_hash_alg;
 use russh_keys::key::PrivateKeyWithHashAlg;
 use ssh_encoding::Encode;
 use ssh_key::Algorithm;
 
 use super::*;
-use crate::kex::{Kex, KexAlgorithm, KexAlgorithmImplementor, KexCause, KEXES};
+use crate::kex::dh::biguint_to_mpint;
+use crate::kex::{KexAlgorithm, KexAlgorithmImplementor, KexCause, KEXES};
 use crate::negotiation::{is_key_compatible_with_algo, Names, Select};
 use crate::{msg, negotiation};
 
@@ -20,7 +23,11 @@ thread_local! {
 #[allow(clippy::large_enum_variant)]
 enum ServerKexState {
     Created,
-    WaitingForKexReply {
+    WaitingForGexRequest {
+        names: Names,
+        kex: KexAlgorithm,
+    },
+    WaitingForDhInit {
         // both KexInit and DH init sent
         names: Names,
         kex: KexAlgorithm,
@@ -45,8 +52,11 @@ impl Debug for ServerKex {
             ServerKexState::Created => {
                 s.field("state", &"created");
             }
-            ServerKexState::WaitingForKexReply { .. } => {
-                s.field("state", &"waiting for a reply");
+            ServerKexState::WaitingForGexRequest { .. } => {
+                s.field("state", &"waiting for GEX request");
+            }
+            ServerKexState::WaitingForDhInit { .. } => {
+                s.field("state", &"waiting for DH reply");
             }
             ServerKexState::WaitingForNewKeys { .. } => {
                 s.field("state", &"waiting for NEWKEYS");
@@ -71,32 +81,31 @@ impl ServerKex {
             state: ServerKexState::Created,
         }
     }
-}
 
-impl Kex for ServerKex {
-    fn kexinit(&mut self, output: &mut PacketWriter) -> Result<(), Error> {
+    pub fn kexinit(&mut self, output: &mut PacketWriter) -> Result<(), Error> {
         self.exchange.server_kex_init =
             negotiation::write_kex(&self.config.preferred, output, Some(self.config.as_ref()))?;
 
         Ok(())
     }
 
-    fn step(
+    pub async fn step<H: Handler + Send>(
         mut self,
         input: Option<&mut IncomingSshPacket>,
         output: &mut PacketWriter,
-    ) -> Result<KexProgress<Self>, Error> {
+        handler: &mut H,
+    ) -> Result<KexProgress<Self>, H::Error> {
         match self.state {
             ServerKexState::Created => {
                 let Some(input) = input else {
-                    return Err(Error::KexInit);
+                    return Err(Error::KexInit)?;
                 };
                 if input.buffer.first() != Some(&msg::KEXINIT) {
                     error!(
                         "Unexpected kex message at this stage: {:?}",
                         input.buffer.first()
                     );
-                    return Err(Error::KexInit);
+                    return Err(Error::KexInit)?;
                 }
 
                 let names = {
@@ -114,7 +123,7 @@ impl Kex for ServerKex {
                     return Err(strict_kex_violation(
                         msg::KEXINIT,
                         input.seqn.0 as usize - 1,
-                    ));
+                    ))?;
                 }
 
                 let kex = KEXES.get(&names.kex).ok_or(Error::UnknownAlgo)?.make();
@@ -139,36 +148,88 @@ impl Kex for ServerKex {
                     });
                 }
 
-                self.state = ServerKexState::WaitingForKexReply { names, kex };
+                if kex.is_dh_gex() {
+                    self.state = ServerKexState::WaitingForGexRequest { names, kex };
+                } else {
+                    self.state = ServerKexState::WaitingForDhInit { names, kex };
+                }
 
                 Ok(KexProgress::NeedsReply {
                     kex: self,
                     reset_seqn: false,
                 })
             }
-            ServerKexState::WaitingForKexReply { mut names, mut kex } => {
+            ServerKexState::WaitingForGexRequest { names, mut kex } => {
                 let Some(input) = input else {
-                    return Err(Error::KexInit);
+                    return Err(Error::KexInit)?;
+                };
+                if input.buffer.first() != Some(&msg::KEX_DH_GEX_REQUEST) {
+                    error!(
+                        "Unexpected kex message at this stage: {:?}",
+                        input.buffer.first()
+                    );
+                    return Err(Error::KexInit)?;
+                }
+
+                #[allow(clippy::indexing_slicing)] // length checked
+                let gex_params = GexParams::decode(&mut &input.buffer[1..])?;
+                debug!("client requests a gex group: {:?}", gex_params);
+
+                let Some(dh_group) = handler.lookup_dh_gex_group(&gex_params).await? else {
+                    debug!("server::Handler impl did not find a matching DH group (is lookup_dh_gex_group implemented?)");
+                    return Err(Error::Kex)?;
+                };
+
+                let prime = biguint_to_mpint(&BigUint::from_bytes_be(&*dh_group.prime));
+                let generator = biguint_to_mpint(&BigUint::from_bytes_be(&*dh_group.generator));
+
+                dbg!(&prime);
+                dbg!(&generator);
+
+                self.exchange.gex = Some((gex_params, dh_group.clone()));
+                kex.dh_gex_set_group(dh_group)?;
+
+                output.packet(|w| {
+                    msg::KEX_DH_GEX_GROUP.encode(w)?;
+                    prime.encode(w)?;
+                    generator.encode(w)?;
+                    Ok(())
+                })?;
+
+                self.state = ServerKexState::WaitingForDhInit { names, kex };
+
+                Ok(KexProgress::NeedsReply {
+                    kex: self,
+                    reset_seqn: false,
+                })
+            }
+            ServerKexState::WaitingForDhInit { mut names, mut kex } => {
+                let Some(input) = input else {
+                    return Err(Error::KexInit)?;
                 };
 
                 if names.ignore_guessed {
                     // Ignore the next packet if (1) it follows and (2) it's not the correct guess.
                     debug!("ignoring guessed kex");
                     names.ignore_guessed = false;
-                    self.state = ServerKexState::WaitingForKexReply { names, kex };
+                    self.state = ServerKexState::WaitingForDhInit { names, kex };
                     return Ok(KexProgress::NeedsReply {
                         kex: self,
                         reset_seqn: false,
                     });
                 }
 
-                // We've received ECDH_REPLY
-                if input.buffer.first() != Some(&msg::KEX_ECDH_INIT) {
+                if input.buffer.first()
+                    != Some(match kex.is_dh_gex() {
+                        true => &msg::KEX_DH_GEX_INIT,
+                        false => &msg::KEX_ECDH_INIT,
+                    })
+                {
                     error!(
                         "Unexpected kex message at this stage: {:?}",
                         input.buffer.first()
                     );
-                    return Err(Error::KexInit);
+                    return Err(Error::KexInit)?;
                 }
 
                 #[allow(clippy::indexing_slicing)] // length checked
@@ -176,7 +237,7 @@ impl Kex for ServerKex {
 
                 self.exchange
                     .client_ephemeral
-                    .extend(&Bytes::decode(&mut r)?);
+                    .extend(&Bytes::decode(&mut r).map_err(Into::into)?);
 
                 let exchange = &mut self.exchange;
                 kex.server_dh(exchange, &input.buffer)?;
@@ -188,7 +249,7 @@ impl Kex for ServerKex {
                     .position(|key| is_key_compatible_with_algo(key, &names.key))
                 else {
                     debug!("we don't have a host key of type {:?}", names.key);
-                    return Err(Error::UnknownKey);
+                    return Err(Error::UnknownKey.into());
                 };
 
                 // Look up the key we'll be using to sign the exchange hash
@@ -214,12 +275,18 @@ impl Kex for ServerKex {
                 // Hash signature
                 debug!("signing with key {:?}", key);
                 let signature = sign_with_hash_alg(
-                    &PrivateKeyWithHashAlg::new(Arc::new(key.clone()), signature_hash_alg)?,
+                    &PrivateKeyWithHashAlg::new(Arc::new(key.clone()), signature_hash_alg)
+                        .map_err(Into::into)?,
                     &hash,
-                )?;
+                )
+                .map_err(Into::into)?;
 
                 output.packet(|w| {
-                    msg::KEX_ECDH_REPLY.encode(w)?;
+                    match kex.is_dh_gex() {
+                        true => &msg::KEX_DH_GEX_REPLY,
+                        false => &msg::KEX_ECDH_REPLY,
+                    }
+                    .encode(w)?;
                     key.public_key().to_bytes()?.encode(w)?;
                     exchange.server_ephemeral.encode(w)?;
                     signature.encode(w)?;
@@ -250,7 +317,7 @@ impl Kex for ServerKex {
             }
             ServerKexState::WaitingForNewKeys { newkeys } => {
                 let Some(input) = input else {
-                    return Err(Error::KexInit);
+                    return Err(Error::KexInit.into());
                 };
 
                 if input.buffer.first() != Some(&msg::NEWKEYS) {
@@ -258,7 +325,7 @@ impl Kex for ServerKex {
                         "Unexpected kex message at this stage: {:?}",
                         input.buffer.first()
                     );
-                    return Err(Error::Kex);
+                    return Err(Error::Kex.into());
                 }
 
                 debug!("new keys received");

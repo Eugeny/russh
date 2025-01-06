@@ -13,7 +13,7 @@ use tokio::sync::oneshot;
 
 use super::*;
 use crate::channels::{Channel, ChannelMsg, ChannelRef};
-use crate::kex::{Kex, KexCause, SessionKexState, EXTENSION_SUPPORT_AS_CLIENT};
+use crate::kex::{KexCause, SessionKexState, EXTENSION_SUPPORT_AS_CLIENT};
 use crate::msg;
 
 /// A connected server session. This type is unique to a client.
