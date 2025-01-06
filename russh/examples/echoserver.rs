@@ -3,9 +3,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use russh::client::GexParams;
 use kex::dh::groups::DhGroup;
 use rand_core::OsRng;
+use russh::client::GexParams;
 use russh::keys::*;
 use russh::server::{Msg, Server as _, Session};
 use russh::*;
@@ -143,7 +143,6 @@ impl server::Handler for Server {
     ) -> Result<Option<DhGroup>, Self::Error> {
         Ok(Some(russh::kex::dh::groups::DH_GROUP16))
     }
-
 }
 
 impl Drop for Server {

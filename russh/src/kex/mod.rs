@@ -328,12 +328,8 @@ pub(crate) fn compute_keys<D: Digest>(
     is_server: bool,
 ) -> Result<super::cipher::CipherPair, Error> {
     let cipher = CIPHERS.get(&cipher).ok_or(Error::UnknownAlgo)?;
-    let remote_to_local_mac = MACS
-        .get(&remote_to_local_mac)
-        .ok_or(Error::UnknownAlgo)?;
-    let local_to_remote_mac = MACS
-        .get(&local_to_remote_mac)
-        .ok_or(Error::UnknownAlgo)?;
+    let remote_to_local_mac = MACS.get(&remote_to_local_mac).ok_or(Error::UnknownAlgo)?;
+    let local_to_remote_mac = MACS.get(&local_to_remote_mac).ok_or(Error::UnknownAlgo)?;
 
     // https://tools.ietf.org/html/rfc4253#section-7.2
     BUFFER.with(|buffer| {

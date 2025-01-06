@@ -255,8 +255,8 @@ impl<D: Digest> KexAlgorithmImplementor for DhGroupKex<D> {
 
         if let Some((gex_params, dh_group)) = &exchange.gex {
             gex_params.encode(buffer)?;
-            biguint_to_mpint(&BigUint::from_bytes_be(&*dh_group.prime)).encode(buffer)?;
-            biguint_to_mpint(&BigUint::from_bytes_be(&*dh_group.generator)).encode(buffer)?;
+            biguint_to_mpint(&BigUint::from_bytes_be(&dh_group.prime)).encode(buffer)?;
+            biguint_to_mpint(&BigUint::from_bytes_be(&dh_group.generator)).encode(buffer)?;
         }
 
         exchange.client_ephemeral.encode(buffer)?;
@@ -313,11 +313,7 @@ impl Decode for GexParams {
         let min_group_size = u32::decode(reader)? as usize;
         let preferred_group_size = u32::decode(reader)? as usize;
         let max_group_size = u32::decode(reader)? as usize;
-        Ok(GexParams::new(
-            min_group_size,
-            preferred_group_size,
-            max_group_size,
-        )?)
+        GexParams::new(min_group_size, preferred_group_size, max_group_size)
     }
 
     type Error = Error;

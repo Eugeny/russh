@@ -97,9 +97,9 @@ fn validate_msg_strict_kex_alt_order(msg_type: u8, seqno: usize, orders: &[&[u8]
     let mut valid = None; // did not match yet
     for order in orders {
         let result = validate_msg_strict_kex(msg_type, seqno, order);
-        valid = match (valid, result)  {
+        valid = match (valid, result) {
             // If we matched a valid msg, it's now valid forever
-            (Some(true), _ ) | (_, Some(true)) => Some(true),
+            (Some(true), _) | (_, Some(true)) => Some(true),
             // If we matched an invalid msg and we didn't find a valid one yet, it's now invalid
             (None | Some(false), Some(false)) => Some(false),
             // If the message was beyond the current pattern, no change
@@ -110,21 +110,33 @@ fn validate_msg_strict_kex_alt_order(msg_type: u8, seqno: usize, orders: &[&[u8]
 }
 
 pub(crate) fn validate_client_msg_strict_kex(msg_type: u8, seqno: usize) -> Result<(), Error> {
-    if Some(false) == validate_msg_strict_kex_alt_order(msg_type, seqno, &[
-        &[KEXINIT, KEX_ECDH_INIT, NEWKEYS],
-        &[KEXINIT, KEX_DH_GEX_REQUEST, KEX_DH_GEX_INIT, NEWKEYS],
-    ]) {
-        return Err(strict_kex_violation(msg_type, seqno))
+    if Some(false)
+        == validate_msg_strict_kex_alt_order(
+            msg_type,
+            seqno,
+            &[
+                &[KEXINIT, KEX_ECDH_INIT, NEWKEYS],
+                &[KEXINIT, KEX_DH_GEX_REQUEST, KEX_DH_GEX_INIT, NEWKEYS],
+            ],
+        )
+    {
+        return Err(strict_kex_violation(msg_type, seqno));
     }
     Ok(())
 }
 
 pub(crate) fn validate_server_msg_strict_kex(msg_type: u8, seqno: usize) -> Result<(), Error> {
-    if Some(false) == validate_msg_strict_kex_alt_order(msg_type, seqno, &[
-        &[KEXINIT, KEX_ECDH_REPLY, NEWKEYS],
-        &[KEXINIT, KEX_DH_GEX_GROUP, KEX_DH_GEX_REPLY, NEWKEYS]
-    ]) {
-        return Err(strict_kex_violation(msg_type, seqno))
+    if Some(false)
+        == validate_msg_strict_kex_alt_order(
+            msg_type,
+            seqno,
+            &[
+                &[KEXINIT, KEX_ECDH_REPLY, NEWKEYS],
+                &[KEXINIT, KEX_DH_GEX_GROUP, KEX_DH_GEX_REPLY, NEWKEYS],
+            ],
+        )
+    {
+        return Err(strict_kex_violation(msg_type, seqno));
     }
     Ok(())
 }

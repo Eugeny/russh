@@ -180,8 +180,8 @@ impl ServerKex {
                     return Err(Error::Kex)?;
                 };
 
-                let prime = biguint_to_mpint(&BigUint::from_bytes_be(&*dh_group.prime));
-                let generator = biguint_to_mpint(&BigUint::from_bytes_be(&*dh_group.generator));
+                let prime = biguint_to_mpint(&BigUint::from_bytes_be(&dh_group.prime));
+                let generator = biguint_to_mpint(&BigUint::from_bytes_be(&dh_group.generator));
 
                 dbg!(&prime);
                 dbg!(&generator);
