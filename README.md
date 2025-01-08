@@ -30,8 +30,10 @@ This is a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Éti
   * `3des-cbc` ✨
 * Key exchanges:
   * `curve25519-sha256@libssh.org`
+  * `diffie-hellman-group-sha1` ✨
   * `diffie-hellman-group1-sha1` ✨
   * `diffie-hellman-group14-sha1` ✨
+  * `diffie-hellman-group-sha256` ✨
   * `diffie-hellman-group14-sha256` ✨
   * `diffie-hellman-group16-sha512` ✨
   * `ecdh-sha2-nistp256` ✨
@@ -62,6 +64,9 @@ This is a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Éti
 * OpenSSH keepalive request handling ✨
 * OpenSSH agent forwarding channels ✨
 * OpenSSH `server-sig-algs` extension ✨
+* PPK key format ✨
+* Pageant support ✨
+* `AsyncRead`/`AsyncWrite`-able channels ✨
 
 ## Safety
 
