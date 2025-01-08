@@ -4,12 +4,13 @@ use p256::NistP256;
 use p384::NistP384;
 use p521::NistP521;
 use pkcs8::{AssociatedOid, EncodePrivateKey, PrivateKeyInfo, SecretDocument};
+use spki::ObjectIdentifier;
 use ssh_key::private::{EcdsaKeypair, Ed25519Keypair, Ed25519PrivateKey, KeypairData};
 use ssh_key::PrivateKey;
 
 use crate::Error;
 
-/// Decode a PKCS#8-encoded private key.
+/// Decode a PKCS#8-encoded private key (ASN.1 or X9.62)
 pub fn decode_pkcs8(
     ciphertext: &[u8],
     password: Option<&[u8]>,
@@ -21,10 +22,25 @@ pub fn decode_pkcs8(
     } else {
         doc
     };
-    Ok(pkcs8_pki_into_keypair_data(doc.decode_msg::<PrivateKeyInfo>()?)?.try_into()?)
+
+    match doc.decode_msg::<sec1::EcPrivateKey>() {
+        Ok(key) => {
+            // X9.62 EC private key
+            let Some(curve) = key.parameters.and_then(|x| x.named_curve()) else {
+                return Err(Error::CouldNotReadKey);
+            };
+            let kp = ec_key_data_into_keypair(curve, key)?;
+            Ok(PrivateKey::new(KeypairData::Ecdsa(kp), "")?)
+        }
+        Err(_) => {
+            // ASN.1 key
+            Ok(pkcs8_pki_into_keypair_data(doc.decode_msg::<PrivateKeyInfo>()?)?.try_into()?)
+        }
+    }
 }
 
 fn pkcs8_pki_into_keypair_data(pki: PrivateKeyInfo<'_>) -> Result<KeypairData, Error> {
+    dbg!(&pki.algorithm.oid);
     match pki.algorithm.oid {
         ed25519_dalek::pkcs8::ALGORITHM_OID => {
             let kpb = ed25519_dalek::pkcs8::KeypairBytes::try_from(pki)?;
@@ -47,34 +63,48 @@ fn pkcs8_pki_into_keypair_data(pki: PrivateKeyInfo<'_>) -> Result<KeypairData, E
             )?;
             Ok(KeypairData::Rsa(pk.try_into()?))
         }
-        sec1::ALGORITHM_OID => Ok(KeypairData::Ecdsa(
-            match pki.algorithm.parameters_oid()? {
-                NistP256::OID => {
-                    let sk = p256::SecretKey::try_from(pki)?;
-                    EcdsaKeypair::NistP256 {
-                        public: sk.public_key().into(),
-                        private: sk.into(),
-                    }
-                }
-                NistP384::OID => {
-                    let sk = p384::SecretKey::try_from(pki)?;
-                    EcdsaKeypair::NistP384 {
-                        public: sk.public_key().into(),
-                        private: sk.into(),
-                    }
-                }
-                NistP521::OID => {
-                    let sk = p521::SecretKey::try_from(pki)?;
-                    EcdsaKeypair::NistP521 {
-                        public: sk.public_key().into(),
-                        private: sk.into(),
-                    }
-                }
-                oid => return Err(Error::UnknownAlgorithm(oid)),
-            },
-        )),
+        sec1::ALGORITHM_OID => Ok(KeypairData::Ecdsa(ec_key_data_into_keypair(
+            pki.algorithm.parameters_oid()?,
+            pki,
+        )?)),
         oid => Err(Error::UnknownAlgorithm(oid)),
     }
+}
+
+fn ec_key_data_into_keypair<K, E>(
+    curve_oid: ObjectIdentifier,
+    private_key: K,
+) -> Result<EcdsaKeypair, Error>
+where
+    p256::SecretKey: TryFrom<K, Error = E>,
+    p384::SecretKey: TryFrom<K, Error = E>,
+    p521::SecretKey: TryFrom<K, Error = E>,
+    crate::Error: From<E>,
+{
+    Ok(match curve_oid {
+        NistP256::OID => {
+            let sk = p256::SecretKey::try_from(private_key)?;
+            EcdsaKeypair::NistP256 {
+                public: sk.public_key().into(),
+                private: sk.into(),
+            }
+        }
+        NistP384::OID => {
+            let sk = p384::SecretKey::try_from(private_key)?;
+            EcdsaKeypair::NistP384 {
+                public: sk.public_key().into(),
+                private: sk.into(),
+            }
+        }
+        NistP521::OID => {
+            let sk = p521::SecretKey::try_from(private_key)?;
+            EcdsaKeypair::NistP521 {
+                public: sk.public_key().into(),
+                private: sk.into(),
+            }
+        }
+        oid => return Err(Error::UnknownAlgorithm(oid)),
+    })
 }
 
 /// Encode into a password-protected PKCS#8-encoded private key.

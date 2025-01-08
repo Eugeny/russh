@@ -45,7 +45,7 @@ russh-cryptovec = { version = "0.48.0", path = "../cryptovec", features = [
   "ssh-encoding",
 ] }
 russh-util = { version = "0.48.0", path = "../russh-util" }
-sec1 = { version = "0.7", features = ["pkcs8"] }
+sec1 = { version = "0.7", features = ["pkcs8", "der"] }
 serde = { version = "1.0", features = ["derive"] }
 sha1.workspace = true
 sha2.workspace = true
