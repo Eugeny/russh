@@ -1514,8 +1514,10 @@ impl Default for Config {
 /// A client handler. Note that messages can be received from the
 /// server at any time during a session.
 ///
+/// You must at the very least implement the `check_server_key` fn.
+/// The default implementation rejects all keys.
+///
 /// Note: this is an `async_trait`. Click `[source]` on the right to see actual async function definitions.
-
 #[async_trait]
 pub trait Handler: Sized + Send {
     type Error: From<crate::Error> + Send + core::fmt::Debug;
