@@ -2,7 +2,7 @@
 authors = ["Pierre-Étienne Meunier <pe@pijul.org>"]
 description = "Deal with SSH keys: load them, decrypt them, call an SSH agent."
 documentation = "https://docs.rs/russh-keys"
-edition = "2018"
+edition = "2021"
 homepage = "https://github.com/warp-tech/russh"
 keywords = ["ssh"]
 license = "Apache-2.0"

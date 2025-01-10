@@ -2,7 +2,7 @@
 authors = ["Pierre-Étienne Meunier <pe@pijul.org>"]
 description = "Utilities to parse .ssh/config files, including helpers to implement ProxyCommand in Russh."
 documentation = "https://docs.rs/russh-config"
-edition = "2018"
+edition = "2021"
 include = ["Cargo.toml", "src/lib.rs", "src/proxy.rs"]
 license = "Apache-2.0"
 name = "russh-config"

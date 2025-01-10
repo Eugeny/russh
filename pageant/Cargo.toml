@@ -2,7 +2,7 @@
 authors = ["Eugene <inbox@null.page>"]
 description = "Pageant SSH agent transport client."
 documentation = "https://docs.rs/pageant"
-edition = "2018"
+edition = "2021"
 license = "Apache-2.0"
 name = "pageant"
 repository = "https://github.com/warp-tech/russh"
