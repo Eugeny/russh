@@ -470,6 +470,7 @@ impl<H: Handler> Handle<H> {
                     return Err(crate::Error::ChannelOpenFailure(reason));
                 }
                 None => {
+                    debug!("channel confirmation sender was dropped");
                     return Err(crate::Error::Disconnect);
                 }
                 msg => {
@@ -805,6 +806,7 @@ where
     if kex_done_signal_rx.await.is_err() {
         // kex_done_signal Sender is dropped when the session
         // fails before a succesful key exchange
+        debug!("kex_done_signal sender was dropped");
         join.await.map_err(crate::Error::Join)??;
         return Err(H::Error::from(crate::Error::Disconnect));
     }
@@ -906,6 +908,7 @@ impl Session {
                     // The kex signal has been consumed, so no one is
                     // awaiting the result of this coroutine
                     // We're better off passing the error into the Handler
+                    debug!("disconnected {e:?}");
                     handler.disconnected(DisconnectReason::Error(e)).await?;
                     Err(H::Error::from(crate::Error::Disconnect))
                 }
@@ -963,6 +966,7 @@ impl Session {
                     if !pkt.buffer.is_empty() {
                         #[allow(clippy::indexing_slicing)] // length checked
                         if pkt.buffer[0] == crate::msg::DISCONNECT {
+                            debug!("received disconnect");
                             result = self.process_disconnect(&pkt).map_err(H::Error::from);
                         } else {
                             self.common.received_data = true;
