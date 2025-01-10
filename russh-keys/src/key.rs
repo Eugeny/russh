@@ -63,6 +63,10 @@ mod private_key_with_hash_alg {
     }
 
     impl PrivateKeyWithHashAlg {
+        /// Direct constructor.
+        ///
+        /// Will fail if you specify a `hash_alg` for a key type other than RSA.
+        /// For RSA, passing `None` is mapped to the legacy `sha-rsa` (SHA-1).
         pub fn new(
             key: Arc<crate::PrivateKey>,
             hash_alg: Option<crate::HashAlg>,
