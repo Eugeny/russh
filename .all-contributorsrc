@@ -481,6 +481,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "RandyMcMillan",
+      "name": "@RandyMcMillan",
+      "avatar_url": "https://avatars.githubusercontent.com/u/152159?v=4",
+      "profile": "https://www.randymcmillan.net",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,
