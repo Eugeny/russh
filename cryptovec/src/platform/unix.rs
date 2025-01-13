@@ -27,7 +27,10 @@ pub fn memset(ptr: *mut u8, value: i32, size: usize) {
 
 #[allow(clippy::panic)]
 unsafe fn panic_libc_error(msg: &str) {
+    #[cfg(not(target_os = "macos"))]
     let errno = *libc::__errno_location();
+    #[cfg(target_os = "macos")]
+    let errno = *libc::__error();
     const ERRMAXLEN: usize = 255;
     const INVALID_ERR: &str = "Unknown";
     let mut errdesc = [0u8; ERRMAXLEN];
