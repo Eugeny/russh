@@ -16,7 +16,7 @@ use ssh_encoding::Decode;
 use ssh_key::public::KeyData;
 use ssh_key::{Algorithm, EcdsaCurve, HashAlg, PublicKey};
 
-use crate::Error;
+use crate::keys::Error;
 
 pub trait PublicKeyExt {
     fn decode(bytes: &[u8]) -> Result<PublicKey, Error>;
@@ -58,8 +58,8 @@ mod private_key_with_hash_alg {
     /// have a hash algorithm associated with them.
     #[derive(Clone, Debug)]
     pub struct PrivateKeyWithHashAlg {
-        key: Arc<crate::PrivateKey>,
-        hash_alg: Option<crate::HashAlg>,
+        key: Arc<crate::keys::PrivateKey>,
+        hash_alg: Option<crate::keys::HashAlg>,
     }
 
     impl PrivateKeyWithHashAlg {
@@ -68,11 +68,11 @@ mod private_key_with_hash_alg {
         /// Will fail if you specify a `hash_alg` for a key type other than RSA.
         /// For RSA, passing `None` is mapped to the legacy `sha-rsa` (SHA-1).
         pub fn new(
-            key: Arc<crate::PrivateKey>,
-            hash_alg: Option<crate::HashAlg>,
-        ) -> Result<Self, crate::Error> {
+            key: Arc<crate::keys::PrivateKey>,
+            hash_alg: Option<crate::keys::HashAlg>,
+        ) -> Result<Self, crate::keys::Error> {
             if hash_alg.is_some() && !key.algorithm().is_rsa() {
-                return Err(crate::Error::InvalidParameters);
+                return Err(crate::keys::Error::InvalidParameters);
             }
             Ok(Self { key, hash_alg })
         }
@@ -81,13 +81,13 @@ mod private_key_with_hash_alg {
             self.key.algorithm().with_hash_alg(self.hash_alg)
         }
 
-        pub fn hash_alg(&self) -> Option<crate::HashAlg> {
+        pub fn hash_alg(&self) -> Option<crate::keys::HashAlg> {
             self.hash_alg
         }
     }
 
     impl Deref for PrivateKeyWithHashAlg {
-        type Target = crate::PrivateKey;
+        type Target = crate::keys::PrivateKey;
 
         fn deref(&self) -> &Self::Target {
             &self.key

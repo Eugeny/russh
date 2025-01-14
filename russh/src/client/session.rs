@@ -1,11 +1,10 @@
 use log::error;
-use russh_keys::map_err;
 use ssh_encoding::Encode;
 use tokio::sync::oneshot;
 
 use crate::client::Session;
 use crate::session::EncryptedState;
-use crate::{msg, ChannelId, CryptoVec, Disconnect, Pty, Sig};
+use crate::{map_err, msg, ChannelId, CryptoVec, Disconnect, Pty, Sig};
 
 impl Session {
     fn channel_open_generic<F>(

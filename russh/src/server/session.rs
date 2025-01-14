@@ -5,16 +5,15 @@ use channels::WindowSizeRef;
 use kex::ServerKex;
 use log::debug;
 use negotiation::parse_kex_algo_list;
-use russh_keys::helpers::NameList;
-use russh_keys::map_err;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::oneshot;
 
 use super::*;
 use crate::channels::{Channel, ChannelMsg, ChannelRef};
+use crate::helpers::NameList;
 use crate::kex::{KexCause, SessionKexState, EXTENSION_SUPPORT_AS_CLIENT};
-use crate::msg;
+use crate::{map_err, msg};
 
 /// A connected server session. This type is unique to a client.
 #[derive(Debug)]

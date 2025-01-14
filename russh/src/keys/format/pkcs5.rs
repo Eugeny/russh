@@ -2,7 +2,7 @@ use aes::*;
 use ssh_key::PrivateKey;
 
 use super::Encryption;
-use crate::Error;
+use crate::keys::Error;
 
 /// Decode a secret key in the PKCS#5 format, possibly deciphering it
 /// using the supplied password.

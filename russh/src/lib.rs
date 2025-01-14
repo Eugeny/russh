@@ -113,8 +113,7 @@ pub mod kex;
 /// MAC algorithm names
 pub mod mac;
 
-/// Re-export of the `russh-keys` crate.
-pub use russh_keys as keys;
+pub mod keys;
 
 mod msg;
 mod negotiation;
@@ -127,6 +126,8 @@ mod pty;
 
 pub use pty::Pty;
 pub use sshbuffer::SshId;
+
+mod helpers;
 
 macro_rules! push_packet {
     ( $buffer:expr, $x:expr ) => {{
@@ -277,7 +278,7 @@ pub enum Error {
     RequestDenied,
 
     #[error(transparent)]
-    Keys(#[from] russh_keys::Error),
+    Keys(#[from] crate::keys::Error),
 
     #[error(transparent)]
     IO(#[from] std::io::Error),

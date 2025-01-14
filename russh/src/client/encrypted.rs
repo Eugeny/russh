@@ -18,12 +18,12 @@ use std::ops::Deref;
 
 use bytes::Bytes;
 use log::{debug, error, info, trace, warn};
-use russh_keys::helpers::{map_err, sign_with_hash_alg, AlgorithmExt, EncodedExt, NameList};
 use ssh_encoding::{Decode, Encode};
 
 use super::IncomingSshPacket;
 use crate::cert::PublicKeyOrCertificate;
 use crate::client::{Handler, Msg, Prompt, Reply, Session};
+use crate::helpers::{map_err, sign_with_hash_alg, AlgorithmExt, EncodedExt, NameList};
 use crate::keys::key::parse_public_key;
 use crate::parsing::{ChannelOpenConfirmation, ChannelType, OpenChannelMessage};
 use crate::session::{Encrypted, EncryptedState, GlobalRequestResponse};

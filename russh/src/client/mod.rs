@@ -45,8 +45,6 @@ use futures::task::{Context, Poll};
 use futures::Future;
 use kex::ClientKex;
 use log::{debug, error, trace};
-use russh_keys::key::PrivateKeyWithHashAlg;
-use russh_keys::map_err;
 use russh_util::time::Instant;
 use ssh_encoding::Decode;
 use ssh_key::{Certificate, PrivateKey, PublicKey};
@@ -61,13 +59,14 @@ pub use crate::auth::AuthResult;
 use crate::channels::{Channel, ChannelMsg, ChannelRef, WindowSizeRef};
 use crate::cipher::{self, clear, OpeningKey};
 use crate::kex::{KexCause, KexProgress, SessionKexState};
+use crate::keys::key::PrivateKeyWithHashAlg;
 use crate::msg::{is_kex_msg, validate_server_msg_strict_kex};
 use crate::session::{CommonSession, EncryptedState, GlobalRequestResponse, NewKeys};
 use crate::ssh_read::SshRead;
 use crate::sshbuffer::{IncomingSshPacket, PacketWriter, SSHBuffer, SshId};
 use crate::{
-    auth, msg, negotiation, ChannelId, ChannelOpenFailure, CryptoVec, Disconnect, Error, Limits,
-    MethodSet, Sig,
+    auth, map_err, msg, negotiation, ChannelId, ChannelOpenFailure, CryptoVec, Disconnect, Error,
+    Limits, MethodSet, Sig,
 };
 
 mod encrypted;
@@ -397,7 +396,7 @@ impl<H: Handler> Handle<H> {
 
     /// Authenticate using a custom method that implements the
     /// [`Signer`][auth::Signer] trait. Currently, this crate only provides an
-    /// implementation for an [SSH agent][russh_keys::agent::client::AgentClient].
+    /// implementation for an [SSH agent][crate::keys::agent::client::AgentClient].
     pub async fn authenticate_publickey_with<U: Into<String>, S: auth::Signer>(
         &mut self,
         user: U,

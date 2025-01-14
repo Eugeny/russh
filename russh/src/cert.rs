@@ -1,10 +1,11 @@
-use russh_keys::key::PrivateKeyWithHashAlg;
 use ssh_key::{Certificate, HashAlg, PublicKey};
 #[cfg(not(target_arch = "wasm32"))]
 use {
-    russh_keys::helpers::AlgorithmExt, ssh_encoding::Decode, ssh_key::public::KeyData,
+    crate::helpers::AlgorithmExt, ssh_encoding::Decode, ssh_key::public::KeyData,
     ssh_key::Algorithm,
 };
+
+use crate::keys::key::PrivateKeyWithHashAlg;
 
 #[derive(Debug)]
 pub(crate) enum PublicKeyOrCertificate {

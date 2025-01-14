@@ -16,11 +16,11 @@ use std::borrow::Cow;
 
 use log::debug;
 use rand::RngCore;
-use russh_keys::helpers::NameList;
 use ssh_encoding::{Decode, Encode};
 use ssh_key::{Algorithm, EcdsaCurve, HashAlg, PrivateKey};
 
 use crate::cipher::CIPHERS;
+use crate::helpers::NameList;
 use crate::kex::{EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT, EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::server::Config;

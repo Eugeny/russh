@@ -8,7 +8,6 @@ use byteorder::{BigEndian, ByteOrder};
 use bytes::Bytes;
 use futures::future::Future;
 use futures::stream::{Stream, StreamExt};
-use russh_cryptovec::CryptoVec;
 use ssh_encoding::{Decode, Encode, Reader};
 use ssh_key::PrivateKey;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -17,8 +16,9 @@ use {std, tokio};
 
 use super::{msg, Constraint};
 use crate::helpers::{sign_with_hash_alg, EncodedExt};
-use crate::key::PrivateKeyWithHashAlg;
-use crate::Error;
+use crate::keys::key::PrivateKeyWithHashAlg;
+use crate::keys::Error;
+use crate::CryptoVec;
 
 #[derive(Clone)]
 #[allow(clippy::type_complexity)]
