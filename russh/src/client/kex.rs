@@ -5,8 +5,6 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use log::{debug, error, warn};
-use russh_cryptovec::CryptoVec;
-use russh_keys::key::parse_public_key;
 use signature::Verifier;
 use ssh_encoding::{Decode, Encode};
 use ssh_key::{Mpint, PublicKey, Signature};
@@ -15,10 +13,11 @@ use super::IncomingSshPacket;
 use crate::client::{Config, NewKeys};
 use crate::kex::dh::groups::DhGroup;
 use crate::kex::{KexAlgorithm, KexAlgorithmImplementor, KexCause, KexProgress, KEXES};
+use crate::keys::key::parse_public_key;
 use crate::negotiation::{Names, Select};
 use crate::session::Exchange;
 use crate::sshbuffer::PacketWriter;
-use crate::{msg, negotiation, strict_kex_violation, Error, SshId};
+use crate::{msg, negotiation, strict_kex_violation, CryptoVec, Error, SshId};
 
 thread_local! {
     static HASH_BUFFER: RefCell<CryptoVec> = RefCell::new(CryptoVec::new());

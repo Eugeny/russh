@@ -9,7 +9,7 @@ use ssh_key::PrivateKey;
 use yasna::BERReaderSeq;
 
 use super::Encryption;
-use crate::Error;
+use crate::keys::Error;
 
 const PBES2: &[u64] = &[1, 2, 840, 113549, 1, 5, 13];
 const ED25519: &[u64] = &[1, 3, 101, 112];

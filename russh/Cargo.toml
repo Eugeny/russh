@@ -14,52 +14,87 @@ rust-version = "1.65"
 
 [features]
 default = ["flate2"]
-legacy-ed25519-pkcs8-parser = ["russh-keys/legacy-ed25519-pkcs8-parser"]
+legacy-ed25519-pkcs8-parser = ["yasna"]
 # Danger: 3DES cipher is insecure.
 des = ["dep:des"]
 
 [dependencies]
-aes.workspace = true
 aes-gcm = "0.10"
-cbc = { version = "0.1" }
+aes.workspace = true
 async-trait.workspace = true
 bitflags = "2.0"
+block-padding = { version = "0.3", features = ["std"] }
 byteorder.workspace = true
 bytes.workspace = true
+cbc = { version = "0.1" }
 chacha20 = "0.9"
 ctr = "0.9"
 curve25519-dalek = "4.1.3"
+data-encoding = "2.3"
 delegate.workspace = true
 digest.workspace = true
+der = "0.7"
+des = { version = "0.8.1", optional = true }
+ecdsa = "0.16"
+ed25519-dalek = { version = "2.0", features = ["rand_core", "pkcs8"] }
 elliptic-curve = { version = "0.13", features = ["ecdh"] }
+enum_dispatch = "0.3.13"
 flate2 = { version = "1.0.15", optional = true }
 futures.workspace = true
 generic-array = "0.14"
+getrandom = { version = "0.2.15", features = ["js"] }
 hex-literal = "0.4"
 hmac.workspace = true
+inout = { version = "0.1", features = ["std"] }
 log.workspace = true
+md5 = "0.7"
 num-bigint = { version = "0.4.2", features = ["rand"] }
+# num-integer = "0.1"
 once_cell = "1.13"
 p256 = { version = "0.13", features = ["ecdh"] }
 p384 = { version = "0.13", features = ["ecdh"] }
 p521 = { version = "0.13", features = ["ecdh"] }
+pbkdf2 = "0.12"
+pkcs1 = "0.7"
+pkcs5 = "0.7"
+pkcs8 = { version = "0.10", features = ["pkcs5", "encryption"] }
 poly1305 = "0.8"
+rand_core = { version = "0.6.4", features = ["getrandom", "std"] }
 rand.workspace = true
-rand_core = { version = "0.6.4", features = ["getrandom"] }
 rsa.workspace = true
-russh-cryptovec = { version = "0.48.0", path = "../cryptovec" }
-russh-keys = { version = "0.50.0-beta.7", path = "../russh-keys" }
+russh-cryptovec = { version = "0.48.0", path = "../cryptovec", features = [
+  "ssh-encoding",
+] }
+russh-util = { version = "0.48.0", path = "../russh-util" }
+sec1 = { version = "0.7", features = ["pkcs8", "der"] }
 sha1.workspace = true
 sha2.workspace = true
 signature.workspace = true
+spki = "0.7"
 ssh-encoding.workspace = true
 ssh-key.workspace = true
 subtle = "2.4"
 thiserror.workspace = true
-russh-util = { version = "0.48.0", path = "../russh-util" }
-des = { version = "0.8.1", optional = true }
 tokio = { workspace = true, features = ["io-util", "sync", "time"] }
-enum_dispatch = "0.3.13"
+typenum = "1.17"
+yasna = { version = "0.5.0", features = [
+    "bit-vec",
+    "num-bigint",
+], optional = true }
+zeroize = "1.7"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { workspace = true, features = [
+  "io-util",
+  "rt-multi-thread",
+  "time",
+  "net",
+] }
+tokio-stream.workspace = true
+home.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+pageant = { version = "0.0.2", path = "../pageant" }
 
 [dev-dependencies]
 anyhow = "1.0.4"
@@ -79,6 +114,7 @@ shell-escape = "0.1"
 tokio-fd = "0.3"
 termion = "2"
 ratatui = "0.29.0"
+tempfile = "3.14.0"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 russh-sftp = "2.0.5"

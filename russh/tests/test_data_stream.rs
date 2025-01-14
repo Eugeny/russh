@@ -3,9 +3,9 @@ use std::sync::Arc;
 
 use rand::RngCore;
 use rand_core::OsRng;
+use russh::keys::key::PrivateKeyWithHashAlg;
 use russh::server::{self, Auth, Msg, Server as _, Session};
 use russh::{client, Channel};
-use russh_keys::key::PrivateKeyWithHashAlg;
 use ssh_key::PrivateKey;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 

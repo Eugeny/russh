@@ -8,7 +8,7 @@ use hmac::{Hmac, Mac};
 use log::debug;
 use sha1::Sha1;
 
-use crate::Error;
+use crate::keys::Error;
 
 /// Check whether the host is known, from its standard location.
 pub fn check_known_hosts(
@@ -76,7 +76,7 @@ pub fn known_host_keys_path<P: AsRef<Path>>(
     port: u16,
     path: P,
 ) -> Result<Vec<(usize, ssh_key::PublicKey)>, Error> {
-    use crate::parse_public_key_base64;
+    use crate::keys::parse_public_key_base64;
 
     let mut f = if let Ok(f) = File::open(path) {
         BufReader::new(f)
@@ -189,7 +189,7 @@ mod test {
     use std::fs::File;
 
     use super::*;
-    use crate::parse_public_key_base64;
+    use crate::keys::parse_public_key_base64;
 
     #[test]
     fn test_check_known_hosts() {

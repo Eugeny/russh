@@ -8,7 +8,7 @@ use spki::ObjectIdentifier;
 use ssh_key::private::{EcdsaKeypair, Ed25519Keypair, Ed25519PrivateKey, KeypairData};
 use ssh_key::PrivateKey;
 
-use crate::Error;
+use crate::keys::Error;
 
 /// Decode a PKCS#8-encoded private key (ASN.1 or X9.62)
 pub fn decode_pkcs8(
@@ -79,7 +79,7 @@ where
     p256::SecretKey: TryFrom<K, Error = E>,
     p384::SecretKey: TryFrom<K, Error = E>,
     p521::SecretKey: TryFrom<K, Error = E>,
-    crate::Error: From<E>,
+    crate::keys::Error: From<E>,
 {
     Ok(match curve_oid {
         NistP256::OID => {

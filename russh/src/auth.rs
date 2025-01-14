@@ -18,12 +18,12 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use russh_keys::helpers::NameList;
-use russh_keys::key::PrivateKeyWithHashAlg;
 use ssh_key::{Certificate, PrivateKey};
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite};
 
+use crate::helpers::NameList;
+use crate::keys::key::PrivateKeyWithHashAlg;
 use crate::CryptoVec;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -163,12 +163,12 @@ pub enum AgentAuthError {
     #[error(transparent)]
     Send(#[from] crate::SendError),
     #[error(transparent)]
-    Key(#[from] russh_keys::Error),
+    Key(#[from] crate::keys::Error),
 }
 
 #[async_trait]
 impl<R: AsyncRead + AsyncWrite + Unpin + Send + 'static> Signer
-    for russh_keys::agent::client::AgentClient<R>
+    for crate::keys::agent::client::AgentClient<R>
 {
     type Error = AgentAuthError;
 

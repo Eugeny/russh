@@ -4,14 +4,14 @@ use std::cell::RefCell;
 use client::GexParams;
 use log::debug;
 use num_bigint::BigUint;
-use russh_keys::helpers::sign_with_hash_alg;
-use russh_keys::key::PrivateKeyWithHashAlg;
 use ssh_encoding::Encode;
 use ssh_key::Algorithm;
 
 use super::*;
+use crate::helpers::sign_with_hash_alg;
 use crate::kex::dh::biguint_to_mpint;
 use crate::kex::{KexAlgorithm, KexAlgorithmImplementor, KexCause, KEXES};
+use crate::keys::key::PrivateKeyWithHashAlg;
 use crate::negotiation::{is_key_compatible_with_algo, Names, Select};
 use crate::{msg, negotiation};
 

@@ -22,8 +22,6 @@ use bytes::Bytes;
 use cert::PublicKeyOrCertificate;
 use log::{debug, error, info, trace, warn};
 use msg;
-use russh_keys::helpers::NameList;
-use russh_keys::map_err;
 use signature::Verifier;
 use ssh_encoding::{Decode, Encode, Reader};
 use ssh_key::{PublicKey, Signature};
@@ -31,6 +29,8 @@ use tokio::time::Instant;
 
 use super::super::*;
 use super::*;
+use crate::helpers::NameList;
+use crate::map_err;
 use crate::msg::SSH_OPEN_ADMINISTRATIVELY_PROHIBITED;
 use crate::parsing::{ChannelOpenConfirmation, ChannelType, OpenChannelMessage};
 

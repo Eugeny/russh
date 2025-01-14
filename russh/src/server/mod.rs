@@ -41,7 +41,6 @@ use client::GexParams;
 use futures::future::Future;
 use log::{debug, error, info, warn};
 use msg::{is_kex_msg, validate_client_msg_strict_kex};
-use russh_keys::map_err;
 use russh_util::runtime::JoinHandle;
 use russh_util::time::Instant;
 use ssh_key::{Certificate, PrivateKey};
@@ -55,7 +54,7 @@ use crate::kex::{KexProgress, SessionKexState};
 use crate::session::*;
 use crate::ssh_read::*;
 use crate::sshbuffer::*;
-use crate::*;
+use crate::{map_err, *};
 
 mod kex;
 mod session;
