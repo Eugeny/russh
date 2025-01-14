@@ -68,6 +68,7 @@ impl From<&MethodKind> for String {
     }
 }
 
+/// An ordered set of authentication methods.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MethodSet(Vec<MethodKind>);
 
@@ -76,6 +77,16 @@ impl Deref for MethodSet {
 
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+impl From<&[MethodKind]> for MethodSet {
+    fn from(value: &[MethodKind]) -> Self {
+        let mut this = Self::empty();
+        for method in value {
+            this.push(*method);
+        }
+        this
     }
 }
 
@@ -114,6 +125,13 @@ impl MethodSet {
 
     pub fn remove(&mut self, method: MethodKind) {
         self.0.retain(|x| *x != method);
+    }
+
+    /// Push a method to the end of the list.
+    /// If the method is already in the list, it is moved to the end.
+    pub fn push(&mut self, method: MethodKind) {
+        self.remove(method);
+        self.0.push(method);
     }
 }
 
