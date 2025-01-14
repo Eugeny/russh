@@ -45,7 +45,7 @@
 //!        client.add_identity(&key, &[agent::Constraint::KeyLifetime { seconds: 60 }]).await?;
 //!        client.request_identities().await?;
 //!        let buf = b"signed message";
-//!        let sig = client.sign_request(&public, russh_cryptovec::CryptoVec::from_slice(&buf[..])).await.unwrap();
+//!        let sig = client.sign_request(&public, None, russh_cryptovec::CryptoVec::from_slice(&buf[..])).await.unwrap();
 //!        // Here, `sig` is encoded in a format usable internally by the SSH protocol.
 //!        Ok::<(), Error>(())
 //!    }).unwrap()
@@ -849,7 +849,7 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
         client.request_identities().await?;
         let buf = russh_cryptovec::CryptoVec::from_slice(b"blabla");
         let len = buf.len();
-        let buf = client.sign_request(public, buf).await.unwrap();
+        let buf = client.sign_request(public, None, buf).await.unwrap();
         let (a, b) = buf.split_at(len);
 
         match key.public_key().key_data() {
@@ -935,7 +935,7 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
             client.request_identities().await.unwrap();
             let buf = russh_cryptovec::CryptoVec::from_slice(b"blabla");
             let len = buf.len();
-            let buf = client.sign_request(public, buf).await.unwrap();
+            let buf = client.sign_request(public, None, buf).await.unwrap();
             let (a, b) = buf.split_at(len);
             if let ssh_key::public::KeyData::Ed25519 { .. } = public.key_data() {
                 let sig = &b[b.len() - 64..];

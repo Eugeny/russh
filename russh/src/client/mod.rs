@@ -47,7 +47,7 @@ use kex::ClientKex;
 use log::{debug, error, trace};
 use russh_util::time::Instant;
 use ssh_encoding::Decode;
-use ssh_key::{Certificate, PrivateKey, PublicKey};
+use ssh_key::{Certificate, HashAlg, PrivateKey, PublicKey};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadHalf, WriteHalf};
 use tokio::pin;
 use tokio::sync::mpsc::{
@@ -401,6 +401,7 @@ impl<H: Handler> Handle<H> {
         &mut self,
         user: U,
         key: ssh_key::PublicKey,
+        hash_alg: Option<HashAlg>,
         signer: &mut S,
     ) -> Result<AuthResult, S::Error> {
         let user = user.into();
@@ -423,7 +424,7 @@ impl<H: Handler> Handle<H> {
                     proceed_with_methods: remaining_methods,
                 }) => return Ok(AuthResult::Failure { remaining_methods }),
                 Some(Reply::SignRequest { key, data }) => {
-                    let data = signer.auth_publickey_sign(&key, data).await;
+                    let data = signer.auth_publickey_sign(&key, hash_alg, data).await;
                     let data = match data {
                         Ok(data) => data,
                         Err(e) => return Err(e),
