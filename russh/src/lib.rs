@@ -365,7 +365,7 @@ impl Default for Limits {
     }
 }
 
-pub use auth::{AgentAuthError, MethodSet, MethodKind, Signer};
+pub use auth::{AgentAuthError, MethodKind, MethodSet, Signer};
 
 /// A reason for disconnection.
 #[allow(missing_docs)] // This should be relatively self-explanatory.
