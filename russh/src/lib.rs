@@ -60,10 +60,7 @@
 //! # Design principles
 //!
 //! The main goal of this library is conciseness, and reduced size and
-//! readability of the library's code. Moreover, this library is split
-//! between Russh, which implements the main logic of SSH clients
-//! and servers, and Russh-keys, which implements calls to
-//! cryptographic primitives.
+//! readability of the library's code.
 //!
 //! One non-goal is to implement all possible cryptographic algorithms
 //! published since the initial release of SSH. Technical debt is

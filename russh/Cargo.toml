@@ -45,7 +45,6 @@ generic-array = "0.14"
 getrandom = { version = "0.2.15", features = ["js"] }
 hex-literal = "0.4"
 hmac.workspace = true
-home.workspace = true
 inout = { version = "0.1", features = ["std"] }
 log.workspace = true
 md5 = "0.7"
@@ -76,13 +75,26 @@ ssh-encoding.workspace = true
 ssh-key.workspace = true
 subtle = "2.4"
 thiserror.workspace = true
-tokio = { workspace = true, features = ["io-util", "sync", "time", "net"] }
+tokio = { workspace = true, features = ["io-util", "sync", "time"] }
 typenum = "1.17"
 yasna = { version = "0.5.0", features = [
     "bit-vec",
     "num-bigint",
 ], optional = true }
 zeroize = "1.7"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { workspace = true, features = [
+  "io-util",
+  "rt-multi-thread",
+  "time",
+  "net",
+] }
+tokio-stream.workspace = true
+home.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+pageant = { version = "0.0.2", path = "../pageant" }
 
 [dev-dependencies]
 anyhow = "1.0.4"
@@ -103,7 +115,6 @@ tokio-fd = "0.3"
 termion = "2"
 ratatui = "0.29.0"
 tempfile = "3.14.0"
-tokio-stream.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 russh-sftp = "2.0.5"
