@@ -238,18 +238,14 @@ pub enum CurrentRequest {
 impl AuthRequest {
     pub(crate) fn new(method: &Method) -> Self {
         match method {
-            Method::KeyboardInteractive { submethods } => {
-                Self {
-                    methods: MethodSet::all(),
-                    partial_success: false,
-                    current: Some(
-                        CurrentRequest::KeyboardInteractive {
-                            submethods: submethods.to_string(),
-                        },
-                    ),
-                    rejection_count: 0,
-                }
-            }
+            Method::KeyboardInteractive { submethods } => Self {
+                methods: MethodSet::all(),
+                partial_success: false,
+                current: Some(CurrentRequest::KeyboardInteractive {
+                    submethods: submethods.to_string(),
+                }),
+                rejection_count: 0,
+            },
             _ => Self {
                 methods: MethodSet::all(),
                 partial_success: false,
