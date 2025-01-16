@@ -21,6 +21,7 @@ use log::{debug, error, info, trace, warn};
 use ssh_encoding::{Decode, Encode};
 
 use super::IncomingSshPacket;
+use crate::auth::AuthRequest;
 use crate::cert::PublicKeyOrCertificate;
 use crate::client::{Handler, Msg, Prompt, Reply, Session};
 use crate::helpers::{map_err, sign_with_hash_alg, AlgorithmExt, EncodedExt, NameList};
@@ -76,27 +77,8 @@ impl Session {
                             if map_err!(Bytes::decode(&mut r))?.as_ref() == b"ssh-userauth" {
                                 *accepted = true;
                                 if let Some(ref meth) = self.common.auth_method {
-                                    let auth_request = match meth {
-                                        crate::auth::Method::KeyboardInteractive { submethods } => {
-                                            auth::AuthRequest {
-                                                methods: auth::MethodSet::all(),
-                                                partial_success: false,
-                                                current: Some(
-                                                    auth::CurrentRequest::KeyboardInteractive {
-                                                        submethods: submethods.to_string(),
-                                                    },
-                                                ),
-                                                rejection_count: 0,
-                                            }
-                                        }
-                                        _ => auth::AuthRequest {
-                                            methods: auth::MethodSet::all(),
-                                            partial_success: false,
-                                            current: None,
-                                            rejection_count: 0,
-                                        },
-                                    };
                                     let len = enc.write.len();
+                                    let auth_request = AuthRequest::new(meth);
                                     #[allow(clippy::indexing_slicing)] // length checked
                                     if enc.write_auth_request(&self.common.auth_user, meth)? {
                                         debug!("enc: {:?}", &enc.write[len..]);
@@ -117,6 +99,7 @@ impl Session {
                     }
                 }
                 EncryptedState::WaitingAuthRequest(ref mut auth_request) => {
+                    trace!("waiting auth request, {:?}", buf.first(),);
                     match buf.split_first() {
                         Some((&msg::USERAUTH_SUCCESS, _)) => {
                             debug!("userauth_success");
@@ -822,6 +805,8 @@ impl Session {
             );
             if is_waiting {
                 enc.write_auth_request(user, &meth)?;
+                let auth_request = AuthRequest::new(&meth);
+                enc.state = EncryptedState::WaitingAuthRequest(auth_request);
             }
         }
         self.common.auth_user.clear();
@@ -892,7 +877,7 @@ impl Encrypted {
                     true
                 }
                 auth::Method::KeyboardInteractive { ref submethods } => {
-                    debug!("Keyboard Iinteractive");
+                    debug!("Keyboard interactive");
                     user.as_bytes().encode(&mut self.write)?;
                     "ssh-connection".encode(&mut self.write)?;
                     "keyboard-interactive".encode(&mut self.write)?;
