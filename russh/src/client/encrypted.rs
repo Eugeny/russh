@@ -907,7 +907,7 @@ impl Encrypted {
 
         match key {
             PublicKeyOrCertificate::Certificate(cert) => {
-                cert.algorithm().encode(buffer)?;
+                cert.algorithm().to_certificate_type().encode(buffer)?;
                 cert.to_bytes()?.encode(buffer)?;
             }
             PublicKeyOrCertificate::PublicKey { key, hash_alg } => {
