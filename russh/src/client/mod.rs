@@ -59,7 +59,6 @@ pub use crate::auth::AuthResult;
 use crate::channels::{Channel, ChannelMsg, ChannelRef, WindowSizeRef};
 use crate::cipher::{self, clear, OpeningKey};
 use crate::kex::{KexCause, KexProgress, SessionKexState};
-use crate::keys::key::PrivateKeyWithHashAlg;
 use crate::msg::{is_kex_msg, validate_server_msg_strict_kex};
 use crate::session::{CommonSession, EncryptedState, GlobalRequestResponse, NewKeys};
 use crate::ssh_read::SshRead;
@@ -360,16 +359,44 @@ impl<H: Handler> Handle<H> {
     }
 
     /// Perform public key-based SSH authentication.
+    /// This method will automatically select the best hash function
+    /// if the server supports the `server-sig-algs` protocol extension
+    /// and will fall back to SHA-1 otherwise.
     pub async fn authenticate_publickey<U: Into<String>>(
         &mut self,
         user: U,
-        key: PrivateKeyWithHashAlg,
+        key: Arc<PrivateKey>,
     ) -> Result<AuthResult, crate::Error> {
         let user = user.into();
         self.sender
             .send(Msg::Authenticate {
                 user,
-                method: auth::Method::PublicKey { key },
+                method: auth::Method::PublicKey {
+                    key,
+                    hash_alg: None,
+                },
+            })
+            .await
+            .map_err(|_| crate::Error::SendError)?;
+        self.wait_recv_reply().await
+    }
+
+    /// Perform public key-based SSH authentication
+    /// with an explicit hash algorithm selection (for RSA keys).
+    pub async fn authenticate_publickey_with_hash<U: Into<String>>(
+        &mut self,
+        user: U,
+        key: Arc<PrivateKey>,
+        hash_alg: Option<HashAlg>,
+    ) -> Result<AuthResult, crate::Error> {
+        let user = user.into();
+        self.sender
+            .send(Msg::Authenticate {
+                user,
+                method: auth::Method::PublicKey {
+                    key,
+                    hash_alg: Some(hash_alg),
+                },
             })
             .await
             .map_err(|_| crate::Error::SendError)?;

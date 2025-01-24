@@ -23,7 +23,6 @@ use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::helpers::NameList;
-use crate::keys::key::PrivateKeyWithHashAlg;
 use crate::CryptoVec;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -192,7 +191,10 @@ pub enum Method {
         password: String,
     },
     PublicKey {
-        key: PrivateKeyWithHashAlg,
+        key: Arc<PrivateKey>,
+        /// None = based on server-sig-algs
+        /// Some(None) = SHA1
+        hash_alg: Option<Option<HashAlg>>,
     },
     OpenSshCertificate {
         key: Arc<PrivateKey>,

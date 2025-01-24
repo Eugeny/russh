@@ -178,7 +178,7 @@ pub enum Error {
     UnknownAlgo,
 
     /// No common algorithm found during key exchange.
-    #[error("No common algorithm")]
+    #[error("No common {kind:?} algorithm - ours: {ours:?}, theirs: {theirs:?}")]
     NoCommonAlgo {
         kind: AlgorithmKind,
         ours: Vec<String>,

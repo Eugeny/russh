@@ -10,7 +10,6 @@ use std::time::Duration;
 use anyhow::Result;
 use async_trait::async_trait;
 use clap::Parser;
-use key::PrivateKeyWithHashAlg;
 use log::info;
 use russh::keys::*;
 use russh::*;
@@ -86,7 +85,10 @@ impl Session {
         let config = client::Config {
             inactivity_timeout: Some(Duration::from_secs(5)),
             preferred: Preferred {
-                kex: Cow::Owned(vec![russh::kex::DH_GEX_SHA256]),
+                kex: Cow::Owned(vec![
+                    russh::kex::CURVE25519_PRE_RFC_8731,
+                    russh::kex::EXTENSION_SUPPORT_AS_CLIENT,
+                ]),
                 ..Default::default()
             },
             ..<_>::default()
@@ -97,7 +99,7 @@ impl Session {
 
         let mut session = client::connect(config, addrs, sh).await?;
         let auth_res = session
-            .authenticate_publickey(user, PrivateKeyWithHashAlg::new(Arc::new(key_pair), None)?)
+            .authenticate_publickey(user, Arc::new(key_pair))
             .await?;
 
         if !auth_res.success() {
