@@ -4,7 +4,6 @@ use std::sync::Arc;
 use futures::FutureExt;
 use rand::RngCore;
 use rand_core::OsRng;
-use russh::keys::key::PrivateKeyWithHashAlg;
 use russh::server::{self, Auth, Msg, Server as _, Session};
 use russh::{client, Channel, ChannelMsg};
 use ssh_key::PrivateKey;
@@ -41,7 +40,7 @@ async fn stream(addr: SocketAddr, data: &[u8], tx: watch::Sender<()>) -> Result<
 
     let mut session = russh::client::connect(config, addr, Client).await?;
     let channel = match session
-        .authenticate_publickey("user", PrivateKeyWithHashAlg::new(key, None).unwrap())
+        .authenticate_publickey("user", key)
         .await
         .map(|x| x.success())
     {

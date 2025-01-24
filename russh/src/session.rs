@@ -21,6 +21,7 @@ use std::num::Wrapping;
 use byteorder::{BigEndian, ByteOrder};
 use log::{debug, trace};
 use ssh_encoding::Encode;
+use ssh_key::Algorithm;
 use tokio::sync::oneshot;
 
 use crate::cipher::OpeningKey;
@@ -52,6 +53,7 @@ pub(crate) struct Encrypted {
     pub client_compression: crate::compression::Compression,
     pub decompress: crate::compression::Decompress,
     pub rekey_wanted: bool,
+    pub server_sig_algs: Option<Vec<Algorithm>>,
 }
 
 pub(crate) struct CommonSession<Config> {
@@ -151,6 +153,7 @@ impl<C> CommonSession<C> {
             client_compression: newkeys.names.client_compression,
             decompress: crate::compression::Decompress::None,
             rekey_wanted: false,
+            server_sig_algs: None,
         });
         self.remote_to_local = newkeys.cipher.remote_to_local;
         self.packet_writer
