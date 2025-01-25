@@ -9,6 +9,7 @@ mod compress {
     use std::sync::{Arc, Mutex};
 
     use async_trait::async_trait;
+    use keys::PrivateKeyWithHashAlg;
     use log::debug;
     use rand_core::OsRng;
     use ssh_key::PrivateKey;
@@ -52,7 +53,10 @@ mod compress {
         let authenticated = session
             .authenticate_publickey(
                 std::env::var("USER").unwrap_or("user".to_owned()),
-                Arc::new(client_key),
+                PrivateKeyWithHashAlg::new(
+                    Arc::new(client_key),
+                    session.best_supported_rsa_hash().await.unwrap().flatten(),
+                ),
             )
             .await
             .unwrap()
@@ -139,6 +143,7 @@ mod compress {
 
 mod channels {
     use async_trait::async_trait;
+    use keys::PrivateKeyWithHashAlg;
     use rand_core::OsRng;
     use server::Session;
     use ssh_key::PrivateKey;
@@ -195,7 +200,7 @@ mod channels {
             let authenticated = session
                 .authenticate_publickey(
                     std::env::var("USER").unwrap_or("user".to_owned()),
-                    Arc::new(client_key),
+                    PrivateKeyWithHashAlg::new(Arc::new(client_key), None),
                 )
                 .await
                 .unwrap();
