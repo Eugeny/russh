@@ -16,12 +16,11 @@ use std::cell::RefCell;
 use std::convert::TryInto;
 use std::ops::Deref;
 use std::str::FromStr;
-use std::sync::Arc;
 
 use bytes::Bytes;
 use log::{debug, error, info, trace, warn};
 use ssh_encoding::{Decode, Encode, Reader};
-use ssh_key::{Algorithm, HashAlg, PrivateKey};
+use ssh_key::Algorithm;
 
 use super::IncomingSshPacket;
 use crate::auth::AuthRequest;
@@ -29,7 +28,6 @@ use crate::cert::PublicKeyOrCertificate;
 use crate::client::{Handler, Msg, Prompt, Reply, Session};
 use crate::helpers::{map_err, sign_with_hash_alg, AlgorithmExt, EncodedExt, NameList};
 use crate::keys::key::parse_public_key;
-use crate::keys::PrivateKeyWithHashAlg;
 use crate::parsing::{ChannelOpenConfirmation, ChannelType, OpenChannelMessage};
 use crate::session::{Encrypted, EncryptedState, GlobalRequestResponse};
 use crate::{
@@ -291,17 +289,15 @@ impl Session {
     fn handle_server_sig_algs_ext(&mut self, r: &mut impl Reader) -> Result<(), Error> {
         let algs = NameList::decode(r)?;
         debug!("* server-sig-algs");
-        if let Some(ref mut enc) = self.common.encrypted {
-            enc.server_sig_algs = Some(
-                algs.0
-                    .iter()
-                    .filter_map(|x| Algorithm::from_str(x).ok())
-                    .inspect(|x| {
-                        debug!("  * {x:?}");
-                    })
-                    .collect::<Vec<_>>(),
-            );
-        }
+        self.server_sig_algs = Some(
+            algs.0
+                .iter()
+                .filter_map(|x| Algorithm::from_str(x).ok())
+                .inspect(|x| {
+                    debug!("  * {x:?}");
+                })
+                .collect::<Vec<_>>(),
+        );
         Ok(())
     }
 
@@ -848,39 +844,6 @@ impl Session {
 }
 
 impl Encrypted {
-    fn pick_hash_alg_for_key(
-        &self,
-        key: Arc<PrivateKey>,
-        hash_alg_choice: Option<Option<HashAlg>>,
-    ) -> Result<PrivateKeyWithHashAlg, Error> {
-        Ok(match hash_alg_choice {
-            Some(hash_alg) => PrivateKeyWithHashAlg::new(key.clone(), hash_alg)?,
-            None => {
-                if key.algorithm().is_rsa() {
-                    PrivateKeyWithHashAlg::new(key.clone(), self.best_key_hash_alg())?
-                } else {
-                    PrivateKeyWithHashAlg::new(key.clone(), None)?
-                }
-            }
-        })
-    }
-
-    fn best_key_hash_alg(&self) -> Option<HashAlg> {
-        if let Some(ref ssa) = self.server_sig_algs {
-            let possible_algs = [
-                Some(ssh_key::HashAlg::Sha512),
-                Some(ssh_key::HashAlg::Sha256),
-                None,
-            ];
-            for alg in possible_algs.into_iter() {
-                if ssa.contains(&Algorithm::Rsa { hash: alg }) {
-                    return alg;
-                }
-            }
-        }
-        None
-    }
-
     fn write_auth_request(
         &mut self,
         user: &str,
@@ -905,12 +868,7 @@ impl Encrypted {
                     password.encode(&mut self.write)?;
                     true
                 }
-                auth::Method::PublicKey {
-                    ref key,
-                    ref hash_alg,
-                } => {
-                    let key = self.pick_hash_alg_for_key(key.clone(), *hash_alg)?;
-
+                auth::Method::PublicKey { ref key } => {
                     user.encode(&mut self.write)?;
                     "ssh-connection".encode(&mut self.write)?;
                     "publickey".encode(&mut self.write)?;
@@ -994,13 +952,12 @@ impl Encrypted {
         buffer: &mut CryptoVec,
     ) -> Result<(), crate::Error> {
         match method {
-            auth::Method::PublicKey { key, hash_alg } => {
-                let key = self.pick_hash_alg_for_key(key.clone(), *hash_alg)?;
+            auth::Method::PublicKey { key } => {
                 let i0 =
-                    self.client_make_to_sign(user, &PublicKeyOrCertificate::from(&key), buffer)?;
+                    self.client_make_to_sign(user, &PublicKeyOrCertificate::from(key), buffer)?;
 
                 // Extend with self-signature.
-                sign_with_hash_alg(&key, buffer)?.encode(&mut *buffer)?;
+                sign_with_hash_alg(key, buffer)?.encode(&mut *buffer)?;
 
                 push_packet!(self.write, {
                     #[allow(clippy::indexing_slicing)] // length checked

@@ -99,7 +99,13 @@ impl Session {
 
         let mut session = client::connect(config, addrs, sh).await?;
         let auth_res = session
-            .authenticate_publickey(user, Arc::new(key_pair))
+            .authenticate_publickey(
+                user,
+                PrivateKeyWithHashAlg::new(
+                    Arc::new(key_pair),
+                    session.best_supported_rsa_hash().await.unwrap().flatten(),
+                ),
+            )
             .await?;
 
         if !auth_res.success() {

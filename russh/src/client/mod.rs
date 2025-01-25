@@ -47,7 +47,7 @@ use kex::ClientKex;
 use log::{debug, error, trace};
 use russh_util::time::Instant;
 use ssh_encoding::Decode;
-use ssh_key::{Certificate, HashAlg, PrivateKey, PublicKey};
+use ssh_key::{Algorithm, Certificate, HashAlg, PrivateKey, PublicKey};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadHalf, WriteHalf};
 use tokio::pin;
 use tokio::sync::mpsc::{
@@ -59,6 +59,7 @@ pub use crate::auth::AuthResult;
 use crate::channels::{Channel, ChannelMsg, ChannelRef, WindowSizeRef};
 use crate::cipher::{self, clear, OpeningKey};
 use crate::kex::{KexCause, KexProgress, SessionKexState};
+use crate::keys::PrivateKeyWithHashAlg;
 use crate::msg::{is_kex_msg, validate_server_msg_strict_kex};
 use crate::session::{CommonSession, EncryptedState, GlobalRequestResponse, NewKeys};
 use crate::ssh_read::SshRead;
@@ -90,6 +91,7 @@ pub struct Session {
     inbound_channel_sender: Sender<Msg>,
     inbound_channel_receiver: Receiver<Msg>,
     open_global_requests: VecDeque<GlobalRequestResponse>,
+    server_sig_algs: Option<Vec<Algorithm>>,
 }
 
 impl Drop for Session {
@@ -180,6 +182,9 @@ pub enum Msg {
     },
     Channel(ChannelId, ChannelMsg),
     Rekey,
+    GetServerSigAlgs {
+        reply_channel: oneshot::Sender<Option<Vec<Algorithm>>>,
+    },
 }
 
 impl From<(ChannelId, ChannelMsg)> for Msg {
@@ -359,44 +364,22 @@ impl<H: Handler> Handle<H> {
     }
 
     /// Perform public key-based SSH authentication.
-    /// This method will automatically select the best hash function
-    /// if the server supports the `server-sig-algs` protocol extension
-    /// and will fall back to SHA-1 otherwise.
+    ///
+    /// For RSA keys, you'll need to decide on which hash algorithm to use.
+    /// This is the difference between what is also known as
+    /// `ssh-rsa`, `rsa-sha2-256`, and `rsa-sha2-512` "keys" in OpenSSH.
+    /// You can use [Handle::best_supported_rsa_hash] to automatically
+    /// figure out the best hash algorithm for RSA keys.
     pub async fn authenticate_publickey<U: Into<String>>(
         &mut self,
         user: U,
-        key: Arc<PrivateKey>,
+        key: PrivateKeyWithHashAlg,
     ) -> Result<AuthResult, crate::Error> {
         let user = user.into();
         self.sender
             .send(Msg::Authenticate {
                 user,
-                method: auth::Method::PublicKey {
-                    key,
-                    hash_alg: None,
-                },
-            })
-            .await
-            .map_err(|_| crate::Error::SendError)?;
-        self.wait_recv_reply().await
-    }
-
-    /// Perform public key-based SSH authentication
-    /// with an explicit hash algorithm selection (for RSA keys).
-    pub async fn authenticate_publickey_with_hash<U: Into<String>>(
-        &mut self,
-        user: U,
-        key: Arc<PrivateKey>,
-        hash_alg: Option<HashAlg>,
-    ) -> Result<AuthResult, crate::Error> {
-        let user = user.into();
-        self.sender
-            .send(Msg::Authenticate {
-                user,
-                method: auth::Method::PublicKey {
-                    key,
-                    hash_alg: Some(hash_alg),
-                },
+                method: auth::Method::PublicKey { key },
             })
             .await
             .map_err(|_| crate::Error::SendError)?;
@@ -505,6 +488,39 @@ impl<H: Handler> Handle<H> {
                 }
             }
         }
+    }
+
+    /// Returns the best RSA hash algorithm supported by the server,
+    /// as indicated by the `server-sig-algs` extension.
+    /// If the server does not support the extension,
+    /// `None` is returned. In this case you may still attempt an authentication
+    /// with `rsa-sha2-256` or `rsa-sha2-512` and hope for the best.
+    /// If the server supports the extension, but does not support `rsa-sha2-*`,
+    /// `Some(None)` is returned.
+    pub async fn best_supported_rsa_hash(&self) -> Result<Option<Option<HashAlg>>, Error> {
+        let (sender, receiver) = oneshot::channel();
+
+        self.sender
+            .send(Msg::GetServerSigAlgs {
+                reply_channel: sender,
+            })
+            .await
+            .map_err(|_| crate::Error::SendError)?;
+
+        if let Some(ssa) = receiver.await.map_err(|_| Error::Inconsistent)? {
+            let possible_algs = [
+                Some(ssh_key::HashAlg::Sha512),
+                Some(ssh_key::HashAlg::Sha256),
+                None,
+            ];
+            for alg in possible_algs.into_iter() {
+                if ssa.contains(&Algorithm::Rsa { hash: alg }) {
+                    return Ok(Some(alg));
+                }
+            }
+        }
+
+        Ok(None)
     }
 
     /// Request a session channel (the most basic type of
@@ -896,6 +912,7 @@ impl Session {
             pending_reads: Vec::new(),
             pending_len: 0,
             open_global_requests: VecDeque::new(),
+            server_sig_algs: None,
         }
     }
 
@@ -1255,6 +1272,9 @@ impl Session {
             }
             Msg::Channel(id, ChannelMsg::Close) => self.close(id)?,
             Msg::Rekey => self.initiate_rekey()?,
+            Msg::GetServerSigAlgs { reply_channel } => {
+                let _ = reply_channel.send(self.server_sig_algs.clone());
+            }
             msg => {
                 // should be unreachable, since the receiver only gets
                 // messages from methods implemented within russh
