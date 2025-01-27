@@ -173,6 +173,7 @@ impl<R: AsyncRead + AsyncWrite + Unpin + Send + 'static> Signer
 {
     type Error = AgentAuthError;
 
+    #[allow(clippy::manual_async_fn)]
     fn auth_publickey_sign(
         &mut self,
         key: &ssh_key::PublicKey,
