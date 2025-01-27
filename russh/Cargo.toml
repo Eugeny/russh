@@ -10,10 +10,11 @@ name = "russh"
 readme = "../README.md"
 repository = "https://github.com/warp-tech/russh"
 version = "0.50.0-beta.11"
-rust-version = "1.65"
+rust-version = "1.75"
 
 [features]
 default = ["flate2"]
+async-trait = ["dep:async-trait"]
 legacy-ed25519-pkcs8-parser = ["yasna"]
 # Danger: 3DES cipher is insecure.
 des = ["dep:des"]
@@ -21,7 +22,7 @@ des = ["dep:des"]
 [dependencies]
 aes-gcm = "0.10"
 aes.workspace = true
-async-trait.workspace = true
+async-trait = { workspace = true, optional = true }
 bitflags = "2.0"
 block-padding = { version = "0.3", features = ["std"] }
 byteorder.workspace = true
@@ -119,3 +120,11 @@ tempfile = "3.14.0"
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 russh-sftp = "2.0.5"
 tokio.workspace = true
+
+[[example]]
+name = "sftp_server"
+path = "examples/sftp_server.rs"
+required-features = ["async-trait"]
+
+[package.metadata.docs.rs]
+all-features = true

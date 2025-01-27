@@ -2,7 +2,7 @@
 name = "russh-util"
 version = "0.48.0"
 edition = "2021"
-rust-version = "1.65"
+rust-version = "1.75"
 description = "Runtime abstraction utilities for russh."
 documentation = "https://docs.rs/russh-util"
 homepage = "https://github.com/warp-tech/russh"

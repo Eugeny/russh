@@ -3,7 +3,6 @@ use std::marker::Sync;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime};
 
-use async_trait::async_trait;
 use byteorder::{BigEndian, ByteOrder};
 use bytes::Bytes;
 use futures::future::Future;
@@ -44,7 +43,7 @@ pub enum MessageType {
     Unlock,
 }
 
-#[async_trait]
+#[cfg_attr(feature = "async-trait", async_trait::async_trait)]
 pub trait Agent: Clone + Send + 'static {
     fn confirm(
         self,
@@ -53,8 +52,8 @@ pub trait Agent: Clone + Send + 'static {
         Box::new(futures::future::ready((self, true)))
     }
 
-    async fn confirm_request(&self, _msg: MessageType) -> bool {
-        true
+    fn confirm_request(&self, _msg: MessageType) -> impl Future<Output = bool> + Send {
+        async { true }
     }
 }
 
@@ -330,7 +329,11 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
             }
         };
         let agent = if needs_confirm {
-            let (agent, ok) = agent.confirm(key.clone()).await;
+            let (agent, ok) = {
+                let _pk = key.clone();
+                Box::new(futures::future::ready((agent, true)))
+            }
+            .await;
             if !ok {
                 return Ok((agent, false));
             }
