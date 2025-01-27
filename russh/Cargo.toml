@@ -120,3 +120,8 @@ tempfile = "3.14.0"
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 russh-sftp = "2.0.5"
 tokio.workspace = true
+
+[[example]]
+name = "sftp_server"
+path = "examples/sftp_server.rs"
+required-features = ["async-trait"]

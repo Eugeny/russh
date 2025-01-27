@@ -173,15 +173,17 @@ impl<R: AsyncRead + AsyncWrite + Unpin + Send + 'static> Signer
 {
     type Error = AgentAuthError;
 
-    async fn auth_publickey_sign(
+    fn auth_publickey_sign(
         &mut self,
         key: &ssh_key::PublicKey,
         hash_alg: Option<HashAlg>,
         to_sign: CryptoVec,
-    ) -> Result<CryptoVec, Self::Error> {
-        self.sign_request(key, hash_alg, to_sign)
-            .await
-            .map_err(Into::into)
+    ) -> impl Future<Output = Result<CryptoVec, Self::Error>> {
+        async move {
+            self.sign_request(key, hash_alg, to_sign)
+                .await
+                .map_err(Into::into)
+        }
     }
 }
 
