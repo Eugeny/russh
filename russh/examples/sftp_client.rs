@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use log::{error, info, LevelFilter};
 use russh::keys::*;
 use russh::*;
@@ -10,7 +9,6 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
 struct Client;
 
-#[async_trait]
 impl client::Handler for Client {
     type Error = anyhow::Error;
 

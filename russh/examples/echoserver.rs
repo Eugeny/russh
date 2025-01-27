@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use rand_core::OsRng;
 use russh::keys::{Certificate, *};
 use russh::server::{Msg, Server as _, Session};
@@ -64,7 +63,6 @@ impl server::Server for Server {
     }
 }
 
-#[async_trait]
 impl server::Handler for Server {
     type Error = russh::Error;
 
