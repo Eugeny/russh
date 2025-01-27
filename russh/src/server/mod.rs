@@ -193,7 +193,8 @@ pub enum Auth {
 
 /// Server handler. Each client will have their own handler.
 ///
-/// Note: this is an `async_trait`. Click `[source]` on the right to see actual async function definitions.
+/// Note: this is an async trait. The trait functions return `impl Future`,
+/// and you can simply define them as `async fn` instead.
 #[cfg_attr(feature = "async-trait", async_trait::async_trait)]
 pub trait Handler: Sized {
     type Error: From<crate::Error> + Send;

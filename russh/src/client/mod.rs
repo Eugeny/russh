@@ -1563,7 +1563,8 @@ impl Default for Config {
 /// You must at the very least implement the `check_server_key` fn.
 /// The default implementation rejects all keys.
 ///
-/// Note: this is an `async_trait`. Click `[source]` on the right to see actual async function definitions.
+/// Note: this is an async trait. The trait functions return `impl Future`,
+/// and you can simply define them as `async fn` instead.
 #[cfg_attr(feature = "async-trait", async_trait::async_trait)]
 pub trait Handler: Sized + Send {
     type Error: From<crate::Error> + Send + core::fmt::Debug;
