@@ -125,3 +125,6 @@ tokio.workspace = true
 name = "sftp_server"
 path = "examples/sftp_server.rs"
 required-features = ["async-trait"]
+
+[package.metadata.docs.rs]
+all-features = true
