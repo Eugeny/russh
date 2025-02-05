@@ -13,11 +13,11 @@
 // limitations under the License.
 //
 
+use std::future::Future;
 use std::ops::Deref;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use ssh_key::{Certificate, HashAlg, PrivateKey};
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -147,16 +147,16 @@ impl AuthResult {
     }
 }
 
-#[async_trait]
+#[cfg_attr(feature = "async-trait", async_trait::async_trait)]
 pub trait Signer: Sized {
     type Error: From<crate::SendError>;
 
-    async fn auth_publickey_sign(
+    fn auth_publickey_sign(
         &mut self,
         key: &ssh_key::PublicKey,
         hash_alg: Option<HashAlg>,
         to_sign: CryptoVec,
-    ) -> Result<CryptoVec, Self::Error>;
+    ) -> impl Future<Output = Result<CryptoVec, Self::Error>> + Send;
 }
 
 #[derive(Debug, Error)]
@@ -167,21 +167,24 @@ pub enum AgentAuthError {
     Key(#[from] crate::keys::Error),
 }
 
-#[async_trait]
+#[cfg_attr(feature = "async-trait", async_trait::async_trait)]
 impl<R: AsyncRead + AsyncWrite + Unpin + Send + 'static> Signer
     for crate::keys::agent::client::AgentClient<R>
 {
     type Error = AgentAuthError;
 
-    async fn auth_publickey_sign(
+    #[allow(clippy::manual_async_fn)]
+    fn auth_publickey_sign(
         &mut self,
         key: &ssh_key::PublicKey,
         hash_alg: Option<HashAlg>,
         to_sign: CryptoVec,
-    ) -> Result<CryptoVec, Self::Error> {
-        self.sign_request(key, hash_alg, to_sign)
-            .await
-            .map_err(Into::into)
+    ) -> impl Future<Output = Result<CryptoVec, Self::Error>> {
+        async move {
+            self.sign_request(key, hash_alg, to_sign)
+                .await
+                .map_err(Into::into)
+        }
     }
 }
 

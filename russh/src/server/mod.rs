@@ -35,7 +35,6 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
-use async_trait::async_trait;
 use bytes::Bytes;
 use client::GexParams;
 use futures::future::Future;
@@ -194,8 +193,9 @@ pub enum Auth {
 
 /// Server handler. Each client will have their own handler.
 ///
-/// Note: this is an `async_trait`. Click `[source]` on the right to see actual async function definitions.
-#[async_trait]
+/// Note: this is an async trait. The trait functions return `impl Future`,
+/// and you can simply define them as `async fn` instead.
+#[cfg_attr(feature = "async-trait", async_trait::async_trait)]
 pub trait Handler: Sized {
     type Error: From<crate::Error> + Send;
 
@@ -203,10 +203,12 @@ pub trait Handler: Sized {
     /// sure rejection happens in time `config.auth_rejection_time`,
     /// except if this method takes more than that.
     #[allow(unused_variables)]
-    async fn auth_none(&mut self, user: &str) -> Result<Auth, Self::Error> {
-        Ok(Auth::Reject {
-            proceed_with_methods: None,
-        })
+    fn auth_none(&mut self, user: &str) -> impl Future<Output = Result<Auth, Self::Error>> + Send {
+        async {
+            Ok(Auth::Reject {
+                proceed_with_methods: None,
+            })
+        }
     }
 
     /// Check authentication using the "password" method. Russh
@@ -214,10 +216,16 @@ pub trait Handler: Sized {
     /// `config.auth_rejection_time`, except if this method takes more
     /// than that.
     #[allow(unused_variables)]
-    async fn auth_password(&mut self, user: &str, password: &str) -> Result<Auth, Self::Error> {
-        Ok(Auth::Reject {
-            proceed_with_methods: None,
-        })
+    fn auth_password(
+        &mut self,
+        user: &str,
+        password: &str,
+    ) -> impl Future<Output = Result<Auth, Self::Error>> + Send {
+        async {
+            Ok(Auth::Reject {
+                proceed_with_methods: None,
+            })
+        }
     }
 
     /// Check authentication using the "publickey" method. This method
@@ -228,12 +236,12 @@ pub trait Handler: Sized {
     /// `config.auth_rejection_time`, except if this method takes more
     /// time than that.
     #[allow(unused_variables)]
-    async fn auth_publickey_offered(
+    fn auth_publickey_offered(
         &mut self,
         user: &str,
         public_key: &ssh_key::PublicKey,
-    ) -> Result<Auth, Self::Error> {
-        Ok(Auth::Accept)
+    ) -> impl Future<Output = Result<Auth, Self::Error>> + Send {
+        async { Ok(Auth::Accept) }
     }
 
     /// Check authentication using the "publickey" method. This method
@@ -243,14 +251,16 @@ pub trait Handler: Sized {
     /// `config.auth_rejection_time`, except if this method takes more
     /// time than that.
     #[allow(unused_variables)]
-    async fn auth_publickey(
+    fn auth_publickey(
         &mut self,
         user: &str,
         public_key: &ssh_key::PublicKey,
-    ) -> Result<Auth, Self::Error> {
-        Ok(Auth::Reject {
-            proceed_with_methods: None,
-        })
+    ) -> impl Future<Output = Result<Auth, Self::Error>> + Send {
+        async {
+            Ok(Auth::Reject {
+                proceed_with_methods: None,
+            })
+        }
     }
 
     /// Check authentication using an OpenSSH certificate. This method
@@ -260,14 +270,16 @@ pub trait Handler: Sized {
     /// `config.auth_rejection_time`, except if this method takes more
     /// time than that.
     #[allow(unused_variables)]
-    async fn auth_openssh_certificate(
+    fn auth_openssh_certificate(
         &mut self,
         user: &str,
         certificate: &Certificate,
-    ) -> Result<Auth, Self::Error> {
-        Ok(Auth::Reject {
-            proceed_with_methods: None,
-        })
+    ) -> impl Future<Output = Result<Auth, Self::Error>> + Send {
+        async {
+            Ok(Auth::Reject {
+                proceed_with_methods: None,
+            })
+        }
     }
 
     /// Check authentication using the "keyboard-interactive"
@@ -275,78 +287,85 @@ pub trait Handler: Sized {
     /// `config.auth_rejection_time`, except if this method takes more
     /// than that.
     #[allow(unused_variables)]
-    async fn auth_keyboard_interactive(
-        &mut self,
+    fn auth_keyboard_interactive<'a>(
+        &'a mut self,
         user: &str,
         submethods: &str,
-        response: Option<Response<'async_trait>>,
-    ) -> Result<Auth, Self::Error> {
-        Ok(Auth::Reject {
-            proceed_with_methods: None,
-        })
+        response: Option<Response<'a>>,
+    ) -> impl Future<Output = Result<Auth, Self::Error>> + Send {
+        async {
+            Ok(Auth::Reject {
+                proceed_with_methods: None,
+            })
+        }
     }
 
     /// Called when authentication succeeds for a session.
     #[allow(unused_variables)]
-    async fn auth_succeeded(&mut self, session: &mut Session) -> Result<(), Self::Error> {
-        Ok(())
+    fn auth_succeeded(
+        &mut self,
+        session: &mut Session,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// Called when authentication starts but before it is successful.
     /// Return value is an authentication banner, usually a warning message shown to the client.
     #[allow(unused_variables)]
-    async fn authentication_banner(&mut self) -> Result<Option<String>, Self::Error> {
-        Ok(None)
+    fn authentication_banner(
+        &mut self,
+    ) -> impl Future<Output = Result<Option<String>, Self::Error>> + Send {
+        async { Ok(None) }
     }
 
     /// Called when the client closes a channel.
     #[allow(unused_variables)]
-    async fn channel_close(
+    fn channel_close(
         &mut self,
         channel: ChannelId,
         session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// Called when the client sends EOF to a channel.
     #[allow(unused_variables)]
-    async fn channel_eof(
+    fn channel_eof(
         &mut self,
         channel: ChannelId,
         session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// Called when a new session channel is created.
     /// Return value indicates whether the channel request should be granted.
     #[allow(unused_variables)]
-    async fn channel_open_session(
+    fn channel_open_session(
         &mut self,
         channel: Channel<Msg>,
         session: &mut Session,
-    ) -> Result<bool, Self::Error> {
-        Ok(false)
+    ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
+        async { Ok(false) }
     }
 
     /// Called when a new X11 channel is created.
     /// Return value indicates whether the channel request should be granted.
     #[allow(unused_variables)]
-    async fn channel_open_x11(
+    fn channel_open_x11(
         &mut self,
         channel: Channel<Msg>,
         originator_address: &str,
         originator_port: u32,
         session: &mut Session,
-    ) -> Result<bool, Self::Error> {
-        Ok(false)
+    ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
+        async { Ok(false) }
     }
 
     /// Called when a new TCP/IP is created.
     /// Return value indicates whether the channel request should be granted.
     #[allow(unused_variables)]
-    async fn channel_open_direct_tcpip(
+    fn channel_open_direct_tcpip(
         &mut self,
         channel: Channel<Msg>,
         host_to_connect: &str,
@@ -354,14 +373,14 @@ pub trait Handler: Sized {
         originator_address: &str,
         originator_port: u32,
         session: &mut Session,
-    ) -> Result<bool, Self::Error> {
-        Ok(false)
+    ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
+        async { Ok(false) }
     }
 
     /// Called when a new forwarded connection comes in.
     /// <https://www.rfc-editor.org/rfc/rfc4254#section-7>
     #[allow(unused_variables)]
-    async fn channel_open_forwarded_tcpip(
+    fn channel_open_forwarded_tcpip(
         &mut self,
         channel: Channel<Msg>,
         host_to_connect: &str,
@@ -369,34 +388,34 @@ pub trait Handler: Sized {
         originator_address: &str,
         originator_port: u32,
         session: &mut Session,
-    ) -> Result<bool, Self::Error> {
-        Ok(false)
+    ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
+        async { Ok(false) }
     }
 
     /// Called when the client confirmed our request to open a
     /// channel. A channel can only be written to after receiving this
     /// message (this library panics otherwise).
     #[allow(unused_variables)]
-    async fn channel_open_confirmation(
+    fn channel_open_confirmation(
         &mut self,
         id: ChannelId,
         max_packet_size: u32,
         window_size: u32,
         session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// Called when a data packet is received. A response can be
     /// written to the `response` argument.
     #[allow(unused_variables)]
-    async fn data(
+    fn data(
         &mut self,
         channel: ChannelId,
         data: &[u8],
         session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// Called when an extended data packet is received. Code 1 means
@@ -404,26 +423,26 @@ pub trait Handler: Sized {
     /// defined (see
     /// [RFC4254](https://tools.ietf.org/html/rfc4254#section-5.2)).
     #[allow(unused_variables)]
-    async fn extended_data(
+    fn extended_data(
         &mut self,
         channel: ChannelId,
         code: u32,
         data: &[u8],
         session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// Called when the network window is adjusted, meaning that we
     /// can send more bytes.
     #[allow(unused_variables)]
-    async fn window_adjusted(
+    fn window_adjusted(
         &mut self,
         channel: ChannelId,
         new_size: u32,
         session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// Called when this server adjusts the network window. Return the
@@ -457,7 +476,7 @@ pub trait Handler: Sized {
     /// }
     /// ```
     #[allow(unused_variables, clippy::too_many_arguments)]
-    async fn pty_request(
+    fn pty_request(
         &mut self,
         channel: ChannelId,
         term: &str,
@@ -467,8 +486,8 @@ pub trait Handler: Sized {
         pix_height: u32,
         modes: &[(Pty, u32)],
         session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// The client requests an X11 connection.
@@ -492,7 +511,7 @@ pub trait Handler: Sized {
     /// }
     /// ```
     #[allow(unused_variables)]
-    async fn x11_request(
+    fn x11_request(
         &mut self,
         channel: ChannelId,
         single_connection: bool,
@@ -500,8 +519,8 @@ pub trait Handler: Sized {
         x11_auth_cookie: &str,
         x11_screen_number: u32,
         session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// The client wants to set the given environment variable. Check
@@ -525,14 +544,14 @@ pub trait Handler: Sized {
     /// }
     /// ```
     #[allow(unused_variables)]
-    async fn env_request(
+    fn env_request(
         &mut self,
         channel: ChannelId,
         variable_name: &str,
         variable_value: &str,
         session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// The client requests a shell.
@@ -552,12 +571,12 @@ pub trait Handler: Sized {
     /// }
     /// ```
     #[allow(unused_variables)]
-    async fn shell_request(
+    fn shell_request(
         &mut self,
         channel: ChannelId,
         session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// The client sends a command to execute, to be passed to a
@@ -579,13 +598,13 @@ pub trait Handler: Sized {
     /// }
     /// ```
     #[allow(unused_variables)]
-    async fn exec_request(
+    fn exec_request(
         &mut self,
         channel: ChannelId,
         data: &[u8],
         session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// The client asks to start the subsystem with the given name
@@ -607,13 +626,13 @@ pub trait Handler: Sized {
     /// }
     /// ```
     #[allow(unused_variables)]
-    async fn subsystem_request(
+    fn subsystem_request(
         &mut self,
         channel: ChannelId,
         name: &str,
         session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// The client's pseudo-terminal window size has changed.
@@ -637,7 +656,7 @@ pub trait Handler: Sized {
     /// }
     /// ```
     #[allow(unused_variables)]
-    async fn window_change_request(
+    fn window_change_request(
         &mut self,
         channel: ChannelId,
         col_width: u32,
@@ -645,8 +664,8 @@ pub trait Handler: Sized {
         pix_width: u32,
         pix_height: u32,
         session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// The client requests OpenSSH agent forwarding
@@ -666,67 +685,67 @@ pub trait Handler: Sized {
     /// }
     /// ```
     #[allow(unused_variables)]
-    async fn agent_request(
+    fn agent_request(
         &mut self,
         channel: ChannelId,
         session: &mut Session,
-    ) -> Result<bool, Self::Error> {
-        Ok(false)
+    ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
+        async { Ok(false) }
     }
 
     /// The client is sending a signal (usually to pass to the
     /// currently running process).
     #[allow(unused_variables)]
-    async fn signal(
+    fn signal(
         &mut self,
         channel: ChannelId,
         signal: Sig,
         session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// Used for reverse-forwarding ports, see
     /// [RFC4254](https://tools.ietf.org/html/rfc4254#section-7).
     /// If `port` is 0, you should set it to the allocated port number.
     #[allow(unused_variables)]
-    async fn tcpip_forward(
+    fn tcpip_forward(
         &mut self,
         address: &str,
         port: &mut u32,
         session: &mut Session,
-    ) -> Result<bool, Self::Error> {
-        Ok(false)
+    ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
+        async { Ok(false) }
     }
 
     /// Used to stop the reverse-forwarding of a port, see
     /// [RFC4254](https://tools.ietf.org/html/rfc4254#section-7).
     #[allow(unused_variables)]
-    async fn cancel_tcpip_forward(
+    fn cancel_tcpip_forward(
         &mut self,
         address: &str,
         port: u32,
         session: &mut Session,
-    ) -> Result<bool, Self::Error> {
-        Ok(false)
+    ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
+        async { Ok(false) }
     }
 
     #[allow(unused_variables)]
-    async fn streamlocal_forward(
+    fn streamlocal_forward(
         &mut self,
         socket_path: &str,
         session: &mut Session,
-    ) -> Result<bool, Self::Error> {
-        Ok(false)
+    ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
+        async { Ok(false) }
     }
 
     #[allow(unused_variables)]
-    async fn cancel_streamlocal_forward(
+    fn cancel_streamlocal_forward(
         &mut self,
         socket_path: &str,
         session: &mut Session,
-    ) -> Result<bool, Self::Error> {
-        Ok(false)
+    ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
+        async { Ok(false) }
     }
 
     /// Override when enabling the `diffie-hellman-group-exchange-*` key exchange methods.
@@ -742,35 +761,37 @@ pub trait Handler: Sized {
     ///
     /// See https://datatracker.ietf.org/doc/html/rfc4419#section-3
     #[allow(unused_variables)]
-    async fn lookup_dh_gex_group(
+    fn lookup_dh_gex_group(
         &mut self,
         gex_params: &GexParams,
-    ) -> Result<Option<DhGroup>, Self::Error> {
-        let mut best_group = &DH_GROUP14;
+    ) -> impl Future<Output = Result<Option<DhGroup>, Self::Error>> + Send {
+        async {
+            let mut best_group = &DH_GROUP14;
 
-        // Find _some_ matching group
-        for group in BUILTIN_SAFE_DH_GROUPS.iter() {
-            if group.bit_size() >= gex_params.min_group_size()
-                && group.bit_size() <= gex_params.max_group_size()
-            {
-                best_group = *group;
-                break;
+            // Find _some_ matching group
+            for group in BUILTIN_SAFE_DH_GROUPS.iter() {
+                if group.bit_size() >= gex_params.min_group_size()
+                    && group.bit_size() <= gex_params.max_group_size()
+                {
+                    best_group = *group;
+                    break;
+                }
             }
-        }
 
-        // Find _closest_ matching group
-        for group in BUILTIN_SAFE_DH_GROUPS.iter() {
-            if group.bit_size() > gex_params.preferred_group_size() {
-                best_group = *group;
-                break;
+            // Find _closest_ matching group
+            for group in BUILTIN_SAFE_DH_GROUPS.iter() {
+                if group.bit_size() > gex_params.preferred_group_size() {
+                    best_group = *group;
+                    break;
+                }
             }
-        }
 
-        Ok(Some(best_group.clone()))
+            Ok(Some(best_group.clone()))
+        }
     }
 }
 
-#[async_trait]
+#[cfg_attr(feature = "async-trait", async_trait::async_trait)]
 /// Trait used to create new handlers when clients connect.
 pub trait Server {
     /// The type of handlers.
@@ -782,78 +803,88 @@ pub trait Server {
 
     /// Run a server on a specified `tokio::net::TcpListener`. Useful when dropping
     /// privileges immediately after socket binding, for example.
-    async fn run_on_socket(
+    fn run_on_socket(
         &mut self,
         config: Arc<Config>,
         socket: &TcpListener,
-    ) -> Result<(), std::io::Error> {
-        if config.maximum_packet_size > 65535 {
-            error!(
-                "Maximum packet size ({:?}) should not larger than a TCP packet (65535)",
-                config.maximum_packet_size
-            );
-        }
+    ) -> impl Future<Output = Result<(), std::io::Error>> + Send
+    where
+        Self: Send,
+    {
+        async move {
+            if config.maximum_packet_size > 65535 {
+                error!(
+                    "Maximum packet size ({:?}) should not larger than a TCP packet (65535)",
+                    config.maximum_packet_size
+                );
+            }
 
-        let (error_tx, mut error_rx) = tokio::sync::mpsc::unbounded_channel();
+            let (error_tx, mut error_rx) = tokio::sync::mpsc::unbounded_channel();
 
-        loop {
-            tokio::select! {
-                accept_result = socket.accept() => {
-                    match accept_result {
-                        Ok((socket, _)) => {
-                            let config = config.clone();
-                            let handler = self.new_client(socket.peer_addr().ok());
-                            let error_tx = error_tx.clone();
+            loop {
+                tokio::select! {
+                    accept_result = socket.accept() => {
+                        match accept_result {
+                            Ok((socket, _)) => {
+                                let config = config.clone();
+                                let handler = self.new_client(socket.peer_addr().ok());
+                                let error_tx = error_tx.clone();
 
-                            russh_util::runtime::spawn(async move {
-                                if config.nodelay {
-                                    if let Err(e) = socket.set_nodelay(true) {
-                                        warn!("set_nodelay() failed: {e:?}");
+                                russh_util::runtime::spawn(async move {
+                                    if config.nodelay {
+                                        if let Err(e) = socket.set_nodelay(true) {
+                                            warn!("set_nodelay() failed: {e:?}");
+                                        }
                                     }
-                                }
 
-                                let session = match run_stream(config, socket, handler).await {
-                                    Ok(s) => s,
-                                    Err(e) => {
-                                        debug!("Connection setup failed");
-                                        let _ = error_tx.send(e);
-                                        return
-                                    }
-                                };
+                                    let session = match run_stream(config, socket, handler).await {
+                                        Ok(s) => s,
+                                        Err(e) => {
+                                            debug!("Connection setup failed");
+                                            let _ = error_tx.send(e);
+                                            return
+                                        }
+                                    };
 
-                                match session.await {
-                                    Ok(_) => debug!("Connection closed"),
-                                    Err(e) => {
-                                        debug!("Connection closed with error");
-                                        let _ = error_tx.send(e);
+                                    match session.await {
+                                        Ok(_) => debug!("Connection closed"),
+                                        Err(e) => {
+                                            debug!("Connection closed with error");
+                                            let _ = error_tx.send(e);
+                                        }
                                     }
-                                }
-                            });
+                                });
+                            }
+
+                            _ => break,
                         }
+                    },
 
-                        _ => break,
+                    Some(error) = error_rx.recv() => {
+                        self.handle_session_error(error);
                     }
-                },
-
-                Some(error) = error_rx.recv() => {
-                    self.handle_session_error(error);
                 }
             }
-        }
 
-        Ok(())
+            Ok(())
+        }
     }
 
     /// Run a server.
     /// Create a new `Connection` from the server's configuration, a
     /// stream and a [`Handler`](trait.Handler.html).
-    async fn run_on_address<A: ToSocketAddrs + Send>(
+    fn run_on_address<A: ToSocketAddrs + Send>(
         &mut self,
         config: Arc<Config>,
         addrs: A,
-    ) -> Result<(), std::io::Error> {
-        let socket = TcpListener::bind(addrs).await?;
-        self.run_on_socket(config, &socket).await
+    ) -> impl Future<Output = Result<(), std::io::Error>> + Send
+    where
+        Self: Send,
+    {
+        async move {
+            let socket = TcpListener::bind(addrs).await?;
+            self.run_on_socket(config, &socket).await
+        }
     }
 }
 

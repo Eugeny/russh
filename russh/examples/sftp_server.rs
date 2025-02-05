@@ -3,7 +3,6 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use async_trait::async_trait;
 use log::{error, info, LevelFilter};
 use rand_core::OsRng;
 use russh::server::{Auth, Msg, Server as _, Session};
@@ -41,7 +40,6 @@ impl SshSession {
     }
 }
 
-#[async_trait]
 impl russh::server::Handler for SshSession {
     type Error = anyhow::Error;
 
@@ -109,7 +107,7 @@ struct SftpSession {
     root_dir_read_done: bool,
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl russh_sftp::server::Handler for SftpSession {
     type Error = StatusCode;
 

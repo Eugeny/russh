@@ -40,7 +40,6 @@ use std::num::Wrapping;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use futures::task::{Context, Poll};
 use futures::Future;
 use kex::ClientKex;
@@ -1564,8 +1563,9 @@ impl Default for Config {
 /// You must at the very least implement the `check_server_key` fn.
 /// The default implementation rejects all keys.
 ///
-/// Note: this is an `async_trait`. Click `[source]` on the right to see actual async function definitions.
-#[async_trait]
+/// Note: this is an async trait. The trait functions return `impl Future`,
+/// and you can simply define them as `async fn` instead.
+#[cfg_attr(feature = "async-trait", async_trait::async_trait)]
 pub trait Handler: Sized + Send {
     type Error: From<crate::Error> + Send + core::fmt::Debug;
 
@@ -1574,95 +1574,95 @@ pub trait Handler: Sized + Send {
     /// [RFC4252](https://tools.ietf.org/html/rfc4252#section-5.4) for
     /// more details.
     #[allow(unused_variables)]
-    async fn auth_banner(
+    fn auth_banner(
         &mut self,
         banner: &str,
         session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// Called to check the server's public key. This is a very important
     /// step to help prevent man-in-the-middle attacks. The default
     /// implementation rejects all keys.
     #[allow(unused_variables)]
-    async fn check_server_key(
+    fn check_server_key(
         &mut self,
         server_public_key: &ssh_key::PublicKey,
-    ) -> Result<bool, Self::Error> {
-        Ok(false)
+    ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
+        async { Ok(false) }
     }
 
     /// Called when the server confirmed our request to open a
     /// channel. A channel can only be written to after receiving this
     /// message (this library panics otherwise).
     #[allow(unused_variables)]
-    async fn channel_open_confirmation(
+    fn channel_open_confirmation(
         &mut self,
         id: ChannelId,
         max_packet_size: u32,
         window_size: u32,
         session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// Called when the server signals success.
     #[allow(unused_variables)]
-    async fn channel_success(
+    fn channel_success(
         &mut self,
         channel: ChannelId,
         session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// Called when the server signals failure.
     #[allow(unused_variables)]
-    async fn channel_failure(
+    fn channel_failure(
         &mut self,
         channel: ChannelId,
         session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// Called when the server closes a channel.
     #[allow(unused_variables)]
-    async fn channel_close(
+    fn channel_close(
         &mut self,
         channel: ChannelId,
         session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// Called when the server sends EOF to a channel.
     #[allow(unused_variables)]
-    async fn channel_eof(
+    fn channel_eof(
         &mut self,
         channel: ChannelId,
         session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// Called when the server rejected our request to open a channel.
     #[allow(unused_variables)]
-    async fn channel_open_failure(
+    fn channel_open_failure(
         &mut self,
         channel: ChannelId,
         reason: ChannelOpenFailure,
         description: &str,
         language: &str,
         session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// Called when the server opens a channel for a new remote port forwarding connection
     #[allow(unused_variables)]
-    async fn server_channel_open_forwarded_tcpip(
+    fn server_channel_open_forwarded_tcpip(
         &mut self,
         channel: Channel<Msg>,
         connected_address: &str,
@@ -1670,29 +1670,29 @@ pub trait Handler: Sized + Send {
         originator_address: &str,
         originator_port: u32,
         session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     // Called when the server opens a channel for a new remote UDS forwarding connection
     #[allow(unused_variables)]
-    async fn server_channel_open_forwarded_streamlocal(
+    fn server_channel_open_forwarded_streamlocal(
         &mut self,
         channel: Channel<Msg>,
         socket_path: &str,
         session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// Called when the server opens an agent forwarding channel
     #[allow(unused_variables)]
-    async fn server_channel_open_agent_forward(
+    fn server_channel_open_agent_forward(
         &mut self,
         channel: Channel<Msg>,
         session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// Called when the server attempts to open a channel of unknown type. It may return `true`,
@@ -1700,37 +1700,37 @@ pub trait Handler: Sized + Send {
     /// [Handler::server_channel_open_unknown] will be called soon after. If it returns `false`,
     /// the channel will not be created and a rejection message will be sent to the server.
     #[allow(unused_variables)]
-    async fn should_accept_unknown_server_channel(
+    fn should_accept_unknown_server_channel(
         &mut self,
         id: ChannelId,
         channel_type: &str,
-    ) -> bool {
-        false
+    ) -> impl Future<Output = bool> + Send {
+        async { false }
     }
 
     /// Called when the server opens an unknown channel.
     #[allow(unused_variables)]
-    async fn server_channel_open_unknown(
+    fn server_channel_open_unknown(
         &mut self,
         channel: Channel<Msg>,
         session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// Called when the server opens a session channel.
     #[allow(unused_variables)]
-    async fn server_channel_open_session(
+    fn server_channel_open_session(
         &mut self,
         channel: Channel<Msg>,
         session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// Called when the server opens a direct tcp/ip channel.
     #[allow(unused_variables)]
-    async fn server_channel_open_direct_tcpip(
+    fn server_channel_open_direct_tcpip(
         &mut self,
         channel: Channel<Msg>,
         host_to_connect: &str,
@@ -1738,20 +1738,20 @@ pub trait Handler: Sized + Send {
         originator_address: &str,
         originator_port: u32,
         session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// Called when the server opens an X11 channel.
     #[allow(unused_variables)]
-    async fn server_channel_open_x11(
+    fn server_channel_open_x11(
         &mut self,
         channel: Channel<Msg>,
         originator_address: &str,
         originator_port: u32,
         session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// Called when the server sends us data. The `extended_code`
@@ -1759,13 +1759,13 @@ pub trait Handler: Sized + Send {
     /// standard output, and `Some(1)` is the standard error. See
     /// [RFC4254](https://tools.ietf.org/html/rfc4254#section-5.2).
     #[allow(unused_variables)]
-    async fn data(
+    fn data(
         &mut self,
         channel: ChannelId,
         data: &[u8],
         session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// Called when the server sends us data. The `extended_code`
@@ -1773,43 +1773,43 @@ pub trait Handler: Sized + Send {
     /// standard output, and `Some(1)` is the standard error. See
     /// [RFC4254](https://tools.ietf.org/html/rfc4254#section-5.2).
     #[allow(unused_variables)]
-    async fn extended_data(
+    fn extended_data(
         &mut self,
         channel: ChannelId,
         ext: u32,
         data: &[u8],
         session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// The server informs this client of whether the client may
     /// perform control-S/control-Q flow control. See
     /// [RFC4254](https://tools.ietf.org/html/rfc4254#section-6.8).
     #[allow(unused_variables)]
-    async fn xon_xoff(
+    fn xon_xoff(
         &mut self,
         channel: ChannelId,
         client_can_do: bool,
         session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// The remote process has exited, with the given exit status.
     #[allow(unused_variables)]
-    async fn exit_status(
+    fn exit_status(
         &mut self,
         channel: ChannelId,
         exit_status: u32,
         session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// The remote process exited upon receiving a signal.
     #[allow(unused_variables)]
-    async fn exit_signal(
+    fn exit_signal(
         &mut self,
         channel: ChannelId,
         signal_name: Sig,
@@ -1817,8 +1817,8 @@ pub trait Handler: Sized + Send {
         error_message: &str,
         lang_tag: &str,
         session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// Called when the network window is adjusted, meaning that we
@@ -1827,13 +1827,13 @@ pub trait Handler: Sized + Send {
     /// `Session::data` before, and it returned less than the
     /// full amount of data.
     #[allow(unused_variables)]
-    async fn window_adjusted(
+    fn window_adjusted(
         &mut self,
         channel: ChannelId,
         new_size: u32,
         session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// Called when this client adjusts the network window. Return the
@@ -1845,27 +1845,31 @@ pub trait Handler: Sized + Send {
 
     /// Called when the server signals success.
     #[allow(unused_variables)]
-    async fn openssh_ext_host_keys_announced(
+    fn openssh_ext_host_keys_announced(
         &mut self,
         keys: Vec<PublicKey>,
         session: &mut Session,
-    ) -> Result<(), Self::Error> {
-        debug!("openssh_ext_hostkeys_announced: {:?}", keys);
-        Ok(())
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async move {
+            debug!("openssh_ext_hostkeys_announced: {:?}", keys);
+            Ok(())
+        }
     }
 
     /// Called when the server sent a disconnect message
     ///
     /// If reason is an Error, this function should re-return the error so the join can also evaluate it
     #[allow(unused_variables)]
-    async fn disconnected(
+    fn disconnected(
         &mut self,
         reason: DisconnectReason<Self::Error>,
-    ) -> Result<(), Self::Error> {
-        debug!("disconnected: {:?}", reason);
-        match reason {
-            DisconnectReason::ReceivedDisconnect(_) => Ok(()),
-            DisconnectReason::Error(e) => Err(e),
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async {
+            debug!("disconnected: {:?}", reason);
+            match reason {
+                DisconnectReason::ReceivedDisconnect(_) => Ok(()),
+                DisconnectReason::Error(e) => Err(e),
+            }
         }
     }
 }
