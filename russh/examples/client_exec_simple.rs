@@ -26,11 +26,13 @@ async fn main() -> Result<()> {
 
     info!("Connecting to {}:{}", cli.host, cli.port);
     info!("Key path: {:?}", cli.private_key);
+    info!("OpenSSH Certificate path: {:?}", cli.openssh_certificate);
 
     // Session is a wrapper around a russh client, defined down below
     let mut ssh = Session::connect(
         cli.private_key,
         cli.username.unwrap_or("root".to_string()),
+        cli.openssh_certificate,
         (cli.host, cli.port),
     )
     .await?;
@@ -77,9 +79,17 @@ impl Session {
     async fn connect<P: AsRef<Path>, A: ToSocketAddrs>(
         key_path: P,
         user: impl Into<String>,
+        openssh_cert_path: Option<P>,
         addrs: A,
     ) -> Result<Self> {
         let key_pair = load_secret_key(key_path, None)?;
+
+        // load ssh certificate
+        let mut openssh_cert = None;
+        if openssh_cert_path.is_some() {
+            openssh_cert = Some(load_openssh_certificate(openssh_cert_path.unwrap())?);
+        }
+
         let config = client::Config {
             inactivity_timeout: Some(Duration::from_secs(5)),
             preferred: Preferred {
@@ -96,18 +106,29 @@ impl Session {
         let sh = Client {};
 
         let mut session = client::connect(config, addrs, sh).await?;
-        let auth_res = session
-            .authenticate_publickey(
-                user,
-                PrivateKeyWithHashAlg::new(
-                    Arc::new(key_pair),
-                    session.best_supported_rsa_hash().await.unwrap().flatten(),
-                ),
-            )
-            .await?;
+        // use publickey authentication, with or without certificate
+        if openssh_cert.is_none() {
+            let auth_res = session
+                .authenticate_publickey(
+                    user,
+                    PrivateKeyWithHashAlg::new(
+                        Arc::new(key_pair),
+                        session.best_supported_rsa_hash().await?.flatten(),
+                    ),
+                )
+                .await?;
 
-        if !auth_res.success() {
-            anyhow::bail!("Authentication failed: {auth_res:?}");
+            if !auth_res.success() {
+                anyhow::bail!("Authentication (with publickey) failed");
+            }
+        } else {
+            let auth_res = session
+                .authenticate_openssh_cert(user, Arc::new(key_pair), openssh_cert.unwrap())
+                .await?;
+
+            if !auth_res.success() {
+                anyhow::bail!("Authentication (with publickey+cert) failed");
+            }
         }
 
         Ok(Self { session })
@@ -164,6 +185,9 @@ pub struct Cli {
 
     #[clap(long, short = 'k')]
     private_key: PathBuf,
+
+    #[clap(long, short = 'o')]
+    openssh_certificate: Option<PathBuf>,
 
     #[clap(multiple = true, index = 2, required = true)]
     command: Vec<String>,
