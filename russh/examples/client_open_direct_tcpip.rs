@@ -6,7 +6,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::Result;
-use async_trait::async_trait;
 use clap::Parser;
 use key::PrivateKeyWithHashAlg;
 use log::info;
@@ -57,7 +56,6 @@ struct Client {}
 // More SSH event handlers
 // can be defined in this trait
 // In this example, we're only using Channel, so these aren't needed.
-#[async_trait]
 impl client::Handler for Client {
     type Error = russh::Error;
 
