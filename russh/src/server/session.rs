@@ -474,13 +474,15 @@ impl Session {
         let reading = start_reading(stream_read, buffer, opening_cipher);
         pin!(reading);
         let mut is_reading = None;
+        let mut channel_closed = false;
 
         #[allow(clippy::panic)] // false positive in macro
         while !self.common.disconnected {
             self.common.received_data = false;
             let mut sent_keepalive = false;
             tokio::select! {
-                r = &mut reading => {
+                r = &mut reading, if !channel_closed => {
+                    debug!("stream reading");
                     let (stream_read, mut buffer, mut opening_cipher) = match r {
                         Ok((_, stream_read, buffer, opening_cipher)) => (stream_read, buffer, opening_cipher),
                         Err(e) => return Err(e.into())
@@ -515,7 +517,8 @@ impl Session {
                     }
                     reading.set(start_reading(stream_read, buffer, opening_cipher));
                 }
-                () = &mut keepalive_timer => {
+                () = &mut keepalive_timer, if !channel_closed => {
+                    debug!("keepalive timer");
                     if self.common.config.keepalive_max != 0 && self.common.alive_timeouts > self.common.config.keepalive_max {
                         debug!("Timeout, client not responding to keepalives");
                         return Err(crate::Error::KeepaliveTimeout.into());
@@ -529,6 +532,7 @@ impl Session {
                     return Err(crate::Error::InactivityTimeout.into());
                 }
                 msg = self.receiver.recv(), if !self.kex.active() => {
+                    debug!("msg = {:?}", msg);
                     match msg {
                         Some(Msg::Channel(id, ChannelMsg::Data { data })) => {
                             self.data(id, data)?;
@@ -540,6 +544,7 @@ impl Session {
                             self.eof(id)?;
                         }
                         Some(Msg::Channel(id, ChannelMsg::Close)) => {
+                            channel_closed = true;
                             self.close(id)?;
                         }
                         Some(Msg::Channel(id, ChannelMsg::Success)) => {
