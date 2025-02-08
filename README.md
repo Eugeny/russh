@@ -1,7 +1,7 @@
 # Russh
 
 [![Rust](https://github.com/warp-tech/russh/actions/workflows/rust.yml/badge.svg)](https://github.com/warp-tech/russh/actions/workflows/rust.yml)  <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
-[![All Contributors](https://img.shields.io/badge/all_contributors-54-orange.svg?style=flat-square)](#contributors-)
+[![All Contributors](https://img.shields.io/badge/all_contributors-55-orange.svg?style=flat-square)](#contributors-)
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
 
 Low-level Tokio SSH2 client and server implementation.
@@ -189,6 +189,7 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
       <td align="center" valign="top" width="14.28%"><a href="https://codeandbitters.com/"><img src="https://avatars.githubusercontent.com/u/36317762?v=4?s=100" width="100px;" alt="Eric Seppanen"/><br /><sub><b>Eric Seppanen</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=ericseppanen" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://pwy.io"><img src="https://avatars.githubusercontent.com/u/3395477?v=4?s=100" width="100px;" alt="Patryk Wychowaniec"/><br /><sub><b>Patryk Wychowaniec</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=Patryk27" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://www.randymcmillan.net"><img src="https://avatars.githubusercontent.com/u/152159?v=4?s=100" width="100px;" alt="@RandyMcMillan"/><br /><sub><b>@RandyMcMillan</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=RandyMcMillan" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/handewo"><img src="https://avatars.githubusercontent.com/u/20971373?v=4?s=100" width="100px;" alt="handewo"/><br /><sub><b>handewo</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=handewo" title="Code">💻</a></td>
     </tr>
   </tbody>
 </table>
