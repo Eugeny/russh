@@ -1,55 +1,53 @@
-use std::borrow::Cow;
 ///
 /// Run this example with:
-/// cargo run --example client_exec_simple -- -k <private key path> <host> <command>
+/// cargo run --example client_open_direct_tcpip -- --private-key <private key path> --local-addr <addr:port> --forward-addr <addr:port> <host>
 ///
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
 
 use anyhow::Result;
 use clap::Parser;
+use key::PrivateKeyWithHashAlg;
 use log::info;
 use russh::keys::*;
 use russh::*;
-use tokio::io::AsyncWriteExt;
-use tokio::net::ToSocketAddrs;
+use std::net::SocketAddr;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream, ToSocketAddrs};
 
 #[tokio::main]
 async fn main() -> Result<()> {
     env_logger::builder()
-        .filter_level(log::LevelFilter::Debug)
+        .filter_level(log::LevelFilter::Info)
         .init();
 
     // CLI options are defined later in this file
     let cli = Cli::parse();
 
-    info!("Connecting to {}:{}", cli.host, cli.port);
+    info!("Connecting to server: {}:{}", cli.host, cli.port);
     info!("Key path: {:?}", cli.private_key);
     info!("OpenSSH Certificate path: {:?}", cli.openssh_certificate);
+
+    let forward_addr: SocketAddr = cli.forward_addr.parse()?;
+    let listener = TcpListener::bind(&cli.local_addr).await?;
+    info!("listen on: {}", &cli.local_addr);
 
     // Session is a wrapper around a russh client, defined down below
     let mut ssh = Session::connect(
         cli.private_key,
-        cli.username.unwrap_or("root".to_string()),
         cli.openssh_certificate,
-        (cli.host, cli.port),
+        cli.username.unwrap_or("root".to_string()),
+        (cli.host.clone(), cli.port),
     )
     .await?;
-    info!("Connected");
+    info!("Server: {}:{} Connected", cli.host, cli.port);
 
-    let code = ssh
-        .call(
-            &cli.command
-                .into_iter()
-                .map(|x| shell_escape::escape(x.into())) // arguments are escaped manually since the SSH protocol doesn't support quoting
-                .collect::<Vec<_>>()
-                .join(" "),
-        )
-        .await?;
+    let (socket, o_addr) = listener.accept().await?;
+    info!("originator address: {}", o_addr);
+    ssh.call(socket, o_addr, forward_addr).await?;
 
-    println!("Exitcode: {:?}", code);
     ssh.close().await?;
+
     Ok(())
 }
 
@@ -78,29 +76,17 @@ pub struct Session {
 impl Session {
     async fn connect<P: AsRef<Path>, A: ToSocketAddrs>(
         key_path: P,
-        user: impl Into<String>,
         openssh_cert_path: Option<P>,
+        user: impl Into<String>,
         addrs: A,
     ) -> Result<Self> {
         let key_pair = load_secret_key(key_path, None)?;
-
+        let config = client::Config::default();
         // load ssh certificate
         let mut openssh_cert = None;
         if openssh_cert_path.is_some() {
             openssh_cert = Some(load_openssh_certificate(openssh_cert_path.unwrap())?);
         }
-
-        let config = client::Config {
-            inactivity_timeout: Some(Duration::from_secs(5)),
-            preferred: Preferred {
-                kex: Cow::Owned(vec![
-                    russh::kex::CURVE25519_PRE_RFC_8731,
-                    russh::kex::EXTENSION_SUPPORT_AS_CLIENT,
-                ]),
-                ..Default::default()
-            },
-            ..<_>::default()
-        };
 
         let config = Arc::new(config);
         let sh = Client {};
@@ -134,33 +120,61 @@ impl Session {
         Ok(Self { session })
     }
 
-    async fn call(&mut self, command: &str) -> Result<u32> {
-        let mut channel = self.session.channel_open_session().await?;
-        channel.exec(true, command).await?;
-
-        let mut code = None;
-        let mut stdout = tokio::io::stdout();
-
+    async fn call(
+        &mut self,
+        mut stream: TcpStream,
+        originator_addr: SocketAddr,
+        forward_addr: SocketAddr,
+    ) -> Result<()> {
+        let mut channel = self
+            .session
+            .channel_open_direct_tcpip(
+                forward_addr.ip().to_string(),
+                forward_addr.port().into(),
+                originator_addr.ip().to_string(),
+                originator_addr.port().into(),
+            )
+            .await?;
+        // There's an event available on the session channel
+        let mut stream_closed = false;
+        let mut buf = vec![0; 65536];
         loop {
-            // There's an event available on the session channel
-            let Some(msg) = channel.wait().await else {
-                break;
-            };
-            match msg {
-                // Write data to the terminal
-                ChannelMsg::Data { ref data } => {
-                    stdout.write_all(data).await?;
-                    stdout.flush().await?;
-                }
-                // The command has returned an exit code
-                ChannelMsg::ExitStatus { exit_status } => {
-                    code = Some(exit_status);
-                    // cannot leave the loop immediately, there might still be more data to receive
-                }
-                _ => {}
+            // Handle one of the possible events:
+            tokio::select! {
+                // There's socket input available from the client
+                r = stream.read(&mut buf), if !stream_closed => {
+                    match r {
+                        Ok(0) => {
+                            stream_closed = true;
+                            channel.eof().await?;
+                        },
+                        // Send it to the server
+                        Ok(n) => channel.data(&buf[..n]).await?,
+                        Err(e) => return Err(e.into()),
+                    };
+                },
+                // There's an event available on the session channel
+                Some(msg) = channel.wait() => {
+                    match msg {
+                        // Write data to the client
+                        ChannelMsg::Data { ref data } => {
+                            stream.write_all(data).await?;
+                        }
+                        ChannelMsg::Eof => {
+                            if !stream_closed {
+                                channel.eof().await?;
+                            }
+                            break;
+                        }
+                        ChannelMsg::WindowAdjusted { new_size:_ }=> {
+                            todo!()
+                        }
+                        _ => {todo!()}
+                    }
+                },
             }
         }
-        Ok(code.expect("program did not exit cleanly"))
+        Ok(())
     }
 
     async fn close(&mut self) -> Result<()> {
@@ -180,15 +194,18 @@ pub struct Cli {
     #[clap(long, short, default_value_t = 22)]
     port: u16,
 
+    #[clap(long, short = 'o')]
+    openssh_certificate: Option<PathBuf>,
+
     #[clap(long, short)]
     username: Option<String>,
 
     #[clap(long, short = 'k')]
     private_key: PathBuf,
 
-    #[clap(long, short = 'o')]
-    openssh_certificate: Option<PathBuf>,
+    #[clap(long, short = 'l')]
+    local_addr: String,
 
-    #[clap(multiple = true, index = 2, required = true)]
-    command: Vec<String>,
+    #[clap(long, short = 'f')]
+    forward_addr: String,
 }
