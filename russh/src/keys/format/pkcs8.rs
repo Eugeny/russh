@@ -40,7 +40,6 @@ pub fn decode_pkcs8(
 }
 
 fn pkcs8_pki_into_keypair_data(pki: PrivateKeyInfo<'_>) -> Result<KeypairData, Error> {
-    dbg!(&pki.algorithm.oid);
     match pki.algorithm.oid {
         ed25519_dalek::pkcs8::ALGORITHM_OID => {
             let kpb = ed25519_dalek::pkcs8::KeypairBytes::try_from(pki)?;
