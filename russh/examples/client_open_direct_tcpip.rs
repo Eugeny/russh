@@ -1,3 +1,4 @@
+use std::net::SocketAddr;
 ///
 /// Run this example with:
 /// cargo run --example client_open_direct_tcpip -- --private-key <private key path> --local-addr <addr:port> --forward-addr <addr:port> <host>
@@ -11,7 +12,6 @@ use key::PrivateKeyWithHashAlg;
 use log::info;
 use russh::keys::*;
 use russh::*;
-use std::net::SocketAddr;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, ToSocketAddrs};
 
