@@ -165,7 +165,7 @@ impl CryptoVec {
             let capacity = size.next_power_of_two();
             let layout = std::alloc::Layout::from_size_align_unchecked(capacity, 1);
             let p = std::alloc::alloc_zeroed(layout);
-            mlock(p, capacity);
+            let _ = mlock(p, capacity);
             CryptoVec { p, capacity, size }
         }
     }
@@ -176,7 +176,7 @@ impl CryptoVec {
             let capacity = capacity.next_power_of_two();
             let layout = std::alloc::Layout::from_size_align_unchecked(capacity, 1);
             let p = std::alloc::alloc_zeroed(layout);
-            mlock(p, capacity);
+            let _ = mlock(p, capacity);
             CryptoVec {
                 p,
                 capacity,
@@ -223,14 +223,14 @@ impl CryptoVec {
                 let old_ptr = self.p;
                 let next_layout = std::alloc::Layout::from_size_align_unchecked(next_capacity, 1);
                 self.p = std::alloc::alloc_zeroed(next_layout);
-                mlock(self.p, next_capacity);
+                let _ = mlock(self.p, next_capacity);
 
                 if self.capacity > 0 {
                     std::ptr::copy_nonoverlapping(old_ptr, self.p, self.size);
                     for i in 0..self.size {
                         std::ptr::write_volatile(old_ptr.add(i), 0)
                     }
-                    munlock(old_ptr, self.capacity);
+                    let _ = munlock(old_ptr, self.capacity);
                     let layout = std::alloc::Layout::from_size_align_unchecked(self.capacity, 1);
                     std::alloc::dealloc(old_ptr, layout);
                 }
@@ -369,7 +369,7 @@ impl Drop for CryptoVec {
                 for i in 0..self.size {
                     std::ptr::write_volatile(self.p.add(i), 0);
                 }
-                platform::munlock(self.p, self.capacity);
+                let _ = platform::munlock(self.p, self.capacity);
                 let layout = std::alloc::Layout::from_size_align_unchecked(self.capacity, 1);
                 std::alloc::dealloc(self.p, layout);
             }

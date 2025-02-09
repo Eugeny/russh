@@ -1,10 +1,11 @@
 // WASM does not support synchronization primitives
-pub fn munlock(_ptr: *const u8, _len: usize) {
+pub fn munlock(_ptr: *const u8, _len: usize) -> Result<(), Infallible> {
     // No-op
+    Ok(())
 }
 
-pub fn mlock(_ptr: *const u8, _len: usize) -> i32 {
-    0
+pub fn mlock(_ptr: *const u8, _len: usize) -> Result<(), Infallible> {
+    Ok(())
 }
 
 pub fn memset(ptr: *mut u8, value: i32, size: usize) {
