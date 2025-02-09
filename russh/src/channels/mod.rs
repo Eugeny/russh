@@ -340,6 +340,10 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + Sync + 'static> Channel<S> {
         self.send_msg(ChannelMsg::Eof).await
     }
 
+    pub async fn exit_status(&self, exit_status: u32) -> Result<(), Error> {
+        self.send_msg(ChannelMsg::ExitStatus { exit_status }).await
+    }
+
     /// Request that the channel be closed.
     pub async fn close(&self) -> Result<(), Error> {
         self.send_msg(ChannelMsg::Close).await
