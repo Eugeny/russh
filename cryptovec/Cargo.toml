@@ -6,7 +6,7 @@ edition = "2021"
 license = "Apache-2.0"
 name = "russh-cryptovec"
 repository = "https://github.com/warp-tech/russh"
-version = "0.50.0"
+version = "0.50.2"
 rust-version = "1.75"
 
 [dependencies]
