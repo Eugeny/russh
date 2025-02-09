@@ -13,7 +13,7 @@ This is a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Éti
 > ✨ = added in Russh
 
 * [More panic safety](https://github.com/warp-tech/russh#safety) ✨
-* `async_trait` support ✨
+* async traits ✨
 * `direct-tcpip` (local port forwarding)
 * `forward-tcpip` (remote port forwarding) ✨
 * `direct-streamlocal` (local UNIX socket forwarding, client only) ✨
@@ -30,10 +30,10 @@ This is a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Éti
   * `3des-cbc` ✨
 * Key exchanges:
   * `curve25519-sha256@libssh.org`
-  * `diffie-hellman-group-sha1` ✨
+  * `diffie-hellman-group-sha1` (GEX) ✨
   * `diffie-hellman-group1-sha1` ✨
   * `diffie-hellman-group14-sha1` ✨
-  * `diffie-hellman-group-sha256` ✨
+  * `diffie-hellman-group-sha256` (GEX) ✨
   * `diffie-hellman-group14-sha256` ✨
   * `diffie-hellman-group16-sha512` ✨
   * `ecdh-sha2-nistp256` ✨
