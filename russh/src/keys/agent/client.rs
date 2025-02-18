@@ -272,8 +272,10 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
             let n = u32::decode(&mut r)?;
             for _ in 0..n {
                 let key_blob = Bytes::decode(&mut r)?;
-                let _comment = String::decode(&mut r)?;
-                keys.push(key::parse_public_key(&key_blob)?);
+                let comment = String::decode(&mut r)?;
+                let mut key = key::parse_public_key(&key_blob)?;
+                key.set_comment(comment);
+                keys.push(key);
             }
         }
 
