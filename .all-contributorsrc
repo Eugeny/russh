@@ -499,6 +499,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "ccbrown",
+      "name": "Chris",
+      "avatar_url": "https://avatars.githubusercontent.com/u/1731074?v=4",
+      "profile": "https://github.com/ccbrown",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,
