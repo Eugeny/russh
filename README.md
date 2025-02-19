@@ -1,7 +1,7 @@
 # Russh
 
 [![Rust](https://github.com/warp-tech/russh/actions/workflows/rust.yml/badge.svg)](https://github.com/warp-tech/russh/actions/workflows/rust.yml)  <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
-[![All Contributors](https://img.shields.io/badge/all_contributors-56-orange.svg?style=flat-square)](#contributors-)
+[![All Contributors](https://img.shields.io/badge/all_contributors-57-orange.svg?style=flat-square)](#contributors-)
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
 
 Low-level Tokio SSH2 client and server implementation.
@@ -191,6 +191,9 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
       <td align="center" valign="top" width="14.28%"><a href="https://www.randymcmillan.net"><img src="https://avatars.githubusercontent.com/u/152159?v=4?s=100" width="100px;" alt="@RandyMcMillan"/><br /><sub><b>@RandyMcMillan</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=RandyMcMillan" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/handewo"><img src="https://avatars.githubusercontent.com/u/20971373?v=4?s=100" width="100px;" alt="handewo"/><br /><sub><b>handewo</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=handewo" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/ccbrown"><img src="https://avatars.githubusercontent.com/u/1731074?v=4?s=100" width="100px;" alt="Chris"/><br /><sub><b>Chris</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=ccbrown" title="Code">💻</a></td>
+    </tr>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/procr1337"><img src="https://avatars.githubusercontent.com/u/193802945?v=4?s=100" width="100px;" alt="procr1337"/><br /><sub><b>procr1337</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=procr1337" title="Code">💻</a></td>
     </tr>
   </tbody>
 </table>
