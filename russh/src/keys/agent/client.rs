@@ -2,9 +2,9 @@ use core::str;
 
 use byteorder::{BigEndian, ByteOrder};
 use bytes::Bytes;
-use log::debug;
+use log::{debug, error};
 use ssh_encoding::{Decode, Encode, Reader};
-use ssh_key::{HashAlg, PrivateKey, PublicKey, Signature};
+use ssh_key::{Algorithm, HashAlg, PrivateKey, PublicKey, Signature};
 use tokio;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
@@ -319,11 +319,16 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
         public.key_data().encoded()?.encode(&mut self.buf)?;
         data.encode(&mut self.buf)?;
         debug!("public = {:?}", public);
-        let hash = match hash_alg {
-            Some(HashAlg::Sha256) => 2,
-            Some(HashAlg::Sha512) => 4,
+
+        let hash = match public.algorithm() {
+            Algorithm::Rsa { .. } => match hash_alg {
+                Some(HashAlg::Sha256) => 2,
+                Some(HashAlg::Sha512) => 4,
+                _ => 0,
+            },
             _ => 0,
         };
+
         hash.encode(&mut self.buf)?;
         let len = self.buf.len() - 4;
         BigEndian::write_u32(&mut self.buf[..], len as u32);
@@ -343,8 +348,11 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
             (t.len() + sig.len() + 8).encode(data)?;
             t.encode(data)?;
             sig.encode(data)?;
+            Ok(())
+        } else {
+            error!("unexpected agent signature type: {:?}", t);
+            Err(Error::AgentProtocolError)
         }
-        Ok(())
     }
 
     /// Ask the agent to sign the supplied piece of data.
