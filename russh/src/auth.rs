@@ -203,6 +203,7 @@ pub enum Method {
     },
     FuturePublicKey {
         key: ssh_key::PublicKey,
+        hash_alg: Option<HashAlg>,
     },
     KeyboardInteractive {
         submethods: String,

@@ -418,7 +418,7 @@ impl<H: Handler> Handle<H> {
             .sender
             .send(Msg::Authenticate {
                 user,
-                method: auth::Method::FuturePublicKey { key },
+                method: auth::Method::FuturePublicKey { key, hash_alg },
             })
             .await
             .is_err()

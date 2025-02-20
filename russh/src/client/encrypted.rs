@@ -214,14 +214,14 @@ impl Session {
                                         &mut self.common.buffer,
                                     )?
                                 }
-                                Some(auth::Method::FuturePublicKey { key }) => {
+                                Some(auth::Method::FuturePublicKey { key, hash_alg }) => {
                                     debug!("public key");
                                     self.common.buffer.clear();
                                     let i = enc.client_make_to_sign(
                                         &self.common.auth_user,
                                         &PublicKeyOrCertificate::PublicKey {
                                             key: key.clone(),
-                                            hash_alg: None,
+                                            hash_alg,
                                         },
                                         &mut self.common.buffer,
                                     )?;
