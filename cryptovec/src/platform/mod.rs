@@ -19,10 +19,11 @@ pub use windows::{memset, mlock, munlock};
 
 #[cfg(not(target_arch = "wasm32"))]
 mod error {
-    use log::warn;
     use std::error::Error;
     use std::fmt::Display;
     use std::sync::atomic::{AtomicBool, Ordering};
+
+    use log::warn;
 
     #[derive(Debug)]
     pub struct MemoryLockError {
