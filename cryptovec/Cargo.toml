@@ -15,7 +15,14 @@ ssh-encoding = { workspace = true, optional = true }
 log.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
-winapi = {version = "0.3", features = ["basetsd", "minwindef", "memoryapi"]}
+winapi = { version = "0.3", features = [
+    "basetsd",
+    "minwindef",
+    "memoryapi",
+    "errhandlingapi",
+    "sysinfoapi",
+    "impl-default",
+] }
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3.46"
