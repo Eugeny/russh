@@ -892,13 +892,16 @@ impl Encrypted {
                     cert.to_bytes()?.as_slice().encode(&mut self.write)?;
                     true
                 }
-                auth::Method::FuturePublicKey { ref key, .. } => {
+                auth::Method::FuturePublicKey { ref key, hash_alg } => {
                     user.as_bytes().encode(&mut self.write)?;
                     "ssh-connection".encode(&mut self.write)?;
                     "publickey".encode(&mut self.write)?;
                     self.write.push(0); // This is a probe
 
-                    key.algorithm().as_str().encode(&mut self.write)?;
+                    key.algorithm()
+                        .with_hash_alg(hash_alg)
+                        .as_str()
+                        .encode(&mut self.write)?;
 
                     key.to_bytes()?.as_slice().encode(&mut self.write)?;
                     true
