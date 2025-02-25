@@ -1,3 +1,4 @@
+use std::collections::{btree_map::Entry, BTreeMap};
 use std::ffi::c_void;
 use std::sync::{Mutex, OnceLock};
 use winapi::shared::basetsd::SIZE_T;
@@ -11,12 +12,7 @@ use super::MemoryLockError;
 // To correctly lock/unlock memory, we need to know the pagesize:
 static PAGE_SIZE: OnceLock<usize> = OnceLock::new();
 // Store refcounters for all locked pages, since Windows doesn't handle that for us:
-static LOCKED_PAGES: Mutex<Vec<PageLock>> = Mutex::new(Vec::new());
-
-struct PageLock {
-    page_idx: usize,
-    lock_counter: usize,
-}
+static LOCKED_PAGES: Mutex<BTreeMap<usize, usize>> = Mutex::new(BTreeMap::new());
 
 /// Unlock memory on drop for Windows.
 pub fn munlock(ptr: *const u8, len: usize) -> Result<(), MemoryLockError> {
@@ -25,18 +21,16 @@ pub fn munlock(ptr: *const u8, len: usize) -> Result<(), MemoryLockError> {
         .lock()
         .map_err(|e| MemoryLockError::new(format!("Accessing PageLocks failed: {e}")))?;
     for page_idx in page_indices {
-        match locked_pages.binary_search_by_key(&page_idx, |pl| pl.page_idx) {
-            Ok(vec_idx) => {
-                #[allow(clippy::indexing_slicing)] // binary_search Ok() is always valid index
-                {
-                    locked_pages[vec_idx].lock_counter -= 1;
-                    if locked_pages[vec_idx].lock_counter == 0 {
-                        locked_pages.remove(vec_idx);
-                        unlock_page(page_idx)?;
-                    }
+        match locked_pages.entry(page_idx) {
+            Entry::Occupied(mut lock_counter) => {
+                let lock_counter_val = lock_counter.get_mut();
+                *lock_counter_val -= 1;
+                if *lock_counter_val == 0 {
+                    lock_counter.remove();
+                    unlock_page(page_idx)?;
                 }
             }
-            Err(_) => {
+            Entry::Vacant(_) => {
                 return Err(MemoryLockError::new(
                     "Tried to unlock pointer from non-locked page!".into(),
                 ));
@@ -65,22 +59,14 @@ pub fn mlock(ptr: *const u8, len: usize) -> Result<(), MemoryLockError> {
         .lock()
         .map_err(|e| MemoryLockError::new(format!("Accessing PageLocks failed: {e}")))?;
     for page_idx in page_indices {
-        match locked_pages.binary_search_by_key(&page_idx, |pl| pl.page_idx) {
-            Ok(vec_idx) => {
-                #[allow(clippy::indexing_slicing)] // binary_search Ok() is always valid index
-                {
-                    locked_pages[vec_idx].lock_counter += 1;
-                }
+        match locked_pages.entry(page_idx) {
+            Entry::Occupied(mut lock_counter) => {
+                let lock_counter_val = lock_counter.get_mut();
+                *lock_counter_val += 1;
             }
-            Err(vec_idx) => {
+            Entry::Vacant(lock_counter) => {
                 lock_page(page_idx)?;
-                locked_pages.insert(
-                    vec_idx,
-                    PageLock {
-                        page_idx,
-                        lock_counter: 1,
-                    },
-                );
+                lock_counter.insert(1);
             }
         }
     }
