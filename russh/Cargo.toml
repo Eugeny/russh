@@ -18,6 +18,8 @@ async-trait = ["dep:async-trait"]
 legacy-ed25519-pkcs8-parser = ["yasna"]
 # Danger: 3DES cipher is insecure.
 des = ["dep:des"]
+# Danger: DSA algorithm is insecure.
+dsa = ["ssh-key/dsa"]
 
 [dependencies]
 aes-gcm = "0.10"
