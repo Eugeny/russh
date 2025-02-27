@@ -167,7 +167,7 @@ impl Session {
                             break;
                         }
                         ChannelMsg::WindowAdjusted { new_size:_ }=> {
-                            todo!()
+                            // Ignore this message type
                         }
                         _ => {todo!()}
                     }
