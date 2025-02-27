@@ -200,9 +200,11 @@ impl Encrypted {
                     auth_user.clear();
                     if let Auth::Reject {
                         proceed_with_methods: Some(proceed_with_methods),
+                        partial_success,
                     } = auth
                     {
                         auth_request.methods = proceed_with_methods;
+                        auth_request.partial_success = partial_success;
                     } else {
                         auth_request.methods.remove(MethodKind::Password);
                     }
@@ -238,9 +240,11 @@ impl Encrypted {
                     auth_user.clear();
                     if let Auth::Reject {
                         proceed_with_methods: Some(proceed_with_methods),
+                        partial_success,
                     } = auth
                     {
                         auth_request.methods = proceed_with_methods;
+                        auth_request.partial_success = partial_success;
                     } else {
                         auth_request.methods.remove(MethodKind::None);
                     }
@@ -404,9 +408,11 @@ impl Encrypted {
                             } else {
                                 if let Auth::Reject {
                                     proceed_with_methods: Some(proceed_with_methods),
+                                    partial_success,
                                 } = auth
                                 {
                                     auth_request.methods = proceed_with_methods;
+                                    auth_request.partial_success = partial_success;
                                 }
                                 auth_request.partial_success = false;
                                 auth_user.clear();
@@ -447,9 +453,11 @@ impl Encrypted {
                         auth => {
                             if let Auth::Reject {
                                 proceed_with_methods: Some(proceed_with_methods),
+                                partial_success,
                             } = auth
                             {
                                 auth_request.methods = proceed_with_methods;
+                                auth_request.partial_success = partial_success;
                             }
                             auth_request.partial_success = false;
                             auth_user.clear();
@@ -539,11 +547,12 @@ async fn reply_userauth_info_response(
         }
         Auth::Reject {
             proceed_with_methods,
+            partial_success,
         } => {
             if let Some(proceed_with_methods) = proceed_with_methods {
                 auth_request.methods = proceed_with_methods;
             }
-            auth_request.partial_success = false;
+            auth_request.partial_success = partial_success;
             reject_auth_request(until, write, auth_request).await?;
             Ok(false)
         }

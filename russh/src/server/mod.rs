@@ -170,6 +170,7 @@ pub enum Auth {
     /// Reject the authentication request.
     Reject {
         proceed_with_methods: Option<MethodSet>,
+        partial_success: bool,
     },
     /// Accept the authentication request.
     Accept,
@@ -191,6 +192,15 @@ pub enum Auth {
     },
 }
 
+impl Auth {
+    pub fn reject() -> Self {
+        Auth::Reject {
+            proceed_with_methods: None,
+            partial_success: false,
+        }
+    }
+}
+
 /// Server handler. Each client will have their own handler.
 ///
 /// Note: this is an async trait. The trait functions return `impl Future`,
@@ -204,11 +214,7 @@ pub trait Handler: Sized {
     /// except if this method takes more than that.
     #[allow(unused_variables)]
     fn auth_none(&mut self, user: &str) -> impl Future<Output = Result<Auth, Self::Error>> + Send {
-        async {
-            Ok(Auth::Reject {
-                proceed_with_methods: None,
-            })
-        }
+        async { Ok(Auth::reject()) }
     }
 
     /// Check authentication using the "password" method. Russh
@@ -221,11 +227,7 @@ pub trait Handler: Sized {
         user: &str,
         password: &str,
     ) -> impl Future<Output = Result<Auth, Self::Error>> + Send {
-        async {
-            Ok(Auth::Reject {
-                proceed_with_methods: None,
-            })
-        }
+        async { Ok(Auth::reject()) }
     }
 
     /// Check authentication using the "publickey" method. This method
@@ -256,11 +258,7 @@ pub trait Handler: Sized {
         user: &str,
         public_key: &ssh_key::PublicKey,
     ) -> impl Future<Output = Result<Auth, Self::Error>> + Send {
-        async {
-            Ok(Auth::Reject {
-                proceed_with_methods: None,
-            })
-        }
+        async { Ok(Auth::reject()) }
     }
 
     /// Check authentication using an OpenSSH certificate. This method
@@ -275,11 +273,7 @@ pub trait Handler: Sized {
         user: &str,
         certificate: &Certificate,
     ) -> impl Future<Output = Result<Auth, Self::Error>> + Send {
-        async {
-            Ok(Auth::Reject {
-                proceed_with_methods: None,
-            })
-        }
+        async { Ok(Auth::reject()) }
     }
 
     /// Check authentication using the "keyboard-interactive"
@@ -293,11 +287,7 @@ pub trait Handler: Sized {
         submethods: &str,
         response: Option<Response<'a>>,
     ) -> impl Future<Output = Result<Auth, Self::Error>> + Send {
-        async {
-            Ok(Auth::Reject {
-                proceed_with_methods: None,
-            })
-        }
+        async { Ok(Auth::reject()) }
     }
 
     /// Called when authentication succeeds for a session.

@@ -105,6 +105,7 @@ enum Reply {
     AuthSuccess,
     AuthFailure {
         proceed_with_methods: MethodSet,
+        partial_success: bool,
     },
     ChannelOpenFailure,
     SignRequest {
@@ -196,7 +197,11 @@ impl From<(ChannelId, ChannelMsg)> for Msg {
 pub enum KeyboardInteractiveAuthResponse {
     Success,
     Failure {
+        /// The server suggests to proceed with these auth methods
         remaining_methods: MethodSet,
+        /// The server says that though auth method has been accepted,
+        /// further authentication is required
+        partial_success: bool,
     },
     InfoRequest {
         name: String,
@@ -328,7 +333,13 @@ impl<H: Handler> Handle<H> {
                 Some(Reply::AuthSuccess) => return Ok(KeyboardInteractiveAuthResponse::Success),
                 Some(Reply::AuthFailure {
                     proceed_with_methods: remaining_methods,
-                }) => return Ok(KeyboardInteractiveAuthResponse::Failure { remaining_methods }),
+                    partial_success,
+                }) => {
+                    return Ok(KeyboardInteractiveAuthResponse::Failure {
+                        remaining_methods,
+                        partial_success,
+                    })
+                }
                 Some(Reply::AuthInfoRequest {
                     name,
                     instructions,
@@ -351,10 +362,17 @@ impl<H: Handler> Handle<H> {
                 Some(Reply::AuthSuccess) => return Ok(AuthResult::Success),
                 Some(Reply::AuthFailure {
                     proceed_with_methods: remaining_methods,
-                }) => return Ok(AuthResult::Failure { remaining_methods }),
+                    partial_success,
+                }) => {
+                    return Ok(AuthResult::Failure {
+                        remaining_methods,
+                        partial_success,
+                    })
+                }
                 None => {
                     return Ok(AuthResult::Failure {
                         remaining_methods: MethodSet::empty(),
+                        partial_success: false,
                     })
                 }
                 _ => {}
@@ -431,7 +449,13 @@ impl<H: Handler> Handle<H> {
                 Some(Reply::AuthSuccess) => return Ok(AuthResult::Success),
                 Some(Reply::AuthFailure {
                     proceed_with_methods: remaining_methods,
-                }) => return Ok(AuthResult::Failure { remaining_methods }),
+                    partial_success,
+                }) => {
+                    return Ok(AuthResult::Failure {
+                        remaining_methods,
+                        partial_success,
+                    })
+                }
                 Some(Reply::SignRequest { key, data }) => {
                     let data = signer.auth_publickey_sign(&key, hash_alg, data).await;
                     let data = match data {
@@ -445,6 +469,7 @@ impl<H: Handler> Handle<H> {
                 None => {
                     return Ok(AuthResult::Failure {
                         remaining_methods: MethodSet::empty(),
+                        partial_success: false,
                     })
                 }
                 _ => {}
