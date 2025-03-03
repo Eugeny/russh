@@ -408,6 +408,12 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + Sync + 'static> Channel<S> {
         self.write_half.id()
     }
 
+    /// Split this [`Channel`] into a [`ChannelReadHalf`] and a [`ChannelWriteHalf`], which can be
+    /// used to read and write concurrently.
+    pub fn split(self) -> (ChannelReadHalf, ChannelWriteHalf<S>) {
+        (self.read_half, self.write_half)
+    }
+
     /// Request a pseudo-terminal with the given characteristics.
     #[allow(clippy::too_many_arguments)] // length checked
     pub async fn request_pty(

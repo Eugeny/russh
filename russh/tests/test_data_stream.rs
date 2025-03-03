@@ -5,7 +5,7 @@ use rand::RngCore;
 use rand_core::OsRng;
 use russh::keys::PrivateKeyWithHashAlg;
 use russh::server::{self, Auth, Msg, Server as _, Session};
-use russh::{client, Channel};
+use russh::{client, Channel, ChannelMsg};
 use ssh_key::PrivateKey;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -14,7 +14,7 @@ pub const WINDOW_SIZE: u32 = 8 * 2048;
 trait ChannelDataCopy {
     async fn copy_data_through_channel(
         &mut self,
-        channel: &mut Channel<client::Msg>,
+        channel: Channel<client::Msg>,
         data: &[u8],
     ) -> anyhow::Result<Vec<u8>>;
 }
@@ -24,7 +24,7 @@ struct ReaderAndWriter;
 impl ChannelDataCopy for ReaderAndWriter {
     async fn copy_data_through_channel(
         &mut self,
-        channel: &mut Channel<client::Msg>,
+        mut channel: Channel<client::Msg>,
         data: &[u8],
     ) -> anyhow::Result<Vec<u8>> {
         let mut buf = Vec::<u8>::new();
@@ -48,9 +48,54 @@ impl ChannelDataCopy for ReaderAndWriter {
     }
 }
 
+struct ChannelHalves;
+
+impl ChannelDataCopy for ChannelHalves {
+    async fn copy_data_through_channel(
+        &mut self,
+        channel: Channel<client::Msg>,
+        data: &[u8],
+    ) -> anyhow::Result<Vec<u8>> {
+        let (mut read, write) = channel.split();
+        let (r0, r1) = tokio::join!(
+            async {
+                write.extended_data(1, data).await?;
+                write.eof().await?;
+
+                Ok::<_, anyhow::Error>(())
+            },
+            async {
+                let mut buf = Vec::<u8>::new();
+                while let Some(msg) = read.wait().await {
+                    match msg {
+                        ChannelMsg::WindowAdjusted { .. } => {}
+                        ChannelMsg::Data { data } => buf.extend(&*data),
+                        ChannelMsg::Eof => break,
+                        msg => panic!("Got unexpected message: {msg:?}"),
+                    }
+                }
+                Ok(buf)
+            }
+        );
+
+        r0?;
+        r1
+    }
+}
+
 #[tokio::test]
 async fn test_reader_and_writer() -> Result<(), anyhow::Error> {
-    env_logger::init();
+    run_test(ReaderAndWriter).await
+}
+
+#[tokio::test]
+async fn test_channel_halves() -> Result<(), anyhow::Error> {
+    run_test(ChannelHalves).await
+}
+
+async fn run_test(test: impl ChannelDataCopy) -> Result<(), anyhow::Error> {
+    static INIT: std::sync::Once = std::sync::Once::new();
+    INIT.call_once(env_logger::init);
 
     let addr = addr();
     let data = data();
@@ -62,7 +107,7 @@ async fn test_reader_and_writer() -> Result<(), anyhow::Error> {
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
 
-    stream(addr, &data, ReaderAndWriter).await?;
+    stream(addr, &data, test).await?;
 
     Ok(())
 }
@@ -76,7 +121,7 @@ async fn stream(
     let key = Arc::new(PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap());
 
     let mut session = russh::client::connect(config, addr, Client).await?;
-    let mut channel = match session
+    let channel = match session
         .authenticate_publickey(
             "user",
             PrivateKeyWithHashAlg::new(
@@ -92,7 +137,7 @@ async fn stream(
         Err(err) => return Err(err.into()),
     };
 
-    let buf = test.copy_data_through_channel(&mut channel, data).await?;
+    let buf = test.copy_data_through_channel(channel, data).await?;
     assert_eq!(data, buf);
 
     Ok(())
