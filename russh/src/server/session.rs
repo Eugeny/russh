@@ -10,7 +10,7 @@ use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::oneshot;
 
 use super::*;
-use crate::channels::{Channel, ChannelMsg, ChannelReadHalf, ChannelRef};
+use crate::channels::{Channel, ChannelMsg, ChannelReadHalf, ChannelRef, ChannelWriteHalf};
 use crate::helpers::NameList;
 use crate::kex::{KexCause, SessionKexState, EXTENSION_SUPPORT_AS_CLIENT};
 use crate::{map_err, msg};
@@ -361,11 +361,13 @@ impl Handle {
                     window_size_ref.update(window_size).await;
 
                     return Ok(Channel {
-                        id,
-                        sender: self.sender.clone(),
+                        write_half: ChannelWriteHalf {
+                            id,
+                            sender: self.sender.clone(),
+                            max_packet_size,
+                            window_size: window_size_ref,
+                        },
                         read_half: ChannelReadHalf { receiver },
-                        max_packet_size,
-                        window_size: window_size_ref,
                     });
                 }
                 Some(ChannelMsg::OpenFailure(reason)) => {

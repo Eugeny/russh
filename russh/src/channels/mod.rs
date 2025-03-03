@@ -151,49 +151,17 @@ impl ChannelReadHalf {
     }
 }
 
-/// A handle to a session channel.
+/// A handle to the writing part of a session channel.
 ///
-/// Allows you to read and write from a channel without borrowing the session
-pub struct Channel<Send: From<(ChannelId, ChannelMsg)>> {
+/// Allows you to write to a channel without borrowing the session
+pub struct ChannelWriteHalf<Send: From<(ChannelId, ChannelMsg)>> {
     pub(crate) id: ChannelId,
     pub(crate) sender: Sender<Send>,
-    pub(crate) read_half: ChannelReadHalf,
     pub(crate) max_packet_size: u32,
     pub(crate) window_size: WindowSizeRef,
 }
 
-impl<T: From<(ChannelId, ChannelMsg)>> std::fmt::Debug for Channel<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Channel").field("id", &self.id).finish()
-    }
-}
-
-impl<S: From<(ChannelId, ChannelMsg)> + Send + Sync + 'static> Channel<S> {
-    pub(crate) fn new(
-        id: ChannelId,
-        sender: Sender<S>,
-        max_packet_size: u32,
-        window_size: u32,
-        channel_buffer_size: usize,
-    ) -> (Self, ChannelRef) {
-        let (tx, rx) = tokio::sync::mpsc::channel(channel_buffer_size);
-        let window_size = WindowSizeRef::new(window_size);
-
-        (
-            Self {
-                id,
-                sender,
-                read_half: ChannelReadHalf { receiver: rx },
-                max_packet_size,
-                window_size: window_size.clone(),
-            },
-            ChannelRef {
-                sender: tx,
-                window_size,
-            },
-        )
-    }
-
+impl<S: From<(ChannelId, ChannelMsg)> + Send + Sync + 'static> ChannelWriteHalf<S> {
     /// Returns the min between the maximum packet size and the
     /// remaining window size in the channel.
     pub async fn writable_packet_size(&self) -> usize {
@@ -370,6 +338,209 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + Sync + 'static> Channel<S> {
             .map_err(|_| Error::SendError)
     }
 
+    /// Make a writer for the [`Channel`] to send [`ChannelMsg::Data`] or [`ChannelMsg::ExtendedData`]
+    /// depending on the `ext` parameter, through the `AsyncWrite` trait.
+    fn make_writer_ext(&self, ext: Option<u32>) -> impl AsyncWrite {
+        io::ChannelTx::new(
+            self.sender.clone(),
+            self.id,
+            self.window_size.value.clone(),
+            self.window_size.subscribe(),
+            self.max_packet_size,
+            ext,
+        )
+    }
+}
+
+/// A handle to a session channel.
+///
+/// Allows you to read and write from a channel without borrowing the session
+pub struct Channel<Send: From<(ChannelId, ChannelMsg)>> {
+    pub(crate) read_half: ChannelReadHalf,
+    pub(crate) write_half: ChannelWriteHalf<Send>,
+}
+
+impl<T: From<(ChannelId, ChannelMsg)>> std::fmt::Debug for Channel<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Channel")
+            .field("id", &self.write_half.id)
+            .finish()
+    }
+}
+
+impl<S: From<(ChannelId, ChannelMsg)> + Send + Sync + 'static> Channel<S> {
+    pub(crate) fn new(
+        id: ChannelId,
+        sender: Sender<S>,
+        max_packet_size: u32,
+        window_size: u32,
+        channel_buffer_size: usize,
+    ) -> (Self, ChannelRef) {
+        let (tx, rx) = tokio::sync::mpsc::channel(channel_buffer_size);
+        let window_size = WindowSizeRef::new(window_size);
+        let read_half = ChannelReadHalf { receiver: rx };
+        let write_half = ChannelWriteHalf {
+            id,
+            sender,
+            max_packet_size,
+            window_size: window_size.clone(),
+        };
+
+        (
+            Self {
+                write_half,
+                read_half,
+            },
+            ChannelRef {
+                sender: tx,
+                window_size,
+            },
+        )
+    }
+
+    /// Returns the min between the maximum packet size and the
+    /// remaining window size in the channel.
+    pub async fn writable_packet_size(&self) -> usize {
+        self.write_half.writable_packet_size().await
+    }
+
+    pub fn id(&self) -> ChannelId {
+        self.write_half.id()
+    }
+
+    /// Request a pseudo-terminal with the given characteristics.
+    #[allow(clippy::too_many_arguments)] // length checked
+    pub async fn request_pty(
+        &self,
+        want_reply: bool,
+        term: &str,
+        col_width: u32,
+        row_height: u32,
+        pix_width: u32,
+        pix_height: u32,
+        terminal_modes: &[(Pty, u32)],
+    ) -> Result<(), Error> {
+        self.write_half
+            .request_pty(
+                want_reply,
+                term,
+                col_width,
+                row_height,
+                pix_width,
+                pix_height,
+                terminal_modes,
+            )
+            .await
+    }
+
+    /// Request a remote shell.
+    pub async fn request_shell(&self, want_reply: bool) -> Result<(), Error> {
+        self.write_half.request_shell(want_reply).await
+    }
+
+    /// Execute a remote program (will be passed to a shell). This can
+    /// be used to implement scp (by calling a remote scp and
+    /// tunneling to its standard input).
+    pub async fn exec<A: Into<Vec<u8>>>(&self, want_reply: bool, command: A) -> Result<(), Error> {
+        self.write_half.exec(want_reply, command).await
+    }
+
+    /// Signal a remote process.
+    pub async fn signal(&self, signal: Sig) -> Result<(), Error> {
+        self.write_half.signal(signal).await
+    }
+
+    /// Request the start of a subsystem with the given name.
+    pub async fn request_subsystem<A: Into<String>>(
+        &self,
+        want_reply: bool,
+        name: A,
+    ) -> Result<(), Error> {
+        self.write_half.request_subsystem(want_reply, name).await
+    }
+
+    /// Request X11 forwarding through an already opened X11
+    /// channel. See
+    /// [RFC4254](https://tools.ietf.org/html/rfc4254#section-6.3.1)
+    /// for security issues related to cookies.
+    pub async fn request_x11<A: Into<String>, B: Into<String>>(
+        &self,
+        want_reply: bool,
+        single_connection: bool,
+        x11_authentication_protocol: A,
+        x11_authentication_cookie: B,
+        x11_screen_number: u32,
+    ) -> Result<(), Error> {
+        self.write_half
+            .request_x11(
+                want_reply,
+                single_connection,
+                x11_authentication_protocol,
+                x11_authentication_cookie,
+                x11_screen_number,
+            )
+            .await
+    }
+
+    /// Set a remote environment variable.
+    pub async fn set_env<A: Into<String>, B: Into<String>>(
+        &self,
+        want_reply: bool,
+        variable_name: A,
+        variable_value: B,
+    ) -> Result<(), Error> {
+        self.write_half
+            .set_env(want_reply, variable_name, variable_value)
+            .await
+    }
+
+    /// Inform the server that our window size has changed.
+    pub async fn window_change(
+        &self,
+        col_width: u32,
+        row_height: u32,
+        pix_width: u32,
+        pix_height: u32,
+    ) -> Result<(), Error> {
+        self.write_half
+            .window_change(col_width, row_height, pix_width, pix_height)
+            .await
+    }
+
+    /// Inform the server that we will accept agent forwarding channels
+    pub async fn agent_forward(&self, want_reply: bool) -> Result<(), Error> {
+        self.write_half.agent_forward(want_reply).await
+    }
+
+    /// Send data to a channel.
+    pub async fn data<R: tokio::io::AsyncRead + Unpin>(&self, data: R) -> Result<(), Error> {
+        self.write_half.data(data).await
+    }
+
+    /// Send data to a channel. The number of bytes added to the
+    /// "sending pipeline" (to be processed by the event loop) is
+    /// returned.
+    pub async fn extended_data<R: tokio::io::AsyncRead + Unpin>(
+        &self,
+        ext: u32,
+        data: R,
+    ) -> Result<(), Error> {
+        self.write_half.extended_data(ext, data).await
+    }
+
+    pub async fn eof(&self) -> Result<(), Error> {
+        self.write_half.eof().await
+    }
+
+    pub async fn exit_status(&self, exit_status: u32) -> Result<(), Error> {
+        self.write_half.exit_status(exit_status).await
+    }
+
+    /// Request that the channel be closed.
+    pub async fn close(&self) -> Result<(), Error> {
+        self.write_half.close().await
+    }
+
     /// Awaits an incoming [`ChannelMsg`], this method returns [`None`] if the channel has been closed.
     pub async fn wait(&mut self) -> Option<ChannelMsg> {
         self.read_half.wait().await
@@ -380,11 +551,11 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + Sync + 'static> Channel<S> {
     pub fn into_stream(self) -> ChannelStream<S> {
         ChannelStream::new(
             io::ChannelTx::new(
-                self.sender.clone(),
-                self.id,
-                self.window_size.value.clone(),
-                self.window_size.subscribe(),
-                self.max_packet_size,
+                self.write_half.sender.clone(),
+                self.write_half.id,
+                self.write_half.window_size.value.clone(),
+                self.write_half.window_size.subscribe(),
+                self.write_half.max_packet_size,
                 None,
             ),
             io::ChannelRx::new(self, None),
@@ -412,13 +583,6 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + Sync + 'static> Channel<S> {
     /// Make a writer for the [`Channel`] to send [`ChannelMsg::Data`] or [`ChannelMsg::ExtendedData`]
     /// depending on the `ext` parameter, through the `AsyncWrite` trait.
     pub fn make_writer_ext(&self, ext: Option<u32>) -> impl AsyncWrite {
-        io::ChannelTx::new(
-            self.sender.clone(),
-            self.id,
-            self.window_size.value.clone(),
-            self.window_size.subscribe(),
-            self.max_packet_size,
-            ext,
-        )
+        self.write_half.make_writer_ext(ext)
     }
 }

@@ -97,8 +97,9 @@ where
     fn drop(&mut self) {
         if let ChannelAsMut::Owned(ref mut channel) = &mut self.channel {
             let _ = channel
+                .write_half
                 .sender
-                .try_send((channel.id, ChannelMsg::Close).into());
+                .try_send((channel.write_half.id, ChannelMsg::Close).into());
         }
     }
 }
