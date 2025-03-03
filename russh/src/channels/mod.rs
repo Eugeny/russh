@@ -137,13 +137,27 @@ impl WindowSizeRef {
     }
 }
 
+/// A handle to the reading part of a session channel.
+///
+/// Allows you to read from a channel without borrowing the session
+pub struct ChannelReadHalf {
+    pub(crate) receiver: Receiver<ChannelMsg>,
+}
+
+impl ChannelReadHalf {
+    /// Awaits an incoming [`ChannelMsg`], this method returns [`None`] if the channel has been closed.
+    pub async fn wait(&mut self) -> Option<ChannelMsg> {
+        self.receiver.recv().await
+    }
+}
+
 /// A handle to a session channel.
 ///
 /// Allows you to read and write from a channel without borrowing the session
 pub struct Channel<Send: From<(ChannelId, ChannelMsg)>> {
     pub(crate) id: ChannelId,
     pub(crate) sender: Sender<Send>,
-    pub(crate) receiver: Receiver<ChannelMsg>,
+    pub(crate) read_half: ChannelReadHalf,
     pub(crate) max_packet_size: u32,
     pub(crate) window_size: WindowSizeRef,
 }
@@ -169,7 +183,7 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + Sync + 'static> Channel<S> {
             Self {
                 id,
                 sender,
-                receiver: rx,
+                read_half: ChannelReadHalf { receiver: rx },
                 max_packet_size,
                 window_size: window_size.clone(),
             },
@@ -358,7 +372,7 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + Sync + 'static> Channel<S> {
 
     /// Awaits an incoming [`ChannelMsg`], this method returns [`None`] if the channel has been closed.
     pub async fn wait(&mut self) -> Option<ChannelMsg> {
-        self.receiver.recv().await
+        self.read_half.wait().await
     }
 
     /// Consume the [`Channel`] to produce a bidirectionnal stream,

@@ -55,7 +55,7 @@ use tokio::sync::mpsc::{
 use tokio::sync::oneshot;
 
 pub use crate::auth::AuthResult;
-use crate::channels::{Channel, ChannelMsg, ChannelRef, WindowSizeRef};
+use crate::channels::{Channel, ChannelMsg, ChannelReadHalf, ChannelRef, WindowSizeRef};
 use crate::cipher::{self, clear, OpeningKey};
 use crate::kex::{KexCause, KexProgress, SessionKexState};
 use crate::keys::PrivateKeyWithHashAlg;
@@ -495,7 +495,7 @@ impl<H: Handler> Handle<H> {
                     return Ok(Channel {
                         id,
                         sender: self.sender.clone(),
-                        receiver,
+                        read_half: ChannelReadHalf { receiver },
                         max_packet_size,
                         window_size: window_size_ref,
                     });
