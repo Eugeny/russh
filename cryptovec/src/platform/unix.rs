@@ -30,9 +30,9 @@ pub fn memset(ptr: *mut u8, value: i32, size: usize) {
 }
 
 unsafe fn get_libc_error(msg: &str) -> String {
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(target_vendor = "apple"))]
     let errno = *libc::__errno_location();
-    #[cfg(target_os = "macos")]
+    #[cfg(target_vendor = "apple")]
     let errno = *libc::__error();
     const ERRMAXLEN: usize = 255;
     const INVALID_ERR: &str = "Unknown";
