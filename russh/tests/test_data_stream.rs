@@ -11,6 +11,43 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 pub const WINDOW_SIZE: u32 = 8 * 2048;
 
+trait ChannelDataCopy {
+    async fn copy_data_through_channel(
+        &mut self,
+        channel: &mut Channel<client::Msg>,
+        data: &[u8],
+    ) -> anyhow::Result<Vec<u8>>;
+}
+
+struct ReaderAndWriter;
+
+impl ChannelDataCopy for ReaderAndWriter {
+    async fn copy_data_through_channel(
+        &mut self,
+        channel: &mut Channel<client::Msg>,
+        data: &[u8],
+    ) -> anyhow::Result<Vec<u8>> {
+        let mut buf = Vec::<u8>::new();
+        let (mut writer, mut reader) = (channel.make_writer_ext(Some(1)), channel.make_reader());
+
+        let (r0, r1) = tokio::join!(
+            async {
+                writer.write_all(data).await?;
+                writer.shutdown().await?;
+
+                Ok::<_, anyhow::Error>(())
+            },
+            reader.read_to_end(&mut buf)
+        );
+
+        r0?;
+        let count = r1?;
+        assert_eq!(data.len(), count);
+
+        Ok(buf)
+    }
+}
+
 #[tokio::test]
 async fn test_reader_and_writer() -> Result<(), anyhow::Error> {
     env_logger::init();
@@ -25,12 +62,16 @@ async fn test_reader_and_writer() -> Result<(), anyhow::Error> {
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
 
-    stream(addr, &data).await?;
+    stream(addr, &data, ReaderAndWriter).await?;
 
     Ok(())
 }
 
-async fn stream(addr: SocketAddr, data: &[u8]) -> Result<(), anyhow::Error> {
+async fn stream(
+    addr: SocketAddr,
+    data: &[u8],
+    mut test: impl ChannelDataCopy,
+) -> Result<(), anyhow::Error> {
     let config = Arc::new(client::Config::default());
     let key = Arc::new(PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap());
 
@@ -51,23 +92,7 @@ async fn stream(addr: SocketAddr, data: &[u8]) -> Result<(), anyhow::Error> {
         Err(err) => return Err(err.into()),
     };
 
-    let mut buf = Vec::<u8>::new();
-    let (mut writer, mut reader) = (channel.make_writer_ext(Some(1)), channel.make_reader());
-
-    let (r0, r1) = tokio::join!(
-        async {
-            writer.write_all(data).await?;
-            writer.shutdown().await?;
-
-            Ok::<_, anyhow::Error>(())
-        },
-        reader.read_to_end(&mut buf)
-    );
-
-    r0?;
-    let count = r1?;
-
-    assert_eq!(data.len(), count);
+    let buf = test.copy_data_through_channel(&mut channel, data).await?;
     assert_eq!(data, buf);
 
     Ok(())
