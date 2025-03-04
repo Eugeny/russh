@@ -142,7 +142,7 @@ macro_rules! push_packet {
 }
 
 mod channels;
-pub use channels::{Channel, ChannelMsg, ChannelStream};
+pub use channels::{Channel, ChannelMsg, ChannelReadHalf, ChannelStream, ChannelWriteHalf};
 
 mod parsing;
 mod session;
