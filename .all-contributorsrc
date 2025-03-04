@@ -526,6 +526,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "psychon",
+      "name": "Uli Schlachter",
+      "avatar_url": "https://avatars.githubusercontent.com/u/89482?v=4",
+      "profile": "https://github.com/psychon",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,
