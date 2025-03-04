@@ -42,7 +42,7 @@ where
     ) -> Poll<io::Result<()>> {
         let (msg, mut idx) = match self.buffer.take() {
             Some(msg) => msg,
-            None => match ready!(self.channel.as_mut().receiver.poll_recv(cx)) {
+            None => match ready!(self.channel.as_mut().read_half.receiver.poll_recv(cx)) {
                 Some(msg) => (msg, 0),
                 None => return Poll::Ready(Ok(())),
             },
@@ -78,7 +78,7 @@ where
                 Poll::Ready(Ok(()))
             }
             (ChannelMsg::Eof, _) => {
-                self.channel.as_mut().receiver.close();
+                self.channel.as_mut().read_half.receiver.close();
 
                 Poll::Ready(Ok(()))
             }
@@ -97,8 +97,9 @@ where
     fn drop(&mut self) {
         if let ChannelAsMut::Owned(ref mut channel) = &mut self.channel {
             let _ = channel
+                .write_half
                 .sender
-                .try_send((channel.id, ChannelMsg::Close).into());
+                .try_send((channel.write_half.id, ChannelMsg::Close).into());
         }
     }
 }
