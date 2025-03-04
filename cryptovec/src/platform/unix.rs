@@ -1,3 +1,4 @@
+use nix::errno::Errno;
 use std::ffi::c_void;
 use std::ptr::NonNull;
 
@@ -10,6 +11,7 @@ pub fn munlock(ptr: *const u8, len: usize) -> Result<(), MemoryLockError> {
         nix::sys::mman::munlock(ptr, len).map_err(|e| {
             MemoryLockError::new(format!("munlock: {} (0x{:x})", e.desc(), e as i32))
         })?;
+        Errno::clear();
     }
     Ok(())
 }
@@ -19,6 +21,7 @@ pub fn mlock(ptr: *const u8, len: usize) -> Result<(), MemoryLockError> {
         let ptr = NonNull::new_unchecked(ptr as *mut c_void);
         nix::sys::mman::mlock(ptr, len)
             .map_err(|e| MemoryLockError::new(format!("mlock: {} (0x{:x})", e.desc(), e as i32)))?;
+        Errno::clear();
     }
     Ok(())
 }
