@@ -870,10 +870,10 @@ where
     let (kex_done_signal, kex_done_signal_rx) = oneshot::channel();
     let join = russh_util::runtime::spawn(session.run(stream, handler, Some(kex_done_signal)));
 
-    if kex_done_signal_rx.await.is_err() {
+    if let Err(err) = kex_done_signal_rx.await {
         // kex_done_signal Sender is dropped when the session
         // fails before a succesful key exchange
-        debug!("kex_done_signal sender was dropped");
+        debug!("kex_done_signal sender was dropped {err:?}");
         join.await.map_err(crate::Error::Join)??;
         return Err(H::Error::from(crate::Error::Disconnect));
     }
