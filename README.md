@@ -1,7 +1,7 @@
 # Russh
 
 [![Rust](https://github.com/warp-tech/russh/actions/workflows/rust.yml/badge.svg)](https://github.com/warp-tech/russh/actions/workflows/rust.yml)  <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
-[![All Contributors](https://img.shields.io/badge/all_contributors-59-orange.svg?style=flat-square)](#contributors-)
+[![All Contributors](https://img.shields.io/badge/all_contributors-60-orange.svg?style=flat-square)](#contributors-)
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
 
 Low-level Tokio SSH2 client and server implementation.
@@ -196,6 +196,7 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/procr1337"><img src="https://avatars.githubusercontent.com/u/193802945?v=4?s=100" width="100px;" alt="procr1337"/><br /><sub><b>procr1337</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=procr1337" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/Itsusinn"><img src="https://avatars.githubusercontent.com/u/30529002?v=4?s=100" width="100px;" alt="iHsin"/><br /><sub><b>iHsin</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=Itsusinn" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/psychon"><img src="https://avatars.githubusercontent.com/u/89482?v=4?s=100" width="100px;" alt="Uli Schlachter"/><br /><sub><b>Uli Schlachter</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=psychon" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/jvanbrunt"><img src="https://avatars.githubusercontent.com/u/3064793?v=4?s=100" width="100px;" alt="Jacob Van Brunt"/><br /><sub><b>Jacob Van Brunt</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=jvanbrunt" title="Code">💻</a></td>
     </tr>
   </tbody>
 </table>
