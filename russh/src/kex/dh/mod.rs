@@ -10,11 +10,37 @@ use sha1::Sha1;
 use sha2::{Sha256, Sha512};
 use ssh_encoding::{Decode, Encode, Reader, Writer};
 
-use self::groups::{DhGroup, DH_GROUP1, DH_GROUP14, DH_GROUP16};
+use self::groups::{
+    DhGroup, DH_GROUP1, DH_GROUP14, DH_GROUP15, DH_GROUP16, DH_GROUP17, DH_GROUP18,
+};
 use super::{compute_keys, KexAlgorithm, KexAlgorithmImplementor, KexType};
 use crate::client::GexParams;
 use crate::session::Exchange;
 use crate::{cipher, mac, msg, CryptoVec, Error};
+
+pub(crate) struct DhGroup15Sha512KexType {}
+
+impl KexType for DhGroup15Sha512KexType {
+    fn make(&self) -> KexAlgorithm {
+        DhGroupKex::<Sha512>::new(Some(&DH_GROUP15)).into()
+    }
+}
+
+pub(crate) struct DhGroup17Sha512KexType {}
+
+impl KexType for DhGroup17Sha512KexType {
+    fn make(&self) -> KexAlgorithm {
+        DhGroupKex::<Sha512>::new(Some(&DH_GROUP17)).into()
+    }
+}
+
+pub(crate) struct DhGroup18Sha512KexType {}
+
+impl KexType for DhGroup18Sha512KexType {
+    fn make(&self) -> KexAlgorithm {
+        DhGroupKex::<Sha512>::new(Some(&DH_GROUP18)).into()
+    }
+}
 
 pub(crate) struct DhGexSha1KexType {}
 
