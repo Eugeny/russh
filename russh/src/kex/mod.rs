@@ -283,7 +283,7 @@ pub const ALL_KEX_ALGORITHMS: &[&Name] = &[
     &DH_G14_SHA256,
     &DH_G15_SHA512,
     &DH_G16_SHA512,
-    &DH_G17_SH512,
+    &DH_G17_SHA512,
     &DH_G18_SHA512,
     &ECDH_SHA2_NISTP256,
     &ECDH_SHA2_NISTP384,
@@ -299,7 +299,7 @@ pub(crate) static KEXES: Lazy<HashMap<&'static Name, &(dyn KexType + Send + Sync
         h.insert(&DH_GEX_SHA1, &_DH_GEX_SHA1);
         h.insert(&DH_GEX_SHA256, &_DH_GEX_SHA256);
         h.insert(&DH_G18_SHA512, &_DH_G18_SHA512);
-        h.insert(&DH_G17_SH512, &_DH_G17_SHA512);
+        h.insert(&DH_G17_SHA512, &_DH_G17_SHA512);
         h.insert(&DH_G16_SHA512, &_DH_G16_SHA512);
         h.insert(&DH_G15_SHA512, &_DH_G15_SHA512);
         h.insert(&DH_G14_SHA256, &_DH_G14_SHA256);
