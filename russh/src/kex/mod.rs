@@ -238,7 +238,7 @@ pub const DH_G15_SHA512: Name = Name("diffie-hellman-group15-sha512");
 /// `diffie-hellman-group16-sha512`
 pub const DH_G16_SHA512: Name = Name("diffie-hellman-group16-sha512");
 /// `diffie-hellman-group17-sha512`
-pub const DH_G17_SH512: Name = Name("diffie-hellman-group17-sha512");
+pub const DH_G17_SHA512: Name = Name("diffie-hellman-group17-sha512");
 /// `diffie-hellman-group18-sha512`
 pub const DH_G18_SHA512: Name = Name("diffie-hellman-group18-sha512");
 /// `ecdh-sha2-nistp256`
