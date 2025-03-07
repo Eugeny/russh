@@ -10,14 +10,10 @@ license = "Apache-2.0"
 repository = "https://github.com/warp-tech/russh"
 
 [dependencies]
-chrono = "0.4.38"
 tokio = { workspace = true, features = ["sync", "macros"] }
 
-[dev-dependencies]
-futures-executor = "0.3.13"
-static_assertions = "1.1.0"
-
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+chrono = "0.4.38"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4.43"
 
