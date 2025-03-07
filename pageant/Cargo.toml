@@ -9,7 +9,7 @@ repository = "https://github.com/warp-tech/russh"
 version = "0.0.2"
 rust-version = "1.75"
 
-[dependencies]
+[target.'cfg(windows)'.dependencies]
 futures.workspace = true
 thiserror.workspace = true
 rand.workspace = true
@@ -17,8 +17,6 @@ log.workspace = true
 tokio = { workspace = true, features = ["io-util", "rt"] }
 bytes.workspace = true
 delegate.workspace = true
-
-[target.'cfg(windows)'.dependencies]
 windows = { version = "0.58", features = [
     "Win32_UI_WindowsAndMessaging",
     "Win32_System_Memory",
