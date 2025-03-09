@@ -85,8 +85,8 @@ const ERROR_PIPE_BUSY: u32 = 231u32;
 #[cfg(windows)]
 impl AgentClient<pageant::PageantStream> {
     /// Connect to a running Pageant instance
-    pub async fn connect_pageant() -> Self {
-        Self::connect(pageant::PageantStream::new())
+    pub async fn connect_pageant() -> Result<Self, Error> {
+        Ok(Self::connect(pageant::PageantStream::new().await?))
     }
 }
 
