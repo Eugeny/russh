@@ -284,6 +284,14 @@ impl Session {
                 let data = Vec::<u8>::decode(r)?;
                 debug!("* {name:?} (unknown, data: {data:?})");
             }
+            if let Some(ref mut enc) = self.common.encrypted {
+                enc.received_extensions.push(name.clone());
+                if let Some(mut senders) = enc.extension_info_awaiters.remove(&name) {
+                    senders.drain(..).for_each(|w| {
+                        let _ = w.send(());
+                    });
+                }
+            }
         }
         Ok(())
     }

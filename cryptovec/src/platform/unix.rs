@@ -1,6 +1,7 @@
-use nix::errno::Errno;
 use std::ffi::c_void;
 use std::ptr::NonNull;
+
+use nix::errno::Errno;
 
 use super::MemoryLockError;
 

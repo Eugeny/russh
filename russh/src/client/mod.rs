@@ -53,6 +53,7 @@ use tokio::sync::mpsc::{
     channel, unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender,
 };
 use tokio::sync::oneshot;
+use tokio::time::Duration;
 
 pub use crate::auth::AuthResult;
 use crate::channels::{
@@ -184,6 +185,10 @@ pub enum Msg {
     },
     Channel(ChannelId, ChannelMsg),
     Rekey,
+    AwaitExtensionInfo {
+        extension_name: String,
+        reply_channel: oneshot::Sender<()>,
+    },
     GetServerSigAlgs {
         reply_channel: oneshot::Sender<Option<Vec<Algorithm>>>,
     },
@@ -525,7 +530,25 @@ impl<H: Handler> Handle<H> {
     /// with `rsa-sha2-256` or `rsa-sha2-512` and hope for the best.
     /// If the server supports the extension, but does not support `rsa-sha2-*`,
     /// `Some(None)` is returned.
+    ///
+    /// Note that this method will wait for up to 1 second for the server to
+    /// send the extension info if it hasn't done so yet. Unfortunately the timing
+    /// of the EXT_INFO message cannot be known in advance (RFC 8308).
+    ///
+    /// If this method returns `None` once, then for most SSH server
+    /// you can assume that it will return `None` every time.
     pub async fn best_supported_rsa_hash(&self) -> Result<Option<Option<HashAlg>>, Error> {
+        // Wait for the extension info from the server
+        let (sender, receiver) = oneshot::channel();
+        self.sender
+            .send(Msg::AwaitExtensionInfo {
+                extension_name: "server-sig-algs".into(),
+                reply_channel: sender,
+            })
+            .await
+            .map_err(|_| crate::Error::SendError)?;
+        let _ = tokio::time::timeout(Duration::from_secs(1), receiver).await;
+
         let (sender, receiver) = oneshot::channel();
 
         self.sender
@@ -1300,6 +1323,24 @@ impl Session {
             }
             Msg::Channel(id, ChannelMsg::Close) => self.close(id)?,
             Msg::Rekey => self.initiate_rekey()?,
+            Msg::AwaitExtensionInfo {
+                extension_name,
+                reply_channel,
+            } => {
+                if let Some(ref mut enc) = self.common.encrypted {
+                    // Drop if the extension has been seen already
+                    if !enc.received_extensions.contains(&extension_name) {
+                        // There will be no new extension info after authentication
+                        // has succeeded
+                        if !matches!(enc.state, EncryptedState::Authenticated) {
+                            enc.extension_info_awaiters
+                                .entry(extension_name)
+                                .or_insert(vec![])
+                                .push(reply_channel);
+                        }
+                    }
+                }
+            }
             Msg::GetServerSigAlgs { reply_channel } => {
                 let _ = reply_channel.send(self.server_sig_algs.clone());
             }
