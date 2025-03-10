@@ -93,7 +93,6 @@ tokio = { workspace = true, features = [
   "time",
   "net",
 ] }
-tokio-stream.workspace = true
 home.workspace = true
 
 [target.'cfg(windows)'.dependencies]
@@ -122,6 +121,7 @@ tempfile = "3.14.0"
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 russh-sftp = "2.0.5"
 tokio.workspace = true
+tokio-stream.workspace = true
 
 [[example]]
 name = "sftp_server"
