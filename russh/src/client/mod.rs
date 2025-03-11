@@ -889,6 +889,7 @@ where
             alive_timeouts: 0,
             received_data: false,
             remote_sshid: sshid.into(),
+            ever_received_keepalive: false,
         },
         session_receiver,
         session_sender,
@@ -1074,7 +1075,7 @@ impl Session {
                     reading.set(start_reading(stream_read, buffer, opening_cipher));
                 }
                 () = &mut keepalive_timer => {
-                    if self.common.config.keepalive_max != 0 && self.common.alive_timeouts > self.common.config.keepalive_max {
+                    if self.common.config.keepalive_max != 0 && self.common.alive_timeouts > self.common.config.keepalive_max && self.common.ever_received_keepalive {
                         debug!("Timeout, server not responding to keepalives");
                         return Err(crate::Error::KeepaliveTimeout.into());
                     }

@@ -88,7 +88,9 @@
 
 use std::convert::TryFrom;
 use std::fmt::{Debug, Display, Formatter};
+use std::future::{Future, Pending};
 
+use futures::future::Either as EitherFuture;
 use log::{debug, warn};
 use parsing::ChannelOpenConfirmation;
 pub use russh_cryptovec::CryptoVec;
@@ -560,12 +562,13 @@ impl ChannelParams {
     }
 }
 
-pub(crate) fn future_or_pending<F: futures::Future, T>(
+/// Returns `f(val)` if `val` it is [Some], or a forever pending [Future] if it is [None].
+pub(crate) fn future_or_pending<R, F: Future<Output = R>, T>(
     val: Option<T>,
     f: impl FnOnce(T) -> F,
-) -> futures::future::Either<futures::future::Pending<<F as futures::Future>::Output>, F> {
-    val.map_or(
-        futures::future::Either::Left(futures::future::pending()),
-        |x| futures::future::Either::Right(f(x)),
-    )
+) -> EitherFuture<Pending<R>, F> {
+    match val {
+        None => EitherFuture::Left(core::future::pending()),
+        Some(x) => EitherFuture::Right(f(x)),
+    }
 }
