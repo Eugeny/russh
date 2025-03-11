@@ -72,7 +72,6 @@ pub(crate) struct CommonSession<Config> {
     pub strict_kex: bool,
     pub alive_timeouts: usize,
     pub received_data: bool,
-    pub ever_received_keepalive: bool,
 }
 
 impl<C> Debug for CommonSession<C> {

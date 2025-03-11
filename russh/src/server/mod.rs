@@ -992,7 +992,6 @@ async fn read_ssh_id<R: AsyncRead + Unpin>(
         alive_timeouts: 0,
         received_data: false,
         remote_sshid: sshid.into(),
-        ever_received_keepalive: false,
     };
     Ok(session)
 }

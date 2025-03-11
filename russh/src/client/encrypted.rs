@@ -562,7 +562,6 @@ impl Session {
                         if wants_reply == 1 {
                             trace!("Received keep alive message: {req:?}",);
                             self.common.wants_reply = false;
-                            self.common.ever_received_keepalive = true;
                             push_packet!(enc.write, enc.write.push(msg::REQUEST_SUCCESS));
                         } else {
                             warn!("Received keepalive without reply request!");
