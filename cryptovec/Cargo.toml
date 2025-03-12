@@ -25,6 +25,7 @@ winapi = { version = "0.3", features = [
     "sysinfoapi",
     "impl-default",
 ] }
+libc = "0.2"
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3.46"
