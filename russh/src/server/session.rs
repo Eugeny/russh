@@ -1,4 +1,5 @@
 use std::collections::{HashMap, VecDeque};
+use std::io::ErrorKind;
 use std::sync::Arc;
 
 use channels::WindowSizeRef;
@@ -647,10 +648,14 @@ impl Session {
             if let Some((stream_read, buffer, opening_cipher)) = is_reading.take() {
                 reading.set(start_reading(stream_read, buffer, opening_cipher));
             }
-            let (n, r, b, opening_cipher) = (&mut reading).await?;
-            is_reading = Some((r, b, opening_cipher));
-            if n == 0 {
-                break;
+            match (&mut reading).await {
+                Ok((0, _, _, _)) => break,
+                Ok((_, r, b, opening_cipher)) => {
+                    is_reading = Some((r, b, opening_cipher));
+                }
+                // at this stage of session shutdown, EOF is not unexpected
+                Err(Error::IO(ref e)) if e.kind() == ErrorKind::UnexpectedEof => break,
+                Err(e) => return Err(e.into()),
             }
         }
 
