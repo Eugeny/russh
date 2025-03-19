@@ -652,10 +652,10 @@ impl Session {
                 Ok((0, _, _, _)) => break,
                 Ok((_, r, b, opening_cipher)) => {
                     is_reading = Some((r, b, opening_cipher));
-                },
-                // read_exact returns this error if it reads 0 bytes, this is an expected eof
-                Err(Error::IO(ref e)) if e.kind() == ErrorKind::UnexpectedEof=> break,
-                Err(e) => return Err(e.into())
+                }
+                // at this stage of session shutdown, EOF is not unexpected
+                Err(Error::IO(ref e)) if e.kind() == ErrorKind::UnexpectedEof => break,
+                Err(e) => return Err(e.into()),
             }
         }
 
