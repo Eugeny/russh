@@ -165,7 +165,7 @@ impl ChannelReadHalf {
     /// Make a reader for the [`Channel`] to receive [`ChannelMsg::Data`] or [`ChannelMsg::ExtendedData`]
     /// depending on the `ext` parameter, through the `AsyncRead` trait.
     pub fn make_reader_ext(&mut self, ext: Option<u32>) -> impl AsyncRead + '_ {
-        io::ChannelRx::<crate::client::Msg>::new(self, ext)
+        io::ChannelRx::new(self, ext)
     }
 }
 
@@ -590,7 +590,7 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + Sync + 'static> Channel<S> {
                 self.write_half.max_packet_size,
                 None,
             ),
-            io::ChannelRx::new(self, None),
+            io::ChannelRx::new(io::ChannelCloseOnDrop(self), None),
         )
     }
 
