@@ -4,7 +4,7 @@ use std::task::{ready, Context, Poll};
 
 use tokio::io::AsyncRead;
 
-use super::{ChannelAsMut, ChannelMsg};
+use super::{ChannelMsg, ChannelRxAsMut};
 use crate::ChannelId;
 
 #[derive(Debug)]
@@ -12,7 +12,7 @@ pub struct ChannelRx<'i, S>
 where
     S: From<(ChannelId, ChannelMsg)>,
 {
-    channel: ChannelAsMut<'i, S>,
+    channel: ChannelRxAsMut<'i, S>,
     buffer: Option<(ChannelMsg, usize)>,
 
     ext: Option<u32>,
@@ -22,7 +22,7 @@ impl<'i, S> ChannelRx<'i, S>
 where
     S: From<(ChannelId, ChannelMsg)>,
 {
-    pub fn new(channel: impl Into<ChannelAsMut<'i, S>>, ext: Option<u32>) -> Self {
+    pub fn new(channel: impl Into<ChannelRxAsMut<'i, S>>, ext: Option<u32>) -> Self {
         Self {
             channel: channel.into(),
             buffer: None,
@@ -42,7 +42,7 @@ where
     ) -> Poll<io::Result<()>> {
         let (msg, mut idx) = match self.buffer.take() {
             Some(msg) => msg,
-            None => match ready!(self.channel.as_mut().read_half.receiver.poll_recv(cx)) {
+            None => match ready!(self.channel.as_mut().receiver.poll_recv(cx)) {
                 Some(msg) => (msg, 0),
                 None => return Poll::Ready(Ok(())),
             },
@@ -78,7 +78,7 @@ where
                 Poll::Ready(Ok(()))
             }
             (ChannelMsg::Eof, _) => {
-                self.channel.as_mut().read_half.receiver.close();
+                self.channel.as_mut().receiver.close();
 
                 Poll::Ready(Ok(()))
             }
@@ -95,7 +95,7 @@ where
     S: From<(ChannelId, ChannelMsg)>,
 {
     fn drop(&mut self) {
-        if let ChannelAsMut::Owned(ref mut channel) = &mut self.channel {
+        if let ChannelRxAsMut::Owned(ref mut channel) = &mut self.channel {
             let _ = channel
                 .write_half
                 .sender

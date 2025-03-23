@@ -144,10 +144,28 @@ pub struct ChannelReadHalf {
     pub(crate) receiver: Receiver<ChannelMsg>,
 }
 
+impl std::fmt::Debug for ChannelReadHalf {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ChannelReadHalf").finish()
+    }
+}
+
 impl ChannelReadHalf {
     /// Awaits an incoming [`ChannelMsg`], this method returns [`None`] if the channel has been closed.
     pub async fn wait(&mut self) -> Option<ChannelMsg> {
         self.receiver.recv().await
+    }
+
+    /// Make a reader for the [`Channel`] to receive [`ChannelMsg::Data`]
+    /// through the `AsyncRead` trait.
+    pub fn make_reader(&mut self) -> impl AsyncRead + '_ {
+        self.make_reader_ext(None)
+    }
+
+    /// Make a reader for the [`Channel`] to receive [`ChannelMsg::Data`] or [`ChannelMsg::ExtendedData`]
+    /// depending on the `ext` parameter, through the `AsyncRead` trait.
+    pub fn make_reader_ext(&mut self, ext: Option<u32>) -> impl AsyncRead + '_ {
+        io::ChannelRx::<crate::client::Msg>::new(self, ext)
     }
 }
 
@@ -159,6 +177,14 @@ pub struct ChannelWriteHalf<Send: From<(ChannelId, ChannelMsg)>> {
     pub(crate) sender: Sender<Send>,
     pub(crate) max_packet_size: u32,
     pub(crate) window_size: WindowSizeRef,
+}
+
+impl<S: From<(ChannelId, ChannelMsg)>> std::fmt::Debug for ChannelWriteHalf<S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ChannelWriteHalf")
+            .field("id", &self.id)
+            .finish()
+    }
 }
 
 impl<S: From<(ChannelId, ChannelMsg)> + Send + Sync + 'static> ChannelWriteHalf<S> {
@@ -571,13 +597,13 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + Sync + 'static> Channel<S> {
     /// Make a reader for the [`Channel`] to receive [`ChannelMsg::Data`]
     /// through the `AsyncRead` trait.
     pub fn make_reader(&mut self) -> impl AsyncRead + '_ {
-        self.make_reader_ext(None)
+        self.read_half.make_reader()
     }
 
     /// Make a reader for the [`Channel`] to receive [`ChannelMsg::Data`] or [`ChannelMsg::ExtendedData`]
     /// depending on the `ext` parameter, through the `AsyncRead` trait.
     pub fn make_reader_ext(&mut self, ext: Option<u32>) -> impl AsyncRead + '_ {
-        io::ChannelRx::new(self, ext)
+        self.read_half.make_reader_ext(ext)
     }
 
     /// Make a writer for the [`Channel`] to send [`ChannelMsg::Data`]

@@ -1,4 +1,4 @@
-use super::{Channel, ChannelId, ChannelMsg};
+use super::{Channel, ChannelId, ChannelMsg, ChannelReadHalf};
 
 mod rx;
 pub use rx::ChannelRx;
@@ -9,27 +9,27 @@ pub use tx::ChannelTx;
 /// An enum with the ability to hold either an owned [`Channel`]
 /// or a `&mut` ref to it.
 #[derive(Debug)]
-pub enum ChannelAsMut<'i, S>
+pub enum ChannelRxAsMut<'i, S>
 where
     S: From<(ChannelId, ChannelMsg)>,
 {
     Owned(Channel<S>),
-    RefMut(&'i mut Channel<S>),
+    RefMut(&'i mut ChannelReadHalf),
 }
 
-impl<'i, S> AsMut<Channel<S>> for ChannelAsMut<'i, S>
+impl<'i, S> AsMut<ChannelReadHalf> for ChannelRxAsMut<'i, S>
 where
     S: From<(ChannelId, ChannelMsg)>,
 {
-    fn as_mut(&mut self) -> &mut Channel<S> {
+    fn as_mut(&mut self) -> &mut ChannelReadHalf {
         match self {
-            Self::Owned(channel) => channel,
+            Self::Owned(channel) => &mut channel.read_half,
             Self::RefMut(ref_mut) => ref_mut,
         }
     }
 }
 
-impl<S> From<Channel<S>> for ChannelAsMut<'static, S>
+impl<S> From<Channel<S>> for ChannelRxAsMut<'static, S>
 where
     S: From<(ChannelId, ChannelMsg)>,
 {
@@ -38,11 +38,11 @@ where
     }
 }
 
-impl<'i, S> From<&'i mut Channel<S>> for ChannelAsMut<'i, S>
+impl<'i, S> From<&'i mut ChannelReadHalf> for ChannelRxAsMut<'i, S>
 where
     S: From<(ChannelId, ChannelMsg)>,
 {
-    fn from(value: &'i mut Channel<S>) -> Self {
+    fn from(value: &'i mut ChannelReadHalf) -> Self {
         Self::RefMut(value)
     }
 }
