@@ -5,7 +5,7 @@ use std::task::{ready, Context, Poll};
 
 use tokio::io::AsyncRead;
 
-use crate::{ChannelMsg, ChannelReadHalf};
+use super::{ChannelMsg, ChannelReadHalf};
 
 #[derive(Debug)]
 pub struct ChannelRx<R> {

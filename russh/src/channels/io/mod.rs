@@ -8,6 +8,7 @@ pub use tx::ChannelTx;
 
 use crate::{Channel, ChannelId, ChannelMsg, ChannelReadHalf};
 
+#[derive(Debug)]
 pub struct ChannelCloseOnDrop<S: From<(ChannelId, ChannelMsg)>>(pub Channel<S>);
 impl<S: From<(ChannelId, ChannelMsg)>> Borrow<ChannelReadHalf> for ChannelCloseOnDrop<S> {
     fn borrow(&self) -> &ChannelReadHalf {
