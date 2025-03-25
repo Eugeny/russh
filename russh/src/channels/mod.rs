@@ -338,9 +338,15 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + Sync + 'static> ChannelWriteHalf<
             .map_err(|_| Error::SendError)
     }
 
+    /// Make a writer for the [`Channel`] to send [`ChannelMsg::Data`]
+    /// through the `AsyncWrite` trait.
+    pub fn make_writer(&self) -> impl AsyncWrite {
+        self.make_writer_ext(None)
+    }
+
     /// Make a writer for the [`Channel`] to send [`ChannelMsg::Data`] or [`ChannelMsg::ExtendedData`]
     /// depending on the `ext` parameter, through the `AsyncWrite` trait.
-    fn make_writer_ext(&self, ext: Option<u32>) -> impl AsyncWrite {
+    pub fn make_writer_ext(&self, ext: Option<u32>) -> impl AsyncWrite {
         io::ChannelTx::new(
             self.sender.clone(),
             self.id,
@@ -583,7 +589,7 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + Sync + 'static> Channel<S> {
     /// Make a writer for the [`Channel`] to send [`ChannelMsg::Data`]
     /// through the `AsyncWrite` trait.
     pub fn make_writer(&self) -> impl AsyncWrite {
-        self.make_writer_ext(None)
+        self.write_half.make_writer()
     }
 
     /// Make a writer for the [`Channel`] to send [`ChannelMsg::Data`] or [`ChannelMsg::ExtendedData`]
