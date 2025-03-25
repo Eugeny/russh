@@ -1,39 +1,33 @@
+use std::borrow::BorrowMut;
 use std::io;
 use std::pin::Pin;
 use std::task::{ready, Context, Poll};
 
 use tokio::io::AsyncRead;
 
-use super::{ChannelAsMut, ChannelMsg};
-use crate::ChannelId;
+use super::{ChannelMsg, ChannelReadHalf};
 
 #[derive(Debug)]
-pub struct ChannelRx<'i, S>
-where
-    S: From<(ChannelId, ChannelMsg)>,
-{
-    channel: ChannelAsMut<'i, S>,
+pub struct ChannelRx<R> {
+    channel: R,
     buffer: Option<(ChannelMsg, usize)>,
 
     ext: Option<u32>,
 }
 
-impl<'i, S> ChannelRx<'i, S>
-where
-    S: From<(ChannelId, ChannelMsg)>,
-{
-    pub fn new(channel: impl Into<ChannelAsMut<'i, S>>, ext: Option<u32>) -> Self {
+impl<R> ChannelRx<R> {
+    pub fn new(channel: R, ext: Option<u32>) -> Self {
         Self {
-            channel: channel.into(),
+            channel,
             buffer: None,
             ext,
         }
     }
 }
 
-impl<'i, S> AsyncRead for ChannelRx<'i, S>
+impl<R> AsyncRead for ChannelRx<R>
 where
-    S: From<(ChannelId, ChannelMsg)>,
+    R: BorrowMut<ChannelReadHalf> + Unpin,
 {
     fn poll_read(
         mut self: Pin<&mut Self>,
@@ -42,7 +36,7 @@ where
     ) -> Poll<io::Result<()>> {
         let (msg, mut idx) = match self.buffer.take() {
             Some(msg) => msg,
-            None => match ready!(self.channel.as_mut().read_half.receiver.poll_recv(cx)) {
+            None => match ready!(self.channel.borrow_mut().receiver.poll_recv(cx)) {
                 Some(msg) => (msg, 0),
                 None => return Poll::Ready(Ok(())),
             },
@@ -78,7 +72,7 @@ where
                 Poll::Ready(Ok(()))
             }
             (ChannelMsg::Eof, _) => {
-                self.channel.as_mut().read_half.receiver.close();
+                self.channel.borrow_mut().receiver.close();
 
                 Poll::Ready(Ok(()))
             }
@@ -86,20 +80,6 @@ where
                 cx.waker().wake_by_ref();
                 Poll::Pending
             }
-        }
-    }
-}
-
-impl<'i, S> Drop for ChannelRx<'i, S>
-where
-    S: From<(ChannelId, ChannelMsg)>,
-{
-    fn drop(&mut self) {
-        if let ChannelAsMut::Owned(ref mut channel) = &mut self.channel {
-            let _ = channel
-                .write_half
-                .sender
-                .try_send((channel.write_half.id, ChannelMsg::Close).into());
         }
     }
 }

@@ -1,48 +1,31 @@
-use super::{Channel, ChannelId, ChannelMsg};
-
 mod rx;
+use std::borrow::{Borrow, BorrowMut};
+
 pub use rx::ChannelRx;
 
 mod tx;
 pub use tx::ChannelTx;
 
-/// An enum with the ability to hold either an owned [`Channel`]
-/// or a `&mut` ref to it.
+use crate::{Channel, ChannelId, ChannelMsg, ChannelReadHalf};
+
 #[derive(Debug)]
-pub enum ChannelAsMut<'i, S>
-where
-    S: From<(ChannelId, ChannelMsg)>,
-{
-    Owned(Channel<S>),
-    RefMut(&'i mut Channel<S>),
-}
-
-impl<'i, S> AsMut<Channel<S>> for ChannelAsMut<'i, S>
-where
-    S: From<(ChannelId, ChannelMsg)>,
-{
-    fn as_mut(&mut self) -> &mut Channel<S> {
-        match self {
-            Self::Owned(channel) => channel,
-            Self::RefMut(ref_mut) => ref_mut,
-        }
+pub struct ChannelCloseOnDrop<S: From<(ChannelId, ChannelMsg)>>(pub Channel<S>);
+impl<S: From<(ChannelId, ChannelMsg)>> Borrow<ChannelReadHalf> for ChannelCloseOnDrop<S> {
+    fn borrow(&self) -> &ChannelReadHalf {
+        &self.0.read_half
     }
 }
-
-impl<S> From<Channel<S>> for ChannelAsMut<'static, S>
-where
-    S: From<(ChannelId, ChannelMsg)>,
-{
-    fn from(value: Channel<S>) -> Self {
-        Self::Owned(value)
+impl<S: From<(ChannelId, ChannelMsg)>> BorrowMut<ChannelReadHalf> for ChannelCloseOnDrop<S> {
+    fn borrow_mut(&mut self) -> &mut ChannelReadHalf {
+        &mut self.0.read_half
     }
 }
-
-impl<'i, S> From<&'i mut Channel<S>> for ChannelAsMut<'i, S>
-where
-    S: From<(ChannelId, ChannelMsg)>,
-{
-    fn from(value: &'i mut Channel<S>) -> Self {
-        Self::RefMut(value)
+impl<S: From<(ChannelId, ChannelMsg)>> Drop for ChannelCloseOnDrop<S> {
+    fn drop(&mut self) {
+        let Self(channel) = self;
+        let _ = channel
+            .write_half
+            .sender
+            .try_send((channel.write_half.id, ChannelMsg::Close).into());
     }
 }
