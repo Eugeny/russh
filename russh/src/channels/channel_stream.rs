@@ -10,7 +10,7 @@ use super::{ChannelId, ChannelMsg};
 /// AsyncRead/AsyncWrite wrapper for SSH Channels
 pub struct ChannelStream<S>
 where
-    S: From<(ChannelId, ChannelMsg)> + 'static,
+    S: From<(ChannelId, ChannelMsg)> + Send + 'static,
 {
     tx: ChannelTx<S>,
     rx: ChannelRx<ChannelCloseOnDrop<S>>,
@@ -18,7 +18,7 @@ where
 
 impl<S> ChannelStream<S>
 where
-    S: From<(ChannelId, ChannelMsg)>,
+    S: From<(ChannelId, ChannelMsg)> + Send,
 {
     pub(super) fn new(tx: ChannelTx<S>, rx: ChannelRx<ChannelCloseOnDrop<S>>) -> Self {
         Self { tx, rx }
@@ -27,7 +27,7 @@ where
 
 impl<S> AsyncRead for ChannelStream<S>
 where
-    S: From<(ChannelId, ChannelMsg)>,
+    S: From<(ChannelId, ChannelMsg)> + Send,
 {
     fn poll_read(
         mut self: Pin<&mut Self>,
