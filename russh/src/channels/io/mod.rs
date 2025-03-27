@@ -31,8 +31,14 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + 'static> Drop for ChannelCloseOnD
     fn drop(&mut self) {
         let id = self.0.write_half.id;
         let sender = self.0.write_half.sender.clone();
+
+        // Best effort: async drop where possible
+        #[cfg(not(target_arch = "wasm32"))]
         tokio::spawn(async move {
             let _ = sender.send((id, ChannelMsg::Close).into()).await;
         });
+
+        #[cfg(target_arch = "wasm32")]
+        let _ = sender.try_send((id, ChannelMsg::Close).into());
     }
 }
