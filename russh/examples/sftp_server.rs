@@ -107,7 +107,6 @@ struct SftpSession {
     root_dir_read_done: bool,
 }
 
-#[async_trait::async_trait]
 impl russh_sftp::server::Handler for SftpSession {
     type Error = StatusCode;
 
