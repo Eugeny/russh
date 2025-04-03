@@ -47,13 +47,14 @@ use log::{debug, error, trace};
 use russh_util::time::Instant;
 use ssh_encoding::Decode;
 use ssh_key::{Algorithm, Certificate, HashAlg, PrivateKey, PublicKey};
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadHalf, WriteHalf};
 use tokio::pin;
 use tokio::sync::mpsc::{
     channel, unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender,
 };
 use tokio::sync::oneshot;
-use tokio::time::Duration;
 
 pub use crate::auth::AuthResult;
 use crate::channels::{
@@ -523,6 +524,21 @@ impl<H: Handler> Handle<H> {
         }
     }
 
+    /// See [`Handle::best_supported_rsa_hash`].
+    #[cfg(not(target_arch = "wasm32"))]
+    async fn await_extension_info(&self, extension_name: String) -> Result<(), crate::Error> {
+        let (sender, receiver) = oneshot::channel();
+        self.sender
+            .send(Msg::AwaitExtensionInfo {
+                extension_name,
+                reply_channel: sender,
+            })
+            .await
+            .map_err(|_| crate::Error::SendError)?;
+        let _ = tokio::time::timeout(Duration::from_secs(1), receiver).await;
+        Ok(())
+    }
+
     /// Returns the best RSA hash algorithm supported by the server,
     /// as indicated by the `server-sig-algs` extension.
     /// If the server does not support the extension,
@@ -532,22 +548,16 @@ impl<H: Handler> Handle<H> {
     /// `Some(None)` is returned.
     ///
     /// Note that this method will wait for up to 1 second for the server to
-    /// send the extension info if it hasn't done so yet. Unfortunately the timing
-    /// of the EXT_INFO message cannot be known in advance (RFC 8308).
+    /// send the extension info if it hasn't done so yet (except when running under
+    /// WebAssembly). Unfortunately the timing of the EXT_INFO message cannot be known
+    /// in advance (RFC 8308).
     ///
-    /// If this method returns `None` once, then for most SSH server
+    /// If this method returns `None` once, then for most SSH servers
     /// you can assume that it will return `None` every time.
     pub async fn best_supported_rsa_hash(&self) -> Result<Option<Option<HashAlg>>, Error> {
         // Wait for the extension info from the server
-        let (sender, receiver) = oneshot::channel();
-        self.sender
-            .send(Msg::AwaitExtensionInfo {
-                extension_name: "server-sig-algs".into(),
-                reply_channel: sender,
-            })
-            .await
-            .map_err(|_| crate::Error::SendError)?;
-        let _ = tokio::time::timeout(Duration::from_secs(1), receiver).await;
+        #[cfg(not(target_arch = "wasm32"))]
+        self.await_extension_info("server-sig-algs".into()).await?;
 
         let (sender, receiver) = oneshot::channel();
 
