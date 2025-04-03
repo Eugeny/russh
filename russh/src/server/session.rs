@@ -752,6 +752,33 @@ impl Session {
         self.common.disconnect(reason, description, language_tag)
     }
 
+    /// Sends a debug message to the client.
+    ///
+    /// Debug messages are intended for debugging purposes and may be
+    /// optionally displayed by the client, depending on the
+    /// `always_display` flag and client configuration.
+    ///
+    /// # Parameters
+    ///
+    /// - `always_display`: If `true`, the client is encouraged to
+    ///   display the message regardless of user preferences.
+    /// - `message`: The debug message to be sent.
+    /// - `language_tag`: The language tag of the message.
+    ///
+    /// # Notes
+    ///
+    /// This message is informational and does not affect the SSH session
+    /// state. Most clients (e.g., OpenSSH) will only display the message
+    /// if verbose mode is enabled.
+    pub fn debug(
+        &mut self,
+        always_display: bool,
+        message: &str,
+        language_tag: &str,
+    ) -> Result<(), Error> {
+        self.common.debug(always_display, message, language_tag)
+    }
+
     /// Send a "success" reply to a /global/ request (requests without
     /// a channel number, such as TCP/IP forwarding or
     /// cancelling). Always call this function if the request was

@@ -189,6 +189,29 @@ impl<C> CommonSession<C> {
         Ok(())
     }
 
+    /// Send a debug message.
+    pub fn debug(
+        &mut self,
+        always_display: bool,
+        message: &str,
+        language_tag: &str,
+    ) -> Result<(), crate::Error> {
+        let debug = |buf: &mut CryptoVec| {
+            push_packet!(buf, {
+                msg::DEBUG.encode(buf)?;
+                (always_display as u8).encode(buf)?;
+                message.encode(buf)?;
+                language_tag.encode(buf)?;
+            });
+            Ok(())
+        };
+        return if let Some(ref mut enc) = self.encrypted {
+            debug(&mut enc.write)
+        } else {
+            debug(&mut self.packet_writer.buffer().buffer)
+        };
+    }
+
     /// Send a single byte message onto the channel.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn byte(&mut self, channel: ChannelId, msg: u8) -> Result<(), crate::Error> {
