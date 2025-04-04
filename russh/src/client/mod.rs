@@ -193,6 +193,10 @@ pub enum Msg {
     GetServerSigAlgs {
         reply_channel: oneshot::Sender<Option<Vec<Algorithm>>>,
     },
+    /// Send a keepalive packet to the remote
+    Keepalive {
+        want_reply: bool,
+    },
 }
 
 impl From<(ChannelId, ChannelMsg)> for Msg {
@@ -819,6 +823,14 @@ impl<H: Handler> Handle<H> {
 
         Ok(())
     }
+
+    /// Send a keepalive package to the remote peer.
+    pub async fn send_keepalive(&self, want_reply: bool) -> Result<(), Error> {
+        self.sender
+            .send(Msg::Keepalive { want_reply })
+            .await
+            .map_err(|_| Error::SendError)
+    }
 }
 
 impl<H: Handler> Future for Handle<H> {
@@ -1353,6 +1365,9 @@ impl Session {
             }
             Msg::GetServerSigAlgs { reply_channel } => {
                 let _ = reply_channel.send(self.server_sig_algs.clone());
+            }
+            Msg::Keepalive { want_reply } => {
+                let _ = self.send_keepalive(want_reply);
             }
             msg => {
                 // should be unreachable, since the receiver only gets
