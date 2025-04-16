@@ -1,11 +1,5 @@
 [workspace]
-members = [
-    "russh",
-    "russh-config",
-    "cryptovec",
-    "pageant",
-    "russh-util",
-]
+members = ["russh", "russh-config", "cryptovec", "pageant", "russh-util"]
 resolver = "2"
 
 [workspace.dependencies]
@@ -21,13 +15,12 @@ home = "0.5"
 hmac = "0.12"
 log = "0.4.11"
 rand = "0.8"
+regex = "1"
 rsa = "0.9"
 sha1 = { version = "0.10.5", features = ["oid"] }
 sha2 = { version = "0.10.6", features = ["oid"] }
 signature = "2.2"
-ssh-encoding = { version = "0.2", features = [
-    "bytes",
-] }
+ssh-encoding = { version = "0.2", features = ["bytes"] }
 ssh-key = { version = "=0.6.10", features = [
     "ed25519",
     "rsa",

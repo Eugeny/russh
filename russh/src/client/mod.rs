@@ -76,6 +76,9 @@ mod encrypted;
 mod kex;
 mod session;
 
+#[cfg(test)]
+mod test;
+
 /// Actual client session's state.
 ///
 /// It is in charge of multiplexing and keeping track of various channels

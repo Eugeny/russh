@@ -64,6 +64,7 @@ pkcs8 = { version = "0.10", features = ["pkcs5", "encryption"] }
 poly1305 = "0.8"
 rand_core = { version = "0.6.4", features = ["getrandom", "std"] }
 rand.workspace = true
+regex.workspace = true
 rsa.workspace = true
 russh-cryptovec = { version = "0.51.0", path = "../cryptovec", features = [
   "ssh-encoding",
@@ -78,11 +79,11 @@ ssh-encoding.workspace = true
 ssh-key.workspace = true
 subtle = "2.4"
 thiserror.workspace = true
-tokio = { workspace = true, features = ["io-util", "sync", "time"] }
+tokio = { workspace = true, features = ["io-util", "sync", "time", "process"] }
 typenum = "1.17"
 yasna = { version = "0.5.0", features = [
-    "bit-vec",
-    "num-bigint",
+  "bit-vec",
+  "num-bigint",
 ], optional = true }
 zeroize = "1.7"
 
@@ -103,13 +104,13 @@ anyhow = "1.0.4"
 env_logger.workspace = true
 clap = { version = "3.2.3", features = ["derive"] }
 tokio = { workspace = true, features = [
-    "io-std",
-    "io-util",
-    "rt-multi-thread",
-    "time",
-    "net",
-    "sync",
-    "macros",
+  "io-std",
+  "io-util",
+  "rt-multi-thread",
+  "time",
+  "net",
+  "sync",
+  "macros",
 ] }
 rand = "0.8.5"
 shell-escape = "0.1"

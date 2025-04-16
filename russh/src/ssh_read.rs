@@ -2,6 +2,7 @@ use std::pin::Pin;
 
 use futures::task::*;
 use log::trace;
+use regex::Regex;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, ReadBuf};
 
 use crate::{CryptoVec, Error};
@@ -151,13 +152,22 @@ impl<R: AsyncRead + Unpin> SshRead<R> {
                 }
             }
 
+            let re = Regex::new(r"^SSH-(1\.99|2\.0)-.*").unwrap();
+
             if ssh_id.bytes_read > 0 {
                 // If we have a full line, handle it.
-                if i >= 8 && ssh_id.buf.get(0..8) == Some(b"SSH-2.0-") {
-                    // Either the line starts with "SSH-2.0-"
-                    ssh_id.sshid_len = i;
-                    #[allow(clippy::indexing_slicing)] // length checked
-                    return Ok(&ssh_id.buf[..ssh_id.sshid_len]);
+                if i >= 8 {
+                    // Get a slice of the buffer safely
+                    if let Some(buf_slice) = ssh_id.buf.get(0..i) {
+                        if let Ok(s) = std::str::from_utf8(buf_slice) {
+                            if re.is_match(s) {
+                                // Either the line starts with "SSH-2.0-" or SSH-1.99
+                                ssh_id.sshid_len = i;
+                                #[allow(clippy::indexing_slicing)] // length checked
+                                return Ok(&ssh_id.buf[..ssh_id.sshid_len]);
+                            }
+                        }
+                    }
                 }
                 // Else, it is a "preliminary" (see
                 // https://tools.ietf.org/html/rfc4253#section-4.2),
