@@ -152,7 +152,7 @@ impl<R: AsyncRead + Unpin> SshRead<R> {
                 }
             }
 
-            let re = Regex::new(r"^SSH-(1\.99|2\.0)-.*").unwrap();
+            let re = Regex::new(r"^SSH-(1\.99|2\.0)-.*").expect("Failed to compile regex");
 
             if ssh_id.bytes_read > 0 {
                 // If we have a full line, handle it.
