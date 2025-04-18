@@ -152,20 +152,20 @@ impl<R: AsyncRead + Unpin> SshRead<R> {
                 }
             }
 
-            let re = Regex::new(r"^SSH-(1\.99|2\.0)-.*").expect("Failed to compile regex");
+            // We have a full line, check if it is a valid SSH protocol
+            // identifier. The SSH protocol identifier is defined in
+            // https://datatracker.ietf.org/doc/html/rfc4253#section-5.1
+            let ssh_version_regex =
+                Regex::new(r"^SSH-(1\.99|2\.0)-.*").expect("Failed to compile regex");
 
             if ssh_id.bytes_read > 0 {
                 // If we have a full line, handle it.
                 if i >= 8 {
-                    // Get a slice of the buffer safely
-                    if let Some(buf_slice) = ssh_id.buf.get(0..i) {
-                        if let Ok(s) = std::str::from_utf8(buf_slice) {
-                            if re.is_match(s) {
-                                // Either the line starts with "SSH-2.0-" or SSH-1.99
-                                ssh_id.sshid_len = i;
-                                #[allow(clippy::indexing_slicing)] // length checked
-                                return Ok(&ssh_id.buf[..ssh_id.sshid_len]);
-                            }
+                    // Check if we have a valid SSH protocol identifier
+                    if let Ok(s) = std::str::from_utf8(&ssh_id.buf[..i]) {
+                        if ssh_version_regex.is_match(s) {
+                            ssh_id.sshid_len = i;
+                            return Ok(ssh_id.id());
                         }
                     }
                 }
