@@ -93,7 +93,6 @@ tokio = { workspace = true, features = [
   "rt-multi-thread",
   "time",
   "net",
-  "process",
 ] }
 home.workspace = true
 
