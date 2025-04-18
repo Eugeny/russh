@@ -79,7 +79,7 @@ ssh-encoding.workspace = true
 ssh-key.workspace = true
 subtle = "2.4"
 thiserror.workspace = true
-tokio = { workspace = true, features = ["io-util", "sync", "time", "process"] }
+tokio = { workspace = true, features = ["io-util", "sync", "time"] }
 typenum = "1.17"
 yasna = { version = "0.5.0", features = [
   "bit-vec",
@@ -93,6 +93,7 @@ tokio = { workspace = true, features = [
   "rt-multi-thread",
   "time",
   "net",
+  "process",
 ] }
 home.workspace = true
 
