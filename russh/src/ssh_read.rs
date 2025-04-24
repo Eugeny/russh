@@ -2,7 +2,6 @@ use std::pin::Pin;
 
 use futures::task::*;
 use log::trace;
-use regex::Regex;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, ReadBuf};
 
 use crate::{CryptoVec, Error};
@@ -152,21 +151,13 @@ impl<R: AsyncRead + Unpin> SshRead<R> {
                 }
             }
 
-            // We have a full line, check if it is a valid SSH protocol
-            // identifier. The SSH protocol identifier is defined in
-            // https://datatracker.ietf.org/doc/html/rfc4253#section-5.1
-            let ssh_version_regex = match Regex::new(r"^SSH-(1\.99|2\.0)-.*") {
-                Ok(regex) => regex,
-                Err(e) => return Err(Error::from(e)),
-            };
-
             if ssh_id.bytes_read > 0 {
                 // If we have a full line, handle it.
                 if i >= 8 {
                     // Check if we have a valid SSH protocol identifier
                     #[allow(clippy::indexing_slicing)]
                     if let Ok(s) = std::str::from_utf8(&ssh_id.buf[..i]) {
-                        if ssh_version_regex.is_match(s) {
+                        if s.starts_with("SSH-1.99-") || s.starts_with("SSH-2.0-") {
                             ssh_id.sshid_len = i;
                             return Ok(ssh_id.id());
                         }

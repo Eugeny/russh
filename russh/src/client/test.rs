@@ -17,18 +17,10 @@ mod tests {
     use crate::ChannelId; // Import directly from crate root
     use crate::{CryptoVec, Error};
 
+    #[derive(Clone)]
     struct TestServer {
         clients: Arc<Mutex<HashMap<(usize, ChannelId), server::Handle>>>,
         id: usize,
-    }
-
-    impl Clone for TestServer {
-        fn clone(&self) -> Self {
-            Self {
-                clients: self.clients.clone(),
-                id: self.id,
-            }
-        }
     }
 
     impl server::Server for TestServer {

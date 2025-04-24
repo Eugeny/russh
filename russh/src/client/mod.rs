@@ -886,28 +886,11 @@ where
     debug!("ssh id = {:?}", config.as_ref().client_id);
 
     write_buffer.send_ssh_id(&config.as_ref().client_id);
-    match map_err!(stream.write_all(&write_buffer.buffer).await) {
-        Ok(_) => {
-            debug!("ssh id sent");
-        }
-        Err(e) => {
-            error!("Error sending SSH id: {:?}", e);
-            return Err(e.into());
-        }
-    }
+    map_err!(stream.write_all(&write_buffer.buffer).await)?;
 
     // Reading SSH id and allocating a session if correct.
     let mut stream = SshRead::new(stream);
-    let sshid = match stream.read_ssh_id().await {
-        Ok(id) => {
-            debug!("ssh id = {:?}", id);
-            id
-        }
-        Err(e) => {
-            error!("Error reading SSH id: {:?}", e);
-            return Err(e.into());
-        }
-    };
+    let sshid = stream.read_ssh_id().await?;
 
     let (handle_sender, session_receiver) = channel(10);
     let (session_sender, handle_receiver) = unbounded_channel();

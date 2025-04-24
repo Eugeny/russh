@@ -191,9 +191,6 @@ pub enum Error {
     #[error("invalid SSH version string")]
     Version,
 
-    #[error("Invalid SSH pattern: {0}")]
-    SSHVersionPattern(#[from] regex::Error),
-
     /// Error during key exchange.
     #[error("Key exchange failed")]
     Kex,
