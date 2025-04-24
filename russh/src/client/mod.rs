@@ -76,6 +76,9 @@ mod encrypted;
 mod kex;
 mod session;
 
+#[cfg(test)]
+mod test;
+
 /// Actual client session's state.
 ///
 /// It is in charge of multiplexing and keeping track of various channels
@@ -879,12 +882,16 @@ where
 {
     // Writing SSH id.
     let mut write_buffer = SSHBuffer::new();
+
+    debug!("ssh id = {:?}", config.as_ref().client_id);
+
     write_buffer.send_ssh_id(&config.as_ref().client_id);
     map_err!(stream.write_all(&write_buffer.buffer).await)?;
 
     // Reading SSH id and allocating a session if correct.
     let mut stream = SshRead::new(stream);
     let sshid = stream.read_ssh_id().await?;
+
     let (handle_sender, session_receiver) = channel(10);
     let (session_sender, handle_receiver) = unbounded_channel();
     if config.maximum_packet_size > 65535 {
