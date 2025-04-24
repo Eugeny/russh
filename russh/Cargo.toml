@@ -9,7 +9,7 @@ license = "Apache-2.0"
 name = "russh"
 readme = "../README.md"
 repository = "https://github.com/warp-tech/russh"
-version = "0.52.0-beta.1"
+version = "0.52.0"
 rust-version = "1.75"
 
 [features]
@@ -68,7 +68,7 @@ rsa.workspace = true
 russh-cryptovec = { version = "0.52.0-beta.1", path = "../cryptovec", features = [
   "ssh-encoding",
 ] }
-russh-util = { version = "0.51.0", path = "../russh-util" }
+russh-util = { version = "0.52.0", path = "../russh-util" }
 sec1 = { version = "0.7", features = ["pkcs8", "der"] }
 sha1.workspace = true
 sha2.workspace = true

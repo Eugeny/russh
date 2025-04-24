@@ -1,6 +1,6 @@
 [package]
 name = "russh-util"
-version = "0.51.0"
+version = "0.52.0"
 edition = "2021"
 rust-version = "1.75"
 description = "Runtime abstraction utilities for russh."
