@@ -62,8 +62,10 @@ impl Session {
             rejection_wait_until
         };
 
-        #[allow(clippy::unwrap_used)]
-        let enc = self.common.encrypted.as_mut().unwrap();
+        let Some(enc) = self.common.encrypted.as_mut() else {
+            return Err(Error::Inconsistent.into());
+        };
+
         // If we've successfully read a packet.
         match (&mut enc.state, buf.split_first()) {
             (
