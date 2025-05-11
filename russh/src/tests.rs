@@ -591,10 +591,7 @@ mod server_kex_junk {
                 .await
                 .unwrap();
             // Unexpected message pre-kex
-            client_stream
-                .write_all(&[0, 0, 0, 2, 0, 99])
-                .await
-                .unwrap();
+            client_stream.write_all(&[0, 0, 0, 2, 0, 99]).await.unwrap();
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         });
 
