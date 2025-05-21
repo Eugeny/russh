@@ -845,8 +845,9 @@ pub trait Server {
                                     }
                                 });
                             }
-
-                            _ => break,
+                            Err(e) => {
+                                return Err(e);
+                            }
                         }
                     },
 
@@ -855,8 +856,6 @@ pub trait Server {
                     }
                 }
             }
-
-            Ok(())
         }
     }
 
