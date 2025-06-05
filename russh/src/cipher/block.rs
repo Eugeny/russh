@@ -11,6 +11,7 @@
 // limitations under the License.
 //
 
+use std::convert::TryInto;
 use std::marker::PhantomData;
 
 use aes::cipher::{IvSizeUser, KeyIvInit, KeySizeUser, StreamCipher};
@@ -21,9 +22,9 @@ use super::super::Error;
 use super::PACKET_LENGTH_LEN;
 use crate::mac::{Mac, MacAlgorithm};
 
-pub struct SshBlockCipher<C: StreamCipher + KeySizeUser + IvSizeUser>(pub PhantomData<C>);
+pub struct SshBlockCipher<C: BlockStreamCipher + KeySizeUser + IvSizeUser>(pub PhantomData<C>);
 
-impl<C: StreamCipher + KeySizeUser + IvSizeUser + KeyIvInit + Send + 'static> super::Cipher
+impl<C: BlockStreamCipher + KeySizeUser + IvSizeUser + KeyIvInit + Send + 'static> super::Cipher
     for SshBlockCipher<C>
 {
     fn key_len(&self) -> usize {
@@ -73,29 +74,44 @@ impl<C: StreamCipher + KeySizeUser + IvSizeUser + KeyIvInit + Send + 'static> su
     }
 }
 
-pub struct OpeningKey<C: StreamCipher + KeySizeUser + IvSizeUser> {
-    cipher: C,
-    mac: Box<dyn Mac + Send>,
+pub struct OpeningKey<C: BlockStreamCipher> {
+    pub(crate) cipher: C,
+    pub(crate) mac: Box<dyn Mac + Send>,
 }
 
-pub struct SealingKey<C: StreamCipher + KeySizeUser + IvSizeUser> {
-    cipher: C,
-    mac: Box<dyn Mac + Send>,
+pub struct SealingKey<C: BlockStreamCipher> {
+    pub(crate) cipher: C,
+    pub(crate) mac: Box<dyn Mac + Send>,
 }
 
-impl<C: StreamCipher + KeySizeUser + IvSizeUser> super::OpeningKey for OpeningKey<C> {
+impl<C: BlockStreamCipher + KeySizeUser + IvSizeUser> super::OpeningKey for OpeningKey<C> {
+    fn packet_length_to_read_for_block_length(&self) -> usize {
+        16
+    }
+
     fn decrypt_packet_length(
         &self,
         _sequence_number: u32,
-        mut encrypted_packet_length: [u8; 4],
+        encrypted_packet_length: &[u8],
     ) -> [u8; 4] {
+        let mut first_block = [0u8; 16];
+        // Fine because of self.packet_length_to_read_for_block_length()
+        #[allow(clippy::indexing_slicing)]
+        first_block.copy_from_slice(&encrypted_packet_length[..16]);
+
         if self.mac.is_etm() {
-            encrypted_packet_length
+            // Fine because of self.packet_length_to_read_for_block_length()
+            #[allow(clippy::unwrap_used, clippy::indexing_slicing)]
+            encrypted_packet_length[..4].try_into().unwrap()
         } else {
             // Work around uncloneable Aes<>
             let mut cipher: C = unsafe { std::ptr::read(&self.cipher as *const C) };
-            cipher.apply_keystream(&mut encrypted_packet_length);
-            encrypted_packet_length
+
+            cipher.decrypt_data(&mut first_block);
+
+            // Fine because of self.packet_length_to_read_for_block_length()
+            #[allow(clippy::unwrap_used, clippy::indexing_slicing)]
+            first_block[..4].try_into().unwrap()
         }
     }
 
@@ -118,9 +134,9 @@ impl<C: StreamCipher + KeySizeUser + IvSizeUser> super::OpeningKey for OpeningKe
             }
             #[allow(clippy::indexing_slicing)]
             self.cipher
-                .apply_keystream(&mut ciphertext_in_plaintext_out[PACKET_LENGTH_LEN..]);
+                .decrypt_data(&mut ciphertext_in_plaintext_out[PACKET_LENGTH_LEN..]);
         } else {
-            self.cipher.apply_keystream(ciphertext_in_plaintext_out);
+            self.cipher.decrypt_data(ciphertext_in_plaintext_out);
 
             if !self
                 .mac
@@ -129,11 +145,13 @@ impl<C: StreamCipher + KeySizeUser + IvSizeUser> super::OpeningKey for OpeningKe
                 return Err(Error::PacketAuth);
             }
         }
-        Ok(ciphertext_in_plaintext_out)
+
+        #[allow(clippy::indexing_slicing)]
+        Ok(&ciphertext_in_plaintext_out[PACKET_LENGTH_LEN..])
     }
 }
 
-impl<C: StreamCipher + KeySizeUser + IvSizeUser> super::SealingKey for SealingKey<C> {
+impl<C: BlockStreamCipher + KeySizeUser + IvSizeUser> super::SealingKey for SealingKey<C> {
     fn padding_length(&self, payload: &[u8]) -> usize {
         let block_size = 16;
 
@@ -174,13 +192,28 @@ impl<C: StreamCipher + KeySizeUser + IvSizeUser> super::SealingKey for SealingKe
         if self.mac.is_etm() {
             #[allow(clippy::indexing_slicing)]
             self.cipher
-                .apply_keystream(&mut plaintext_in_ciphertext_out[PACKET_LENGTH_LEN..]);
+                .encrypt_data(&mut plaintext_in_ciphertext_out[PACKET_LENGTH_LEN..]);
             self.mac
                 .compute(sequence_number, plaintext_in_ciphertext_out, tag_out);
         } else {
             self.mac
                 .compute(sequence_number, plaintext_in_ciphertext_out, tag_out);
-            self.cipher.apply_keystream(plaintext_in_ciphertext_out);
+            self.cipher.encrypt_data(plaintext_in_ciphertext_out);
         }
+    }
+}
+
+pub trait BlockStreamCipher {
+    fn encrypt_data(&mut self, data: &mut [u8]);
+    fn decrypt_data(&mut self, data: &mut [u8]);
+}
+
+impl<T: StreamCipher> BlockStreamCipher for T {
+    fn encrypt_data(&mut self, data: &mut [u8]) {
+        self.apply_keystream(data);
+    }
+
+    fn decrypt_data(&mut self, data: &mut [u8]) {
+        self.apply_keystream(data);
     }
 }

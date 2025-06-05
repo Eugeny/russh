@@ -15,6 +15,8 @@
 
 // http://cvsweb.openbsd.org/cgi-bin/cvsweb/src/usr.bin/ssh/PROTOCOL.chacha20poly1305?annotate=HEAD
 
+use std::convert::TryInto;
+
 use aes::cipher::{BlockSizeUser, StreamCipherSeek};
 use byteorder::{BigEndian, ByteOrder};
 use chacha20::cipher::{KeyInit, KeyIvInit, StreamCipher};
@@ -94,11 +96,16 @@ impl super::OpeningKey for OpeningKey {
     fn decrypt_packet_length(
         &self,
         sequence_number: u32,
-        mut encrypted_packet_length: [u8; 4],
+        encrypted_packet_length: &[u8],
     ) -> [u8; 4] {
+        // Fine because of self.packet_length_to_read_for_block_length()
+        #[allow(clippy::unwrap_used, clippy::indexing_slicing)]
+        let mut encrypted_packet_length: [u8; 4] = encrypted_packet_length.try_into().unwrap();
+
         let nonce = make_counter(sequence_number);
         let mut cipher = ChaCha20Legacy::new(&self.k1, &nonce);
         cipher.apply_keystream(&mut encrypted_packet_length);
+
         encrypted_packet_length
     }
 

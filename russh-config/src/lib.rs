@@ -8,6 +8,7 @@ use std::io::Read;
 use std::net::ToSocketAddrs;
 use std::path::Path;
 
+use globset::Glob;
 use log::debug;
 use thiserror::*;
 
@@ -34,7 +35,10 @@ pub struct Config {
     pub port: u16,
     pub identity_file: Option<String>,
     pub proxy_command: Option<String>,
+    pub proxy_jump: Option<String>,
     pub add_keys_to_agent: AddKeysToAgent,
+    pub user_known_hosts_file: Option<String>,
+    pub strict_host_key_checking: bool,
 }
 
 impl Config {
@@ -45,22 +49,32 @@ impl Config {
             port: 22,
             identity_file: None,
             proxy_command: None,
+            proxy_jump: None,
             add_keys_to_agent: AddKeysToAgent::default(),
+            user_known_hosts_file: None,
+            strict_host_key_checking: true,
         }
     }
 }
 
 impl Config {
-    fn update_proxy_command(&mut self) {
-        if let Some(ref mut prox) = self.proxy_command {
-            *prox = prox.replace("%h", &self.host_name);
-            *prox = prox.replace("%p", &format!("{}", self.port));
-        }
+    // Look for any of the ssh_config(5) percent-style tokens and expand them
+    // based on current data in the struct, returning a new String. This function
+    // can be employed late/lazy eg just before establishing a stream using ProxyCommand
+    // but also can be used to modify Hostname as config parse time
+    fn expand_tokens(&self, original: &str) -> String {
+        let mut string = original.to_string();
+        string = string.replace("%u", &self.user);
+        string = string.replace("%h", &self.host_name); // remote hostname (from context "host")
+        string = string.replace("%H", &self.host_name); // remote hostname (from context "host")
+        string = string.replace("%p", &format!("{}", self.port)); // original typed hostname (from context "host")
+        string = string.replace("%%", "%");
+        string
     }
 
-    pub async fn stream(&mut self) -> Result<Stream, Error> {
-        self.update_proxy_command();
+    pub async fn stream(&self) -> Result<Stream, Error> {
         if let Some(ref proxy_command) = self.proxy_command {
+            let proxy_command = self.expand_tokens(proxy_command);
             let cmd: Vec<&str> = proxy_command.split(' ').collect();
             Stream::proxy_command(cmd.first().unwrap_or(&""), cmd.get(1..).unwrap_or(&[]))
                 .await
@@ -76,7 +90,7 @@ impl Config {
 }
 
 pub fn parse_home(host: &str) -> Result<Config, Error> {
-    let mut home = if let Some(home) = dirs_next::home_dir() {
+    let mut home = if let Some(home) = home::home_dir() {
         home
     } else {
         return Err(Error::NoHome);
@@ -93,86 +107,199 @@ pub fn parse_path<P: AsRef<Path>>(path: P, host: &str) -> Result<Config, Error> 
     parse(&s, host)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum AddKeysToAgent {
     Yes,
     Confirm,
     Ask,
+    #[default]
     No,
 }
 
-impl Default for AddKeysToAgent {
-    fn default() -> Self {
-        AddKeysToAgent::No
-    }
-}
-
 pub fn parse(file: &str, host: &str) -> Result<Config, Error> {
-    let mut config: Option<Config> = None;
+    let mut config = Config::default(host);
+    let mut matches_current = false;
     for line in file.lines() {
-        let line = line.trim();
-        if let Some(n) = line.find(' ') {
-            let (key, value) = line.split_at(n);
+        let tokens = line.trim().splitn(2, ' ').collect::<Vec<&str>>();
+        if tokens.len() == 2 {
+            let (key, value) = (tokens.first().unwrap_or(&""), tokens.get(1).unwrap_or(&""));
             let lower = key.to_lowercase();
-            if let Some(ref mut config) = config {
+            if lower.as_str() == "host" {
+                matches_current = value
+                    .split_whitespace()
+                    .any(|x| check_host_against_glob_pattern(host, x));
+            }
+            if matches_current {
                 match lower.as_str() {
-                    "host" => break,
                     "user" => {
                         config.user.clear();
                         config.user.push_str(value.trim_start());
                     }
-                    "hostname" => {
-                        config.host_name.clear();
-                        config.host_name.push_str(value.trim_start())
-                    }
+                    "hostname" => config.host_name = config.expand_tokens(value.trim_start()),
                     "port" => {
                         if let Ok(port) = value.trim_start().parse() {
                             config.port = port
                         }
                     }
                     "identityfile" => {
-                        let id = value.trim_start();
-                        if id.starts_with("~/") {
-                            if let Some(mut home) = dirs_next::home_dir() {
-                                home.push(id.split_at(2).1);
-                                config.identity_file = Some(
-                                    home.to_str()
-                                        .ok_or_else(|| {
-                                            std::io::Error::new(
-                                                std::io::ErrorKind::Other,
-                                                "Failed to convert home directory to string",
-                                            )
-                                        })?
-                                        .to_string(),
-                                );
-                            } else {
-                                return Err(Error::NoHome);
-                            }
-                        } else {
-                            config.identity_file = Some(id.to_string())
-                        }
+                        config.identity_file =
+                            Some(value.trim_start().strip_quotes().expand_home()?);
                     }
                     "proxycommand" => config.proxy_command = Some(value.trim_start().to_string()),
+                    "proxyjump" => config.proxy_jump = Some(value.trim_start().to_string()),
                     "addkeystoagent" => match value.to_lowercase().as_str() {
                         "yes" => config.add_keys_to_agent = AddKeysToAgent::Yes,
                         "confirm" => config.add_keys_to_agent = AddKeysToAgent::Confirm,
                         "ask" => config.add_keys_to_agent = AddKeysToAgent::Ask,
                         _ => config.add_keys_to_agent = AddKeysToAgent::No,
                     },
+                    "userknownhostsfile" => {
+                        config.user_known_hosts_file =
+                            Some(value.trim_start().strip_quotes().expand_home()?);
+                    }
+                    "stricthostkeychecking" => match value.to_lowercase().as_str() {
+                        "no" => config.strict_host_key_checking = false,
+                        _ => config.strict_host_key_checking = true,
+                    },
                     key => {
                         debug!("{:?}", key);
                     }
                 }
-            } else if lower.as_str() == "host" && value.trim_start() == host {
-                let mut c = Config::default(host);
-                c.port = 22;
-                config = Some(c)
             }
         }
     }
-    if let Some(config) = config {
-        Ok(config)
-    } else {
-        Err(Error::HostNotFound)
+    Ok(config)
+}
+
+fn check_host_against_glob_pattern(candidate: &str, glob_pattern: &str) -> bool {
+    match Glob::new(glob_pattern) {
+        Ok(glob) => glob.compile_matcher().is_match(candidate),
+        _ => false,
+    }
+}
+
+trait SshConfigStrExt {
+    fn strip_quotes(&self) -> Self;
+    fn expand_home(&self) -> Result<String, Error>;
+}
+
+impl SshConfigStrExt for &str {
+    fn strip_quotes(&self) -> Self {
+        if self.len() > 1
+            && ((self.starts_with('\'') && self.ends_with('\''))
+                || (self.starts_with('\"') && self.ends_with('\"')))
+        {
+            #[allow(clippy::indexing_slicing)] // length checked
+            &self[1..self.len() - 1]
+        } else {
+            self
+        }
+    }
+
+    fn expand_home(&self) -> Result<String, Error> {
+        if self.starts_with("~/") {
+            if let Some(mut home) = home::home_dir() {
+                home.push(self.split_at(2).1);
+                Ok(home
+                    .to_str()
+                    .ok_or_else(|| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::Other,
+                            "Failed to convert home directory to string",
+                        )
+                    })?
+                    .to_string())
+            } else {
+                Err(Error::NoHome)
+            }
+        } else {
+            Ok(self.to_string())
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used)]
+    use crate::{parse, AddKeysToAgent, Config, SshConfigStrExt};
+
+    #[test]
+    fn strip_quotes() {
+        let value = "'this is a test'";
+        assert_eq!("this is a test", value.strip_quotes());
+        let value = "\"this is a test\"";
+        assert_eq!("this is a test", value.strip_quotes());
+        let value = "'this is a test\"";
+        assert_eq!("'this is a test\"", value.strip_quotes());
+        let value = "'this is a test";
+        assert_eq!("'this is a test", value.strip_quotes());
+        let value = "this is a test'";
+        assert_eq!("this is a test'", value.strip_quotes());
+        let value = "this is a test";
+        assert_eq!("this is a test", value.strip_quotes());
+        let value = "";
+        assert_eq!("", value.strip_quotes());
+        let value = "'";
+        assert_eq!("'", value.strip_quotes());
+        let value = "''";
+        assert_eq!("", value.strip_quotes());
+    }
+
+    #[test]
+    fn expand_home() {
+        let value = "~/some/folder".expand_home().expect("expand_home");
+        assert_eq!(
+            format!(
+                "{}{}",
+                home::home_dir().expect("homedir").to_str().expect("to_str"),
+                "/some/folder"
+            ),
+            value
+        );
+    }
+
+    #[test]
+    fn default_config() {
+        let config: Config = Config::default("some_host");
+        assert_eq!(whoami::username(), config.user);
+        assert_eq!("some_host", config.host_name);
+        assert_eq!(22, config.port);
+        assert_eq!(None, config.identity_file);
+        assert_eq!(None, config.proxy_command);
+        assert_eq!(None, config.proxy_jump);
+        assert_eq!(AddKeysToAgent::No, config.add_keys_to_agent);
+        assert_eq!(None, config.user_known_hosts_file);
+        assert!(config.strict_host_key_checking);
+    }
+
+    #[test]
+    fn basic_config() {
+        let value = r"#
+Host test_host
+  IdentityFile '~/.ssh/id_ed25519'
+  User trinity
+  Hostname foo.com
+  Port 23
+  UserKnownHostsFile /some/special/host_file
+  StrictHostKeyChecking no
+#";
+        let identity_file = format!(
+            "{}{}",
+            home::home_dir().expect("homedir").to_str().expect("to_str"),
+            "/.ssh/id_ed25519"
+        );
+        let config = parse(value, "test_host").expect("parse");
+        assert_eq!("trinity", config.user);
+        assert_eq!("foo.com", config.host_name);
+        assert_eq!(23, config.port);
+        assert_eq!(Some(identity_file), config.identity_file);
+        assert_eq!(None, config.proxy_command);
+        assert_eq!(None, config.proxy_jump);
+        assert_eq!(AddKeysToAgent::No, config.add_keys_to_agent);
+        assert_eq!(
+            Some("/some/special/host_file"),
+            config.user_known_hosts_file.as_deref()
+        );
+        assert!(!config.strict_host_key_checking);
     }
 }

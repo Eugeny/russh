@@ -1,11 +1,11 @@
-use async_trait::async_trait;
-
-use log::debug;
-use russh::server::{Auth, Msg, Session};
-use russh::*;
-use russh_keys::*;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+
+use log::debug;
+use rand_core::OsRng;
+use russh::keys::*;
+use russh::server::{Auth, Msg, Server as _, Session};
+use russh::*;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -14,15 +14,15 @@ async fn main() -> anyhow::Result<()> {
     config.auth_rejection_time = std::time::Duration::from_secs(3);
     config
         .keys
-        .push(russh_keys::key::KeyPair::generate_ed25519().unwrap());
+        .push(russh::keys::PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap());
     let config = Arc::new(config);
-    let sh = Server {
+    let mut sh = Server {
         clients: Arc::new(Mutex::new(HashMap::new())),
         id: 0,
     };
     tokio::time::timeout(
         std::time::Duration::from_secs(60),
-        russh::server::run(config, ("0.0.0.0", 2222), sh),
+        sh.run_on_address(config, ("0.0.0.0", 2222)),
     )
     .await
     .unwrap_or(Ok(()))?;
@@ -46,54 +46,53 @@ impl server::Server for Server {
     }
 }
 
-#[async_trait]
 impl server::Handler for Server {
     type Error = anyhow::Error;
 
     async fn channel_open_session(
-        self,
+        &mut self,
         channel: Channel<Msg>,
-        session: Session,
-    ) -> Result<(Self, bool, Session), Self::Error> {
+        _session: &mut Session,
+    ) -> Result<bool, Self::Error> {
         {
             debug!("channel open session");
             let mut clients = self.clients.lock().unwrap();
             clients.insert((self.id, channel.id()), channel);
         }
-        Ok((self, true, session))
+        Ok(true)
     }
 
     /// The client requests a shell.
     #[allow(unused_variables)]
     async fn shell_request(
-        self,
+        &mut self,
         channel: ChannelId,
-        mut session: Session,
-    ) -> Result<(Self, Session), Self::Error> {
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
         session.request_success();
-        Ok((self, session))
+        Ok(())
     }
 
     async fn auth_publickey(
-        self,
+        &mut self,
         _: &str,
-        _: &key::PublicKey,
-    ) -> Result<(Self, Auth), Self::Error> {
-        Ok((self, server::Auth::Accept))
+        _: &ssh_key::PublicKey,
+    ) -> Result<Auth, Self::Error> {
+        Ok(server::Auth::Accept)
     }
     async fn data(
-        self,
+        &mut self,
         _channel: ChannelId,
         data: &[u8],
-        mut session: Session,
-    ) -> Result<(Self, Session), Self::Error> {
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
         debug!("data: {data:?}");
         {
             let mut clients = self.clients.lock().unwrap();
             for ((_, _channel_id), ref mut channel) in clients.iter_mut() {
-                session.data(channel.id(), CryptoVec::from(data.to_vec()));
+                session.data(channel.id(), CryptoVec::from(data.to_vec()))?;
             }
         }
-        Ok((self, session))
+        Ok(())
     }
 }

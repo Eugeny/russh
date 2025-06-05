@@ -1,4 +1,9 @@
-#[derive(Debug)]
+use std::convert::TryFrom;
+
+use delegate::delegate;
+use ssh_encoding::Encode;
+
+#[derive(Debug, Clone)]
 pub enum Compression {
     None,
     #[cfg(feature = "flate2")]
@@ -19,10 +24,50 @@ pub enum Decompress {
     Zlib(flate2::Decompress),
 }
 
+#[derive(Debug, PartialEq, Eq, Copy, Clone, Hash)]
+pub struct Name(&'static str);
+impl AsRef<str> for Name {
+    fn as_ref(&self) -> &str {
+        self.0
+    }
+}
+
+impl Encode for Name {
+    delegate! { to self.as_ref() {
+        fn encoded_len(&self) -> Result<usize, ssh_encoding::Error>;
+        fn encode(&self, writer: &mut impl ssh_encoding::Writer) -> Result<(), ssh_encoding::Error>;
+    }}
+}
+
+impl TryFrom<&str> for Name {
+    type Error = ();
+    fn try_from(s: &str) -> Result<Name, ()> {
+        ALL_COMPRESSION_ALGORITHMS
+            .iter()
+            .find(|x| x.0 == s)
+            .map(|x| **x)
+            .ok_or(())
+    }
+}
+
+pub const NONE: Name = Name("none");
+#[cfg(feature = "flate2")]
+pub const ZLIB: Name = Name("zlib");
+#[cfg(feature = "flate2")]
+pub const ZLIB_LEGACY: Name = Name("zlib@openssh.com");
+
+pub const ALL_COMPRESSION_ALGORITHMS: &[&Name] = &[
+    &NONE,
+    #[cfg(feature = "flate2")]
+    &ZLIB,
+    #[cfg(feature = "flate2")]
+    &ZLIB_LEGACY,
+];
+
 #[cfg(feature = "flate2")]
 impl Compression {
-    pub fn from_string(s: &str) -> Self {
-        if s == "zlib" || s == "zlib@openssh.com" {
+    pub fn new(name: &Name) -> Self {
+        if name == &ZLIB || name == &ZLIB_LEGACY {
             Compression::Zlib
         } else {
             Compression::None
@@ -56,7 +101,7 @@ impl Compression {
 
 #[cfg(not(feature = "flate2"))]
 impl Compression {
-    pub fn from_string(_: &str) -> Self {
+    pub fn new(_name: &Name) -> Self {
         Compression::None
     }
 
@@ -71,7 +116,7 @@ impl Compress {
         &mut self,
         input: &'a [u8],
         _: &'a mut russh_cryptovec::CryptoVec,
-    ) -> Result<&'a [u8], Error> {
+    ) -> Result<&'a [u8], crate::Error> {
         Ok(input)
     }
 }
@@ -82,7 +127,7 @@ impl Decompress {
         &mut self,
         input: &'a [u8],
         _: &'a mut russh_cryptovec::CryptoVec,
-    ) -> Result<&'a [u8], Error> {
+    ) -> Result<&'a [u8], crate::Error> {
         Ok(input)
     }
 }
