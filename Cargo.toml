@@ -8,10 +8,16 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.86"
 byteorder = "1.5.0"
+ecdsa = { version = "0.16.9", features = ["verifying"] }
+ed25519-dalek = { version = "2.1.1", features = ["signature"] }
 futures = "0.3.30"
+p256 = "0.13.2"
+p384 = "0.13.1"
+p521 = "0.13.3"
+rsa = "0.9.6"
 russh-cryptovec = "0.7.3"
 ssh-encoding = "0.2.0"
-ssh-key = { version = "0.6.6", default-features = false, features = ["encryption", "ed25519", "rsa", "getrandom"] }
+ssh-key = { version = "0.6.6", default-features = false, features = ["encryption", "ed25519", "rsa", "getrandom", "ecdsa"] }
 thiserror = "1.0.63"
 tokio = { version = "1.40.0", features = ["io-util", "macros", "rt"] }
 tokio-util = "0.7.11"
