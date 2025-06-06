@@ -16,6 +16,11 @@ jobs:
     steps:
     - uses: actions/checkout@v2
 
+    - uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        override: true
+
     - name: Build (no features enabled)
       run: cargo build --verbose
 
@@ -27,6 +32,11 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
+
+    - uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        override: true
 
     - name: Build (no features enabled)
       run: cargo build --verbose
@@ -40,13 +50,18 @@ jobs:
     steps:
     - uses: actions/checkout@v2
 
+    - uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        override: true
+        target: wasm32-wasip1
+
     - name: Install target
       run: |
-        rustup toolchain add 1.81.0
-        rustup target add --toolchain 1.81.0 wasm32-wasip1
+        rustup target add wasm32-wasip1
 
     - name: Build (all features enabled)
-      run: cargo +1.81.0 build --verbose --target wasm32-wasip1 -p russh
+      run: cargo build --verbose --target wasm32-wasip1 -p russh
 
   Formatting:
     runs-on: ubuntu-24.04
@@ -54,8 +69,11 @@ jobs:
     steps:
     - uses: actions/checkout@v2
 
-    - name: Install rustfmt
-      run: rustup component add rustfmt
+    - uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        override: true
+        components: rustfmt
 
     - name: rustfmt
       run: cargo fmt --check
@@ -66,8 +84,11 @@ jobs:
     steps:
     - uses: actions/checkout@v2
 
-    - name: Install Clippy
-      run: rustup component add clippy
+    - uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        override: true
+        components: clippy
 
     - name: Clippy (no features enabled)
       run: cargo clippy -- -D warnings
@@ -80,6 +101,11 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
+
+    - uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        override: true
 
     - name: Test (no features enabled)
       run: |
@@ -100,10 +126,16 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
+
+    - uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        override: true
+        toolchain: 1.85.0
+
     - uses: taiki-e/install-action@cargo-hack
     - uses: taiki-e/install-action@cargo-minimal-versions
 
     - name: Check with minimal dependency versions
       run: |
-        rustup toolchain add 1.75.0
-        cargo +1.75.0 minimal-versions check --all-features --no-dev-deps
+        cargo +1.85.0 minimal-versions check --all-features --no-dev-deps
