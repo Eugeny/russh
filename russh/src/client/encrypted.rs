@@ -14,6 +14,7 @@
 //
 use std::cell::RefCell;
 use std::convert::TryInto;
+use std::io::Error as IoError;
 use std::ops::Deref;
 use std::str::FromStr;
 
@@ -239,6 +240,12 @@ impl Session {
                                     self.common.buffer = loop {
                                         match self.receiver.recv().await {
                                             Some(Msg::Signed { data }) => break data,
+                                            None => {
+                                                return Err(crate::Error::IO(IoError::other(
+                                                    "Failed to receive message",
+                                                ))
+                                                .into());
+                                            }
                                             _ => {}
                                         }
                                     };
