@@ -85,7 +85,7 @@ yasna = { version = "0.5.0", features = [
   "num-bigint",
 ], optional = true }
 zeroize = "1.7"
-base64ct = "=1.7.3" # can be removed in 2024 edition
+base64ct = "~1.6" # can be removed in 2024 edition
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { workspace = true, features = [
