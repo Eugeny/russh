@@ -17,122 +17,134 @@
 
 use std::convert::TryInto;
 
-use aes::cipher::{BlockSizeUser, StreamCipherSeek};
-use byteorder::{BigEndian, ByteOrder};
-use chacha20::cipher::{KeyInit, KeyIvInit, StreamCipher};
-use chacha20::{ChaCha20Legacy, ChaCha20LegacyCore};
-use generic_array::typenum::{Unsigned, U16, U32, U8};
+use chacha20poly1305::{
+    aead::{AeadCore, AeadMutInPlace, KeyInit},
+    ChaCha20Poly1305, KeySizeUser,
+};
+use generic_array::typenum::Unsigned;
 use generic_array::GenericArray;
-use poly1305::Poly1305;
-use subtle::ConstantTimeEq;
 
 use super::super::Error;
-use crate::cipher::PACKET_LENGTH_LEN;
 use crate::mac::MacAlgorithm;
 
 pub struct SshChacha20Poly1305Cipher {}
 
-type KeyLength = U32;
-type NonceLength = U8;
-type TagLength = U16;
-type Key = GenericArray<u8, KeyLength>;
-type Nonce = GenericArray<u8, NonceLength>;
+type KeySize = <ChaCha20Poly1305 as KeySizeUser>::KeySize;
+type Key = GenericArray<u8, KeySize>;
+type NonceSize = <ChaCha20Poly1305 as AeadCore>::NonceSize;
+type TagSize = <ChaCha20Poly1305 as AeadCore>::TagSize;
 
 impl super::Cipher for SshChacha20Poly1305Cipher {
     fn key_len(&self) -> usize {
-        KeyLength::to_usize() * 2
+        ChaCha20Poly1305::key_size()
+    }
+
+    fn nonce_len(&self) -> usize {
+        GenericArray::<u8, NonceSize>::default().len()
     }
 
     #[allow(clippy::indexing_slicing)] // length checked
     fn make_opening_key(
         &self,
         k: &[u8],
-        _: &[u8],
+        n: &[u8],
         _: &[u8],
         _: &dyn MacAlgorithm,
     ) -> Box<dyn super::OpeningKey + Send> {
-        let mut k1 = Key::default();
-        let mut k2 = Key::default();
-        k1.clone_from_slice(&k[KeyLength::to_usize()..]);
-        k2.clone_from_slice(&k[..KeyLength::to_usize()]);
-        Box::new(OpeningKey { k1, k2 })
+        let mut key = Key::default();
+        key.clone_from_slice(k);
+        let mut nonce = GenericArray::<u8, NonceSize>::default();
+        nonce.clone_from_slice(n);
+        Box::new(OpeningKey {
+            nonce,
+            cipher: ChaCha20Poly1305::new(&key),
+        })
     }
 
     #[allow(clippy::indexing_slicing)] // length checked
     fn make_sealing_key(
         &self,
         k: &[u8],
-        _: &[u8],
+        n: &[u8],
         _: &[u8],
         _: &dyn MacAlgorithm,
     ) -> Box<dyn super::SealingKey + Send> {
-        let mut k1 = Key::default();
-        let mut k2 = Key::default();
-        k1.clone_from_slice(&k[KeyLength::to_usize()..]);
-        k2.clone_from_slice(&k[..KeyLength::to_usize()]);
-        Box::new(SealingKey { k1, k2 })
+        let mut key = Key::default();
+        key.clone_from_slice(k);
+        let mut nonce = GenericArray::<u8, NonceSize>::default();
+        nonce.clone_from_slice(n);
+        Box::new(SealingKey {
+            nonce,
+            cipher: ChaCha20Poly1305::new(&key),
+        })
     }
 }
 
 pub struct OpeningKey {
-    k1: Key,
-    k2: Key,
+    nonce: GenericArray<u8, NonceSize>,
+    cipher: ChaCha20Poly1305,
 }
 
 pub struct SealingKey {
-    k1: Key,
-    k2: Key,
+    nonce: GenericArray<u8, NonceSize>,
+    cipher: ChaCha20Poly1305,
 }
 
-#[allow(clippy::indexing_slicing)] // length checked
-fn make_counter(sequence_number: u32) -> Nonce {
-    let mut nonce = Nonce::default();
-    let i0 = NonceLength::to_usize() - 4;
-    BigEndian::write_u32(&mut nonce[i0..], sequence_number);
-    nonce
+fn inc_nonce(nonce: &mut GenericArray<u8, NonceSize>) {
+    let mut carry = 1;
+    #[allow(clippy::indexing_slicing)] // length checked
+    for i in (0..nonce.len()).rev() {
+        let n = nonce[i] as u16 + carry;
+        nonce[i] = n as u8;
+        carry = n >> 8;
+    }
 }
 
 impl super::OpeningKey for OpeningKey {
     fn decrypt_packet_length(
         &self,
-        sequence_number: u32,
+        _sequence_number: u32,
         encrypted_packet_length: &[u8],
     ) -> [u8; 4] {
         // Fine because of self.packet_length_to_read_for_block_length()
         #[allow(clippy::unwrap_used, clippy::indexing_slicing)]
-        let mut encrypted_packet_length: [u8; 4] = encrypted_packet_length.try_into().unwrap();
-
-        let nonce = make_counter(sequence_number);
-        let mut cipher = ChaCha20Legacy::new(&self.k1, &nonce);
-        cipher.apply_keystream(&mut encrypted_packet_length);
-
-        encrypted_packet_length
+        encrypted_packet_length.try_into().unwrap()
     }
 
     fn tag_len(&self) -> usize {
-        TagLength::to_usize()
+        TagSize::to_usize()
     }
 
     #[allow(clippy::indexing_slicing)] // lengths checked
     fn open<'a>(
         &mut self,
-        sequence_number: u32,
+        _sequence_number: u32,
         ciphertext_in_plaintext_out: &'a mut [u8],
         tag: &[u8],
     ) -> Result<&'a [u8], Error> {
-        let nonce = make_counter(sequence_number);
-        let expected_tag = compute_poly1305(&nonce, &self.k2, ciphertext_in_plaintext_out);
+        // Packet length is sent unencrypted
+        let mut packet_length = [0; super::PACKET_LENGTH_LEN];
 
-        if !bool::from(expected_tag.ct_eq(tag)) {
-            return Err(Error::DecryptionError);
-        }
+        #[allow(clippy::indexing_slicing)] // length checked
+        packet_length.clone_from_slice(&ciphertext_in_plaintext_out[..super::PACKET_LENGTH_LEN]);
 
-        let mut cipher = ChaCha20Legacy::new(&self.k2, &nonce);
+        let mut tag_buf = GenericArray::<u8, TagSize>::default();
+        tag_buf.clone_from_slice(tag);
 
-        cipher.seek(<ChaCha20LegacyCore as BlockSizeUser>::BlockSize::to_usize());
-        cipher.apply_keystream(&mut ciphertext_in_plaintext_out[PACKET_LENGTH_LEN..]);
+        #[allow(clippy::indexing_slicing)]
+        self.cipher
+            .decrypt_in_place_detached(
+                &self.nonce,
+                &packet_length,
+                &mut ciphertext_in_plaintext_out[super::PACKET_LENGTH_LEN..],
+                &tag_buf,
+            )
+            .map_err(|_| Error::DecryptionError)?;
 
-        Ok(&ciphertext_in_plaintext_out[PACKET_LENGTH_LEN..])
+        inc_nonce(&mut self.nonce);
+
+        #[allow(clippy::indexing_slicing)]
+        Ok(&ciphertext_in_plaintext_out[super::PACKET_LENGTH_LEN..])
     }
 }
 
@@ -163,40 +175,31 @@ impl super::SealingKey for SealingKey {
     }
 
     fn tag_len(&self) -> usize {
-        TagLength::to_usize()
+        TagSize::to_usize()
     }
 
     fn seal(
         &mut self,
-        sequence_number: u32,
+        _sequence_number: u32,
         plaintext_in_ciphertext_out: &mut [u8],
         tag: &mut [u8],
     ) {
-        let nonce = make_counter(sequence_number);
-
-        let mut cipher = ChaCha20Legacy::new(&self.k1, &nonce);
+        // Packet length is received unencrypted
+        let mut packet_length = [0; super::PACKET_LENGTH_LEN];
         #[allow(clippy::indexing_slicing)] // length checked
-        cipher.apply_keystream(&mut plaintext_in_ciphertext_out[..PACKET_LENGTH_LEN]);
+        packet_length.clone_from_slice(&plaintext_in_ciphertext_out[..super::PACKET_LENGTH_LEN]);
 
-        // --
-        let mut cipher = ChaCha20Legacy::new(&self.k2, &nonce);
-
-        cipher.seek(<ChaCha20LegacyCore as BlockSizeUser>::BlockSize::to_usize());
         #[allow(clippy::indexing_slicing, clippy::unwrap_used)]
-        cipher.apply_keystream(&mut plaintext_in_ciphertext_out[PACKET_LENGTH_LEN..]);
+        let tag_out = self
+            .cipher
+            .encrypt_in_place_detached(
+                &self.nonce,
+                &packet_length,
+                &mut plaintext_in_ciphertext_out[super::PACKET_LENGTH_LEN..],
+            )
+            .unwrap();
 
-        // --
-
-        tag.copy_from_slice(
-            compute_poly1305(&nonce, &self.k2, plaintext_in_ciphertext_out).as_slice(),
-        );
+        inc_nonce(&mut self.nonce);
+        tag.clone_from_slice(&tag_out)
     }
-}
-
-fn compute_poly1305(nonce: &Nonce, key: &Key, data: &[u8]) -> poly1305::Tag {
-    let mut cipher = ChaCha20Legacy::new(key, nonce);
-    let mut poly_key = GenericArray::<u8, U32>::default();
-    cipher.apply_keystream(&mut poly_key);
-
-    Poly1305::new(&poly_key).compute_unpadded(data)
 }
