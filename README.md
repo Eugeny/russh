@@ -20,6 +20,7 @@ This is a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Éti
 * `forward-streamlocal` (remote UNIX socket forwarding) ✨
 * Ciphers:
   * `chacha20-poly1305@openssh.com`
+  * `aes128-gcm@openssh.com` ✨
   * `aes256-gcm@openssh.com` ✨
   * `aes256-ctr` ✨
   * `aes192-ctr` ✨

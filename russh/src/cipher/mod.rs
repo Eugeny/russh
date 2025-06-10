@@ -22,6 +22,7 @@ use std::marker::PhantomData;
 use std::num::Wrapping;
 
 use aes::{Aes128, Aes192, Aes256};
+use aes_gcm::{Aes128Gcm, Aes256Gcm};
 use byteorder::{BigEndian, ByteOrder};
 use ctr::Ctr128BE;
 use delegate::delegate;
@@ -87,6 +88,8 @@ pub const AES_192_CBC: Name = Name("aes192-cbc");
 pub const AES_256_CBC: Name = Name("aes256-cbc");
 /// `aes256-ctr`
 pub const AES_256_CTR: Name = Name("aes256-ctr");
+/// `aes128-gcm@openssh.com`
+pub const AES_128_GCM: Name = Name("aes128-gcm@openssh.com");
 /// `aes256-gcm@openssh.com`
 pub const AES_256_GCM: Name = Name("aes256-gcm@openssh.com");
 /// `chacha20-poly1305@openssh.com`
@@ -100,7 +103,8 @@ static _3DES_CBC: SshBlockCipher<CbcWrapper<des::TdesEde3>> = SshBlockCipher(Pha
 static _AES_128_CTR: SshBlockCipher<Ctr128BE<Aes128>> = SshBlockCipher(PhantomData);
 static _AES_192_CTR: SshBlockCipher<Ctr128BE<Aes192>> = SshBlockCipher(PhantomData);
 static _AES_256_CTR: SshBlockCipher<Ctr128BE<Aes256>> = SshBlockCipher(PhantomData);
-static _AES_256_GCM: GcmCipher = GcmCipher {};
+static _AES_128_GCM: GcmCipher<Aes128Gcm> = GcmCipher(PhantomData);
+static _AES_256_GCM: GcmCipher<Aes256Gcm> = GcmCipher(PhantomData);
 static _AES_128_CBC: SshBlockCipher<CbcWrapper<Aes128>> = SshBlockCipher(PhantomData);
 static _AES_192_CBC: SshBlockCipher<CbcWrapper<Aes192>> = SshBlockCipher(PhantomData);
 static _AES_256_CBC: SshBlockCipher<CbcWrapper<Aes256>> = SshBlockCipher(PhantomData);
@@ -114,6 +118,7 @@ pub static ALL_CIPHERS: &[&Name] = &[
     &AES_128_CTR,
     &AES_192_CTR,
     &AES_256_CTR,
+    &AES_128_GCM,
     &AES_256_GCM,
     &AES_128_CBC,
     &AES_192_CBC,
@@ -131,6 +136,7 @@ pub(crate) static CIPHERS: Lazy<HashMap<&'static Name, &(dyn Cipher + Send + Syn
         h.insert(&AES_128_CTR, &_AES_128_CTR);
         h.insert(&AES_192_CTR, &_AES_192_CTR);
         h.insert(&AES_256_CTR, &_AES_256_CTR);
+        h.insert(&AES_128_GCM, &_AES_128_GCM);
         h.insert(&AES_256_GCM, &_AES_256_GCM);
         h.insert(&AES_128_CBC, &_AES_128_CBC);
         h.insert(&AES_192_CBC, &_AES_192_CBC);
