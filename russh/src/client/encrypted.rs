@@ -731,6 +731,9 @@ impl Session {
                     Some(GlobalRequestResponse::Keepalive) => {
                         // ignore keepalives
                     }
+                    Some(GlobalRequestResponse::NoMoreSessions) => {
+                        debug!("no-more-sessions@openssh.com requests success");
+                    }
                     Some(GlobalRequestResponse::TcpIpForward(return_channel)) => {
                         let result = if r.is_empty() {
                             // If a specific port was requested, the reply has no data
@@ -766,6 +769,9 @@ impl Session {
                 match self.open_global_requests.pop_front() {
                     Some(GlobalRequestResponse::Keepalive) => {
                         // ignore keepalives
+                    }
+                    Some(GlobalRequestResponse::NoMoreSessions) => {
+                        warn!("no-more-sessions@openssh.com requests failure");
                     }
                     Some(GlobalRequestResponse::TcpIpForward(return_channel)) => {
                         let _ = return_channel.send(None);
