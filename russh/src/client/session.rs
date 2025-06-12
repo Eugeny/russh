@@ -414,6 +414,19 @@ impl Session {
         Ok(())
     }
 
+    pub fn no_more_sessions(&mut self, want_reply: bool) -> Result<(), crate::Error> {
+        self.open_global_requests
+            .push_back(crate::session::GlobalRequestResponse::NoMoreSessions);
+        if let Some(ref mut enc) = self.common.encrypted {
+            push_packet!(enc.write, {
+                msg::GLOBAL_REQUEST.encode(&mut enc.write)?;
+                "no-more-sessions@openssh.com".encode(&mut enc.write)?;
+                (want_reply as u8).encode(&mut enc.write)?;
+            });
+        }
+        Ok(())
+    }
+
     pub fn data(&mut self, channel: ChannelId, data: CryptoVec) -> Result<(), crate::Error> {
         if let Some(ref mut enc) = self.common.encrypted {
             enc.data(channel, data, self.kex.active())

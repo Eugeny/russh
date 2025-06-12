@@ -200,6 +200,9 @@ pub enum Msg {
     Keepalive {
         want_reply: bool,
     },
+    NoMoreSessions {
+        want_reply: bool,
+    },
 }
 
 impl From<(ChannelId, ChannelMsg)> for Msg {
@@ -834,6 +837,14 @@ impl<H: Handler> Handle<H> {
             .await
             .map_err(|_| Error::SendError)
     }
+
+    /// Send a no-more-sessions request to the remote peer.
+    pub async fn no_more_sessions(&self, want_reply: bool) -> Result<(), Error> {
+        self.sender
+            .send(Msg::NoMoreSessions { want_reply })
+            .await
+            .map_err(|_| Error::SendError)
+    }
 }
 
 impl<H: Handler> Future for Handle<H> {
@@ -1375,6 +1386,9 @@ impl Session {
             }
             Msg::Keepalive { want_reply } => {
                 let _ = self.send_keepalive(want_reply);
+            }
+            Msg::NoMoreSessions { want_reply } => {
+                let _ = self.no_more_sessions(want_reply);
             }
             msg => {
                 // should be unreachable, since the receiver only gets
