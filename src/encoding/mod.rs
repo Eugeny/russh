@@ -13,10 +13,9 @@
 // limitations under the License.
 //
 
+use anyhow::Error;
 use byteorder::{BigEndian, ByteOrder, WriteBytesExt};
 use russh_cryptovec::CryptoVec;
-
-use anyhow::Error;
 
 #[doc(hidden)]
 pub trait Bytes {
@@ -297,7 +296,7 @@ pub trait SshRead<'a>: Sized + 'a {
     fn read_ssh(pos: &mut Position<'a>) -> Result<Self, Error>;
 }
 
-impl<'a> ssh_encoding::Reader for Position<'a> {
+impl ssh_encoding::Reader for Position<'_> {
     fn read<'o>(&mut self, out: &'o mut [u8]) -> ssh_encoding::Result<&'o [u8]> {
         out.copy_from_slice(
             self.s
