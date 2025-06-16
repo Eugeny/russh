@@ -102,7 +102,7 @@ This is a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Éti
 * [lapdev](https://github.com/lapce/lapdev) - Self-Hosted Remote Dev Environment
   * Uses `russh::server` to construct a proxy into your development environment.
 * [medusa](https://github.com/evilsocket/medusa) - A fast and secure multi protocol honeypot.
-  * Uses `russh::server` to be the basis of the honyepot.
+  * Uses `russh::server` to be the basis of the honeypot.
 * [rebels-in-the-sky](https://github.com/ricott1/rebels-in-the-sky) - P2P terminal game about spacepirates playing basketball across the galaxy
   * Uses `russh::server` to deliver the game, using `ratatui` as the rendering engine.
 * [warpgate](https://github.com/warp-tech/warpgate) - Smart SSH, HTTPS and MySQL bastion that requires no additional client-side software
