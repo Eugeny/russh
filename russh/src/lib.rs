@@ -100,6 +100,12 @@ use thiserror::Error;
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+pub mod test_framework;
+
+#[cfg(test)]
+mod test_framework_tests;
+
 mod auth;
 
 mod cert;
