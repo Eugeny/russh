@@ -30,6 +30,9 @@ impl OpenChannelMessage {
                 }
             }
             "direct-tcpip" => ChannelType::DirectTcpip(TcpChannelInfo::decode(r)?),
+            "direct-streamlocal@openssh.com" => {
+                ChannelType::DirectStreamLocal(StreamLocalChannelInfo::decode(r)?)
+            }
             "forwarded-tcpip" => ChannelType::ForwardedTcpIp(TcpChannelInfo::decode(r)?),
             "forwarded-streamlocal@openssh.com" => {
                 ChannelType::ForwardedStreamLocal(StreamLocalChannelInfo::decode(r)?)
@@ -99,6 +102,7 @@ pub enum ChannelType {
         originator_port: u32,
     },
     DirectTcpip(TcpChannelInfo),
+    DirectStreamLocal(StreamLocalChannelInfo),
     ForwardedTcpIp(TcpChannelInfo),
     ForwardedStreamLocal(StreamLocalChannelInfo),
     AgentForward,
