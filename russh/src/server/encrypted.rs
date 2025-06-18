@@ -1191,11 +1191,7 @@ impl Session {
             }
             ChannelType::DirectStreamLocal(d) => {
                 let mut result = handler
-                    .channel_open_direct_streamlocal(
-                        channel,
-                        &d.socket_path,
-                        self,
-                    )
+                    .channel_open_direct_streamlocal(channel, &d.socket_path, self)
                     .await;
                 if let Ok(allowed) = &mut result {
                     self.channels.insert(sender_channel, reference);
