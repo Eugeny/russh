@@ -1189,6 +1189,20 @@ impl Session {
                 }
                 result
             }
+            ChannelType::DirectStreamLocal(d) => {
+                let mut result = handler
+                    .channel_open_direct_streamlocal(
+                        channel,
+                        &d.socket_path,
+                        self,
+                    )
+                    .await;
+                if let Ok(allowed) = &mut result {
+                    self.channels.insert(sender_channel, reference);
+                    self.finalize_channel_open(&msg, channel_params, *allowed)?;
+                }
+                result
+            }
             ChannelType::ForwardedStreamLocal(_) => {
                 if let Some(ref mut enc) = self.common.encrypted {
                     msg.fail(

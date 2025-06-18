@@ -662,6 +662,17 @@ impl Session {
                                 )
                                 .await?
                         }
+                        ChannelType::DirectStreamLocal(d) => {
+                            confirm()?;
+                            let channel = self.accept_server_initiated_channel(id, &msg);
+                            client
+                                .server_channel_open_direct_streamlocal(
+                                    channel,
+                                    &d.socket_path,
+                                    self,
+                                )
+                                .await?
+                        }
                         ChannelType::X11 {
                             originator_address,
                             originator_port,

@@ -352,7 +352,7 @@ pub trait Handler: Sized {
         async { Ok(false) }
     }
 
-    /// Called when a new TCP/IP is created.
+    /// Called when a new direct TCP/IP ("local TCP forwarding") channel is opened.
     /// Return value indicates whether the channel request should be granted.
     #[allow(unused_variables)]
     fn channel_open_direct_tcpip(
@@ -367,7 +367,7 @@ pub trait Handler: Sized {
         async { Ok(false) }
     }
 
-    /// Called when a new forwarded connection comes in.
+    /// Called when a new remote forwarded TCP connection comes in.
     /// <https://www.rfc-editor.org/rfc/rfc4254#section-7>
     #[allow(unused_variables)]
     fn channel_open_forwarded_tcpip(
@@ -377,6 +377,18 @@ pub trait Handler: Sized {
         port_to_connect: u32,
         originator_address: &str,
         originator_port: u32,
+        session: &mut Session,
+    ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
+        async { Ok(false) }
+    }
+
+    /// Called when a new direct-streamlocal ("local UNIX socket forwarding") channel is created.
+    /// Return value indicates whether the channel request should be granted.
+    #[allow(unused_variables)]
+    fn channel_open_direct_streamlocal(
+        &mut self,
+        channel: Channel<Msg>,
+        socket_path: &str,
         session: &mut Session,
     ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
         async { Ok(false) }
