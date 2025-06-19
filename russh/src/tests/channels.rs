@@ -6,6 +6,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::keys::PrivateKeyWithHashAlg;
 use crate::server::Session;
+use crate::tests::test_init;
 use crate::{Channel, ChannelId, ChannelMsg, CryptoVec};
 
 async fn test_session<RC, RS, CH, SH, F1, F2>(
@@ -77,6 +78,8 @@ async fn test_session<RC, RS, CH, SH, F1, F2>(
 
 #[tokio::test]
 async fn test_server_channels() {
+    test_init();
+
     #[derive(Debug)]
     struct Client {}
 
@@ -157,6 +160,8 @@ async fn test_server_channels() {
 
 #[tokio::test]
 async fn test_channel_streams() {
+    test_init();
+
     #[derive(Debug)]
     struct Client {}
 
@@ -251,6 +256,8 @@ async fn test_channel_streams() {
 
 #[tokio::test]
 async fn test_channel_objects() {
+    test_init();
+
     #[derive(Debug)]
     struct Client {}
 
@@ -326,6 +333,8 @@ async fn test_channel_objects() {
 
 #[tokio::test]
 async fn test_channel_window_size() {
+    test_init();
+
     #[derive(Debug)]
     struct Client {}
 

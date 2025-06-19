@@ -1,8 +1,11 @@
 use super::test_framework::*;
+use crate::tests::test_init;
 use crate::ChannelId;
 
 #[tokio::test]
 async fn test_basic_auth_and_channel() -> Result<(), TestError> {
+    test_init();
+
     let context = TestFramework::setup().await?;
 
     let actions = vec![
@@ -25,6 +28,8 @@ async fn test_basic_auth_and_channel() -> Result<(), TestError> {
 
 #[tokio::test]
 async fn test_data_exchange() -> Result<(), TestError> {
+    test_init();
+
     let context = TestFramework::setup().await?;
 
     let actions = vec![
@@ -55,6 +60,8 @@ async fn test_data_exchange() -> Result<(), TestError> {
 
 #[tokio::test]
 async fn test_bidirectional_data_exchange() -> Result<(), TestError> {
+    test_init();
+
     let context = TestFramework::setup().await?;
 
     let actions = vec![
@@ -86,6 +93,8 @@ async fn test_bidirectional_data_exchange() -> Result<(), TestError> {
 #[tokio::test]
 #[should_panic(expected = "EventMismatch")]
 async fn test_exact_event_order_failure() {
+    test_init();
+
     let context = TestFramework::setup().await.unwrap();
 
     let actions = vec![

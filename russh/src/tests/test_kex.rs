@@ -1,6 +1,6 @@
 use super::test_framework::*;
 use crate::kex::ALL_KEX_ALGORITHMS;
-use crate::ChannelId;
+use crate::tests::test_init;
 
 /// Configuration for kex algorithm testing
 #[derive(Debug, Clone)]
@@ -35,12 +35,6 @@ impl KexTestConfig {
         }
     }
 
-    /// Set the username for authentication
-    pub fn with_user(mut self, user: impl Into<String>) -> Self {
-        self.user = Some(user.into());
-        self
-    }
-
     /// Get the username, defaulting to "testuser" if not specified
     pub fn get_user(&self) -> &str {
         self.user.as_deref().unwrap_or("testuser")
@@ -49,9 +43,8 @@ impl KexTestConfig {
 
 #[tokio::test]
 async fn test_all_kex_algorithms() -> Result<(), TestError> {
-    let _ = env_logger::builder()
-        .filter_level(log::LevelFilter::Debug)
-        .try_init();
+    test_init();
+
     for &algorithm in ALL_KEX_ALGORITHMS {
         if algorithm == &crate::kex::NONE {
             continue;

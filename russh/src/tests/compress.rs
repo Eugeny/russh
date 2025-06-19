@@ -8,11 +8,12 @@ use ssh_key::PrivateKey;
 
 use crate::keys::PrivateKeyWithHashAlg;
 use crate::server::{Msg, Server as _, Session};
+use crate::tests::test_init;
 use crate::{client, server, Channel, ChannelId, ChannelMsg, Preferred};
 
 #[tokio::test]
 async fn compress_local_test() {
-    let _ = env_logger::try_init();
+    test_init();
 
     let client_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap();
     let mut config = crate::server::Config::default();

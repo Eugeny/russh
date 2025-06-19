@@ -107,7 +107,7 @@ use crate::client::{
     self, Handle as ClientHandle, Handler as ClientHandler, Session as ClientSession,
 };
 use crate::server::{
-    self, Auth, Handler as ServerHandler, Msg as ServerMsg, Session as ServerSession,
+    self, Auth, Handler as ServerHandler, Msg as ServerMsg, Session as ServerSession, Handle as ServerHandle,
 };
 use crate::{ChannelId, Error};
 
@@ -121,6 +121,12 @@ pub enum ServerCommand {
     CloseChannel {
         channel_id: ChannelId,
     },
+    OpenForwardedTcpip {
+        connected_address: String,
+        connected_port: u32,
+        originator_address: String,
+        originator_port: u32,
+    },
 }
 
 /// Represents an action that can be performed on the client or server
@@ -128,6 +134,20 @@ pub enum ServerCommand {
 pub enum Action {
     /// Client calls channel_open_session
     ClientOpenSession,
+    /// Client calls channel_open_direct_tcpip
+    ClientOpenDirectTcpip {
+        host_to_connect: String,
+        port_to_connect: u32,
+        originator_address: String,
+        originator_port: u32,
+    },
+    /// Server opens a forwarded-tcpip channel to the client
+    ServerOpenForwardedTcpip {
+        connected_address: String,
+        connected_port: u32,
+        originator_address: String,
+        originator_port: u32,
+    },
     /// Client sends data to a channel
     ClientSendData { channel: ChannelId, data: Vec<u8> },
     /// Client closes a channel
@@ -147,6 +167,27 @@ pub enum ExpectedEvent {
     ServerAuthPublickey { user: String },
     /// Server handler channel_open_session was called
     ServerChannelOpenSession,
+    /// Server handler channel_open_direct_tcpip was called
+    ServerChannelOpenDirectTcpip {
+        host_to_connect: String,
+        port_to_connect: u32,
+        originator_address: String,
+        originator_port: u32,
+    },
+    /// Server handler channel_open_forwarded_tcpip was called
+    ServerChannelOpenForwardedTcpip {
+        host_to_connect: String,
+        port_to_connect: u32,
+        originator_address: String,
+        originator_port: u32,
+    },
+    /// Client handler server_channel_open_forwarded_tcpip was called
+    ClientServerChannelOpenForwardedTcpip {
+        connected_address: String,
+        connected_port: u32,
+        originator_address: String,
+        originator_port: u32,
+    },
     /// Server handler data was called
     ServerData { channel: ChannelId, data: Vec<u8> },
     /// Server handler channel_close was called
@@ -191,6 +232,7 @@ struct TestServerHandler {
     events: Arc<tokio::sync::Mutex<VecDeque<ExpectedEvent>>>,
     channels: Arc<tokio::sync::Mutex<HashMap<ChannelId, Channel<ServerMsg>>>>,
     command_rx: Arc<tokio::sync::Mutex<mpsc::UnboundedReceiver<ServerCommand>>>,
+    server_session: Arc<tokio::sync::Mutex<Option<ServerHandle>>>,
 }
 
 impl TestServerHandler {
@@ -202,6 +244,7 @@ impl TestServerHandler {
             events,
             channels: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             command_rx: Arc::new(tokio::sync::Mutex::new(command_rx)),
+            server_session: Arc::new(tokio::sync::Mutex::new(None)),
         }
     }
 
@@ -212,7 +255,9 @@ impl TestServerHandler {
 
     async fn process_commands(&self) {
         let mut command_rx = self.command_rx.lock().await;
+        // Process all available commands
         while let Ok(command) = command_rx.try_recv() {
+            println!("Processing server command: {:?}", command);
             match command {
                 ServerCommand::SendData { channel_id, data } => {
                     let channels = self.channels.lock().await;
@@ -228,6 +273,44 @@ impl TestServerHandler {
                         if let Err(e) = channel.close().await {
                             eprintln!("Failed to close channel {:?}: {:?}", channel_id, e);
                         }
+                    }
+                }
+                ServerCommand::OpenForwardedTcpip {
+                    connected_address,
+                    connected_port,
+                    originator_address,
+                    originator_port,
+                } => {
+                    println!("Processing OpenForwardedTcpip command");
+                    // Get the server session handle and open the forwarded-tcpip channel
+                    let session_opt = {
+                        let stored_session = self.server_session.lock().await;
+                        stored_session.clone()
+                    };
+
+                    if let Some(session_handle) = session_opt {
+                        println!("Server session handle available, opening forwarded-tcpip channel");
+                        match session_handle
+                            .channel_open_forwarded_tcpip(
+                                connected_address,
+                                connected_port,
+                                originator_address,
+                                originator_port,
+                            )
+                            .await
+                        {
+                            Ok(channel) => {
+                                let channel_id = channel.id();
+                                let mut channels = self.channels.lock().await;
+                                channels.insert(channel_id, channel);
+                                println!("Opened forwarded-tcpip channel with ID: {}", channel_id);
+                            }
+                            Err(e) => {
+                                eprintln!("Failed to open forwarded-tcpip channel: {:?}", e);
+                            }
+                        }
+                    } else {
+                        eprintln!("No server session handle available for opening forwarded-tcpip channel");
                     }
                 }
             }
@@ -248,21 +331,88 @@ impl ServerHandler for TestServerHandler {
             user: user.to_string(),
         })
         .await;
+
+        // Process any pending commands after auth
+        self.process_commands().await;
+
         Ok(Auth::Accept)
     }
 
     async fn channel_open_session(
         &mut self,
         channel: Channel<ServerMsg>,
-        _session: &mut ServerSession,
+        session: &mut ServerSession,
     ) -> Result<bool, Self::Error> {
         let channel_id = channel.id();
+
+        // Store the server session handle for later use
+        {
+            let mut stored_session = self.server_session.lock().await;
+            *stored_session = Some(session.handle());
+        }
+
         self.record_event(ExpectedEvent::ServerChannelOpenSession)
             .await;
 
         // Store the channel for later use
         let mut channels = self.channels.lock().await;
         channels.insert(channel_id, channel);
+
+        // Process any pending commands now that we have a session handle
+        self.process_commands().await;
+
+        Ok(true)
+    }
+
+    async fn channel_open_direct_tcpip(
+        &mut self,
+        channel: Channel<ServerMsg>,
+        host_to_connect: &str,
+        port_to_connect: u32,
+        originator_address: &str,
+        originator_port: u32,
+        _session: &mut ServerSession,
+    ) -> Result<bool, Self::Error> {
+        let channel_id = channel.id();
+        self.record_event(ExpectedEvent::ServerChannelOpenDirectTcpip {
+            host_to_connect: host_to_connect.to_string(),
+            port_to_connect,
+            originator_address: originator_address.to_string(),
+            originator_port,
+        })
+        .await;
+
+        // Store the channel for later use
+        let mut channels = self.channels.lock().await;
+        channels.insert(channel_id, channel);
+
+        Ok(true)
+    }
+
+    async fn channel_open_forwarded_tcpip(
+        &mut self,
+        channel: Channel<ServerMsg>,
+        host_to_connect: &str,
+        port_to_connect: u32,
+        originator_address: &str,
+        originator_port: u32,
+        _session: &mut ServerSession,
+    ) -> Result<bool, Self::Error> {
+        let channel_id = channel.id();
+        self.record_event(ExpectedEvent::ServerChannelOpenForwardedTcpip {
+            host_to_connect: host_to_connect.to_string(),
+            port_to_connect,
+            originator_address: originator_address.to_string(),
+            originator_port,
+        })
+        .await;
+
+        // Store the channel for later use
+        let mut channels = self.channels.lock().await;
+        channels.insert(channel_id, channel);
+
+        // Process any pending commands
+        self.process_commands().await;
 
         Ok(true)
     }
@@ -348,6 +498,25 @@ impl ClientHandler for TestClientHandler {
             .await;
         Ok(())
     }
+
+    async fn server_channel_open_forwarded_tcpip(
+        &mut self,
+        _channel: Channel<client::Msg>,
+        connected_address: &str,
+        connected_port: u32,
+        originator_address: &str,
+        originator_port: u32,
+        _session: &mut ClientSession,
+    ) -> Result<(), Self::Error> {
+        self.record_event(ExpectedEvent::ClientServerChannelOpenForwardedTcpip {
+            connected_address: connected_address.to_string(),
+            connected_port,
+            originator_address: originator_address.to_string(),
+            originator_port,
+        })
+        .await;
+        Ok(())
+    }
 }
 
 /// Test context that holds the client and server handles along with channels
@@ -358,6 +527,7 @@ pub struct TestContext {
     pub server_channels: Arc<tokio::sync::Mutex<HashMap<ChannelId, Channel<ServerMsg>>>>,
     pub server_command_tx: mpsc::UnboundedSender<ServerCommand>,
     pub client_channels: Vec<Channel<crate::client::Msg>>,
+    pub server_session_handle: Arc<tokio::sync::Mutex<Option<ServerHandle>>>,
 }
 
 impl TestContext {
@@ -405,6 +575,7 @@ impl TestFramework {
         // Create handlers
         let server_handler = TestServerHandler::new(server_events.clone(), server_command_rx);
         let server_channels = server_handler.channels.clone();
+        let server_session_handle = server_handler.server_session.clone();
         let client_handler = TestClientHandler::new(client_events.clone());
 
         // Set up server config
@@ -452,6 +623,7 @@ impl TestFramework {
             server_channels,
             server_command_tx,
             client_channels: Vec::new(),
+            server_session_handle,
         })
     }
 
@@ -526,6 +698,24 @@ impl TestFramework {
                     .map_err(|e| TestError::Client(format!("{:?}", e)))?;
                 context.client_channels.push(channel);
             }
+            Action::ClientOpenDirectTcpip {
+                host_to_connect,
+                port_to_connect,
+                originator_address,
+                originator_port,
+            } => {
+                let channel = context
+                    .client
+                    .channel_open_direct_tcpip(
+                        host_to_connect,
+                        port_to_connect,
+                        originator_address,
+                        originator_port,
+                    )
+                    .await
+                    .map_err(|e| TestError::Client(format!("{:?}", e)))?;
+                context.client_channels.push(channel);
+            }
             Action::ClientSendData { channel, data } => {
                 let ch = context.get_client_channel(channel.0 as usize)?;
                 ch.data(&data[..]).await.map_err(|e| {
@@ -564,6 +754,48 @@ impl TestFramework {
 
                 // Give some time for the command to be processed
                 tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+            Action::ServerOpenForwardedTcpip {
+                connected_address,
+                connected_port,
+                originator_address,
+                originator_port,
+            } => {
+                println!("Executing ServerOpenForwardedTcpip action");
+
+                // Get the server session handle from the context
+                let session_handle_opt = {
+                    let stored_session = context.server_session_handle.lock().await;
+                    stored_session.clone()
+                };
+
+                if let Some(session_handle) = session_handle_opt {
+                    println!("Server session handle available, opening forwarded-tcpip channel directly");
+                    match session_handle
+                        .channel_open_forwarded_tcpip(
+                            connected_address,
+                            connected_port,
+                            originator_address,
+                            originator_port,
+                        )
+                        .await
+                    {
+                        Ok(channel) => {
+                            let channel_id = channel.id();
+                            println!("Successfully opened forwarded-tcpip channel with ID: {}", channel_id);
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to open forwarded-tcpip channel: {:?}", e);
+                            return Err(TestError::Server(format!("Failed to open forwarded-tcpip channel: {:?}", e)));
+                        }
+                    }
+                } else {
+                    eprintln!("No server session handle available");
+                    return Err(TestError::Server("No server session handle available".to_string()));
+                }
+
+                // Give some time for the channel opening to be processed
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             }
         }
         Ok(())

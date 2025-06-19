@@ -8,3 +8,10 @@ mod test_data_channels;
 mod test_data_stream;
 mod test_framework;
 mod test_kex;
+mod test_tcpip_channels;
+
+pub fn test_init() {
+    let _ = env_logger::builder()
+        .filter_level(log::LevelFilter::Debug)
+        .try_init();
+}

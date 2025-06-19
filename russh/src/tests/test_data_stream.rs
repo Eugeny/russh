@@ -8,6 +8,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::keys::PrivateKeyWithHashAlg;
 use crate::server::{self, Auth, Msg, Server as _, Session};
+use crate::tests::test_init;
 use crate::{client, Channel, ChannelMsg};
 
 pub const WINDOW_SIZE: u32 = 8 * 2048;
@@ -95,8 +96,7 @@ async fn test_channel_halves() -> Result<(), anyhow::Error> {
 }
 
 async fn run_test(test: impl ChannelDataCopy) -> Result<(), anyhow::Error> {
-    static INIT: std::sync::Once = std::sync::Once::new();
-    INIT.call_once(env_logger::init);
+    test_init();
 
     let addr = addr();
     let data = data();

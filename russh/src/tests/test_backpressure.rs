@@ -11,6 +11,7 @@ use tokio::time::sleep;
 
 use crate::keys::PrivateKeyWithHashAlg;
 use crate::server::{self, Auth, Msg, Server as _, Session};
+use crate::tests::test_init;
 use crate::{client, Channel, ChannelMsg};
 
 pub const WINDOW_SIZE: usize = 8 * 2048;
@@ -18,7 +19,7 @@ pub const CHANNEL_BUFFER_SIZE: usize = 10;
 
 #[tokio::test]
 async fn test_backpressure() -> Result<(), anyhow::Error> {
-    env_logger::init();
+    test_init();
 
     let addr = addr();
     let data = data();

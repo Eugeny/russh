@@ -4,10 +4,11 @@ use tokio::io::AsyncWriteExt;
 
 use crate::server;
 use crate::server::Server as _;
+use crate::tests::test_init;
 
 #[tokio::test]
 async fn server_kex_junk_test() {
-    let _ = env_logger::try_init();
+    test_init();
 
     let config = server::Config::default();
     let config = Arc::new(config);
