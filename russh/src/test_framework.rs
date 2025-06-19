@@ -102,15 +102,24 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 
 use crate::channels::Channel;
-use crate::server::{self, Auth, Handler as ServerHandler, Msg as ServerMsg, Session as ServerSession};
-use crate::client::{self, Handler as ClientHandler, Handle as ClientHandle, Session as ClientSession};
+use crate::client::{
+    self, Handle as ClientHandle, Handler as ClientHandler, Session as ClientSession,
+};
+use crate::server::{
+    self, Auth, Handler as ServerHandler, Msg as ServerMsg, Session as ServerSession,
+};
 use crate::{ChannelId, Error};
 
 /// Commands that can be sent to the server handler
 #[derive(Debug)]
 pub enum ServerCommand {
-    SendData { channel_id: ChannelId, data: Vec<u8> },
-    CloseChannel { channel_id: ChannelId },
+    SendData {
+        channel_id: ChannelId,
+        data: Vec<u8>,
+    },
+    CloseChannel {
+        channel_id: ChannelId,
+    },
 }
 
 /// Represents an action that can be performed on the client or server
@@ -147,6 +156,10 @@ pub enum ExpectedEvent {
     ClientChannelClose { channel: ChannelId },
     /// Client handler check_server_key was called
     ClientCheckServerKey,
+    /// Server key exchange algorithm was selected
+    ServerKexAlgorithm { algorithm: String },
+    /// Client key exchange algorithm was selected
+    ClientKexAlgorithm { algorithm: String },
 }
 
 /// Test framework error
@@ -159,7 +172,10 @@ pub enum TestError {
     #[error("Client error: {0}")]
     Client(String),
     #[error("Expected event {expected:?} but got {actual:?}")]
-    EventMismatch { expected: ExpectedEvent, actual: ExpectedEvent },
+    EventMismatch {
+        expected: ExpectedEvent,
+        actual: ExpectedEvent,
+    },
     #[error("Expected {expected} events but got {actual}")]
     EventCountMismatch { expected: usize, actual: usize },
     #[error("Channel not found: {0}")]
@@ -229,7 +245,8 @@ impl ServerHandler for TestServerHandler {
     ) -> Result<Auth, Self::Error> {
         self.record_event(ExpectedEvent::ServerAuthPublickey {
             user: user.to_string(),
-        }).await;
+        })
+        .await;
         Ok(Auth::Accept)
     }
 
@@ -239,7 +256,8 @@ impl ServerHandler for TestServerHandler {
         _session: &mut ServerSession,
     ) -> Result<bool, Self::Error> {
         let channel_id = channel.id();
-        self.record_event(ExpectedEvent::ServerChannelOpenSession).await;
+        self.record_event(ExpectedEvent::ServerChannelOpenSession)
+            .await;
 
         // Store the channel for later use
         let mut channels = self.channels.lock().await;
@@ -257,7 +275,8 @@ impl ServerHandler for TestServerHandler {
         self.record_event(ExpectedEvent::ServerData {
             channel,
             data: data.to_vec(),
-        }).await;
+        })
+        .await;
 
         // Process any pending commands
         self.process_commands().await;
@@ -270,7 +289,8 @@ impl ServerHandler for TestServerHandler {
         channel: ChannelId,
         _session: &mut ServerSession,
     ) -> Result<(), Self::Error> {
-        self.record_event(ExpectedEvent::ServerChannelClose { channel }).await;
+        self.record_event(ExpectedEvent::ServerChannelClose { channel })
+            .await;
         Ok(())
     }
 }
@@ -313,7 +333,8 @@ impl ClientHandler for TestClientHandler {
         self.record_event(ExpectedEvent::ClientData {
             channel,
             data: data.to_vec(),
-        }).await;
+        })
+        .await;
         Ok(())
     }
 
@@ -322,25 +343,30 @@ impl ClientHandler for TestClientHandler {
         channel: ChannelId,
         _session: &mut ClientSession,
     ) -> Result<(), Self::Error> {
-        self.record_event(ExpectedEvent::ClientChannelClose { channel }).await;
+        self.record_event(ExpectedEvent::ClientChannelClose { channel })
+            .await;
         Ok(())
     }
 }
 
 /// Test context that holds the client and server handles along with channels
 pub struct TestContext {
-    client: ClientHandle<TestClientHandler>,
-    server_events: Arc<tokio::sync::Mutex<VecDeque<ExpectedEvent>>>,
-    client_events: Arc<tokio::sync::Mutex<VecDeque<ExpectedEvent>>>,
-    server_channels: Arc<tokio::sync::Mutex<HashMap<ChannelId, Channel<ServerMsg>>>>,
-    server_command_tx: mpsc::UnboundedSender<ServerCommand>,
-    client_channels: Vec<Channel<crate::client::Msg>>,
+    pub client: ClientHandle<TestClientHandler>,
+    pub server_events: Arc<tokio::sync::Mutex<VecDeque<ExpectedEvent>>>,
+    pub client_events: Arc<tokio::sync::Mutex<VecDeque<ExpectedEvent>>>,
+    pub server_channels: Arc<tokio::sync::Mutex<HashMap<ChannelId, Channel<ServerMsg>>>>,
+    pub server_command_tx: mpsc::UnboundedSender<ServerCommand>,
+    pub client_channels: Vec<Channel<crate::client::Msg>>,
 }
 
 impl TestContext {
     /// Get a client channel by index
-    pub fn get_client_channel(&self, index: usize) -> Result<&Channel<crate::client::Msg>, TestError> {
-        self.client_channels.get(index)
+    pub fn get_client_channel(
+        &self,
+        index: usize,
+    ) -> Result<&Channel<crate::client::Msg>, TestError> {
+        self.client_channels
+            .get(index)
             .ok_or_else(|| TestError::ChannelNotFound(ChannelId(index as u32)))
     }
 
@@ -357,6 +383,14 @@ pub struct TestFramework;
 impl TestFramework {
     /// Set up a connected client and server pair using a pipe
     pub async fn setup() -> Result<TestContext, TestError> {
+        Self::setup_with_configs(None, None).await
+    }
+
+    /// Set up a connected client and server pair with custom configurations
+    pub async fn setup_with_configs(
+        custom_server_config: Option<server::Config>,
+        custom_client_config: Option<client::Config>,
+    ) -> Result<TestContext, TestError> {
         // Create a bidirectional pipe
         let (client_stream, server_stream) = tokio::io::duplex(65536);
 
@@ -373,19 +407,30 @@ impl TestFramework {
         let client_handler = TestClientHandler::new(client_events.clone());
 
         // Set up server config
-        let server_key = ssh_key::PrivateKey::random(&mut rand::rngs::OsRng, ssh_key::Algorithm::Ed25519)
-            .map_err(|e| TestError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+        let server_config = if let Some(config) = custom_server_config {
+            Arc::new(config)
+        } else {
+            let server_key =
+                ssh_key::PrivateKey::random(&mut rand::rngs::OsRng, ssh_key::Algorithm::Ed25519)
+                    .map_err(|e| {
+                        TestError::Io(std::io::Error::new(std::io::ErrorKind::Other, e))
+                    })?;
 
-        let server_config = Arc::new(server::Config {
-            inactivity_timeout: Some(std::time::Duration::from_secs(10)),
-            auth_rejection_time: std::time::Duration::from_secs(1),
-            auth_rejection_time_initial: Some(std::time::Duration::from_secs(0)),
-            keys: vec![server_key],
-            ..Default::default()
-        });
+            Arc::new(server::Config {
+                inactivity_timeout: Some(std::time::Duration::from_secs(10)),
+                auth_rejection_time: std::time::Duration::from_secs(1),
+                auth_rejection_time_initial: Some(std::time::Duration::from_secs(0)),
+                keys: vec![server_key],
+                ..Default::default()
+            })
+        };
 
         // Set up client config
-        let client_config = Arc::new(client::Config::default());
+        let client_config = if let Some(config) = custom_client_config {
+            Arc::new(config)
+        } else {
+            Arc::new(client::Config::default())
+        };
 
         // Start server in background
         let _server_task = tokio::spawn(async move {
@@ -458,46 +503,63 @@ impl TestFramework {
         match action {
             Action::ClientAuthenticate { user } => {
                 // Generate a key for authentication
-                let key = ssh_key::PrivateKey::random(&mut rand::rngs::OsRng, ssh_key::Algorithm::Ed25519)
-                    .map_err(|e| TestError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+                let key = ssh_key::PrivateKey::random(
+                    &mut rand::rngs::OsRng,
+                    ssh_key::Algorithm::Ed25519,
+                )
+                .map_err(|e| TestError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
 
                 let key_with_hash = crate::keys::PrivateKeyWithHashAlg::new(Arc::new(key), None);
 
-                context.client.authenticate_publickey(user, key_with_hash)
+                context
+                    .client
+                    .authenticate_publickey(user, key_with_hash)
                     .await
                     .map_err(|e| TestError::Client(format!("{:?}", e)))?;
             }
             Action::ClientOpenSession => {
-                let channel = context.client.channel_open_session()
+                let channel = context
+                    .client
+                    .channel_open_session()
                     .await
                     .map_err(|e| TestError::Client(format!("{:?}", e)))?;
                 context.client_channels.push(channel);
             }
             Action::ClientSendData { channel, data } => {
                 let ch = context.get_client_channel(channel.0 as usize)?;
-                ch.data(&data[..])
-                    .await
-                    .map_err(|e| TestError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+                ch.data(&data[..]).await.map_err(|e| {
+                    TestError::Io(std::io::Error::new(std::io::ErrorKind::Other, e))
+                })?;
             }
             Action::ClientCloseChannel { channel } => {
                 let ch = context.get_client_channel(channel.0 as usize)?;
-                ch.close()
-                    .await
-                    .map_err(|e| TestError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+                ch.close().await.map_err(|e| {
+                    TestError::Io(std::io::Error::new(std::io::ErrorKind::Other, e))
+                })?;
             }
             Action::ServerSendData { channel, data } => {
-                context.server_command_tx.send(ServerCommand::SendData {
-                    channel_id: channel,
-                    data,
-                }).map_err(|_| TestError::Server("Failed to send command to server".to_string()))?;
+                context
+                    .server_command_tx
+                    .send(ServerCommand::SendData {
+                        channel_id: channel,
+                        data,
+                    })
+                    .map_err(|_| {
+                        TestError::Server("Failed to send command to server".to_string())
+                    })?;
 
                 // Give some time for the command to be processed
                 tokio::time::sleep(std::time::Duration::from_millis(50)).await;
             }
             Action::ServerCloseChannel { channel } => {
-                context.server_command_tx.send(ServerCommand::CloseChannel {
-                    channel_id: channel,
-                }).map_err(|_| TestError::Server("Failed to send command to server".to_string()))?;
+                context
+                    .server_command_tx
+                    .send(ServerCommand::CloseChannel {
+                        channel_id: channel,
+                    })
+                    .map_err(|_| {
+                        TestError::Server("Failed to send command to server".to_string())
+                    })?;
 
                 // Give some time for the command to be processed
                 tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -520,7 +582,11 @@ impl TestFramework {
 
         // Check exact length match
         if all_events.len() != expected_events.len() {
-            eprintln!("Expected {} events, got {}", expected_events.len(), all_events.len());
+            eprintln!(
+                "Expected {} events, got {}",
+                expected_events.len(),
+                all_events.len()
+            );
             eprintln!("Expected: {:?}", expected_events);
             eprintln!("Actual: {:?}", all_events);
             return Err(TestError::EventCountMismatch {
@@ -566,7 +632,10 @@ impl TestFramework {
             if !all_events.contains(expected) {
                 return Err(TestError::EventMismatch {
                     expected: expected.clone(),
-                    actual: all_events.first().cloned().unwrap_or(ExpectedEvent::ClientCheckServerKey),
+                    actual: all_events
+                        .first()
+                        .cloned()
+                        .unwrap_or(ExpectedEvent::ClientCheckServerKey),
                 });
             }
         }
