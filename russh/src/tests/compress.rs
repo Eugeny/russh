@@ -1,15 +1,14 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use crate::keys::PrivateKeyWithHashAlg;
-use crate::{client, server, Channel, ChannelId, ChannelMsg, Preferred};
 use log::debug;
 use rand_core::OsRng;
 use russh_cryptovec::CryptoVec;
 use ssh_key::PrivateKey;
 
-use crate::server::Msg;
-use crate::server::{Server as _, Session};
+use crate::keys::PrivateKeyWithHashAlg;
+use crate::server::{Msg, Server as _, Session};
+use crate::{client, server, Channel, ChannelId, ChannelMsg, Preferred};
 
 #[tokio::test]
 async fn compress_local_test() {

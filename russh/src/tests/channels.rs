@@ -1,11 +1,11 @@
 use std::future::Future;
 
-use crate::keys::PrivateKeyWithHashAlg;
-use crate::server::Session;
 use rand_core::OsRng;
 use ssh_key::PrivateKey;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+use crate::keys::PrivateKeyWithHashAlg;
+use crate::server::Session;
 use crate::{Channel, ChannelId, ChannelMsg, CryptoVec};
 
 async fn test_session<RC, RS, CH, SH, F1, F2>(

@@ -3,8 +3,8 @@
 mod channels;
 mod compress;
 mod server_kex_junk;
-mod test_framework_tests;
+mod test_backpressure;
+mod test_data_channels;
+mod test_data_stream;
 mod test_framework;
 mod test_kex;
-mod test_backpressure;
-mod test_data_stream;

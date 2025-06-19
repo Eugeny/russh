@@ -1,9 +1,6 @@
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::Arc;
 
-use crate::keys::PrivateKeyWithHashAlg;
-use crate::server::{self, Auth, Msg, Server as _, Session};
-use crate::{client, Channel, ChannelMsg};
 use futures::FutureExt;
 use rand::RngCore;
 use rand_core::OsRng;
@@ -11,6 +8,10 @@ use ssh_key::PrivateKey;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::watch;
 use tokio::time::sleep;
+
+use crate::keys::PrivateKeyWithHashAlg;
+use crate::server::{self, Auth, Msg, Server as _, Session};
+use crate::{client, Channel, ChannelMsg};
 
 pub const WINDOW_SIZE: usize = 8 * 2048;
 pub const CHANNEL_BUFFER_SIZE: usize = 10;
