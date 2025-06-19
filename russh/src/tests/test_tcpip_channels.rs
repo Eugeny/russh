@@ -41,7 +41,7 @@ async fn test_direct_tcpip_channel() {
 
     let actions = vec![
         Action::ClientAuthenticate {
-            user: "testuser".to_string()
+            user: "testuser".to_string(),
         },
         Action::ClientOpenDirectTcpip {
             host_to_connect: "127.0.0.1".to_string(),
@@ -57,7 +57,7 @@ async fn test_direct_tcpip_channel() {
 
     let expected_events = vec![
         ExpectedEvent::ServerAuthPublickey {
-            user: "testuser".to_string()
+            user: "testuser".to_string(),
         },
         ExpectedEvent::ServerChannelOpenDirectTcpip {
             host_to_connect: "127.0.0.1".to_string(),
@@ -86,7 +86,7 @@ async fn test_direct_tcpip_bidirectional() {
 
     let actions = vec![
         Action::ClientAuthenticate {
-            user: "testuser".to_string()
+            user: "testuser".to_string(),
         },
         Action::ClientOpenDirectTcpip {
             host_to_connect: "example.com".to_string(),
@@ -107,7 +107,7 @@ async fn test_direct_tcpip_bidirectional() {
 
     let expected_events = vec![
         ExpectedEvent::ServerAuthPublickey {
-            user: "testuser".to_string()
+            user: "testuser".to_string(),
         },
         ExpectedEvent::ServerChannelOpenDirectTcpip {
             host_to_connect: "example.com".to_string(),
@@ -140,7 +140,7 @@ async fn test_direct_tcpip_channel_close() {
 
     let actions = vec![
         Action::ClientAuthenticate {
-            user: "testuser".to_string()
+            user: "testuser".to_string(),
         },
         Action::ClientOpenDirectTcpip {
             host_to_connect: "192.168.1.1".to_string(),
@@ -159,7 +159,7 @@ async fn test_direct_tcpip_channel_close() {
 
     let expected_events = vec![
         ExpectedEvent::ServerAuthPublickey {
-            user: "testuser".to_string()
+            user: "testuser".to_string(),
         },
         ExpectedEvent::ServerChannelOpenDirectTcpip {
             host_to_connect: "192.168.1.1".to_string(),
@@ -191,7 +191,7 @@ async fn test_multiple_direct_tcpip_channels() {
 
     let actions = vec![
         Action::ClientAuthenticate {
-            user: "testuser".to_string()
+            user: "testuser".to_string(),
         },
         // First channel
         Action::ClientOpenDirectTcpip {
@@ -220,7 +220,7 @@ async fn test_multiple_direct_tcpip_channels() {
 
     let expected_events = vec![
         ExpectedEvent::ServerAuthPublickey {
-            user: "testuser".to_string()
+            user: "testuser".to_string(),
         },
         ExpectedEvent::ServerChannelOpenDirectTcpip {
             host_to_connect: "host1.example.com".to_string(),
@@ -263,7 +263,7 @@ async fn test_forwarded_tcpip_channel() {
 
     let actions = vec![
         Action::ClientAuthenticate {
-            user: "testuser".to_string()
+            user: "testuser".to_string(),
         },
         // First establish a session channel to get the server session handle
         Action::ClientOpenSession,
@@ -278,7 +278,7 @@ async fn test_forwarded_tcpip_channel() {
 
     let expected_events = vec![
         ExpectedEvent::ServerAuthPublickey {
-            user: "testuser".to_string()
+            user: "testuser".to_string(),
         },
         ExpectedEvent::ServerChannelOpenSession,
         ExpectedEvent::ClientCheckServerKey,

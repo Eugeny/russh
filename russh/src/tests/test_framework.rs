@@ -107,7 +107,8 @@ use crate::client::{
     self, Handle as ClientHandle, Handler as ClientHandler, Session as ClientSession,
 };
 use crate::server::{
-    self, Auth, Handler as ServerHandler, Msg as ServerMsg, Session as ServerSession, Handle as ServerHandle,
+    self, Auth, Handle as ServerHandle, Handler as ServerHandler, Msg as ServerMsg,
+    Session as ServerSession,
 };
 use crate::{ChannelId, Error};
 
@@ -117,15 +118,6 @@ pub enum ServerCommand {
     SendData {
         channel_id: ChannelId,
         data: Vec<u8>,
-    },
-    CloseChannel {
-        channel_id: ChannelId,
-    },
-    OpenForwardedTcpip {
-        connected_address: String,
-        connected_port: u32,
-        originator_address: String,
-        originator_port: u32,
     },
 }
 
@@ -154,8 +146,6 @@ pub enum Action {
     ClientCloseChannel { channel: ChannelId },
     /// Server sends data to a channel
     ServerSendData { channel: ChannelId, data: Vec<u8> },
-    /// Server closes a channel
-    ServerCloseChannel { channel: ChannelId },
     /// Client authenticates with publickey
     ClientAuthenticate { user: String },
 }
@@ -198,10 +188,6 @@ pub enum ExpectedEvent {
     ClientChannelClose { channel: ChannelId },
     /// Client handler check_server_key was called
     ClientCheckServerKey,
-    /// Server key exchange algorithm was selected
-    ServerKexAlgorithm { algorithm: String },
-    /// Client key exchange algorithm was selected
-    ClientKexAlgorithm { algorithm: String },
 }
 
 /// Test framework error
@@ -265,52 +251,6 @@ impl TestServerHandler {
                         if let Err(e) = channel.data(&data[..]).await {
                             eprintln!("Failed to send data to channel {:?}: {:?}", channel_id, e);
                         }
-                    }
-                }
-                ServerCommand::CloseChannel { channel_id } => {
-                    let channels = self.channels.lock().await;
-                    if let Some(channel) = channels.get(&channel_id) {
-                        if let Err(e) = channel.close().await {
-                            eprintln!("Failed to close channel {:?}: {:?}", channel_id, e);
-                        }
-                    }
-                }
-                ServerCommand::OpenForwardedTcpip {
-                    connected_address,
-                    connected_port,
-                    originator_address,
-                    originator_port,
-                } => {
-                    println!("Processing OpenForwardedTcpip command");
-                    // Get the server session handle and open the forwarded-tcpip channel
-                    let session_opt = {
-                        let stored_session = self.server_session.lock().await;
-                        stored_session.clone()
-                    };
-
-                    if let Some(session_handle) = session_opt {
-                        println!("Server session handle available, opening forwarded-tcpip channel");
-                        match session_handle
-                            .channel_open_forwarded_tcpip(
-                                connected_address,
-                                connected_port,
-                                originator_address,
-                                originator_port,
-                            )
-                            .await
-                        {
-                            Ok(channel) => {
-                                let channel_id = channel.id();
-                                let mut channels = self.channels.lock().await;
-                                channels.insert(channel_id, channel);
-                                println!("Opened forwarded-tcpip channel with ID: {}", channel_id);
-                            }
-                            Err(e) => {
-                                eprintln!("Failed to open forwarded-tcpip channel: {:?}", e);
-                            }
-                        }
-                    } else {
-                        eprintln!("No server session handle available for opening forwarded-tcpip channel");
                     }
                 }
             }
@@ -524,7 +464,6 @@ pub struct TestContext {
     pub client: ClientHandle<TestClientHandler>,
     pub server_events: Arc<tokio::sync::Mutex<VecDeque<ExpectedEvent>>>,
     pub client_events: Arc<tokio::sync::Mutex<VecDeque<ExpectedEvent>>>,
-    pub server_channels: Arc<tokio::sync::Mutex<HashMap<ChannelId, Channel<ServerMsg>>>>,
     pub server_command_tx: mpsc::UnboundedSender<ServerCommand>,
     pub client_channels: Vec<Channel<crate::client::Msg>>,
     pub server_session_handle: Arc<tokio::sync::Mutex<Option<ServerHandle>>>,
@@ -539,12 +478,6 @@ impl TestContext {
         self.client_channels
             .get(index)
             .ok_or_else(|| TestError::ChannelNotFound(ChannelId(index as u32)))
-    }
-
-    /// Get a server channel by index
-    pub async fn get_server_channel(&self, index: usize) -> Result<bool, TestError> {
-        let channels = self.server_channels.lock().await;
-        Ok(channels.len() > index)
     }
 }
 
@@ -574,7 +507,6 @@ impl TestFramework {
 
         // Create handlers
         let server_handler = TestServerHandler::new(server_events.clone(), server_command_rx);
-        let server_channels = server_handler.channels.clone();
         let server_session_handle = server_handler.server_session.clone();
         let client_handler = TestClientHandler::new(client_events.clone());
 
@@ -620,7 +552,6 @@ impl TestFramework {
             client,
             server_events,
             client_events,
-            server_channels,
             server_command_tx,
             client_channels: Vec::new(),
             server_session_handle,
@@ -643,33 +574,6 @@ impl TestFramework {
 
         // Verify events
         Self::verify_events(&context, expected_events).await
-    }
-
-    /// Execute a sequence of actions using the framework
-    pub async fn execute_actions(
-        context: &mut TestContext,
-        actions: Vec<Action>,
-    ) -> Result<(), TestError> {
-        for action in actions {
-            Self::execute_action(context, action).await?;
-        }
-        Ok(())
-    }
-
-    /// Execute actions and verify that expected events occurred (order-independent)
-    pub async fn run_test_flexible(
-        mut context: TestContext,
-        actions: Vec<Action>,
-        expected_events: Vec<ExpectedEvent>,
-    ) -> Result<(), TestError> {
-        // Execute actions
-        Self::execute_actions(&mut context, actions).await?;
-
-        // Allow some time for events to propagate
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-
-        // Verify events occurred (order-independent)
-        Self::verify_events_flexible(&context, expected_events).await
     }
 
     async fn execute_action(context: &mut TestContext, action: Action) -> Result<(), TestError> {
@@ -742,19 +646,6 @@ impl TestFramework {
                 // Give some time for the command to be processed
                 tokio::time::sleep(std::time::Duration::from_millis(50)).await;
             }
-            Action::ServerCloseChannel { channel } => {
-                context
-                    .server_command_tx
-                    .send(ServerCommand::CloseChannel {
-                        channel_id: channel,
-                    })
-                    .map_err(|_| {
-                        TestError::Server("Failed to send command to server".to_string())
-                    })?;
-
-                // Give some time for the command to be processed
-                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-            }
             Action::ServerOpenForwardedTcpip {
                 connected_address,
                 connected_port,
@@ -770,7 +661,9 @@ impl TestFramework {
                 };
 
                 if let Some(session_handle) = session_handle_opt {
-                    println!("Server session handle available, opening forwarded-tcpip channel directly");
+                    println!(
+                        "Server session handle available, opening forwarded-tcpip channel directly"
+                    );
                     match session_handle
                         .channel_open_forwarded_tcpip(
                             connected_address,
@@ -782,16 +675,24 @@ impl TestFramework {
                     {
                         Ok(channel) => {
                             let channel_id = channel.id();
-                            println!("Successfully opened forwarded-tcpip channel with ID: {}", channel_id);
+                            println!(
+                                "Successfully opened forwarded-tcpip channel with ID: {}",
+                                channel_id
+                            );
                         }
                         Err(e) => {
                             eprintln!("Failed to open forwarded-tcpip channel: {:?}", e);
-                            return Err(TestError::Server(format!("Failed to open forwarded-tcpip channel: {:?}", e)));
+                            return Err(TestError::Server(format!(
+                                "Failed to open forwarded-tcpip channel: {:?}",
+                                e
+                            )));
                         }
                     }
                 } else {
                     eprintln!("No server session handle available");
-                    return Err(TestError::Server("No server session handle available".to_string()));
+                    return Err(TestError::Server(
+                        "No server session handle available".to_string(),
+                    ));
                 }
 
                 // Give some time for the channel opening to be processed
@@ -839,36 +740,6 @@ impl TestFramework {
                 return Err(TestError::EventMismatch {
                     expected: expected.clone(),
                     actual: actual.clone(),
-                });
-            }
-        }
-
-        Ok(())
-    }
-
-    async fn verify_events_flexible(
-        context: &TestContext,
-        expected_events: Vec<ExpectedEvent>,
-    ) -> Result<(), TestError> {
-        let server_events = context.server_events.lock().await;
-        let client_events = context.client_events.lock().await;
-
-        let mut all_events = Vec::new();
-        all_events.extend(server_events.iter().cloned());
-        all_events.extend(client_events.iter().cloned());
-
-        drop(server_events);
-        drop(client_events);
-
-        // Check that all expected events occurred (order-independent)
-        for expected in &expected_events {
-            if !all_events.contains(expected) {
-                return Err(TestError::EventMismatch {
-                    expected: expected.clone(),
-                    actual: all_events
-                        .first()
-                        .cloned()
-                        .unwrap_or(ExpectedEvent::ClientCheckServerKey),
                 });
             }
         }
