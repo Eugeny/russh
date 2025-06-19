@@ -1,33 +1,3 @@
-//! Tests for TCP/IP channel functionality using the test framework
-//!
-//! This module contains comprehensive tests for SSH TCP/IP channel operations:
-//! - **direct-tcpip channels**: Client-initiated port forwarding (fully implemented)
-//! - **forwarded-tcpip channels**: Server-initiated port forwarding (framework extended, test placeholder)
-//!
-//! ## Test Coverage
-//!
-//! ### Direct-TCPIP Channels (Client-Initiated)
-//! - Basic channel opening and data transfer
-//! - Bidirectional communication
-//! - Channel closure
-//! - Multiple concurrent channels
-//!
-//! ### Framework Extensions Made
-//! - Added `Action::ClientOpenDirectTcpip` for client-initiated TCP/IP channel opening
-//! - Added `Action::ServerOpenForwardedTcpip` for server-initiated channel opening (placeholder)
-//! - Added corresponding `ExpectedEvent` variants for all channel operations
-//! - Extended `TestServerHandler` with `channel_open_direct_tcpip` and `channel_open_forwarded_tcpip` methods
-//! - Extended `TestClientHandler` with `server_channel_open_forwarded_tcpip` method
-//!
-//! ## Notes
-//!
-//! - Channel IDs in actions vs. events: Client action channel IDs start from 0, but actual russh
-//!   channel IDs in events start from 2 due to internal SSH protocol handling
-//! - Event ordering: Some events like `ClientCheckServerKey` may occur at different times than expected
-//!   due to asynchronous nature of SSH handshaking
-//! - Server-initiated channels: Full implementation requires access to server session in handler,
-//!   which would require significant architectural changes to the test framework
-
 use super::test_framework::*;
 use crate::tests::test_init;
 use crate::ChannelId;

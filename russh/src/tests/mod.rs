@@ -4,6 +4,7 @@ mod channels;
 mod compress;
 mod server_kex_junk;
 mod test_backpressure;
+mod test_crypto;
 mod test_data_channels;
 mod test_data_stream;
 mod test_framework;
