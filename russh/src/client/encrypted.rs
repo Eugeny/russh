@@ -190,6 +190,7 @@ impl Session {
                                         Some(Msg::AuthInfoResponse { responses }) => {
                                             break responses
                                         }
+                                        None => return Err(crate::Error::RecvError.into()),
                                         _ => {}
                                     }
                                 };
@@ -239,6 +240,7 @@ impl Session {
                                     self.common.buffer = loop {
                                         match self.receiver.recv().await {
                                             Some(Msg::Signed { data }) => break data,
+                                            None => return Err(crate::Error::RecvError.into()),
                                             _ => {}
                                         }
                                     };

@@ -369,6 +369,7 @@ impl<H: Handler> Handle<H> {
                         prompts,
                     });
                 }
+                None => return Err(crate::Error::RecvError),
                 _ => {}
             }
         }
