@@ -111,7 +111,8 @@ impl<N: NonceSequence> super::OpeningKey for OpeningKey<N> {
         #[allow(clippy::indexing_slicing)] // length checked
         packet_length.clone_from_slice(&ciphertext_and_tag[..super::PACKET_LENGTH_LEN]);
 
-        self.0
+        let buf = self
+            .0
             .open_in_place(
                 Aad::from(&packet_length),
                 #[allow(clippy::indexing_slicing)] // length checked
@@ -119,11 +120,7 @@ impl<N: NonceSequence> super::OpeningKey for OpeningKey<N> {
             )
             .map_err(|_| Error::DecryptionError)?;
 
-        #[allow(clippy::indexing_slicing)] // length checked
-        Ok(
-            &ciphertext_and_tag
-                [super::PACKET_LENGTH_LEN..ciphertext_and_tag.len() - self.tag_len()],
-        )
+        Ok(buf)
     }
 }
 
@@ -172,6 +169,6 @@ impl<N: NonceSequence> super::SealingKey for SealingKey<N> {
             )
             .unwrap();
 
-        tag.clone_from_slice(tag_out.as_ref())
+        tag.clone_from_slice(tag_out.as_ref());
     }
 }
