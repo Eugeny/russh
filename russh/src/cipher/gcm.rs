@@ -124,11 +124,6 @@ impl<C: AeadCore + AeadInPlace> super::OpeningKey for OpeningKey<C> {
         #[allow(clippy::indexing_slicing)] // length checked
         packet_length.clone_from_slice(&ciphertext_in_plaintext_out[..super::PACKET_LENGTH_LEN]);
 
-        let mut buffer = vec![0; ciphertext_in_plaintext_out.len() - super::PACKET_LENGTH_LEN];
-
-        #[allow(clippy::indexing_slicing)] // length checked
-        buffer.copy_from_slice(&ciphertext_in_plaintext_out[super::PACKET_LENGTH_LEN..]);
-
         let mut tag_buf = GenericArray::<u8, <C as AeadCore>::TagSize>::default();
         tag_buf.clone_from_slice(tag);
 
