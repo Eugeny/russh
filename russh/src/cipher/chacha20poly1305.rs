@@ -36,7 +36,7 @@ impl super::Cipher for SshChacha20Poly1305Cipher {
     ) -> Box<dyn super::OpeningKey + Send> {
         Box::new(OpeningKey(chacha20_poly1305_openssh::OpeningKey::new(
             #[allow(clippy::unwrap_used)]
-            k.first_chunk().unwrap(),
+            k.try_into().unwrap(),
         )))
     }
 
@@ -49,7 +49,7 @@ impl super::Cipher for SshChacha20Poly1305Cipher {
     ) -> Box<dyn super::SealingKey + Send> {
         Box::new(SealingKey(chacha20_poly1305_openssh::SealingKey::new(
             #[allow(clippy::unwrap_used)]
-            k.first_chunk().unwrap(),
+            k.try_into().unwrap(),
         )))
     }
 }
@@ -67,7 +67,7 @@ impl super::OpeningKey for OpeningKey {
         self.0.decrypt_packet_length(
             sequence_number,
             #[allow(clippy::unwrap_used)]
-            *encrypted_packet_length.first_chunk().unwrap(),
+            encrypted_packet_length.try_into().unwrap(),
         )
     }
 
@@ -86,7 +86,7 @@ impl super::OpeningKey for OpeningKey {
                 sequence_number,
                 ciphertext_in_plaintext_out,
                 #[allow(clippy::unwrap_used)]
-                tag.first_chunk().unwrap(),
+                tag.try_into().unwrap(),
             )
             .map_err(|_| Error::DecryptionError)
     }
@@ -132,7 +132,7 @@ impl super::SealingKey for SealingKey {
             sequence_number,
             plaintext_in_ciphertext_out,
             #[allow(clippy::unwrap_used)]
-            tag.first_chunk_mut().unwrap(),
+            tag.try_into().unwrap(),
         );
     }
 }

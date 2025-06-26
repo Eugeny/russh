@@ -105,5 +105,5 @@ jobs:
 
     - name: Check with minimal dependency versions
       run: |
-        rustup toolchain add 1.77.0
-        cargo +1.77.0 minimal-versions check --all-features --no-dev-deps
+        rustup toolchain add 1.75.0
+        cargo +1.75.0 minimal-versions check --all-features --no-dev-deps
