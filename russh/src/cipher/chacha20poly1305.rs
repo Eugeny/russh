@@ -15,7 +15,7 @@
 
 // http://cvsweb.openbsd.org/cgi-bin/cvsweb/src/usr.bin/ssh/PROTOCOL.chacha20poly1305?annotate=HEAD
 
-use aws_lc_rs::aead::chacha20_poly1305_openssh;
+use ring::aead::chacha20_poly1305_openssh;
 
 use super::super::Error;
 use crate::mac::MacAlgorithm;
@@ -27,7 +27,6 @@ impl super::Cipher for SshChacha20Poly1305Cipher {
         chacha20_poly1305_openssh::KEY_LEN
     }
 
-    #[allow(clippy::indexing_slicing)] // length checked
     fn make_opening_key(
         &self,
         k: &[u8],
@@ -41,7 +40,6 @@ impl super::Cipher for SshChacha20Poly1305Cipher {
         )))
     }
 
-    #[allow(clippy::indexing_slicing)] // length checked
     fn make_sealing_key(
         &self,
         k: &[u8],
@@ -77,7 +75,6 @@ impl super::OpeningKey for OpeningKey {
         chacha20_poly1305_openssh::TAG_LEN
     }
 
-    #[allow(clippy::indexing_slicing)] // lengths checked
     fn open<'a>(
         &mut self,
         sequence_number: u32,
