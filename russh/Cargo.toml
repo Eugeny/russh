@@ -10,7 +10,7 @@ name = "russh"
 readme = "../README.md"
 repository = "https://github.com/warp-tech/russh"
 version = "0.52.1"
-rust-version = "1.75"
+rust-version = "1.77"
 
 [features]
 default = ["flate2"]
@@ -25,7 +25,7 @@ dsa = ["ssh-key/dsa"]
 aes-gcm = "0.10"
 aes.workspace = true
 async-trait = { workspace = true, optional = true }
-aws-lc-rs = "1.13.1"
+aws-lc-rs = { version = "1.13.1" }
 bitflags = "2.0"
 block-padding = { version = "0.3", features = ["std"] }
 byteorder.workspace = true
