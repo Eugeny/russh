@@ -117,9 +117,10 @@ impl super::OpeningKey for OpeningKey {
     fn open<'a>(
         &mut self,
         sequence_number: u32,
-        ciphertext_in_plaintext_out: &'a mut [u8],
-        tag: &[u8],
+        ciphertext_and_tag: &'a mut [u8],
     ) -> Result<&'a [u8], Error> {
+        let ciphertext_len = ciphertext_and_tag.len() - self.tag_len();
+        let (ciphertext_in_plaintext_out, tag) = ciphertext_and_tag.split_at_mut(ciphertext_len);
         let nonce = make_counter(sequence_number);
         let expected_tag = compute_poly1305(&nonce, &self.k2, ciphertext_in_plaintext_out);
 

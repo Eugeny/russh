@@ -22,7 +22,6 @@ des = ["dep:des"]
 dsa = ["ssh-key/dsa"]
 
 [dependencies]
-aes-gcm = "0.10"
 aes.workspace = true
 async-trait = { workspace = true, optional = true }
 bitflags = "2.0"
@@ -64,6 +63,7 @@ pkcs8 = { version = "0.10", features = ["pkcs5", "encryption"] }
 poly1305 = "0.8"
 rand_core = { version = "0.6.4", features = ["getrandom", "std"] }
 rand.workspace = true
+ring = "0.17"
 rsa.workspace = true
 russh-cryptovec = { version = "0.52.0", path = "../cryptovec", features = [
   "ssh-encoding",
