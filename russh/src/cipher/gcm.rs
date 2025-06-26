@@ -17,26 +17,24 @@
 
 use std::convert::TryInto;
 
-use aes_gcm::{AeadCore, AeadInPlace, KeyInit, KeySizeUser};
-use digest::typenum::Unsigned;
-use generic_array::GenericArray;
 use rand::RngCore;
-use std::marker::PhantomData;
+use ring::aead::{
+    Aad, Algorithm, BoundKey, Nonce as AeadNonce, NonceSequence, OpeningKey as AeadOpeningKey,
+    SealingKey as AeadSealingKey, UnboundKey, NONCE_LEN,
+};
 
 use super::super::Error;
 use crate::mac::MacAlgorithm;
 
-pub struct GcmCipher<C: AeadCore + AeadInPlace + KeyInit + KeySizeUser>(pub PhantomData<C>);
+pub struct GcmCipher(pub(crate) &'static Algorithm);
 
-impl<C: AeadCore + AeadInPlace + KeyInit + KeySizeUser + Send + 'static> super::Cipher
-    for GcmCipher<C>
-{
+impl super::Cipher for GcmCipher {
     fn key_len(&self) -> usize {
-        C::key_size()
+        self.0.key_len()
     }
 
     fn nonce_len(&self) -> usize {
-        GenericArray::<u8, <C as AeadCore>::NonceSize>::default().len()
+        self.0.nonce_len()
     }
 
     fn make_opening_key(
@@ -46,14 +44,11 @@ impl<C: AeadCore + AeadInPlace + KeyInit + KeySizeUser + Send + 'static> super::
         _: &[u8],
         _: &dyn MacAlgorithm,
     ) -> Box<dyn super::OpeningKey + Send> {
-        let mut key = GenericArray::<u8, <C as KeySizeUser>::KeySize>::default();
-        key.clone_from_slice(k);
-        let mut nonce = GenericArray::<u8, <C as AeadCore>::NonceSize>::default();
-        nonce.clone_from_slice(n);
-        Box::new(OpeningKey {
-            nonce,
-            cipher: C::new(&key),
-        })
+        #[allow(clippy::unwrap_used)]
+        Box::new(OpeningKey(AeadOpeningKey::new(
+            UnboundKey::new(self.0, k).unwrap(),
+            Nonce(n.try_into().unwrap()),
+        )))
     }
 
     fn make_sealing_key(
@@ -63,41 +58,34 @@ impl<C: AeadCore + AeadInPlace + KeyInit + KeySizeUser + Send + 'static> super::
         _: &[u8],
         _: &dyn MacAlgorithm,
     ) -> Box<dyn super::SealingKey + Send> {
-        let mut key = GenericArray::<u8, <C as KeySizeUser>::KeySize>::default();
-        key.clone_from_slice(k);
-        let mut nonce = GenericArray::<u8, <C as AeadCore>::NonceSize>::default();
-        nonce.clone_from_slice(n);
-        Box::new(SealingKey {
-            nonce,
-            cipher: C::new(&key),
-        })
+        #[allow(clippy::unwrap_used)]
+        Box::new(SealingKey(AeadSealingKey::new(
+            UnboundKey::new(self.0, k).unwrap(),
+            Nonce(n.try_into().unwrap()),
+        )))
     }
 }
 
-pub struct OpeningKey<C: AeadCore + AeadInPlace> {
-    nonce: GenericArray<u8, <C as AeadCore>::NonceSize>,
-    cipher: C,
-}
+pub struct OpeningKey<N: NonceSequence>(AeadOpeningKey<N>);
 
-pub struct SealingKey<C: AeadCore + AeadInPlace> {
-    nonce: GenericArray<u8, <C as AeadCore>::NonceSize>,
-    cipher: C,
-}
+pub struct SealingKey<N: NonceSequence>(AeadSealingKey<N>);
 
-fn inc_nonce<C>(nonce: &mut GenericArray<u8, <C as AeadCore>::NonceSize>)
-where
-    C: AeadCore,
-{
-    let mut carry = 1;
-    #[allow(clippy::indexing_slicing)] // length checked
-    for i in (0..nonce.len()).rev() {
-        let n = nonce[i] as u16 + carry;
-        nonce[i] = n as u8;
-        carry = n >> 8;
+struct Nonce([u8; NONCE_LEN]);
+
+impl NonceSequence for Nonce {
+    fn advance(&mut self) -> Result<ring::aead::Nonce, ring::error::Unspecified> {
+        let mut carry = 1;
+        #[allow(clippy::indexing_slicing)] // length checked
+        for i in (0..NONCE_LEN).rev() {
+            let n = self.0[i] as u16 + carry;
+            self.0[i] = n as u8;
+            carry = n >> 8;
+        }
+        Ok(AeadNonce::assume_unique_for_key(self.0))
     }
 }
 
-impl<C: AeadCore + AeadInPlace> super::OpeningKey for OpeningKey<C> {
+impl<N: NonceSequence> super::OpeningKey for OpeningKey<N> {
     fn decrypt_packet_length(
         &self,
         _sequence_number: u32,
@@ -109,42 +97,37 @@ impl<C: AeadCore + AeadInPlace> super::OpeningKey for OpeningKey<C> {
     }
 
     fn tag_len(&self) -> usize {
-        <C as AeadCore>::TagSize::to_usize()
+        self.0.algorithm().tag_len()
     }
 
     fn open<'a>(
         &mut self,
         _sequence_number: u32,
-        ciphertext_in_plaintext_out: &'a mut [u8],
-        tag: &[u8],
+        ciphertext_and_tag: &'a mut [u8],
     ) -> Result<&'a [u8], Error> {
         // Packet length is sent unencrypted
         let mut packet_length = [0; super::PACKET_LENGTH_LEN];
 
         #[allow(clippy::indexing_slicing)] // length checked
-        packet_length.clone_from_slice(&ciphertext_in_plaintext_out[..super::PACKET_LENGTH_LEN]);
+        packet_length.clone_from_slice(&ciphertext_and_tag[..super::PACKET_LENGTH_LEN]);
 
-        let mut tag_buf = GenericArray::<u8, <C as AeadCore>::TagSize>::default();
-        tag_buf.clone_from_slice(tag);
-
-        #[allow(clippy::indexing_slicing)]
-        self.cipher
-            .decrypt_in_place_detached(
-                &self.nonce,
-                &packet_length,
-                &mut ciphertext_in_plaintext_out[super::PACKET_LENGTH_LEN..],
-                &tag_buf,
+        self.0
+            .open_in_place(
+                Aad::from(&packet_length),
+                #[allow(clippy::indexing_slicing)] // length checked
+                &mut ciphertext_and_tag[super::PACKET_LENGTH_LEN..],
             )
             .map_err(|_| Error::DecryptionError)?;
 
-        inc_nonce::<C>(&mut self.nonce);
-
-        #[allow(clippy::indexing_slicing)]
-        Ok(&ciphertext_in_plaintext_out[super::PACKET_LENGTH_LEN..])
+        #[allow(clippy::indexing_slicing)] // length checked
+        Ok(
+            &ciphertext_and_tag
+                [super::PACKET_LENGTH_LEN..ciphertext_and_tag.len() - self.tag_len()],
+        )
     }
 }
 
-impl<C: AeadCore + AeadInPlace> super::SealingKey for SealingKey<C> {
+impl<N: NonceSequence> super::SealingKey for SealingKey<N> {
     fn padding_length(&self, payload: &[u8]) -> usize {
         let block_size = 16;
         let extra_len = super::PACKET_LENGTH_LEN + super::PADDING_LENGTH_LEN;
@@ -165,7 +148,7 @@ impl<C: AeadCore + AeadInPlace> super::SealingKey for SealingKey<C> {
     }
 
     fn tag_len(&self) -> usize {
-        <C as AeadCore>::TagSize::to_usize()
+        self.0.algorithm().tag_len()
     }
 
     fn seal(
@@ -179,17 +162,16 @@ impl<C: AeadCore + AeadInPlace> super::SealingKey for SealingKey<C> {
         #[allow(clippy::indexing_slicing)] // length checked
         packet_length.clone_from_slice(&plaintext_in_ciphertext_out[..super::PACKET_LENGTH_LEN]);
 
-        #[allow(clippy::indexing_slicing, clippy::unwrap_used)]
+        #[allow(clippy::unwrap_used)]
         let tag_out = self
-            .cipher
-            .encrypt_in_place_detached(
-                &self.nonce,
-                &packet_length,
+            .0
+            .seal_in_place_separate_tag(
+                Aad::from(&packet_length),
+                #[allow(clippy::indexing_slicing)]
                 &mut plaintext_in_ciphertext_out[super::PACKET_LENGTH_LEN..],
             )
             .unwrap();
 
-        inc_nonce::<C>(&mut self.nonce);
-        tag.clone_from_slice(&tag_out)
+        tag.clone_from_slice(tag_out.as_ref())
     }
 }

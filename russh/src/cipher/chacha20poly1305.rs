@@ -78,15 +78,17 @@ impl super::OpeningKey for OpeningKey {
     fn open<'a>(
         &mut self,
         sequence_number: u32,
-        ciphertext_in_plaintext_out: &'a mut [u8],
-        tag: &[u8],
+        ciphertext_and_tag: &'a mut [u8],
     ) -> Result<&'a [u8], Error> {
+        let ciphertext_len = ciphertext_and_tag.len() - self.tag_len();
+        let (ciphertext_in_plaintext_out, tag) = ciphertext_and_tag.split_at_mut(ciphertext_len);
+
         self.0
             .open_in_place(
                 sequence_number,
                 ciphertext_in_plaintext_out,
                 #[allow(clippy::unwrap_used)]
-                tag.try_into().unwrap(),
+                tag.as_ref().try_into().unwrap(),
             )
             .map_err(|_| Error::DecryptionError)
     }

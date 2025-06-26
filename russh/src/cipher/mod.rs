@@ -22,12 +22,12 @@ use std::marker::PhantomData;
 use std::num::Wrapping;
 
 use aes::{Aes128, Aes192, Aes256};
-use aes_gcm::{Aes128Gcm, Aes256Gcm};
 use byteorder::{BigEndian, ByteOrder};
 use ctr::Ctr128BE;
 use delegate::delegate;
 use log::trace;
 use once_cell::sync::Lazy;
+use ring::aead::{AES_128_GCM as ALGORITHM_AES_128_GCM, AES_256_GCM as ALGORITHM_AES_256_GCM};
 use ssh_encoding::Encode;
 use tokio::io::{AsyncRead, AsyncReadExt};
 
@@ -103,8 +103,8 @@ static _3DES_CBC: SshBlockCipher<CbcWrapper<des::TdesEde3>> = SshBlockCipher(Pha
 static _AES_128_CTR: SshBlockCipher<Ctr128BE<Aes128>> = SshBlockCipher(PhantomData);
 static _AES_192_CTR: SshBlockCipher<Ctr128BE<Aes192>> = SshBlockCipher(PhantomData);
 static _AES_256_CTR: SshBlockCipher<Ctr128BE<Aes256>> = SshBlockCipher(PhantomData);
-static _AES_128_GCM: GcmCipher<Aes128Gcm> = GcmCipher(PhantomData);
-static _AES_256_GCM: GcmCipher<Aes256Gcm> = GcmCipher(PhantomData);
+static _AES_128_GCM: GcmCipher = GcmCipher(&ALGORITHM_AES_128_GCM);
+static _AES_256_GCM: GcmCipher = GcmCipher(&ALGORITHM_AES_256_GCM);
 static _AES_128_CBC: SshBlockCipher<CbcWrapper<Aes128>> = SshBlockCipher(PhantomData);
 static _AES_192_CBC: SshBlockCipher<CbcWrapper<Aes192>> = SshBlockCipher(PhantomData);
 static _AES_256_CBC: SshBlockCipher<CbcWrapper<Aes256>> = SshBlockCipher(PhantomData);
@@ -194,12 +194,7 @@ pub(crate) trait OpeningKey {
 
     fn tag_len(&self) -> usize;
 
-    fn open<'a>(
-        &mut self,
-        seqn: u32,
-        ciphertext_in_plaintext_out: &'a mut [u8],
-        tag: &[u8],
-    ) -> Result<&'a [u8], Error>;
+    fn open<'a>(&mut self, seqn: u32, ciphertext_and_tag: &'a mut [u8]) -> Result<&'a [u8], Error>;
 }
 
 pub(crate) trait SealingKey {
@@ -286,9 +281,7 @@ pub(crate) async fn read<R: AsyncRead + Unpin>(
 
     trace!("read_exact done");
     let seqn = buffer.seqn.0;
-    let ciphertext_len = buffer.buffer.len() - cipher.tag_len();
-    let (ciphertext, tag) = buffer.buffer.split_at_mut(ciphertext_len);
-    let plaintext = cipher.open(seqn, ciphertext, tag)?;
+    let plaintext = cipher.open(seqn, &mut buffer.buffer)?;
 
     let padding_length = *plaintext.first().to_owned().unwrap_or(&0) as usize;
     trace!("reading, padding_length {:?}", padding_length);

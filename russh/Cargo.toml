@@ -22,7 +22,6 @@ des = ["dep:des"]
 dsa = ["ssh-key/dsa"]
 
 [dependencies]
-aes-gcm = "0.10"
 aes.workspace = true
 async-trait = { workspace = true, optional = true }
 bitflags = "2.0"
