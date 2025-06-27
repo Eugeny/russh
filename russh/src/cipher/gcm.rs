@@ -74,6 +74,9 @@ struct Nonce([u8; NONCE_LEN]);
 
 impl NonceSequence for Nonce {
     fn advance(&mut self) -> Result<ring::aead::Nonce, ring::error::Unspecified> {
+        let mut previous_nonce = [0u8; NONCE_LEN];
+        #[allow(clippy::indexing_slicing)] // length checked
+        previous_nonce.clone_from_slice(&self.0[..]);
         let mut carry = 1;
         #[allow(clippy::indexing_slicing)] // length checked
         for i in (0..NONCE_LEN).rev() {
@@ -81,7 +84,7 @@ impl NonceSequence for Nonce {
             self.0[i] = n as u8;
             carry = n >> 8;
         }
-        Ok(AeadNonce::assume_unique_for_key(self.0))
+        Ok(AeadNonce::assume_unique_for_key(previous_nonce))
     }
 }
 
