@@ -20,6 +20,7 @@ legacy-ed25519-pkcs8-parser = ["yasna"]
 des = ["dep:des"]
 # Danger: DSA algorithm is insecure.
 dsa = ["ssh-key/dsa"]
+_bench = ["dep:criterion"]
 
 [dependencies]
 aes-gcm = "0.10"
@@ -86,6 +87,7 @@ yasna = { version = "0.5.0", features = [
 ], optional = true }
 zeroize = "1.7"
 base64ct = "~1.6" # can be removed in 2024 edition
+criterion = { version = "0.3", optional = true, features = ["html_reports"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { workspace = true, features = [
@@ -127,3 +129,7 @@ tokio-stream.workspace = true
 
 [package.metadata.docs.rs]
 all-features = true
+
+[[bench]]
+name = "ciphers"
+harness = false
