@@ -54,6 +54,10 @@ jobs:
       run: |
         cargo install --force --locked bindgen-cli
 
+    - name: Install dependencies
+      run: |
+        sudo apt-get install -y gcc-multilib
+
     - name: Build (all features enabled)
       run: cargo +1.81.0 build --verbose --target wasm32-wasip1 -p russh
 
