@@ -13,18 +13,21 @@ version = "0.52.1"
 rust-version = "1.75"
 
 [features]
-default = ["flate2"]
+default = ["flate2", "aws-lc-rs"]
+aws-lc-rs = ["dep:aws-lc-rs"]
 async-trait = ["dep:async-trait"]
 legacy-ed25519-pkcs8-parser = ["yasna"]
 # Danger: 3DES cipher is insecure.
 des = ["dep:des"]
 # Danger: DSA algorithm is insecure.
 dsa = ["ssh-key/dsa"]
+ring = ["dep:ring"]
 _bench = ["dep:criterion"]
 
 [dependencies]
 aes.workspace = true
 async-trait = { workspace = true, optional = true }
+aws-lc-rs = { version = "1.13.1", optional = true }
 bitflags = "2.0"
 block-padding = { version = "0.3", features = ["std"] }
 byteorder.workspace = true
@@ -62,6 +65,7 @@ pkcs5 = "0.7"
 pkcs8 = { version = "0.10", features = ["pkcs5", "encryption"] }
 rand_core = { version = "0.6.4", features = ["getrandom", "std"] }
 rand.workspace = true
+ring = { version = "0.17.14", optional = true }
 rsa.workspace = true
 russh-cryptovec = { version = "0.52.0", path = "../cryptovec", features = [
   "ssh-encoding",
@@ -94,10 +98,6 @@ tokio = { workspace = true, features = [
   "net",
 ] }
 home.workspace = true
-aws-lc-rs = "1.13.1"
-
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-ring = "0.17.14"
 
 [target.'cfg(windows)'.dependencies]
 pageant = { version = "0.0.3", path = "../pageant" }

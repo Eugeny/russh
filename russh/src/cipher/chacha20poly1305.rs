@@ -15,9 +15,9 @@
 
 // http://cvsweb.openbsd.org/cgi-bin/cvsweb/src/usr.bin/ssh/PROTOCOL.chacha20poly1305?annotate=HEAD
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "aws-lc-rs")]
 use aws_lc_rs::aead::chacha20_poly1305_openssh;
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(not(feature = "aws-lc-rs"), feature = "ring"))]
 use ring::aead::chacha20_poly1305_openssh;
 
 use super::super::Error;

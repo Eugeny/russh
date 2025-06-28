@@ -17,7 +17,7 @@
 
 use std::convert::TryInto;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "aws-lc-rs")]
 use aws_lc_rs::{
     aead::{
         Aad, Algorithm, BoundKey, Nonce as AeadNonce, NonceSequence, OpeningKey as AeadOpeningKey,
@@ -26,7 +26,7 @@ use aws_lc_rs::{
     error::Unspecified,
 };
 use rand::RngCore;
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(not(feature = "aws-lc-rs"), feature = "ring"))]
 use ring::{
     aead::{
         Aad, Algorithm, BoundKey, Nonce as AeadNonce, NonceSequence, OpeningKey as AeadOpeningKey,
