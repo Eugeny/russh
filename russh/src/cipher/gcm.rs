@@ -16,12 +16,12 @@
 // http://cvsweb.openbsd.org/cgi-bin/cvsweb/src/usr.bin/ssh/PROTOCOL.chacha20poly1305?annotate=HEAD
 
 use std::convert::TryInto;
+use std::marker::PhantomData;
 
 use aes_gcm::{AeadCore, AeadInPlace, KeyInit, KeySizeUser};
 use digest::typenum::Unsigned;
 use generic_array::GenericArray;
 use rand::RngCore;
-use std::marker::PhantomData;
 
 use super::super::Error;
 use crate::mac::MacAlgorithm;

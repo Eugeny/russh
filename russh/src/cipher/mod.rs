@@ -97,18 +97,19 @@ pub const CHACHA20_POLY1305: Name = Name("chacha20-poly1305@openssh.com");
 /// `none`
 pub const NONE: Name = Name("none");
 
-static _CLEAR: Clear = Clear {};
+pub(crate) static _CLEAR: Clear = Clear {};
 #[cfg(feature = "des")]
-static _3DES_CBC: SshBlockCipher<CbcWrapper<des::TdesEde3>> = SshBlockCipher(PhantomData);
-static _AES_128_CTR: SshBlockCipher<Ctr128BE<Aes128>> = SshBlockCipher(PhantomData);
-static _AES_192_CTR: SshBlockCipher<Ctr128BE<Aes192>> = SshBlockCipher(PhantomData);
-static _AES_256_CTR: SshBlockCipher<Ctr128BE<Aes256>> = SshBlockCipher(PhantomData);
-static _AES_128_GCM: GcmCipher<Aes128Gcm> = GcmCipher(PhantomData);
-static _AES_256_GCM: GcmCipher<Aes256Gcm> = GcmCipher(PhantomData);
-static _AES_128_CBC: SshBlockCipher<CbcWrapper<Aes128>> = SshBlockCipher(PhantomData);
-static _AES_192_CBC: SshBlockCipher<CbcWrapper<Aes192>> = SshBlockCipher(PhantomData);
-static _AES_256_CBC: SshBlockCipher<CbcWrapper<Aes256>> = SshBlockCipher(PhantomData);
-static _CHACHA20_POLY1305: SshChacha20Poly1305Cipher = SshChacha20Poly1305Cipher {};
+pub(crate) static _3DES_CBC: SshBlockCipher<CbcWrapper<des::TdesEde3>> =
+    SshBlockCipher(PhantomData);
+pub(crate) static _AES_128_CTR: SshBlockCipher<Ctr128BE<Aes128>> = SshBlockCipher(PhantomData);
+pub(crate) static _AES_192_CTR: SshBlockCipher<Ctr128BE<Aes192>> = SshBlockCipher(PhantomData);
+pub(crate) static _AES_256_CTR: SshBlockCipher<Ctr128BE<Aes256>> = SshBlockCipher(PhantomData);
+pub(crate) static _AES_128_GCM: GcmCipher<Aes128Gcm> = GcmCipher(PhantomData);
+pub(crate) static _AES_256_GCM: GcmCipher<Aes256Gcm> = GcmCipher(PhantomData);
+pub(crate) static _AES_128_CBC: SshBlockCipher<CbcWrapper<Aes128>> = SshBlockCipher(PhantomData);
+pub(crate) static _AES_192_CBC: SshBlockCipher<CbcWrapper<Aes192>> = SshBlockCipher(PhantomData);
+pub(crate) static _AES_256_CBC: SshBlockCipher<CbcWrapper<Aes256>> = SshBlockCipher(PhantomData);
+pub(crate) static _CHACHA20_POLY1305: SshChacha20Poly1305Cipher = SshChacha20Poly1305Cipher {};
 
 pub static ALL_CIPHERS: &[&Name] = &[
     &CLEAR,
@@ -314,3 +315,6 @@ const MINIMUM_PACKET_LEN: usize = 16;
 const MAXIMUM_PACKET_LEN: usize = 256 * 1024;
 
 const PADDING_LENGTH_LEN: usize = 1;
+
+#[cfg(feature = "_bench")]
+pub mod benchmark;
