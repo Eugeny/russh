@@ -15,7 +15,7 @@
 
 // http://cvsweb.openbsd.org/cgi-bin/cvsweb/src/usr.bin/ssh/PROTOCOL.chacha20poly1305?annotate=HEAD
 
-use ring::aead::chacha20_poly1305_openssh;
+use aws_lc_rs::aead::chacha20_poly1305_openssh;
 
 use super::super::Error;
 use crate::mac::MacAlgorithm;
@@ -88,7 +88,7 @@ impl super::OpeningKey for OpeningKey {
                 sequence_number,
                 ciphertext_in_plaintext_out,
                 #[allow(clippy::unwrap_used)]
-                tag.as_ref().try_into().unwrap(),
+                &tag.try_into().unwrap(),
             )
             .map_err(|_| Error::DecryptionError)
     }
