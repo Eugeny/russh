@@ -97,7 +97,7 @@ pub const CHACHA20_POLY1305: Name = Name("chacha20-poly1305@openssh.com");
 /// `none`
 pub const NONE: Name = Name("none");
 
-static _CLEAR: Clear = Clear {};
+pub(crate) static _CLEAR: Clear = Clear {};
 #[cfg(feature = "des")]
 static _3DES_CBC: SshBlockCipher<CbcWrapper<des::TdesEde3>> = SshBlockCipher(PhantomData);
 static _AES_128_CTR: SshBlockCipher<Ctr128BE<Aes128>> = SshBlockCipher(PhantomData);
@@ -307,3 +307,6 @@ const MINIMUM_PACKET_LEN: usize = 16;
 const MAXIMUM_PACKET_LEN: usize = 256 * 1024;
 
 const PADDING_LENGTH_LEN: usize = 1;
+
+#[cfg(feature = "_bench")]
+pub mod benchmark;
