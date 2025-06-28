@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used)]
 use criterion::*;
 use rand::RngCore;
 
@@ -10,9 +11,9 @@ pub fn bench(c: &mut Criterion) {
         let cipher = super::CIPHERS.get(&cipher_name).unwrap();
 
         let mut key = vec![0; cipher.key_len()];
-        black_box(rand_generator.try_fill_bytes(&mut key).unwrap());
+        rand_generator.try_fill_bytes(&mut key).unwrap();
         let mut nonce = vec![0; cipher.nonce_len()];
-        black_box(rand_generator.try_fill_bytes(&mut nonce).unwrap());
+        rand_generator.try_fill_bytes(&mut nonce).unwrap();
 
         let mut sk = cipher.make_sealing_key(&key, &nonce, &[], &crate::mac::_NONE);
         let mut ok = cipher.make_opening_key(&key, &nonce, &[], &crate::mac::_NONE);
@@ -27,8 +28,8 @@ pub fn bench(c: &mut Criterion) {
                 b.iter_with_setup(
                     || {
                         let mut in_out = black_box(vec![0u8; size]);
-                        black_box(rand_generator.try_fill_bytes(&mut in_out).unwrap());
-                        black_box(rand_generator.try_fill_bytes(&mut packet_length).unwrap());
+                        rand_generator.try_fill_bytes(&mut in_out).unwrap();
+                        rand_generator.try_fill_bytes(&mut packet_length).unwrap();
                         in_out
                     },
                     |mut in_out| {
