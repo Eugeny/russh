@@ -22,12 +22,15 @@ use std::marker::PhantomData;
 use std::num::Wrapping;
 
 use aes::{Aes128, Aes192, Aes256};
+#[cfg(not(target_arch = "wasm32"))]
 use aws_lc_rs::aead::{AES_128_GCM as ALGORITHM_AES_128_GCM, AES_256_GCM as ALGORITHM_AES_256_GCM};
 use byteorder::{BigEndian, ByteOrder};
 use ctr::Ctr128BE;
 use delegate::delegate;
 use log::trace;
 use once_cell::sync::Lazy;
+#[cfg(target_arch = "wasm32")]
+use ring::aead::{AES_128_GCM as ALGORITHM_AES_128_GCM, AES_256_GCM as ALGORITHM_AES_256_GCM};
 use ssh_encoding::Encode;
 use tokio::io::{AsyncRead, AsyncReadExt};
 

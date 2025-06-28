@@ -15,7 +15,10 @@
 
 // http://cvsweb.openbsd.org/cgi-bin/cvsweb/src/usr.bin/ssh/PROTOCOL.chacha20poly1305?annotate=HEAD
 
+#[cfg(not(target_arch = "wasm32"))]
 use aws_lc_rs::aead::chacha20_poly1305_openssh;
+#[cfg(target_arch = "wasm32")]
+use ring::aead::chacha20_poly1305_openssh;
 
 use super::super::Error;
 use crate::mac::MacAlgorithm;
