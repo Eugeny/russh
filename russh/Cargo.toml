@@ -62,7 +62,6 @@ pkcs5 = "0.7"
 pkcs8 = { version = "0.10", features = ["pkcs5", "encryption"] }
 rand_core = { version = "0.6.4", features = ["getrandom", "std"] }
 rand.workspace = true
-ring = "0.17"
 rsa.workspace = true
 russh-cryptovec = { version = "0.52.0", path = "../cryptovec", features = [
   "ssh-encoding",
@@ -86,6 +85,7 @@ yasna = { version = "0.5.0", features = [
 zeroize = "1.7"
 base64ct = "~1.6" # can be removed in 2024 edition
 criterion = { version = "0.3", optional = true, features = ["html_reports"] }
+aws-lc-rs = "1.13.1"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { workspace = true, features = [

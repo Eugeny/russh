@@ -17,11 +17,11 @@
 
 use std::convert::TryInto;
 
-use rand::RngCore;
-use ring::aead::{
+use aws_lc_rs::aead::{
     Aad, Algorithm, BoundKey, Nonce as AeadNonce, NonceSequence, OpeningKey as AeadOpeningKey,
     SealingKey as AeadSealingKey, UnboundKey, NONCE_LEN,
 };
+use rand::RngCore;
 
 use super::super::Error;
 use crate::mac::MacAlgorithm;
@@ -73,7 +73,7 @@ pub struct SealingKey<N: NonceSequence>(AeadSealingKey<N>);
 struct Nonce([u8; NONCE_LEN]);
 
 impl NonceSequence for Nonce {
-    fn advance(&mut self) -> Result<ring::aead::Nonce, ring::error::Unspecified> {
+    fn advance(&mut self) -> Result<aws_lc_rs::aead::Nonce, aws_lc_rs::error::Unspecified> {
         let mut previous_nonce = [0u8; NONCE_LEN];
         #[allow(clippy::indexing_slicing)] // length checked
         previous_nonce.clone_from_slice(&self.0[..]);
