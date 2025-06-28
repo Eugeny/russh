@@ -34,7 +34,6 @@ pub fn bench(c: &mut Criterion) {
                     |mut in_out| {
                         for _ in 0..iterations {
                             sk.seal(0, &mut in_out, &mut tag);
-                            // ok.decrypt_packet_length(0, &packet_length);
                             ok.open(0, &mut in_out, &tag).unwrap();
                         }
                     },
