@@ -22,12 +22,15 @@ use std::marker::PhantomData;
 use std::num::Wrapping;
 
 use aes::{Aes128, Aes192, Aes256};
-use aes_gcm::{Aes128Gcm, Aes256Gcm};
+#[cfg(feature = "aws-lc-rs")]
+use aws_lc_rs::aead::{AES_128_GCM as ALGORITHM_AES_128_GCM, AES_256_GCM as ALGORITHM_AES_256_GCM};
 use byteorder::{BigEndian, ByteOrder};
 use ctr::Ctr128BE;
 use delegate::delegate;
 use log::trace;
 use once_cell::sync::Lazy;
+#[cfg(all(not(feature = "aws-lc-rs"), feature = "ring"))]
+use ring::aead::{AES_128_GCM as ALGORITHM_AES_128_GCM, AES_256_GCM as ALGORITHM_AES_256_GCM};
 use ssh_encoding::Encode;
 use tokio::io::{AsyncRead, AsyncReadExt};
 
@@ -99,17 +102,16 @@ pub const NONE: Name = Name("none");
 
 pub(crate) static _CLEAR: Clear = Clear {};
 #[cfg(feature = "des")]
-pub(crate) static _3DES_CBC: SshBlockCipher<CbcWrapper<des::TdesEde3>> =
-    SshBlockCipher(PhantomData);
-pub(crate) static _AES_128_CTR: SshBlockCipher<Ctr128BE<Aes128>> = SshBlockCipher(PhantomData);
-pub(crate) static _AES_192_CTR: SshBlockCipher<Ctr128BE<Aes192>> = SshBlockCipher(PhantomData);
-pub(crate) static _AES_256_CTR: SshBlockCipher<Ctr128BE<Aes256>> = SshBlockCipher(PhantomData);
-pub(crate) static _AES_128_GCM: GcmCipher<Aes128Gcm> = GcmCipher(PhantomData);
-pub(crate) static _AES_256_GCM: GcmCipher<Aes256Gcm> = GcmCipher(PhantomData);
-pub(crate) static _AES_128_CBC: SshBlockCipher<CbcWrapper<Aes128>> = SshBlockCipher(PhantomData);
-pub(crate) static _AES_192_CBC: SshBlockCipher<CbcWrapper<Aes192>> = SshBlockCipher(PhantomData);
-pub(crate) static _AES_256_CBC: SshBlockCipher<CbcWrapper<Aes256>> = SshBlockCipher(PhantomData);
-pub(crate) static _CHACHA20_POLY1305: SshChacha20Poly1305Cipher = SshChacha20Poly1305Cipher {};
+static _3DES_CBC: SshBlockCipher<CbcWrapper<des::TdesEde3>> = SshBlockCipher(PhantomData);
+static _AES_128_CTR: SshBlockCipher<Ctr128BE<Aes128>> = SshBlockCipher(PhantomData);
+static _AES_192_CTR: SshBlockCipher<Ctr128BE<Aes192>> = SshBlockCipher(PhantomData);
+static _AES_256_CTR: SshBlockCipher<Ctr128BE<Aes256>> = SshBlockCipher(PhantomData);
+static _AES_128_GCM: GcmCipher = GcmCipher(&ALGORITHM_AES_128_GCM);
+static _AES_256_GCM: GcmCipher = GcmCipher(&ALGORITHM_AES_256_GCM);
+static _AES_128_CBC: SshBlockCipher<CbcWrapper<Aes128>> = SshBlockCipher(PhantomData);
+static _AES_192_CBC: SshBlockCipher<CbcWrapper<Aes192>> = SshBlockCipher(PhantomData);
+static _AES_256_CBC: SshBlockCipher<CbcWrapper<Aes256>> = SshBlockCipher(PhantomData);
+static _CHACHA20_POLY1305: SshChacha20Poly1305Cipher = SshChacha20Poly1305Cipher {};
 
 pub static ALL_CIPHERS: &[&Name] = &[
     &CLEAR,
@@ -195,12 +197,7 @@ pub(crate) trait OpeningKey {
 
     fn tag_len(&self) -> usize;
 
-    fn open<'a>(
-        &mut self,
-        seqn: u32,
-        ciphertext_in_plaintext_out: &'a mut [u8],
-        tag: &[u8],
-    ) -> Result<&'a [u8], Error>;
+    fn open<'a>(&mut self, seqn: u32, ciphertext_and_tag: &'a mut [u8]) -> Result<&'a [u8], Error>;
 }
 
 pub(crate) trait SealingKey {
@@ -287,9 +284,7 @@ pub(crate) async fn read<R: AsyncRead + Unpin>(
 
     trace!("read_exact done");
     let seqn = buffer.seqn.0;
-    let ciphertext_len = buffer.buffer.len() - cipher.tag_len();
-    let (ciphertext, tag) = buffer.buffer.split_at_mut(ciphertext_len);
-    let plaintext = cipher.open(seqn, ciphertext, tag)?;
+    let plaintext = cipher.open(seqn, &mut buffer.buffer)?;
 
     let padding_length = *plaintext.first().to_owned().unwrap_or(&0) as usize;
     trace!("reading, padding_length {:?}", padding_length);

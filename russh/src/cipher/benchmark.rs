@@ -21,7 +21,6 @@ pub fn bench(c: &mut Criterion) {
         let mut group = c.benchmark_group(format!("Cipher: {}", cipher_name.0));
         for size in [100usize, 1000, 10000] {
             let iterations = 10000 / size;
-            let mut tag = black_box(vec![0u8; sk.tag_len()]);
 
             group.throughput(Throughput::Bytes(size as u64));
             group.bench_function(format!("Block size: {size}"), |b| {
@@ -34,8 +33,10 @@ pub fn bench(c: &mut Criterion) {
                     },
                     |mut in_out| {
                         for _ in 0..iterations {
-                            sk.seal(0, &mut in_out, &mut tag);
-                            ok.open(0, &mut in_out, &tag).unwrap();
+                            let len = in_out.len();
+                            let (data, tag) = in_out.split_at_mut(len - sk.tag_len());
+                            sk.seal(0, data, tag);
+                            ok.open(0, &mut in_out).unwrap();
                         }
                     },
                 );

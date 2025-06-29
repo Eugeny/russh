@@ -28,6 +28,11 @@ jobs:
     steps:
     - uses: actions/checkout@v2
 
+    - name: install nasm
+      run: |
+        choco install nasm
+        echo "C:\Program Files\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
     - name: Build (no features enabled)
       run: cargo build --verbose
 
@@ -45,8 +50,8 @@ jobs:
         rustup toolchain add 1.81.0
         rustup target add --toolchain 1.81.0 wasm32-wasip1
 
-    - name: Build (all features enabled)
-      run: cargo +1.81.0 build --verbose --target wasm32-wasip1 -p russh
+    - name: Build (WASM-compatible features)
+      run: cargo +1.81.0 build --verbose --target wasm32-wasip1 --no-default-features --features flate2,ring -p russh
 
   Formatting:
     runs-on: ubuntu-24.04
