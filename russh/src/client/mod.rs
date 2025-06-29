@@ -369,6 +369,7 @@ impl<H: Handler> Handle<H> {
                         prompts,
                     });
                 }
+                None => return Err(crate::Error::RecvError),
                 _ => {}
             }
         }
@@ -1844,7 +1845,7 @@ pub trait Handler: Sized + Send {
         async { Ok(()) }
     }
 
-    /// Called when the server opens a direct tcp/ip channel.
+    /// Called when the server opens a direct tcp/ip channel (non-standard).
     #[allow(unused_variables)]
     fn server_channel_open_direct_tcpip(
         &mut self,
@@ -1853,6 +1854,17 @@ pub trait Handler: Sized + Send {
         port_to_connect: u32,
         originator_address: &str,
         originator_port: u32,
+        session: &mut Session,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
+    }
+
+    /// Called when the server opens a direct-streamlocal channel (non-standard).
+    #[allow(unused_variables)]
+    fn server_channel_open_direct_streamlocal(
+        &mut self,
+        channel: Channel<Msg>,
+        socket_path: &str,
         session: &mut Session,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
         async { Ok(()) }

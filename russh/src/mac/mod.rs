@@ -84,18 +84,18 @@ pub const HMAC_SHA256_ETM: Name = Name("hmac-sha2-256-etm@openssh.com");
 /// `hmac-sha2-512-etm@openssh.com`
 pub const HMAC_SHA512_ETM: Name = Name("hmac-sha2-512-etm@openssh.com");
 
-static _NONE: NoMacAlgorithm = NoMacAlgorithm {};
-static _HMAC_SHA1: CryptoMacAlgorithm<Hmac<Sha1>, U20> =
+pub(crate) static _NONE: NoMacAlgorithm = NoMacAlgorithm {};
+pub(crate) static _HMAC_SHA1: CryptoMacAlgorithm<Hmac<Sha1>, U20> =
     CryptoMacAlgorithm(PhantomData, PhantomData);
-static _HMAC_SHA256: CryptoMacAlgorithm<Hmac<Sha256>, U32> =
+pub(crate) static _HMAC_SHA256: CryptoMacAlgorithm<Hmac<Sha256>, U32> =
     CryptoMacAlgorithm(PhantomData, PhantomData);
-static _HMAC_SHA512: CryptoMacAlgorithm<Hmac<Sha512>, U64> =
+pub(crate) static _HMAC_SHA512: CryptoMacAlgorithm<Hmac<Sha512>, U64> =
     CryptoMacAlgorithm(PhantomData, PhantomData);
-static _HMAC_SHA1_ETM: CryptoEtmMacAlgorithm<Hmac<Sha1>, U20> =
+pub(crate) static _HMAC_SHA1_ETM: CryptoEtmMacAlgorithm<Hmac<Sha1>, U20> =
     CryptoEtmMacAlgorithm(PhantomData, PhantomData);
-static _HMAC_SHA256_ETM: CryptoEtmMacAlgorithm<Hmac<Sha256>, U32> =
+pub(crate) static _HMAC_SHA256_ETM: CryptoEtmMacAlgorithm<Hmac<Sha256>, U32> =
     CryptoEtmMacAlgorithm(PhantomData, PhantomData);
-static _HMAC_SHA512_ETM: CryptoEtmMacAlgorithm<Hmac<Sha512>, U64> =
+pub(crate) static _HMAC_SHA512_ETM: CryptoEtmMacAlgorithm<Hmac<Sha512>, U64> =
     CryptoEtmMacAlgorithm(PhantomData, PhantomData);
 
 pub const ALL_MAC_ALGORITHMS: &[&Name] = &[

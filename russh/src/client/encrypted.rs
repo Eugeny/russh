@@ -190,6 +190,7 @@ impl Session {
                                         Some(Msg::AuthInfoResponse { responses }) => {
                                             break responses
                                         }
+                                        None => return Err(crate::Error::RecvError.into()),
                                         _ => {}
                                     }
                                 };
@@ -239,6 +240,7 @@ impl Session {
                                     self.common.buffer = loop {
                                         match self.receiver.recv().await {
                                             Some(Msg::Signed { data }) => break data,
+                                            None => return Err(crate::Error::RecvError.into()),
                                             _ => {}
                                         }
                                     };
@@ -658,6 +660,17 @@ impl Session {
                                     d.port_to_connect,
                                     &d.originator_address,
                                     d.originator_port,
+                                    self,
+                                )
+                                .await?
+                        }
+                        ChannelType::DirectStreamLocal(d) => {
+                            confirm()?;
+                            let channel = self.accept_server_initiated_channel(id, &msg);
+                            client
+                                .server_channel_open_direct_streamlocal(
+                                    channel,
+                                    &d.socket_path,
                                     self,
                                 )
                                 .await?

@@ -104,7 +104,7 @@ use tokio::sync::mpsc;
 
 use crate::channels::Channel;
 use crate::client::{
-    self, Handle as ClientHandle, Handler as ClientHandler, Session as ClientSession,
+    self, Handle as ClientHandle, Handler as ClientHandler,
 };
 use crate::server::{
     self, Auth, Handle as ServerHandle, Handler as ServerHandler, Msg as ServerMsg,
@@ -419,7 +419,7 @@ impl ClientHandler for TestClientHandler {
         &mut self,
         channel: ChannelId,
         data: &[u8],
-        _session: &mut ClientSession,
+        _session: &mut client::Session,
     ) -> Result<(), Self::Error> {
         self.record_event(ExpectedEvent::ClientData {
             channel,
@@ -432,7 +432,7 @@ impl ClientHandler for TestClientHandler {
     async fn channel_close(
         &mut self,
         channel: ChannelId,
-        _session: &mut ClientSession,
+        _session: &mut client::Session,
     ) -> Result<(), Self::Error> {
         self.record_event(ExpectedEvent::ClientChannelClose { channel })
             .await;
@@ -446,7 +446,7 @@ impl ClientHandler for TestClientHandler {
         connected_port: u32,
         originator_address: &str,
         originator_port: u32,
-        _session: &mut ClientSession,
+        _session: &mut client::Session,
     ) -> Result<(), Self::Error> {
         self.record_event(ExpectedEvent::ClientServerChannelOpenForwardedTcpip {
             connected_address: connected_address.to_string(),
