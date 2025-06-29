@@ -258,7 +258,6 @@ impl TestServerHandler {
     }
 }
 
-#[cfg_attr(feature = "async-trait", async_trait::async_trait)]
 impl ServerHandler for TestServerHandler {
     type Error = TestError;
 
@@ -403,7 +402,6 @@ impl TestClientHandler {
     }
 }
 
-#[cfg_attr(feature = "async-trait", async_trait::async_trait)]
 impl ClientHandler for TestClientHandler {
     type Error = TestError;
 

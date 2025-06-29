@@ -28,6 +28,6 @@ async fn test_all_kex_algorithms() -> Result<(), TestError> {
 pub async fn test_kex_algorithm(kex_algorithm: crate::kex::Name) -> Result<(), TestError> {
     let mut preferred = crate::Preferred::default();
     preferred.kex = vec![kex_algorithm].into();
-    
+
     test_crypto_with_config(CryptoTestConfig::with_preferred(preferred)).await
 }
