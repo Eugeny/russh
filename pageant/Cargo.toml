@@ -1,0 +1,26 @@
+[package]
+authors = ["Eugene <inbox@null.page>"]
+description = "Pageant SSH agent transport client."
+documentation = "https://docs.rs/pageant"
+edition = "2021"
+license = "Apache-2.0"
+name = "pageant"
+repository = "https://github.com/warp-tech/russh"
+version = "0.0.3"
+rust-version = "1.75"
+
+[target.'cfg(windows)'.dependencies]
+futures.workspace = true
+thiserror.workspace = true
+rand.workspace = true
+log.workspace = true
+tokio = { workspace = true, features = ["io-util", "rt"] }
+bytes.workspace = true
+delegate.workspace = true
+windows = { version = "0.58", features = [
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_System_Memory",
+    "Win32_Security",
+    "Win32_System_Threading",
+    "Win32_System_DataExchange",
+] }

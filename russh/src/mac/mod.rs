@@ -14,13 +14,16 @@
 //!
 //! This module exports cipher names for use with [Preferred].
 use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::marker::PhantomData;
 
+use delegate::delegate;
 use digest::typenum::{U20, U32, U64};
 use hmac::Hmac;
 use once_cell::sync::Lazy;
 use sha1::Sha1;
 use sha2::{Sha256, Sha512};
+use ssh_encoding::Encode;
 
 use self::crypto::CryptoMacAlgorithm;
 use self::crypto_etm::CryptoEtmMacAlgorithm;
@@ -52,6 +55,20 @@ impl AsRef<str> for Name {
     }
 }
 
+impl Encode for Name {
+    delegate! { to self.as_ref() {
+        fn encoded_len(&self) -> Result<usize, ssh_encoding::Error>;
+        fn encode(&self, writer: &mut impl ssh_encoding::Writer) -> Result<(), ssh_encoding::Error>;
+    }}
+}
+
+impl TryFrom<&str> for Name {
+    type Error = ();
+    fn try_from(s: &str) -> Result<Name, ()> {
+        MACS.keys().find(|x| x.0 == s).map(|x| **x).ok_or(())
+    }
+}
+
 /// `none`
 pub const NONE: Name = Name("none");
 /// `hmac-sha1`
@@ -67,19 +84,29 @@ pub const HMAC_SHA256_ETM: Name = Name("hmac-sha2-256-etm@openssh.com");
 /// `hmac-sha2-512-etm@openssh.com`
 pub const HMAC_SHA512_ETM: Name = Name("hmac-sha2-512-etm@openssh.com");
 
-static _NONE: NoMacAlgorithm = NoMacAlgorithm {};
-static _HMAC_SHA1: CryptoMacAlgorithm<Hmac<Sha1>, U20> =
+pub(crate) static _NONE: NoMacAlgorithm = NoMacAlgorithm {};
+pub(crate) static _HMAC_SHA1: CryptoMacAlgorithm<Hmac<Sha1>, U20> =
     CryptoMacAlgorithm(PhantomData, PhantomData);
-static _HMAC_SHA256: CryptoMacAlgorithm<Hmac<Sha256>, U32> =
+pub(crate) static _HMAC_SHA256: CryptoMacAlgorithm<Hmac<Sha256>, U32> =
     CryptoMacAlgorithm(PhantomData, PhantomData);
-static _HMAC_SHA512: CryptoMacAlgorithm<Hmac<Sha512>, U64> =
+pub(crate) static _HMAC_SHA512: CryptoMacAlgorithm<Hmac<Sha512>, U64> =
     CryptoMacAlgorithm(PhantomData, PhantomData);
-static _HMAC_SHA1_ETM: CryptoEtmMacAlgorithm<Hmac<Sha1>, U64> =
+pub(crate) static _HMAC_SHA1_ETM: CryptoEtmMacAlgorithm<Hmac<Sha1>, U20> =
     CryptoEtmMacAlgorithm(PhantomData, PhantomData);
-static _HMAC_SHA256_ETM: CryptoEtmMacAlgorithm<Hmac<Sha256>, U64> =
+pub(crate) static _HMAC_SHA256_ETM: CryptoEtmMacAlgorithm<Hmac<Sha256>, U32> =
     CryptoEtmMacAlgorithm(PhantomData, PhantomData);
-static _HMAC_SHA512_ETM: CryptoEtmMacAlgorithm<Hmac<Sha512>, U64> =
+pub(crate) static _HMAC_SHA512_ETM: CryptoEtmMacAlgorithm<Hmac<Sha512>, U64> =
     CryptoEtmMacAlgorithm(PhantomData, PhantomData);
+
+pub const ALL_MAC_ALGORITHMS: &[&Name] = &[
+    &NONE,
+    &HMAC_SHA1,
+    &HMAC_SHA256,
+    &HMAC_SHA512,
+    &HMAC_SHA1_ETM,
+    &HMAC_SHA256_ETM,
+    &HMAC_SHA512_ETM,
+];
 
 pub(crate) static MACS: Lazy<HashMap<&'static Name, &(dyn MacAlgorithm + Send + Sync)>> =
     Lazy::new(|| {
@@ -91,5 +118,6 @@ pub(crate) static MACS: Lazy<HashMap<&'static Name, &(dyn MacAlgorithm + Send + 
         h.insert(&HMAC_SHA1_ETM, &_HMAC_SHA1_ETM);
         h.insert(&HMAC_SHA256_ETM, &_HMAC_SHA256_ETM);
         h.insert(&HMAC_SHA512_ETM, &_HMAC_SHA512_ETM);
+        assert_eq!(h.len(), ALL_MAC_ALGORITHMS.len());
         h
     });

@@ -26,104 +26,78 @@
 //! The [Session](client::Session) is passed to the [Handler](client::Handler)
 //! when the client receives data.
 //!
-//! ```no_run
-//! use async_trait::async_trait;
-//! use std::sync::Arc;
-//! use russh::*;
-//! use russh::server::{Auth, Session};
-//! use russh_keys::*;
-//! use futures::Future;
-//! use std::io::Read;
+//! Check out the following examples:
 //!
-//! struct Client {
-//! }
-//!
-//! #[async_trait]
-//! impl client::Handler for Client {
-//!    type Error = anyhow::Error;
-//!
-//!    async fn check_server_key(self, server_public_key: &key::PublicKey) -> Result<(Self, bool), Self::Error> {
-//!        println!("check_server_key: {:?}", server_public_key);
-//!        Ok((self, true))
-//!    }
-//!
-//!    async fn data(self, channel: ChannelId, data: &[u8], session: client::Session) -> Result<(Self, client::Session), Self::Error> {
-//!        println!("data on channel {:?}: {:?}", channel, std::str::from_utf8(data));
-//!        Ok((self, session))
-//!    }
-//! }
-//!
-//! #[tokio::main]
-//! async fn main() {
-//!   let config = russh::client::Config::default();
-//!   let config = Arc::new(config);
-//!   let sh = Client{};
-//!
-//!   let key = russh_keys::key::KeyPair::generate_ed25519().unwrap();
-//!   let mut agent = russh_keys::agent::client::AgentClient::connect_env().await.unwrap();
-//!   agent.add_identity(&key, &[]).await.unwrap();
-//!   let mut session = russh::client::connect(config, ("127.0.0.1", 22), sh).await.unwrap();
-//!   if session.authenticate_future(std::env::var("USER").unwrap_or("user".to_owned()), key.clone_public_key().unwrap(), agent).await.1.unwrap() {
-//!     let mut channel = session.channel_open_session().await.unwrap();
-//!     channel.data(&b"Hello, world!"[..]).await.unwrap();
-//!     if let Some(msg) = channel.wait().await {
-//!         println!("{:?}", msg)
-//!     }
-//!   }
-//! }
-//! ```
+//! * [Client that connects to a server, runs a command and prints its output](https://github.com/warp-tech/russh/blob/main/russh/examples/client_exec_simple.rs)
+//! * [Client that connects to a server, runs a command in a PTY and provides interactive input/output](https://github.com/warp-tech/russh/blob/main/russh/examples/client_exec_interactive.rs)
+//! * [SFTP client (with `russh-sftp`)](https://github.com/warp-tech/russh/blob/main/russh/examples/sftp_client.rs)
 //!
 //! [Session]: client::Session
 
-use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
+use std::convert::TryInto;
+use std::num::Wrapping;
 use std::pin::Pin;
 use std::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::Duration;
 
-use async_trait::async_trait;
 use futures::task::{Context, Poll};
 use futures::Future;
-use log::{debug, error, info, trace};
-use russh_cryptovec::CryptoVec;
-use russh_keys::encoding::Reader;
-#[cfg(feature = "openssl")]
-use russh_keys::key::SignatureHash;
-use russh_keys::key::{self, parse_public_key, PublicKey};
-use tokio;
-use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
-use tokio::net::{TcpStream, ToSocketAddrs};
+use kex::ClientKex;
+use log::{debug, error, trace};
+use russh_util::time::Instant;
+use ssh_encoding::Decode;
+use ssh_key::{Algorithm, Certificate, HashAlg, PrivateKey, PublicKey};
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadHalf, WriteHalf};
 use tokio::pin;
 use tokio::sync::mpsc::{
     channel, unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender,
 };
+use tokio::sync::oneshot;
 
-use crate::channels::{Channel, ChannelMsg};
-use crate::cipher::{self, clear, CipherPair, OpeningKey};
-use crate::key::PubKey;
-use crate::session::{CommonSession, EncryptedState, Exchange, Kex, KexDhDone, KexInit, NewKeys};
+pub use crate::auth::AuthResult;
+use crate::channels::{
+    Channel, ChannelMsg, ChannelReadHalf, ChannelRef, ChannelWriteHalf, WindowSizeRef,
+};
+use crate::cipher::{self, clear, OpeningKey};
+use crate::kex::{KexCause, KexProgress, SessionKexState};
+use crate::keys::PrivateKeyWithHashAlg;
+use crate::msg::{is_kex_msg, validate_server_msg_strict_kex};
+use crate::session::{CommonSession, EncryptedState, GlobalRequestResponse, NewKeys};
 use crate::ssh_read::SshRead;
-use crate::sshbuffer::{SSHBuffer, SshId};
-use crate::{auth, msg, negotiation, ChannelId, ChannelOpenFailure, Disconnect, Limits, Sig};
+use crate::sshbuffer::{IncomingSshPacket, PacketWriter, SSHBuffer, SshId};
+use crate::{
+    auth, map_err, msg, negotiation, ChannelId, ChannelOpenFailure, CryptoVec, Disconnect, Error,
+    Limits, MethodSet, Sig,
+};
 
 mod encrypted;
 mod kex;
 mod session;
+
+#[cfg(test)]
+mod test;
 
 /// Actual client session's state.
 ///
 /// It is in charge of multiplexing and keeping track of various channels
 /// that may get opened and closed during the lifetime of an SSH session and
 /// allows sending messages to the server.
+#[derive(Debug)]
 pub struct Session {
+    kex: SessionKexState<ClientKex>,
     common: CommonSession<Arc<Config>>,
     receiver: Receiver<Msg>,
     sender: UnboundedSender<Reply>,
-    channels: HashMap<ChannelId, UnboundedSender<ChannelMsg>>,
+    channels: HashMap<ChannelId, ChannelRef>,
     target_window_size: u32,
     pending_reads: Vec<CryptoVec>,
     pending_len: u32,
     inbound_channel_sender: Sender<Msg>,
     inbound_channel_receiver: Receiver<Msg>,
+    open_global_requests: VecDeque<GlobalRequestResponse>,
+    server_sig_algs: Option<Vec<Algorithm>>,
 }
 
 impl Drop for Session {
@@ -136,10 +110,13 @@ impl Drop for Session {
 #[allow(clippy::large_enum_variant)]
 enum Reply {
     AuthSuccess,
-    AuthFailure,
+    AuthFailure {
+        proceed_with_methods: MethodSet,
+        partial_success: bool,
+    },
     ChannelOpenFailure,
     SignRequest {
-        key: key::PublicKey,
+        key: ssh_key::PublicKey,
         data: CryptoVec,
     },
     AuthInfoRequest {
@@ -162,33 +139,45 @@ pub enum Msg {
         data: CryptoVec,
     },
     ChannelOpenSession {
-        sender: UnboundedSender<ChannelMsg>,
+        channel_ref: ChannelRef,
     },
     ChannelOpenX11 {
         originator_address: String,
         originator_port: u32,
-        sender: UnboundedSender<ChannelMsg>,
+        channel_ref: ChannelRef,
     },
     ChannelOpenDirectTcpIp {
         host_to_connect: String,
         port_to_connect: u32,
         originator_address: String,
         originator_port: u32,
-        sender: UnboundedSender<ChannelMsg>,
+        channel_ref: ChannelRef,
     },
     ChannelOpenDirectStreamLocal {
         socket_path: String,
-        sender: UnboundedSender<ChannelMsg>,
+        channel_ref: ChannelRef,
     },
     TcpIpForward {
-        want_reply: bool,
+        /// Provide a channel for the reply result to request a reply from the server
+        reply_channel: Option<oneshot::Sender<Option<u32>>>,
         address: String,
         port: u32,
     },
     CancelTcpIpForward {
-        want_reply: bool,
+        /// Provide a channel for the reply result to request a reply from the server
+        reply_channel: Option<oneshot::Sender<bool>>,
         address: String,
         port: u32,
+    },
+    StreamLocalForward {
+        /// Provide a channel for the reply result to request a reply from the server
+        reply_channel: Option<oneshot::Sender<bool>>,
+        socket_path: String,
+    },
+    CancelStreamLocalForward {
+        /// Provide a channel for the reply result to request a reply from the server
+        reply_channel: Option<oneshot::Sender<bool>>,
+        socket_path: String,
     },
     Close {
         id: ChannelId,
@@ -199,6 +188,21 @@ pub enum Msg {
         language_tag: String,
     },
     Channel(ChannelId, ChannelMsg),
+    Rekey,
+    AwaitExtensionInfo {
+        extension_name: String,
+        reply_channel: oneshot::Sender<()>,
+    },
+    GetServerSigAlgs {
+        reply_channel: oneshot::Sender<Option<Vec<Algorithm>>>,
+    },
+    /// Send a keepalive packet to the remote
+    Keepalive {
+        want_reply: bool,
+    },
+    NoMoreSessions {
+        want_reply: bool,
+    },
 }
 
 impl From<(ChannelId, ChannelMsg)> for Msg {
@@ -210,7 +214,13 @@ impl From<(ChannelId, ChannelMsg)> for Msg {
 #[derive(Debug)]
 pub enum KeyboardInteractiveAuthResponse {
     Success,
-    Failure,
+    Failure {
+        /// The server suggests to proceed with these auth methods
+        remaining_methods: MethodSet,
+        /// The server says that though auth method has been accepted,
+        /// further authentication is required
+        partial_success: bool,
+    },
     InfoRequest {
         name: String,
         instructions: String,
@@ -224,12 +234,26 @@ pub struct Prompt {
     pub echo: bool,
 }
 
+#[derive(Debug)]
+pub struct RemoteDisconnectInfo {
+    pub reason_code: crate::Disconnect,
+    pub message: String,
+    pub lang_tag: String,
+}
+
+#[derive(Debug)]
+pub enum DisconnectReason<E: From<crate::Error> + Send> {
+    ReceivedDisconnect(RemoteDisconnectInfo),
+    Error(E),
+}
+
 /// Handle to a session, used to send messages to a client outside of
 /// the request/response cycle.
 pub struct Handle<H: Handler> {
     sender: Sender<Msg>,
     receiver: UnboundedReceiver<Reply>,
-    join: tokio::task::JoinHandle<Result<(), H::Error>>,
+    join: russh_util::runtime::JoinHandle<Result<(), H::Error>>,
+    channel_buffer_size: usize,
 }
 
 impl<H: Handler> Drop for Handle<H> {
@@ -248,7 +272,7 @@ impl<H: Handler> Handle<H> {
     pub async fn authenticate_none<U: Into<String>>(
         &mut self,
         user: U,
-    ) -> Result<bool, crate::Error> {
+    ) -> Result<AuthResult, crate::Error> {
         let user = user.into();
         self.sender
             .send(Msg::Authenticate {
@@ -265,7 +289,7 @@ impl<H: Handler> Handle<H> {
         &mut self,
         user: U,
         password: P,
-    ) -> Result<bool, crate::Error> {
+    ) -> Result<AuthResult, crate::Error> {
         let user = user.into();
         self.sender
             .send(Msg::Authenticate {
@@ -281,7 +305,7 @@ impl<H: Handler> Handle<H> {
 
     /// Initiate Keyboard-Interactive based SSH authentication.
     ///
-    /// * `submethods` - Hnts to the server the preferred methods to be used for authentication
+    /// * `submethods` - Hints to the server the preferred methods to be used for authentication
     pub async fn authenticate_keyboard_interactive_start<
         U: Into<String>,
         S: Into<Option<String>>,
@@ -307,7 +331,7 @@ impl<H: Handler> Handle<H> {
     /// complete Keyboard-Interactive based SSH authentication.
     ///
     /// * `responses` - The responses to each prompt. The number of responses must match the number
-    /// of prompts. If a prompt has an empty string, then the response should be an empty string.
+    ///   of prompts. If a prompt has an empty string, then the response should be an empty string.
     pub async fn authenticate_keyboard_interactive_respond(
         &mut self,
         responses: Vec<String>,
@@ -325,7 +349,15 @@ impl<H: Handler> Handle<H> {
         loop {
             match self.receiver.recv().await {
                 Some(Reply::AuthSuccess) => return Ok(KeyboardInteractiveAuthResponse::Success),
-                Some(Reply::AuthFailure) => return Ok(KeyboardInteractiveAuthResponse::Failure),
+                Some(Reply::AuthFailure {
+                    proceed_with_methods: remaining_methods,
+                    partial_success,
+                }) => {
+                    return Ok(KeyboardInteractiveAuthResponse::Failure {
+                        remaining_methods,
+                        partial_success,
+                    })
+                }
                 Some(Reply::AuthInfoRequest {
                     name,
                     instructions,
@@ -337,28 +369,48 @@ impl<H: Handler> Handle<H> {
                         prompts,
                     });
                 }
+                None => return Err(crate::Error::RecvError),
                 _ => {}
             }
         }
     }
 
-    async fn wait_recv_reply(&mut self) -> Result<bool, crate::Error> {
+    async fn wait_recv_reply(&mut self) -> Result<AuthResult, crate::Error> {
         loop {
             match self.receiver.recv().await {
-                Some(Reply::AuthSuccess) => return Ok(true),
-                Some(Reply::AuthFailure) => return Ok(false),
-                None => return Ok(false),
+                Some(Reply::AuthSuccess) => return Ok(AuthResult::Success),
+                Some(Reply::AuthFailure {
+                    proceed_with_methods: remaining_methods,
+                    partial_success,
+                }) => {
+                    return Ok(AuthResult::Failure {
+                        remaining_methods,
+                        partial_success,
+                    })
+                }
+                None => {
+                    return Ok(AuthResult::Failure {
+                        remaining_methods: MethodSet::empty(),
+                        partial_success: false,
+                    })
+                }
                 _ => {}
             }
         }
     }
 
     /// Perform public key-based SSH authentication.
+    ///
+    /// For RSA keys, you'll need to decide on which hash algorithm to use.
+    /// This is the difference between what is also known as
+    /// `ssh-rsa`, `rsa-sha2-256`, and `rsa-sha2-512` "keys" in OpenSSH.
+    /// You can use [Handle::best_supported_rsa_hash] to automatically
+    /// figure out the best hash algorithm for RSA keys.
     pub async fn authenticate_publickey<U: Into<String>>(
         &mut self,
         user: U,
-        key: Arc<key::KeyPair>,
-    ) -> Result<bool, crate::Error> {
+        key: PrivateKeyWithHashAlg,
+    ) -> Result<AuthResult, crate::Error> {
         let user = user.into();
         self.sender
             .send(Msg::Authenticate {
@@ -370,45 +422,75 @@ impl<H: Handler> Handle<H> {
         self.wait_recv_reply().await
     }
 
-    /// Authenticate using a custom method that implements the
-    /// [`Signer`][auth::Signer] trait. Currently, this crate only provides an
-    /// implementation for an [SSH
-    /// agent][russh_keys::agent::client::AgentClient].
-    pub async fn authenticate_future<U: Into<String>, S: auth::Signer>(
+    /// Perform public OpenSSH Certificate-based SSH authentication
+    pub async fn authenticate_openssh_cert<U: Into<String>>(
         &mut self,
         user: U,
-        key: key::PublicKey,
-        mut future: S,
-    ) -> (S, Result<bool, S::Error>) {
+        key: Arc<PrivateKey>,
+        cert: Certificate,
+    ) -> Result<AuthResult, crate::Error> {
+        let user = user.into();
+        self.sender
+            .send(Msg::Authenticate {
+                user,
+                method: auth::Method::OpenSshCertificate { key, cert },
+            })
+            .await
+            .map_err(|_| crate::Error::SendError)?;
+        self.wait_recv_reply().await
+    }
+
+    /// Authenticate using a custom method that implements the
+    /// [`Signer`][auth::Signer] trait. Currently, this crate only provides an
+    /// implementation for an [SSH agent][crate::keys::agent::client::AgentClient].
+    pub async fn authenticate_publickey_with<U: Into<String>, S: auth::Signer>(
+        &mut self,
+        user: U,
+        key: ssh_key::PublicKey,
+        hash_alg: Option<HashAlg>,
+        signer: &mut S,
+    ) -> Result<AuthResult, S::Error> {
         let user = user.into();
         if self
             .sender
             .send(Msg::Authenticate {
                 user,
-                method: auth::Method::FuturePublicKey { key },
+                method: auth::Method::FuturePublicKey { key, hash_alg },
             })
             .await
             .is_err()
         {
-            return (future, Err((crate::SendError {}).into()));
+            return Err((crate::SendError {}).into());
         }
         loop {
             let reply = self.receiver.recv().await;
             match reply {
-                Some(Reply::AuthSuccess) => return (future, Ok(true)),
-                Some(Reply::AuthFailure) => return (future, Ok(false)),
+                Some(Reply::AuthSuccess) => return Ok(AuthResult::Success),
+                Some(Reply::AuthFailure {
+                    proceed_with_methods: remaining_methods,
+                    partial_success,
+                }) => {
+                    return Ok(AuthResult::Failure {
+                        remaining_methods,
+                        partial_success,
+                    })
+                }
                 Some(Reply::SignRequest { key, data }) => {
-                    let (f, data) = future.auth_publickey_sign(&key, data).await;
-                    future = f;
+                    let data = signer.auth_publickey_sign(&key, hash_alg, data).await;
                     let data = match data {
                         Ok(data) => data,
-                        Err(e) => return (future, Err(e)),
+                        Err(e) => return Err(e),
                     };
                     if self.sender.send(Msg::Signed { data }).await.is_err() {
-                        return (future, Err((crate::SendError {}).into()));
+                        return Err((crate::SendError {}).into());
                     }
                 }
-                None => return (future, Ok(false)),
+                None => {
+                    return Ok(AuthResult::Failure {
+                        remaining_methods: MethodSet::empty(),
+                        partial_success: false,
+                    })
+                }
                 _ => {}
             }
         }
@@ -417,7 +499,8 @@ impl<H: Handler> Handle<H> {
     /// Wait for confirmation that a channel is open
     async fn wait_channel_confirmation(
         &self,
-        mut receiver: UnboundedReceiver<ChannelMsg>,
+        mut receiver: Receiver<ChannelMsg>,
+        window_size_ref: WindowSizeRef,
     ) -> Result<Channel<Msg>, crate::Error> {
         loop {
             match receiver.recv().await {
@@ -426,18 +509,23 @@ impl<H: Handler> Handle<H> {
                     max_packet_size,
                     window_size,
                 }) => {
+                    window_size_ref.update(window_size).await;
+
                     return Ok(Channel {
-                        id,
-                        sender: self.sender.clone(),
-                        receiver,
-                        max_packet_size,
-                        window_size,
+                        write_half: ChannelWriteHalf {
+                            id,
+                            sender: self.sender.clone(),
+                            max_packet_size,
+                            window_size: window_size_ref,
+                        },
+                        read_half: ChannelReadHalf { receiver },
                     });
                 }
                 Some(ChannelMsg::OpenFailure(reason)) => {
                     return Err(crate::Error::ChannelOpenFailure(reason));
                 }
                 None => {
+                    debug!("channel confirmation sender was dropped");
                     return Err(crate::Error::Disconnect);
                 }
                 msg => {
@@ -447,18 +535,82 @@ impl<H: Handler> Handle<H> {
         }
     }
 
+    /// See [`Handle::best_supported_rsa_hash`].
+    #[cfg(not(target_arch = "wasm32"))]
+    async fn await_extension_info(&self, extension_name: String) -> Result<(), crate::Error> {
+        let (sender, receiver) = oneshot::channel();
+        self.sender
+            .send(Msg::AwaitExtensionInfo {
+                extension_name,
+                reply_channel: sender,
+            })
+            .await
+            .map_err(|_| crate::Error::SendError)?;
+        let _ = tokio::time::timeout(Duration::from_secs(1), receiver).await;
+        Ok(())
+    }
+
+    /// Returns the best RSA hash algorithm supported by the server,
+    /// as indicated by the `server-sig-algs` extension.
+    /// If the server does not support the extension,
+    /// `None` is returned. In this case you may still attempt an authentication
+    /// with `rsa-sha2-256` or `rsa-sha2-512` and hope for the best.
+    /// If the server supports the extension, but does not support `rsa-sha2-*`,
+    /// `Some(None)` is returned.
+    ///
+    /// Note that this method will wait for up to 1 second for the server to
+    /// send the extension info if it hasn't done so yet (except when running under
+    /// WebAssembly). Unfortunately the timing of the EXT_INFO message cannot be known
+    /// in advance (RFC 8308).
+    ///
+    /// If this method returns `None` once, then for most SSH servers
+    /// you can assume that it will return `None` every time.
+    pub async fn best_supported_rsa_hash(&self) -> Result<Option<Option<HashAlg>>, Error> {
+        // Wait for the extension info from the server
+        #[cfg(not(target_arch = "wasm32"))]
+        self.await_extension_info("server-sig-algs".into()).await?;
+
+        let (sender, receiver) = oneshot::channel();
+
+        self.sender
+            .send(Msg::GetServerSigAlgs {
+                reply_channel: sender,
+            })
+            .await
+            .map_err(|_| crate::Error::SendError)?;
+
+        if let Some(ssa) = receiver.await.map_err(|_| Error::Inconsistent)? {
+            let possible_algs = [
+                Some(ssh_key::HashAlg::Sha512),
+                Some(ssh_key::HashAlg::Sha256),
+                None,
+            ];
+            for alg in possible_algs.into_iter() {
+                if ssa.contains(&Algorithm::Rsa { hash: alg }) {
+                    return Ok(Some(alg));
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
     /// Request a session channel (the most basic type of
     /// channel). This function returns `Some(..)` immediately if the
     /// connection is authenticated, but the channel only becomes
     /// usable when it's confirmed by the server, as indicated by the
     /// `confirmed` field of the corresponding `Channel`.
     pub async fn channel_open_session(&self) -> Result<Channel<Msg>, crate::Error> {
-        let (sender, receiver) = unbounded_channel();
+        let (sender, receiver) = channel(self.channel_buffer_size);
+        let channel_ref = ChannelRef::new(sender);
+        let window_size_ref = channel_ref.window_size().clone();
+
         self.sender
-            .send(Msg::ChannelOpenSession { sender })
+            .send(Msg::ChannelOpenSession { channel_ref })
             .await
             .map_err(|_| crate::Error::SendError)?;
-        self.wait_channel_confirmation(receiver).await
+        self.wait_channel_confirmation(receiver, window_size_ref)
+            .await
     }
 
     /// Request an X11 channel, on which the X11 protocol may be tunneled.
@@ -467,16 +619,20 @@ impl<H: Handler> Handle<H> {
         originator_address: A,
         originator_port: u32,
     ) -> Result<Channel<Msg>, crate::Error> {
-        let (sender, receiver) = unbounded_channel();
+        let (sender, receiver) = channel(self.channel_buffer_size);
+        let channel_ref = ChannelRef::new(sender);
+        let window_size_ref = channel_ref.window_size().clone();
+
         self.sender
             .send(Msg::ChannelOpenX11 {
                 originator_address: originator_address.into(),
                 originator_port,
-                sender,
+                channel_ref,
             })
             .await
             .map_err(|_| crate::Error::SendError)?;
-        self.wait_channel_confirmation(receiver).await
+        self.wait_channel_confirmation(receiver, window_size_ref)
+            .await
     }
 
     /// Open a TCP/IP forwarding channel. This is usually done when a
@@ -494,68 +650,143 @@ impl<H: Handler> Handle<H> {
         originator_address: B,
         originator_port: u32,
     ) -> Result<Channel<Msg>, crate::Error> {
-        let (sender, receiver) = unbounded_channel();
+        let (sender, receiver) = channel(self.channel_buffer_size);
+        let channel_ref = ChannelRef::new(sender);
+        let window_size_ref = channel_ref.window_size().clone();
+
         self.sender
             .send(Msg::ChannelOpenDirectTcpIp {
                 host_to_connect: host_to_connect.into(),
                 port_to_connect,
                 originator_address: originator_address.into(),
                 originator_port,
-                sender,
+                channel_ref,
             })
             .await
             .map_err(|_| crate::Error::SendError)?;
-        self.wait_channel_confirmation(receiver).await
+        self.wait_channel_confirmation(receiver, window_size_ref)
+            .await
     }
 
     pub async fn channel_open_direct_streamlocal<S: Into<String>>(
         &self,
         socket_path: S,
     ) -> Result<Channel<Msg>, crate::Error> {
-        let (sender, receiver) = unbounded_channel();
+        let (sender, receiver) = channel(self.channel_buffer_size);
+        let channel_ref = ChannelRef::new(sender);
+        let window_size_ref = channel_ref.window_size().clone();
+
         self.sender
             .send(Msg::ChannelOpenDirectStreamLocal {
                 socket_path: socket_path.into(),
-                sender,
+                channel_ref,
             })
             .await
             .map_err(|_| crate::Error::SendError)?;
-        self.wait_channel_confirmation(receiver).await
+        self.wait_channel_confirmation(receiver, window_size_ref)
+            .await
     }
 
+    /// Requests the server to open a TCP/IP forward channel
+    ///
+    /// If port == 0 the server will choose a port that will be returned, returns 0 otherwise
     pub async fn tcpip_forward<A: Into<String>>(
         &mut self,
         address: A,
         port: u32,
-    ) -> Result<bool, crate::Error> {
+    ) -> Result<u32, crate::Error> {
+        let (reply_send, reply_recv) = oneshot::channel();
         self.sender
             .send(Msg::TcpIpForward {
-                want_reply: true,
+                reply_channel: Some(reply_send),
                 address: address.into(),
                 port,
             })
             .await
             .map_err(|_| crate::Error::SendError)?;
-        if port == 0 {
-            self.wait_recv_reply().await?;
+
+        match reply_recv.await {
+            Ok(Some(port)) => Ok(port),
+            Ok(None) => Err(crate::Error::RequestDenied),
+            Err(e) => {
+                error!("Unable to receive TcpIpForward result: {e:?}");
+                Err(crate::Error::Disconnect)
+            }
         }
-        Ok(true)
     }
 
+    // Requests the server to close a TCP/IP forward channel
     pub async fn cancel_tcpip_forward<A: Into<String>>(
         &self,
         address: A,
         port: u32,
-    ) -> Result<bool, crate::Error> {
+    ) -> Result<(), crate::Error> {
+        let (reply_send, reply_recv) = oneshot::channel();
         self.sender
             .send(Msg::CancelTcpIpForward {
-                want_reply: true,
+                reply_channel: Some(reply_send),
                 address: address.into(),
                 port,
             })
             .await
             .map_err(|_| crate::Error::SendError)?;
-        Ok(true)
+
+        match reply_recv.await {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(crate::Error::RequestDenied),
+            Err(e) => {
+                error!("Unable to receive CancelTcpIpForward result: {e:?}");
+                Err(crate::Error::Disconnect)
+            }
+        }
+    }
+
+    // Requests the server to open a UDS forward channel
+    pub async fn streamlocal_forward<A: Into<String>>(
+        &mut self,
+        socket_path: A,
+    ) -> Result<(), crate::Error> {
+        let (reply_send, reply_recv) = oneshot::channel();
+        self.sender
+            .send(Msg::StreamLocalForward {
+                reply_channel: Some(reply_send),
+                socket_path: socket_path.into(),
+            })
+            .await
+            .map_err(|_| crate::Error::SendError)?;
+
+        match reply_recv.await {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(crate::Error::RequestDenied),
+            Err(e) => {
+                error!("Unable to receive StreamLocalForward result: {e:?}");
+                Err(crate::Error::Disconnect)
+            }
+        }
+    }
+
+    // Requests the server to close a UDS forward channel
+    pub async fn cancel_streamlocal_forward<A: Into<String>>(
+        &self,
+        socket_path: A,
+    ) -> Result<(), crate::Error> {
+        let (reply_send, reply_recv) = oneshot::channel();
+        self.sender
+            .send(Msg::CancelStreamLocalForward {
+                reply_channel: Some(reply_send),
+                socket_path: socket_path.into(),
+            })
+            .await
+            .map_err(|_| crate::Error::SendError)?;
+
+        match reply_recv.await {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(crate::Error::RequestDenied),
+            Err(e) => {
+                error!("Unable to receive CancelStreamLocalForward result: {e:?}");
+                Err(crate::Error::Disconnect)
+            }
+        }
     }
 
     /// Sends a disconnect message.
@@ -589,6 +820,32 @@ impl<H: Handler> Handle<H> {
                 _ => unreachable!(),
             })
     }
+
+    /// Asynchronously perform a session re-key at the next opportunity
+    pub async fn rekey_soon(&self) -> Result<(), Error> {
+        self.sender
+            .send(Msg::Rekey)
+            .await
+            .map_err(|_| Error::SendError)?;
+
+        Ok(())
+    }
+
+    /// Send a keepalive package to the remote peer.
+    pub async fn send_keepalive(&self, want_reply: bool) -> Result<(), Error> {
+        self.sender
+            .send(Msg::Keepalive { want_reply })
+            .await
+            .map_err(|_| Error::SendError)
+    }
+
+    /// Send a no-more-sessions request to the remote peer.
+    pub async fn no_more_sessions(&self, want_reply: bool) -> Result<(), Error> {
+        self.sender
+            .send(Msg::NoMoreSessions { want_reply })
+            .await
+            .map_err(|_| Error::SendError)
+    }
 }
 
 impl<H: Handler> Future for Handle<H> {
@@ -612,14 +869,13 @@ impl<H: Handler> Future for Handle<H> {
 /// commands, etc. The future will resolve to an error if the connection fails.
 /// This function creates a connection to the `addr` specified using a
 /// [`tokio::net::TcpStream`] and then calls [`connect_stream`] under the hood.
-pub async fn connect<H: Handler + Send + 'static, A: ToSocketAddrs>(
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn connect<H: Handler + Send + 'static, A: tokio::net::ToSocketAddrs>(
     config: Arc<Config>,
     addrs: A,
     handler: H,
 ) -> Result<Handle<H>, H::Error> {
-    let socket = TcpStream::connect(addrs)
-        .await
-        .map_err(crate::Error::from)?;
+    let socket = map_err!(tokio::net::TcpStream::connect(addrs).await)?;
     connect_stream(config, socket, handler).await
 }
 
@@ -638,15 +894,16 @@ where
 {
     // Writing SSH id.
     let mut write_buffer = SSHBuffer::new();
+
+    debug!("ssh id = {:?}", config.as_ref().client_id);
+
     write_buffer.send_ssh_id(&config.as_ref().client_id);
-    stream
-        .write_all(&write_buffer.buffer)
-        .await
-        .map_err(crate::Error::from)?;
+    map_err!(stream.write_all(&write_buffer.buffer).await)?;
 
     // Reading SSH id and allocating a session if correct.
     let mut stream = SshRead::new(stream);
     let sshid = stream.read_ssh_id().await?;
+
     let (handle_sender, session_receiver) = channel(10);
     let (session_sender, handle_receiver) = unbounded_channel();
     if config.maximum_packet_size > 65535 {
@@ -655,32 +912,36 @@ where
             config.maximum_packet_size
         );
     }
+    let channel_buffer_size = config.channel_buffer_size;
     let mut session = Session::new(
         config.window_size,
         CommonSession {
-            write_buffer,
-            kex: None,
+            packet_writer: PacketWriter::clear(),
             auth_user: String::new(),
             auth_attempts: 0,
             auth_method: None, // Client only.
-            cipher: CipherPair {
-                local_to_remote: Box::new(clear::Key),
-                remote_to_local: Box::new(clear::Key),
-            },
+            remote_to_local: Box::new(clear::Key),
             encrypted: None,
             config,
             wants_reply: false,
             disconnected: false,
             buffer: CryptoVec::new(),
+            strict_kex: false,
+            alive_timeouts: 0,
+            received_data: false,
+            remote_sshid: sshid.into(),
         },
         session_receiver,
         session_sender,
     );
-    session.read_ssh_id(sshid)?;
-    let (encrypted_signal, encrypted_recv) = tokio::sync::oneshot::channel();
-    let join = tokio::spawn(session.run(stream, handler, Some(encrypted_signal)));
+    session.begin_rekey()?;
+    let (kex_done_signal, kex_done_signal_rx) = oneshot::channel();
+    let join = russh_util::runtime::spawn(session.run(stream, handler, Some(kex_done_signal)));
 
-    if encrypted_recv.await.is_err() {
+    if let Err(err) = kex_done_signal_rx.await {
+        // kex_done_signal Sender is dropped when the session
+        // fails before a succesful key exchange
+        debug!("kex_done_signal sender was dropped {err:?}");
         join.await.map_err(crate::Error::Join)??;
         return Err(H::Error::from(crate::Error::Disconnect));
     }
@@ -689,6 +950,7 @@ where
         sender: handle_sender,
         receiver: handle_receiver,
         join,
+        channel_buffer_size,
     })
 }
 
@@ -703,6 +965,26 @@ async fn start_reading<R: AsyncRead + Unpin>(
 }
 
 impl Session {
+    fn maybe_decompress(&mut self, buffer: &SSHBuffer) -> Result<IncomingSshPacket, Error> {
+        if let Some(ref mut enc) = self.common.encrypted {
+            let mut decomp = CryptoVec::new();
+            Ok(IncomingSshPacket {
+                #[allow(clippy::indexing_slicing)] // length checked
+                buffer: enc.decompress.decompress(
+                    &buffer.buffer[5..],
+                    &mut decomp,
+                )?.into(),
+                seqn: buffer.seqn,
+            })
+        } else {
+            Ok(IncomingSshPacket {
+                #[allow(clippy::indexing_slicing)] // length checked
+                buffer: buffer.buffer[5..].into(),
+                seqn: buffer.seqn,
+            })
+        }
+    }
+
     fn new(
         target_window_size: u32,
         common: CommonSession<Arc<Config>>,
@@ -714,87 +996,138 @@ impl Session {
             common,
             receiver,
             sender,
+            kex: SessionKexState::Idle,
             target_window_size,
             inbound_channel_sender,
             inbound_channel_receiver,
             channels: HashMap::new(),
             pending_reads: Vec::new(),
             pending_len: 0,
+            open_global_requests: VecDeque::new(),
+            server_sig_algs: None,
         }
     }
 
     async fn run<H: Handler + Send, R: AsyncRead + AsyncWrite + Unpin + Send>(
         mut self,
-        mut stream: SshRead<R>,
+        stream: SshRead<R>,
         mut handler: H,
-        mut encrypted_signal: Option<tokio::sync::oneshot::Sender<()>>,
+        mut kex_done_signal: Option<oneshot::Sender<()>>,
     ) -> Result<(), H::Error> {
-        self.flush()?;
-        if !self.common.write_buffer.buffer.is_empty() {
-            debug!("writing {:?} bytes", self.common.write_buffer.buffer.len());
-            stream
-                .write_all(&self.common.write_buffer.buffer)
-                .await
-                .map_err(crate::Error::from)?;
-            stream.flush().await.map_err(crate::Error::from)?;
-        }
-        self.common.write_buffer.buffer.clear();
-        let mut decomp = CryptoVec::new();
-
         let (stream_read, mut stream_write) = stream.split();
+        let result = self
+            .run_inner(
+                stream_read,
+                &mut stream_write,
+                &mut handler,
+                &mut kex_done_signal,
+            )
+            .await;
+        trace!("disconnected");
+        self.receiver.close();
+        self.inbound_channel_receiver.close();
+        map_err!(stream_write.shutdown().await)?;
+        match result {
+            Ok(v) => {
+                handler
+                    .disconnected(DisconnectReason::ReceivedDisconnect(v))
+                    .await?;
+                Ok(())
+            }
+            Err(e) => {
+                if kex_done_signal.is_some() {
+                    // The kex signal has not been consumed yet,
+                    // so we can send return the concrete error to be propagated
+                    // into the JoinHandle and returned from `connect_stream`
+                    Err(e)
+                } else {
+                    // The kex signal has been consumed, so no one is
+                    // awaiting the result of this coroutine
+                    // We're better off passing the error into the Handler
+                    debug!("disconnected {e:?}");
+                    handler.disconnected(DisconnectReason::Error(e)).await?;
+                    Err(H::Error::from(crate::Error::Disconnect))
+                }
+            }
+        }
+    }
+
+    async fn run_inner<H: Handler + Send, R: AsyncRead + AsyncWrite + Unpin + Send>(
+        &mut self,
+        stream_read: SshRead<ReadHalf<R>>,
+        stream_write: &mut WriteHalf<R>,
+        handler: &mut H,
+        kex_done_signal: &mut Option<tokio::sync::oneshot::Sender<()>>,
+    ) -> Result<RemoteDisconnectInfo, H::Error> {
+        let mut result: Result<RemoteDisconnectInfo, H::Error> = Err(Error::Disconnect.into());
+        self.flush()?;
+
+        map_err!(self.common.packet_writer.flush_into(stream_write).await)?;
+
         let buffer = SSHBuffer::new();
 
         // Allow handing out references to the cipher
         let mut opening_cipher = Box::new(clear::Key) as Box<dyn OpeningKey + Send>;
-        std::mem::swap(&mut opening_cipher, &mut self.common.cipher.remote_to_local);
+        std::mem::swap(&mut opening_cipher, &mut self.common.remote_to_local);
+
+        let keepalive_timer =
+            crate::future_or_pending(self.common.config.keepalive_interval, tokio::time::sleep);
+        pin!(keepalive_timer);
+
+        let inactivity_timer =
+            crate::future_or_pending(self.common.config.inactivity_timeout, tokio::time::sleep);
+        pin!(inactivity_timer);
 
         let reading = start_reading(stream_read, buffer, opening_cipher);
         pin!(reading);
 
         #[allow(clippy::panic)] // false positive in select! macro
         while !self.common.disconnected {
+            self.common.received_data = false;
+            let mut sent_keepalive = false;
             tokio::select! {
                 r = &mut reading => {
-                    let (stream_read, buffer, mut opening_cipher) = match r {
+                    let (stream_read, mut buffer, mut opening_cipher) = match r {
                         Ok((_, stream_read, buffer, opening_cipher)) => (stream_read, buffer, opening_cipher),
                         Err(e) => return Err(e.into())
                     };
 
-                    std::mem::swap(&mut opening_cipher, &mut self.common.cipher.remote_to_local);
+                    std::mem::swap(&mut opening_cipher, &mut self.common.remote_to_local);
 
                     if buffer.buffer.len() < 5 {
                         break
                     }
 
-                    let buf = if let Some(ref mut enc) = self.common.encrypted {
+                    let mut pkt = self.maybe_decompress(&buffer)?;
+                    if !pkt.buffer.is_empty() {
                         #[allow(clippy::indexing_slicing)] // length checked
-                        if let Ok(buf) = enc.decompress.decompress(
-                            &buffer.buffer[5..],
-                            &mut decomp,
-                        ) {
-                            buf
+                        if pkt.buffer[0] == crate::msg::DISCONNECT {
+                            debug!("received disconnect");
+                            result = self.process_disconnect(&pkt).map_err(H::Error::from);
                         } else {
-                            break
-                        }
-                    } else {
-                        #[allow(clippy::indexing_slicing)] // length checked
-                        &buffer.buffer[5..]
-                    };
-                    if !buf.is_empty() {
-                        #[allow(clippy::indexing_slicing)] // length checked
-                        if buf[0] == crate::msg::DISCONNECT {
-                            break;
-                        } else if buf[0] > 4 {
-                            let (h, s) = reply(self, handler, &mut encrypted_signal, buf).await?;
-                            handler = h;
-                            self = s;
+                            self.common.received_data = true;
+                            reply(self, handler, kex_done_signal, &mut pkt).await?;
+                            buffer.seqn = pkt.seqn; // TODO reply changes seqn internall, find cleaner way
                         }
                     }
 
-                    std::mem::swap(&mut opening_cipher, &mut self.common.cipher.remote_to_local);
+                    std::mem::swap(&mut opening_cipher, &mut self.common.remote_to_local);
                     reading.set(start_reading(stream_read, buffer, opening_cipher));
                 }
-                msg = self.receiver.recv(), if !self.is_rekeying() => {
+                () = &mut keepalive_timer => {
+                    if self.common.config.keepalive_max != 0 && self.common.alive_timeouts > self.common.config.keepalive_max {
+                        debug!("Timeout, server not responding to keepalives");
+                        return Err(crate::Error::KeepaliveTimeout.into());
+                    }
+                    self.common.alive_timeouts = self.common.alive_timeouts.saturating_add(1);
+                    self.send_keepalive(true)?;
+                    sent_keepalive = true;
+                }
+                () = &mut inactivity_timer => {
+                    debug!("timeout");
+                    return Err(crate::Error::InactivityTimeout.into());
+                }
+                msg = self.receiver.recv(), if !self.kex.active() => {
                     match msg {
                         Some(msg) => self.handle_msg(msg)?,
                         None => {
@@ -804,80 +1137,113 @@ impl Session {
                     };
 
                     // eagerly take all outgoing messages so writes are batched
-                    while !self.is_rekeying() {
+                    while !self.kex.active() {
                         match self.receiver.try_recv() {
                             Ok(next) => self.handle_msg(next)?,
                             Err(_) => break
                         }
                     }
                 }
-                msg = self.inbound_channel_receiver.recv(), if !self.is_rekeying() => {
+                msg = self.inbound_channel_receiver.recv(), if !self.kex.active() => {
                     match msg {
                         Some(msg) => self.handle_msg(msg)?,
                         None => (),
                     }
 
                     // eagerly take all outgoing messages so writes are batched
-                    while !self.is_rekeying() {
+                    while !self.kex.active() {
                         match self.inbound_channel_receiver.try_recv() {
                             Ok(next) => self.handle_msg(next)?,
                             Err(_) => break
                         }
                     }
                 }
-            }
+            };
+
             self.flush()?;
-            if !self.common.write_buffer.buffer.is_empty() {
-                trace!(
-                    "writing to stream: {:?} bytes",
-                    self.common.write_buffer.buffer.len()
-                );
-                stream_write
-                    .write_all(&self.common.write_buffer.buffer)
-                    .await
-                    .map_err(crate::Error::from)?;
-                stream_write.flush().await.map_err(crate::Error::from)?;
-            }
-            self.common.write_buffer.buffer.clear();
+            map_err!(self.common.packet_writer.flush_into(stream_write).await)?;
+
             if let Some(ref mut enc) = self.common.encrypted {
                 if let EncryptedState::InitCompression = enc.state {
-                    enc.client_compression.init_compress(&mut enc.compress);
+                    enc.client_compression
+                        .init_compress(self.common.packet_writer.compress());
                     enc.state = EncryptedState::Authenticated;
                 }
             }
+
+            if self.common.received_data {
+                // Reset the number of failed keepalive attempts. We don't
+                // bother detecting keepalive response messages specifically
+                // (OpenSSH_9.6p1 responds with REQUEST_FAILURE aka 82). Instead
+                // we assume that the server is still alive if we receive any
+                // data from it.
+                self.common.alive_timeouts = 0;
+            }
+            if self.common.received_data || sent_keepalive {
+                if let (futures::future::Either::Right(ref mut sleep), Some(d)) = (
+                    keepalive_timer.as_mut().as_pin_mut(),
+                    self.common.config.keepalive_interval,
+                ) {
+                    sleep.as_mut().reset(tokio::time::Instant::now() + d);
+                }
+            }
+            if !sent_keepalive {
+                if let (futures::future::Either::Right(ref mut sleep), Some(d)) = (
+                    inactivity_timer.as_mut().as_pin_mut(),
+                    self.common.config.inactivity_timeout,
+                ) {
+                    sleep.as_mut().reset(tokio::time::Instant::now() + d);
+                }
+            }
         }
-        debug!("disconnected");
-        if self.common.disconnected {
-            stream_write.shutdown().await.map_err(crate::Error::from)?;
-        }
-        Ok(())
+
+        result
+    }
+
+    fn process_disconnect(
+        &mut self,
+        pkt: &IncomingSshPacket,
+    ) -> Result<RemoteDisconnectInfo, Error> {
+        let mut r = &pkt.buffer[..];
+        u8::decode(&mut r)?; // skip message type
+        self.common.disconnected = true;
+
+        let reason_code = u32::decode(&mut r)?.try_into()?;
+        let message = String::decode(&mut r)?;
+        let lang_tag = String::decode(&mut r)?;
+
+        Ok(RemoteDisconnectInfo {
+            reason_code,
+            message,
+            lang_tag,
+        })
     }
 
     fn handle_msg(&mut self, msg: Msg) -> Result<(), crate::Error> {
         match msg {
             Msg::Authenticate { user, method } => {
-                self.write_auth_request_if_needed(&user, method);
+                self.write_auth_request_if_needed(&user, method)?;
             }
             Msg::Signed { .. } => {}
             Msg::AuthInfoResponse { .. } => {}
-            Msg::ChannelOpenSession { sender } => {
+            Msg::ChannelOpenSession { channel_ref } => {
                 let id = self.channel_open_session()?;
-                self.channels.insert(id, sender);
+                self.channels.insert(id, channel_ref);
             }
             Msg::ChannelOpenX11 {
                 originator_address,
                 originator_port,
-                sender,
+                channel_ref,
             } => {
                 let id = self.channel_open_x11(&originator_address, originator_port)?;
-                self.channels.insert(id, sender);
+                self.channels.insert(id, channel_ref);
             }
             Msg::ChannelOpenDirectTcpIp {
                 host_to_connect,
                 port_to_connect,
                 originator_address,
                 originator_port,
-                sender,
+                channel_ref,
             } => {
                 let id = self.channel_open_direct_tcpip(
                     &host_to_connect,
@@ -885,36 +1251,44 @@ impl Session {
                     &originator_address,
                     originator_port,
                 )?;
-                self.channels.insert(id, sender);
+                self.channels.insert(id, channel_ref);
             }
             Msg::ChannelOpenDirectStreamLocal {
                 socket_path,
-                sender,
+                channel_ref,
             } => {
                 let id = self.channel_open_direct_streamlocal(&socket_path)?;
-                self.channels.insert(id, sender);
+                self.channels.insert(id, channel_ref);
             }
             Msg::TcpIpForward {
-                want_reply,
+                reply_channel,
                 address,
                 port,
-            } => self.tcpip_forward(want_reply, &address, port),
+            } => self.tcpip_forward(reply_channel, &address, port)?,
             Msg::CancelTcpIpForward {
-                want_reply,
+                reply_channel,
                 address,
                 port,
-            } => self.cancel_tcpip_forward(want_reply, &address, port),
+            } => self.cancel_tcpip_forward(reply_channel, &address, port)?,
+            Msg::StreamLocalForward {
+                reply_channel,
+                socket_path,
+            } => self.streamlocal_forward(reply_channel, &socket_path)?,
+            Msg::CancelStreamLocalForward {
+                reply_channel,
+                socket_path,
+            } => self.cancel_streamlocal_forward(reply_channel, &socket_path)?,
             Msg::Disconnect {
                 reason,
                 description,
                 language_tag,
-            } => self.disconnect(reason, &description, &language_tag),
-            Msg::Channel(id, ChannelMsg::Data { data }) => self.data(id, data),
+            } => self.disconnect(reason, &description, &language_tag)?,
+            Msg::Channel(id, ChannelMsg::Data { data }) => self.data(id, data)?,
             Msg::Channel(id, ChannelMsg::Eof) => {
-                self.eof(id);
+                self.eof(id)?;
             }
             Msg::Channel(id, ChannelMsg::ExtendedData { data, ext }) => {
-                self.extended_data(id, ext, data);
+                self.extended_data(id, ext, data)?;
             }
             Msg::Channel(
                 id,
@@ -936,7 +1310,7 @@ impl Session {
                 pix_width,
                 pix_height,
                 &terminal_modes,
-            ),
+            )?,
             Msg::Channel(
                 id,
                 ChannelMsg::WindowChange {
@@ -945,7 +1319,7 @@ impl Session {
                     pix_width,
                     pix_height,
                 },
-            ) => self.window_change(id, col_width, row_height, pix_width, pix_height),
+            ) => self.window_change(id, col_width, row_height, pix_width, pix_height)?,
             Msg::Channel(
                 id,
                 ChannelMsg::RequestX11 {
@@ -962,7 +1336,7 @@ impl Session {
                 &x11_authentication_protocol,
                 &x11_authentication_cookie,
                 x11_screen_number,
-            ),
+            )?,
             Msg::Channel(
                 id,
                 ChannelMsg::SetEnv {
@@ -970,9 +1344,9 @@ impl Session {
                     variable_name,
                     variable_value,
                 },
-            ) => self.set_env(id, want_reply, &variable_name, &variable_value),
+            ) => self.set_env(id, want_reply, &variable_name, &variable_value)?,
             Msg::Channel(id, ChannelMsg::RequestShell { want_reply }) => {
-                self.request_shell(want_reply, id)
+                self.request_shell(want_reply, id)?
             }
             Msg::Channel(
                 id,
@@ -980,15 +1354,43 @@ impl Session {
                     want_reply,
                     command,
                 },
-            ) => self.exec(id, want_reply, &command),
-            Msg::Channel(id, ChannelMsg::Signal { signal }) => self.signal(id, signal),
+            ) => self.exec(id, want_reply, &command)?,
+            Msg::Channel(id, ChannelMsg::Signal { signal }) => self.signal(id, signal)?,
             Msg::Channel(id, ChannelMsg::RequestSubsystem { want_reply, name }) => {
-                self.request_subsystem(want_reply, id, &name)
+                self.request_subsystem(want_reply, id, &name)?
             }
             Msg::Channel(id, ChannelMsg::AgentForward { want_reply }) => {
-                self.agent_forward(id, want_reply)
+                self.agent_forward(id, want_reply)?
             }
-            Msg::Channel(id, ChannelMsg::Close) => self.close(id),
+            Msg::Channel(id, ChannelMsg::Close) => self.close(id)?,
+            Msg::Rekey => self.initiate_rekey()?,
+            Msg::AwaitExtensionInfo {
+                extension_name,
+                reply_channel,
+            } => {
+                if let Some(ref mut enc) = self.common.encrypted {
+                    // Drop if the extension has been seen already
+                    if !enc.received_extensions.contains(&extension_name) {
+                        // There will be no new extension info after authentication
+                        // has succeeded
+                        if !matches!(enc.state, EncryptedState::Authenticated) {
+                            enc.extension_info_awaiters
+                                .entry(extension_name)
+                                .or_insert(vec![])
+                                .push(reply_channel);
+                        }
+                    }
+                }
+            }
+            Msg::GetServerSigAlgs { reply_channel } => {
+                let _ = reply_channel.send(self.server_sig_algs.clone());
+            }
+            Msg::Keepalive { want_reply } => {
+                let _ = self.send_keepalive(want_reply);
+            }
+            Msg::NoMoreSessions { want_reply } => {
+                let _ = self.no_more_sessions(want_reply);
+            }
             msg => {
                 // should be unreachable, since the receiver only gets
                 // messages from methods implemented within russh
@@ -998,35 +1400,23 @@ impl Session {
         Ok(())
     }
 
-    fn is_rekeying(&self) -> bool {
-        if let Some(ref enc) = self.common.encrypted {
-            enc.rekey.is_some()
-        } else {
-            true
-        }
-    }
+    fn begin_rekey(&mut self) -> Result<(), crate::Error> {
+        debug!("beginning re-key");
+        let mut kex = ClientKex::new(
+            self.common.config.clone(),
+            &self.common.config.client_id,
+            &self.common.remote_sshid,
+            match &self.common.encrypted {
+                None => KexCause::Initial,
+                Some(enc) => KexCause::Rekey {
+                    strict: self.common.strict_kex,
+                    session_id: enc.session_id.clone(),
+                },
+            },
+        );
 
-    fn read_ssh_id(&mut self, sshid: &[u8]) -> Result<(), crate::Error> {
-        // self.read_buffer.bytes += sshid.bytes_read + 2;
-        let mut exchange = Exchange::new();
-        exchange.server_id.extend(sshid);
-        // Preparing the response
-        exchange
-            .client_id
-            .extend(self.common.config.client_id.as_kex_hash_bytes());
-        let mut kexinit = KexInit {
-            exchange,
-            algo: None,
-            sent: false,
-            session_id: None,
-        };
-        self.common.write_buffer.buffer.clear();
-        kexinit.client_write(
-            self.common.config.as_ref(),
-            &mut *self.common.cipher.local_to_remote,
-            &mut self.common.write_buffer,
-        )?;
-        self.common.kex = Some(Kex::Init(kexinit));
+        kex.kexinit(&mut self.common.packet_writer)?;
+        self.kex = SessionKexState::InProgress(kex);
         Ok(())
     }
 
@@ -1036,183 +1426,124 @@ impl Session {
         if let Some(ref mut enc) = self.common.encrypted {
             if enc.flush(
                 &self.common.config.as_ref().limits,
-                &mut *self.common.cipher.local_to_remote,
-                &mut self.common.write_buffer,
-            )? {
-                info!("Re-exchanging keys");
-                if enc.rekey.is_none() {
-                    if let Some(exchange) = std::mem::replace(&mut enc.exchange, None) {
-                        let mut kexinit = KexInit::initiate_rekey(exchange, &enc.session_id);
-                        kexinit.client_write(
-                            self.common.config.as_ref(),
-                            &mut *self.common.cipher.local_to_remote,
-                            &mut self.common.write_buffer,
-                        )?;
-                        enc.rekey = Some(Kex::Init(kexinit))
-                    }
-                }
+                &mut self.common.packet_writer,
+            )? && !self.kex.active()
+            {
+                self.begin_rekey()?;
             }
         }
         Ok(())
     }
 
-    /// Send a `ChannelMsg` from the background handler to the client.
-    pub fn send_channel_msg(&self, channel: ChannelId, msg: ChannelMsg) -> bool {
-        if let Some(chan) = self.channels.get(&channel) {
-            chan.send(msg).unwrap_or(());
-            true
-        } else {
-            false
+    /// Immediately trigger a session re-key after flushing all pending packets
+    pub fn initiate_rekey(&mut self) -> Result<(), Error> {
+        if let Some(ref mut enc) = self.common.encrypted {
+            enc.rekey_wanted = true;
+            self.flush()?
         }
-    }
-}
-
-thread_local! {
-    static HASH_BUFFER: RefCell<CryptoVec> = RefCell::new(CryptoVec::new());
-}
-
-impl KexDhDone {
-    async fn server_key_check<H: Handler>(
-        mut self,
-        rekey: bool,
-        mut handler: H,
-        buf: &[u8],
-    ) -> Result<(NewKeys, H), H::Error> {
-        let mut reader = buf.reader(1);
-        let pubkey = reader.read_string().map_err(crate::Error::from)?; // server public key.
-        let pubkey = parse_public_key(
-            pubkey,
-            #[cfg(feature = "openssl")]
-            SignatureHash::from_rsa_hostkey_algo(self.names.key.0.as_bytes()),
-        )
-        .map_err(crate::Error::from)?;
-        debug!("server_public_Key: {:?}", pubkey);
-        if !rekey {
-            let ret = handler.check_server_key(&pubkey).await?;
-            handler = ret.0;
-            let check = ret.1;
-            if !check {
-                return Err(crate::Error::UnknownKey.into());
-            }
-        }
-        HASH_BUFFER.with(|buffer| {
-            let mut buffer = buffer.borrow_mut();
-            buffer.clear();
-            let hash = {
-                let server_ephemeral = reader.read_string().map_err(crate::Error::from)?;
-                self.exchange.server_ephemeral.extend(server_ephemeral);
-                let signature = reader.read_string().map_err(crate::Error::from)?;
-
-                self.kex
-                    .compute_shared_secret(&self.exchange.server_ephemeral)?;
-                debug!("kexdhdone.exchange = {:?}", self.exchange);
-
-                let mut pubkey_vec = CryptoVec::new();
-                pubkey.push_to(&mut pubkey_vec);
-
-                let hash =
-                    self.kex
-                        .compute_exchange_hash(&pubkey_vec, &self.exchange, &mut buffer)?;
-
-                debug!("exchange hash: {:?}", hash);
-                let signature = {
-                    let mut sig_reader = signature.reader(0);
-                    let sig_type = sig_reader.read_string().map_err(crate::Error::from)?;
-                    debug!("sig_type: {:?}", sig_type);
-                    sig_reader.read_string().map_err(crate::Error::from)?
-                };
-                use russh_keys::key::Verify;
-                debug!("signature: {:?}", signature);
-                if !pubkey.verify_server_auth(hash.as_ref(), signature) {
-                    debug!("wrong server sig");
-                    return Err(crate::Error::WrongServerSig.into());
-                }
-                hash
-            };
-            let mut newkeys = self.compute_keys(hash, false)?;
-            newkeys.sent = true;
-            Ok((newkeys, handler))
-        })
+        Ok(())
     }
 }
 
 async fn reply<H: Handler>(
-    mut session: Session,
-    mut handler: H,
-    sender: &mut Option<tokio::sync::oneshot::Sender<()>>,
-    buf: &[u8],
-) -> Result<(H, Session), H::Error> {
-    match session.common.kex.take() {
-        Some(Kex::Init(kexinit)) => {
-            if kexinit.algo.is_some()
-                || buf.first() == Some(&msg::KEXINIT)
-                || session.common.encrypted.is_none()
-            {
-                let done = kexinit.client_parse(
-                    session.common.config.as_ref(),
-                    &mut *session.common.cipher.local_to_remote,
-                    buf,
-                    &mut session.common.write_buffer,
-                )?;
+    session: &mut Session,
+    handler: &mut H,
+    kex_done_signal: &mut Option<tokio::sync::oneshot::Sender<()>>,
+    pkt: &mut IncomingSshPacket,
+) -> Result<(), H::Error> {
+    if let Some(message_type) = pkt.buffer.first() {
+        debug!(
+            "< msg type {message_type:?}, seqn {:?}, len {}",
+            pkt.seqn.0,
+            pkt.buffer.len()
+        );
+        if session.common.strict_kex && session.common.encrypted.is_none() {
+            let seqno = pkt.seqn.0 - 1; // was incremented after read()
+            validate_server_msg_strict_kex(*message_type, seqno as usize)?;
+        }
 
-                if done.kex.skip_exchange() {
-                    session.common.encrypted(
-                        initial_encrypted_state(&session),
-                        done.compute_keys(CryptoVec::new(), false)?,
-                    );
-
-                    if let Some(sender) = sender.take() {
-                        sender.send(()).unwrap_or(());
-                    }
-                } else {
-                    session.common.kex = Some(Kex::DhDone(done));
-                }
-                session.flush()?;
-            }
-            Ok((handler, session))
+        if [msg::IGNORE, msg::UNIMPLEMENTED, msg::DEBUG].contains(message_type) {
+            return Ok(());
         }
-        Some(Kex::DhDone(mut kexdhdone)) => {
-            if kexdhdone.names.ignore_guessed {
-                kexdhdone.names.ignore_guessed = false;
-                session.common.kex = Some(Kex::DhDone(kexdhdone));
-                Ok((handler, session))
-            } else if buf.first() == Some(&msg::KEX_ECDH_REPLY) {
-                // We've sent ECDH_INIT, waiting for ECDH_REPLY
-                let (kex, h) = kexdhdone.server_key_check(false, handler, buf).await?;
-                handler = h;
-                session.common.kex = Some(Kex::Keys(kex));
-                session
-                    .common
-                    .cipher
-                    .local_to_remote
-                    .write(&[msg::NEWKEYS], &mut session.common.write_buffer);
-                session.flush()?;
-                Ok((handler, session))
-            } else {
-                error!("Wrong packet received");
-                Err(crate::Error::Inconsistent.into())
-            }
-        }
-        Some(Kex::Keys(newkeys)) => {
-            debug!("newkeys received");
-            if buf.first() != Some(&msg::NEWKEYS) {
-                return Err(crate::Error::Kex.into());
-            }
-            if let Some(sender) = sender.take() {
-                sender.send(()).unwrap_or(());
-            }
-            session
-                .common
-                .encrypted(initial_encrypted_state(&session), newkeys);
-            // Ok, NEWKEYS received, now encrypted.
-            Ok((handler, session))
-        }
-        Some(kex) => {
-            session.common.kex = Some(kex);
-            Ok((handler, session))
-        }
-        None => session.client_read_encrypted(handler, buf).await,
     }
+
+    if pkt.buffer.first() == Some(&msg::KEXINIT) && session.kex == SessionKexState::Idle {
+        // Not currently in a rekey but received KEXINIT
+        debug!("server has initiated re-key");
+        session.begin_rekey()?;
+        // Kex will consume the packet right away
+    }
+
+    let is_kex_msg = pkt.buffer.first().cloned().map(is_kex_msg).unwrap_or(false);
+
+    if is_kex_msg {
+        if let SessionKexState::InProgress(kex) = session.kex.take() {
+            let progress = kex.step(Some(pkt), &mut session.common.packet_writer)?;
+
+            match progress {
+                KexProgress::NeedsReply { kex, reset_seqn } => {
+                    debug!("kex impl continues: {kex:?}");
+                    session.kex = SessionKexState::InProgress(kex);
+                    if reset_seqn {
+                        debug!("kex impl requests seqno reset");
+                        session.common.reset_seqn();
+                    }
+                }
+                KexProgress::Done {
+                    server_host_key,
+                    newkeys,
+                } => {
+                    debug!("kex impl has completed");
+                    session.common.strict_kex =
+                        session.common.strict_kex || newkeys.names.strict_kex;
+
+                    if let Some(ref mut enc) = session.common.encrypted {
+                        // This is a rekey
+                        enc.last_rekey = Instant::now();
+                        session.common.packet_writer.buffer().bytes = 0;
+                        enc.flush_all_pending()?;
+                        let mut pending = std::mem::take(&mut session.pending_reads);
+                        for p in pending.drain(..) {
+                            session.process_packet(handler, &p).await?;
+                        }
+                        session.pending_reads = pending;
+                        session.pending_len = 0;
+                        session.common.newkeys(newkeys);
+                    } else {
+                        // This is the initial kex
+                        if let Some(server_host_key) = &server_host_key {
+                            let check = handler.check_server_key(server_host_key).await?;
+                            if !check {
+                                return Err(crate::Error::UnknownKey.into());
+                            }
+                        }
+
+                        session
+                            .common
+                            .encrypted(initial_encrypted_state(session), newkeys);
+
+                        if let Some(sender) = kex_done_signal.take() {
+                            sender.send(()).unwrap_or(());
+                        }
+                    }
+
+                    session.kex = SessionKexState::Idle;
+
+                    if session.common.strict_kex {
+                        pkt.seqn = Wrapping(0);
+                    }
+
+                    debug!("kex done");
+                }
+            }
+
+            session.flush()?;
+
+            return Ok(());
+        }
+    }
+
+    session.client_read_encrypted(handler, pkt).await
 }
 
 fn initial_encrypted_state(session: &Session) -> EncryptedState {
@@ -1222,6 +1553,74 @@ fn initial_encrypted_state(session: &Session) -> EncryptedState {
         EncryptedState::WaitingAuthServiceRequest {
             accepted: false,
             sent: false,
+        }
+    }
+}
+
+/// Parameters for dynamic group Diffie-Hellman key exchanges.
+#[derive(Debug, Clone)]
+pub struct GexParams {
+    /// Minimum DH group size (in bits)
+    min_group_size: usize,
+    /// Preferred DH group size (in bits)
+    preferred_group_size: usize,
+    /// Maximum DH group size (in bits)
+    max_group_size: usize,
+}
+
+impl GexParams {
+    pub fn new(
+        min_group_size: usize,
+        preferred_group_size: usize,
+        max_group_size: usize,
+    ) -> Result<Self, Error> {
+        let this = Self {
+            min_group_size,
+            preferred_group_size,
+            max_group_size,
+        };
+        this.validate()?;
+        Ok(this)
+    }
+
+    pub(crate) fn validate(&self) -> Result<(), Error> {
+        if self.min_group_size < 2048 {
+            return Err(Error::InvalidConfig(
+                "min_group_size must be at least 2048 bits".into(),
+            ));
+        }
+        if self.preferred_group_size < self.min_group_size {
+            return Err(Error::InvalidConfig(
+                "preferred_group_size must be at least as large as min_group_size".into(),
+            ));
+        }
+        if self.max_group_size < self.preferred_group_size {
+            return Err(Error::InvalidConfig(
+                "max_group_size must be at least as large as preferred_group_size".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn min_group_size(&self) -> usize {
+        self.min_group_size
+    }
+
+    pub fn preferred_group_size(&self) -> usize {
+        self.preferred_group_size
+    }
+
+    pub fn max_group_size(&self) -> usize {
+        self.max_group_size
+    }
+}
+
+impl Default for GexParams {
+    fn default() -> GexParams {
+        GexParams {
+            min_group_size: 3072,
+            preferred_group_size: 8192,
+            max_group_size: 8192,
         }
     }
 }
@@ -1237,12 +1636,20 @@ pub struct Config {
     pub window_size: u32,
     /// The maximal size of a single packet.
     pub maximum_packet_size: u32,
+    /// Buffer size for each channel (a number of unprocessed messages to store before propagating backpressure to the TCP stream)
+    pub channel_buffer_size: usize,
     /// Lists of preferred algorithms.
     pub preferred: negotiation::Preferred,
     /// Time after which the connection is garbage-collected.
     pub inactivity_timeout: Option<std::time::Duration>,
+    /// If nothing is received from the server for this amount of time, send a keepalive message.
+    pub keepalive_interval: Option<std::time::Duration>,
+    /// If this many keepalives have been sent without reply, close the connection.
+    pub keepalive_max: usize,
     /// Whether to expect and wait for an authentication call.
     pub anonymous: bool,
+    /// DH dynamic group exchange parameters.
+    pub gex: GexParams,
 }
 
 impl Default for Config {
@@ -1256,9 +1663,13 @@ impl Default for Config {
             limits: Limits::default(),
             window_size: 2097152,
             maximum_packet_size: 32768,
+            channel_buffer_size: 100,
             preferred: Default::default(),
             inactivity_timeout: None,
+            keepalive_interval: None,
+            keepalive_max: 3,
             anonymous: false,
+            gex: Default::default(),
         }
     }
 }
@@ -1266,171 +1677,209 @@ impl Default for Config {
 /// A client handler. Note that messages can be received from the
 /// server at any time during a session.
 ///
-/// Note: this is an `async_trait`. Click `[source]` on the right to see actual async function definitions.
-
-#[async_trait]
+/// You must at the very least implement the `check_server_key` fn.
+/// The default implementation rejects all keys.
+///
+/// Note: this is an async trait. The trait functions return `impl Future`,
+/// and you can simply define them as `async fn` instead.
+#[cfg_attr(feature = "async-trait", async_trait::async_trait)]
 pub trait Handler: Sized + Send {
-    type Error: From<crate::Error> + Send;
+    type Error: From<crate::Error> + Send + core::fmt::Debug;
 
     /// Called when the server sends us an authentication banner. This
     /// is usually meant to be shown to the user, see
     /// [RFC4252](https://tools.ietf.org/html/rfc4252#section-5.4) for
     /// more details.
-    ///
-    /// The returned Boolean is ignored.
     #[allow(unused_variables)]
-    async fn auth_banner(
-        self,
+    fn auth_banner(
+        &mut self,
         banner: &str,
-        session: Session,
-    ) -> Result<(Self, Session), Self::Error> {
-        Ok((self, session))
+        session: &mut Session,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// Called to check the server's public key. This is a very important
     /// step to help prevent man-in-the-middle attacks. The default
     /// implementation rejects all keys.
     #[allow(unused_variables)]
-    async fn check_server_key(
-        self,
-        server_public_key: &key::PublicKey,
-    ) -> Result<(Self, bool), Self::Error> {
-        Ok((self, false))
+    fn check_server_key(
+        &mut self,
+        server_public_key: &ssh_key::PublicKey,
+    ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
+        async { Ok(false) }
     }
 
     /// Called when the server confirmed our request to open a
     /// channel. A channel can only be written to after receiving this
     /// message (this library panics otherwise).
     #[allow(unused_variables)]
-    async fn channel_open_confirmation(
-        self,
+    fn channel_open_confirmation(
+        &mut self,
         id: ChannelId,
         max_packet_size: u32,
         window_size: u32,
-        session: Session,
-    ) -> Result<(Self, Session), Self::Error> {
-        Ok((self, session))
+        session: &mut Session,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// Called when the server signals success.
     #[allow(unused_variables)]
-    async fn channel_success(
-        self,
+    fn channel_success(
+        &mut self,
         channel: ChannelId,
-        session: Session,
-    ) -> Result<(Self, Session), Self::Error> {
-        Ok((self, session))
+        session: &mut Session,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// Called when the server signals failure.
     #[allow(unused_variables)]
-    async fn channel_failure(
-        self,
+    fn channel_failure(
+        &mut self,
         channel: ChannelId,
-        session: Session,
-    ) -> Result<(Self, Session), Self::Error> {
-        Ok((self, session))
+        session: &mut Session,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// Called when the server closes a channel.
     #[allow(unused_variables)]
-    async fn channel_close(
-        self,
+    fn channel_close(
+        &mut self,
         channel: ChannelId,
-        session: Session,
-    ) -> Result<(Self, Session), Self::Error> {
-        Ok((self, session))
+        session: &mut Session,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// Called when the server sends EOF to a channel.
     #[allow(unused_variables)]
-    async fn channel_eof(
-        self,
+    fn channel_eof(
+        &mut self,
         channel: ChannelId,
-        session: Session,
-    ) -> Result<(Self, Session), Self::Error> {
-        Ok((self, session))
+        session: &mut Session,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// Called when the server rejected our request to open a channel.
     #[allow(unused_variables)]
-    async fn channel_open_failure(
-        self,
+    fn channel_open_failure(
+        &mut self,
         channel: ChannelId,
         reason: ChannelOpenFailure,
         description: &str,
         language: &str,
-        session: Session,
-    ) -> Result<(Self, Session), Self::Error> {
-        Ok((self, session))
+        session: &mut Session,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// Called when the server opens a channel for a new remote port forwarding connection
     #[allow(unused_variables)]
-    async fn server_channel_open_forwarded_tcpip(
-        self,
+    fn server_channel_open_forwarded_tcpip(
+        &mut self,
         channel: Channel<Msg>,
         connected_address: &str,
         connected_port: u32,
         originator_address: &str,
         originator_port: u32,
-        session: Session,
-    ) -> Result<(Self, Session), Self::Error> {
-        Ok((self, session))
+        session: &mut Session,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
+    }
+
+    // Called when the server opens a channel for a new remote UDS forwarding connection
+    #[allow(unused_variables)]
+    fn server_channel_open_forwarded_streamlocal(
+        &mut self,
+        channel: Channel<Msg>,
+        socket_path: &str,
+        session: &mut Session,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// Called when the server opens an agent forwarding channel
     #[allow(unused_variables)]
-    async fn server_channel_open_agent_forward(
-        self,
-        channel: ChannelId,
-        session: Session,
-    ) -> Result<(Self, Session), Self::Error> {
-        Ok((self, session))
+    fn server_channel_open_agent_forward(
+        &mut self,
+        channel: Channel<Msg>,
+        session: &mut Session,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
-    /// Called when the server gets an unknown channel. It may return `true`,
-    /// if the channel of unknown type should be handled. If it returns `false`,
-    /// the channel will not be created and an error will be sent to the server.
+    /// Called when the server attempts to open a channel of unknown type. It may return `true`,
+    /// if the channel of unknown type should be accepted. In this case,
+    /// [Handler::server_channel_open_unknown] will be called soon after. If it returns `false`,
+    /// the channel will not be created and a rejection message will be sent to the server.
     #[allow(unused_variables)]
-    fn server_channel_handle_unknown(&self, channel: ChannelId, channel_type: &[u8]) -> bool {
-        false
+    fn should_accept_unknown_server_channel(
+        &mut self,
+        id: ChannelId,
+        channel_type: &str,
+    ) -> impl Future<Output = bool> + Send {
+        async { false }
+    }
+
+    /// Called when the server opens an unknown channel.
+    #[allow(unused_variables)]
+    fn server_channel_open_unknown(
+        &mut self,
+        channel: Channel<Msg>,
+        session: &mut Session,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// Called when the server opens a session channel.
     #[allow(unused_variables)]
-    async fn server_channel_open_session(
-        self,
-        channel: ChannelId,
-        session: Session,
-    ) -> Result<(Self, Session), Self::Error> {
-        Ok((self, session))
+    fn server_channel_open_session(
+        &mut self,
+        channel: Channel<Msg>,
+        session: &mut Session,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
-    /// Called when the server opens a direct tcp/ip channel.
+    /// Called when the server opens a direct tcp/ip channel (non-standard).
     #[allow(unused_variables)]
-    async fn server_channel_open_direct_tcpip(
-        self,
-        channel: ChannelId,
+    fn server_channel_open_direct_tcpip(
+        &mut self,
+        channel: Channel<Msg>,
         host_to_connect: &str,
         port_to_connect: u32,
         originator_address: &str,
         originator_port: u32,
-        session: Session,
-    ) -> Result<(Self, Session), Self::Error> {
-        Ok((self, session))
+        session: &mut Session,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
+    }
+
+    /// Called when the server opens a direct-streamlocal channel (non-standard).
+    #[allow(unused_variables)]
+    fn server_channel_open_direct_streamlocal(
+        &mut self,
+        channel: Channel<Msg>,
+        socket_path: &str,
+        session: &mut Session,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// Called when the server opens an X11 channel.
     #[allow(unused_variables)]
-    async fn server_channel_open_x11(
-        self,
+    fn server_channel_open_x11(
+        &mut self,
         channel: Channel<Msg>,
         originator_address: &str,
         originator_port: u32,
-        session: Session,
-    ) -> Result<(Self, Session), Self::Error> {
-        Ok((self, session))
+        session: &mut Session,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// Called when the server sends us data. The `extended_code`
@@ -1438,13 +1887,13 @@ pub trait Handler: Sized + Send {
     /// standard output, and `Some(1)` is the standard error. See
     /// [RFC4254](https://tools.ietf.org/html/rfc4254#section-5.2).
     #[allow(unused_variables)]
-    async fn data(
-        self,
+    fn data(
+        &mut self,
         channel: ChannelId,
         data: &[u8],
-        session: Session,
-    ) -> Result<(Self, Session), Self::Error> {
-        Ok((self, session))
+        session: &mut Session,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// Called when the server sends us data. The `extended_code`
@@ -1452,52 +1901,52 @@ pub trait Handler: Sized + Send {
     /// standard output, and `Some(1)` is the standard error. See
     /// [RFC4254](https://tools.ietf.org/html/rfc4254#section-5.2).
     #[allow(unused_variables)]
-    async fn extended_data(
-        self,
+    fn extended_data(
+        &mut self,
         channel: ChannelId,
         ext: u32,
         data: &[u8],
-        session: Session,
-    ) -> Result<(Self, Session), Self::Error> {
-        Ok((self, session))
+        session: &mut Session,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// The server informs this client of whether the client may
     /// perform control-S/control-Q flow control. See
     /// [RFC4254](https://tools.ietf.org/html/rfc4254#section-6.8).
     #[allow(unused_variables)]
-    async fn xon_xoff(
-        self,
+    fn xon_xoff(
+        &mut self,
         channel: ChannelId,
         client_can_do: bool,
-        session: Session,
-    ) -> Result<(Self, Session), Self::Error> {
-        Ok((self, session))
+        session: &mut Session,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// The remote process has exited, with the given exit status.
     #[allow(unused_variables)]
-    async fn exit_status(
-        self,
+    fn exit_status(
+        &mut self,
         channel: ChannelId,
         exit_status: u32,
-        session: Session,
-    ) -> Result<(Self, Session), Self::Error> {
-        Ok((self, session))
+        session: &mut Session,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// The remote process exited upon receiving a signal.
     #[allow(unused_variables)]
-    async fn exit_signal(
-        self,
+    fn exit_signal(
+        &mut self,
         channel: ChannelId,
         signal_name: Sig,
         core_dumped: bool,
         error_message: &str,
         lang_tag: &str,
-        session: Session,
-    ) -> Result<(Self, Session), Self::Error> {
-        Ok((self, session))
+        session: &mut Session,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// Called when the network window is adjusted, meaning that we
@@ -1506,13 +1955,13 @@ pub trait Handler: Sized + Send {
     /// `Session::data` before, and it returned less than the
     /// full amount of data.
     #[allow(unused_variables)]
-    async fn window_adjusted(
-        self,
+    fn window_adjusted(
+        &mut self,
         channel: ChannelId,
         new_size: u32,
-        session: Session,
-    ) -> Result<(Self, Session), Self::Error> {
-        Ok((self, session))
+        session: &mut Session,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// Called when this client adjusts the network window. Return the
@@ -1524,12 +1973,31 @@ pub trait Handler: Sized + Send {
 
     /// Called when the server signals success.
     #[allow(unused_variables)]
-    async fn openssh_ext_host_keys_announced(
-        self,
+    fn openssh_ext_host_keys_announced(
+        &mut self,
         keys: Vec<PublicKey>,
-        session: Session,
-    ) -> Result<(Self, Session), Self::Error> {
-        debug!("openssh_ext_hostkeys_announced: {:?}", keys);
-        Ok((self, session))
+        session: &mut Session,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async move {
+            debug!("openssh_ext_hostkeys_announced: {:?}", keys);
+            Ok(())
+        }
+    }
+
+    /// Called when the server sent a disconnect message
+    ///
+    /// If reason is an Error, this function should re-return the error so the join can also evaluate it
+    #[allow(unused_variables)]
+    fn disconnected(
+        &mut self,
+        reason: DisconnectReason<Self::Error>,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async {
+            debug!("disconnected: {:?}", reason);
+            match reason {
+                DisconnectReason::ReceivedDisconnect(_) => Ok(()),
+                DisconnectReason::Error(e) => Err(e),
+            }
+        }
     }
 }

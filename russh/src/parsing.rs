@@ -1,7 +1,7 @@
-use russh_cryptovec::CryptoVec;
-use russh_keys::encoding::{Encoding, Position};
+use ssh_encoding::{Decode, Encode, Reader};
 
-use crate::msg;
+use crate::helpers::map_err;
+use crate::{msg, CryptoVec};
 
 #[derive(Debug)]
 pub struct OpenChannelMessage {
@@ -12,30 +12,33 @@ pub struct OpenChannelMessage {
 }
 
 impl OpenChannelMessage {
-    pub fn parse(r: &mut Position) -> Result<Self, crate::Error> {
+    pub fn parse<R: Reader>(r: &mut R) -> Result<Self, crate::Error> {
         // https://tools.ietf.org/html/rfc4254#section-5.1
-        let typ = r.read_string().map_err(crate::Error::from)?;
-        let sender = r.read_u32().map_err(crate::Error::from)?;
-        let window = r.read_u32().map_err(crate::Error::from)?;
-        let maxpacket = r.read_u32().map_err(crate::Error::from)?;
+        let typ = map_err!(String::decode(r))?;
+        let sender = map_err!(u32::decode(r))?;
+        let window = map_err!(u32::decode(r))?;
+        let maxpacket = map_err!(u32::decode(r))?;
 
-        let typ = match typ {
-            b"session" => ChannelType::Session,
-            b"x11" => {
-                let originator_address =
-                    std::str::from_utf8(r.read_string().map_err(crate::Error::from)?)
-                        .map_err(crate::Error::from)?
-                        .to_owned();
-                let originator_port = r.read_u32().map_err(crate::Error::from)?;
+        let typ = match typ.as_str() {
+            "session" => ChannelType::Session,
+            "x11" => {
+                let originator_address = map_err!(String::decode(r))?;
+                let originator_port = map_err!(u32::decode(r))?;
                 ChannelType::X11 {
                     originator_address,
                     originator_port,
                 }
             }
-            b"direct-tcpip" => ChannelType::DirectTcpip(TcpChannelInfo::new(r)?),
-            b"forwarded-tcpip" => ChannelType::ForwardedTcpIp(TcpChannelInfo::new(r)?),
-            b"auth-agent@openssh.com" => ChannelType::AgentForward,
-            t => ChannelType::Unknown { typ: t.to_vec() },
+            "direct-tcpip" => ChannelType::DirectTcpip(TcpChannelInfo::decode(r)?),
+            "direct-streamlocal@openssh.com" => {
+                ChannelType::DirectStreamLocal(StreamLocalChannelInfo::decode(r)?)
+            }
+            "forwarded-tcpip" => ChannelType::ForwardedTcpIp(TcpChannelInfo::decode(r)?),
+            "forwarded-streamlocal@openssh.com" => {
+                ChannelType::ForwardedStreamLocal(StreamLocalChannelInfo::decode(r)?)
+            }
+            "auth-agent@openssh.com" => ChannelType::AgentForward,
+            _ => ChannelType::Unknown { typ },
         };
 
         Ok(Self {
@@ -53,34 +56,41 @@ impl OpenChannelMessage {
         sender_channel: u32,
         window_size: u32,
         packet_size: u32,
-    ) {
+    ) -> Result<(), crate::Error> {
         push_packet!(buffer, {
-            buffer.push(msg::CHANNEL_OPEN_CONFIRMATION);
-            buffer.push_u32_be(self.recipient_channel); // remote channel number.
-            buffer.push_u32_be(sender_channel); // our channel number.
-            buffer.push_u32_be(window_size);
-            buffer.push_u32_be(packet_size);
+            msg::CHANNEL_OPEN_CONFIRMATION.encode(buffer)?;
+            self.recipient_channel.encode(buffer)?; // remote channel number.
+            sender_channel.encode(buffer)?; // our channel number.
+            window_size.encode(buffer)?;
+            packet_size.encode(buffer)?;
         });
+        Ok(())
     }
 
     /// Pushes a failure message to the vec.
-    pub fn fail(&self, buffer: &mut CryptoVec, reason: u8, message: &[u8]) {
+    pub fn fail(
+        &self,
+        buffer: &mut CryptoVec,
+        reason: u8,
+        message: &[u8],
+    ) -> Result<(), crate::Error> {
         push_packet!(buffer, {
-            buffer.push(msg::CHANNEL_OPEN_FAILURE);
-            buffer.push_u32_be(self.recipient_channel);
-            buffer.push_u32_be(reason as u32);
-            buffer.extend_ssh_string(message);
-            buffer.extend_ssh_string(b"en");
+            msg::CHANNEL_OPEN_FAILURE.encode(buffer)?;
+            self.recipient_channel.encode(buffer)?;
+            (reason as u32).encode(buffer)?;
+            message.encode(buffer)?;
+            "en".encode(buffer)?;
         });
+        Ok(())
     }
 
     /// Pushes an unknown type error to the vec.
-    pub fn unknown_type(&self, buffer: &mut CryptoVec) {
+    pub fn unknown_type(&self, buffer: &mut CryptoVec) -> Result<(), crate::Error> {
         self.fail(
             buffer,
             msg::SSH_OPEN_UNKNOWN_CHANNEL_TYPE,
             b"Unknown channel type",
-        );
+        )
     }
 }
 
@@ -92,10 +102,12 @@ pub enum ChannelType {
         originator_port: u32,
     },
     DirectTcpip(TcpChannelInfo),
+    DirectStreamLocal(StreamLocalChannelInfo),
     ForwardedTcpIp(TcpChannelInfo),
+    ForwardedStreamLocal(StreamLocalChannelInfo),
     AgentForward,
     Unknown {
-        typ: Vec<u8>,
+        typ: String,
     },
 }
 
@@ -107,16 +119,28 @@ pub struct TcpChannelInfo {
     pub originator_port: u32,
 }
 
-impl TcpChannelInfo {
-    fn new(r: &mut Position) -> Result<Self, crate::Error> {
-        let host_to_connect = std::str::from_utf8(r.read_string().map_err(crate::Error::from)?)
-            .map_err(crate::Error::from)?
-            .to_owned();
-        let port_to_connect = r.read_u32().map_err(crate::Error::from)?;
-        let originator_address = std::str::from_utf8(r.read_string().map_err(crate::Error::from)?)
-            .map_err(crate::Error::from)?
-            .to_owned();
-        let originator_port = r.read_u32().map_err(crate::Error::from)?;
+#[derive(Debug)]
+pub struct StreamLocalChannelInfo {
+    pub socket_path: String,
+}
+
+impl Decode for StreamLocalChannelInfo {
+    type Error = ssh_encoding::Error;
+
+    fn decode(r: &mut impl Reader) -> Result<Self, Self::Error> {
+        let socket_path = String::decode(r)?.to_owned();
+        Ok(Self { socket_path })
+    }
+}
+
+impl Decode for TcpChannelInfo {
+    type Error = ssh_encoding::Error;
+
+    fn decode(r: &mut impl Reader) -> Result<Self, Self::Error> {
+        let host_to_connect = String::decode(r)?;
+        let port_to_connect = u32::decode(r)?;
+        let originator_address = String::decode(r)?;
+        let originator_port = u32::decode(r)?;
 
         Ok(Self {
             host_to_connect,
@@ -135,12 +159,14 @@ pub(crate) struct ChannelOpenConfirmation {
     pub maximum_packet_size: u32,
 }
 
-impl ChannelOpenConfirmation {
-    pub fn parse(r: &mut Position) -> Result<Self, crate::Error> {
-        let recipient_channel = r.read_u32().map_err(crate::Error::from)?;
-        let sender_channel = r.read_u32().map_err(crate::Error::from)?;
-        let initial_window_size = r.read_u32().map_err(crate::Error::from)?;
-        let maximum_packet_size = r.read_u32().map_err(crate::Error::from)?;
+impl Decode for ChannelOpenConfirmation {
+    type Error = ssh_encoding::Error;
+
+    fn decode(r: &mut impl Reader) -> Result<Self, Self::Error> {
+        let recipient_channel = u32::decode(r)?;
+        let sender_channel = u32::decode(r)?;
+        let initial_window_size = u32::decode(r)?;
+        let maximum_packet_size = u32::decode(r)?;
 
         Ok(Self {
             recipient_channel,

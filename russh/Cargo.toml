@@ -2,71 +2,135 @@
 authors = ["Pierre-Étienne Meunier <pe@pijul.org>"]
 description = "A client and server SSH library."
 documentation = "https://docs.rs/russh"
-edition = "2018"
-homepage = "https://pijul.org/russh"
+edition = "2021"
+homepage = "https://github.com/warp-tech/russh"
 keywords = ["ssh"]
 license = "Apache-2.0"
 name = "russh"
 readme = "../README.md"
 repository = "https://github.com/warp-tech/russh"
-version = "0.38.0-beta.1"
-rust-version = "1.60"
+version = "0.53.0-beta.1"
+rust-version = "1.75"
 
 [features]
-default = ["flate2"]
-openssl = ["russh-keys/openssl", "dep:openssl"]
-vendored-openssl = ["openssl/vendored", "russh-keys/vendored-openssl"]
+default = ["flate2", "aws-lc-rs"]
+aws-lc-rs = ["dep:aws-lc-rs"]
+async-trait = ["dep:async-trait"]
+legacy-ed25519-pkcs8-parser = ["yasna"]
+# Danger: 3DES cipher is insecure.
+des = ["dep:des"]
+# Danger: DSA algorithm is insecure.
+dsa = ["ssh-key/dsa"]
+ring = ["dep:ring"]
+_bench = ["dep:criterion"]
 
 [dependencies]
-aes = "0.8"
-aes-gcm = "0.10"
-async-trait = "0.1"
+aes.workspace = true
+async-trait = { workspace = true, optional = true }
+aws-lc-rs = { version = "1.13.1", optional = true }
 bitflags = "2.0"
-byteorder = "1.3"
-chacha20 = "0.9"
-curve25519-dalek = "4.0"
-poly1305 = "0.8"
+block-padding = { version = "0.3", features = ["std"] }
+byteorder.workspace = true
+bytes.workspace = true
+cbc = { version = "0.1" }
 ctr = "0.9"
-digest = "0.10"
-flate2 = { version = "1.0", optional = true }
-futures = "0.3"
+curve25519-dalek = "4.1.3"
+data-encoding = "2.3"
+delegate.workspace = true
+digest.workspace = true
+der = "0.7"
+des = { version = "0.8.1", optional = true }
+ecdsa = "0.16"
+ed25519-dalek = { version = "2.0", features = ["rand_core", "pkcs8"] }
+elliptic-curve = { version = "0.13", features = ["ecdh"] }
+enum_dispatch = "0.3.13"
+flate2 = { version = "1.0.15", optional = true }
+futures.workspace = true
 generic-array = "0.14"
-hmac = "0.12"
-log = "0.4"
-once_cell = "1.13"
-openssl = { version = "0.10", optional = true }
-rand = "0.8"
-russh-cryptovec = { version = "0.7.0", path = "../cryptovec" }
-russh-keys = { version = "0.37.1", path = "../russh-keys" }
-sha1 = "0.10"
-sha2 = "0.10"
+getrandom = { version = "0.2.15", features = ["js"] }
 hex-literal = "0.4"
-num-bigint = { version = "0.4", features = ["rand"] }
-subtle = "2.4"
-thiserror = "1.0"
-tokio = { version = "1.17.0", features = [
-    "io-util",
-    "rt-multi-thread",
-    "time",
-    "net",
-    "sync",
-    "macros",
-    "process",
+hmac.workspace = true
+inout = { version = "0.1", features = ["std"] }
+log.workspace = true
+md5 = "0.7"
+num-bigint = { version = "0.4.2", features = ["rand"] }
+# num-integer = "0.1"
+once_cell = "1.13"
+p256 = { version = "0.13", features = ["ecdh"] }
+p384 = { version = "0.13", features = ["ecdh"] }
+p521 = { version = "0.13", features = ["ecdh"] }
+pbkdf2 = "0.12"
+pkcs1 = "0.7"
+pkcs5 = "0.7"
+pkcs8 = { version = "0.10", features = ["pkcs5", "encryption"] }
+rand_core = { version = "0.6.4", features = ["getrandom", "std"] }
+rand.workspace = true
+ring = { version = "0.17.14", optional = true }
+rsa.workspace = true
+russh-cryptovec = { version = "0.52.0", path = "../cryptovec", features = [
+  "ssh-encoding",
 ] }
-tokio-util = "0.7"
+russh-util = { version = "0.52.0", path = "../russh-util" }
+sec1 = { version = "0.7", features = ["pkcs8", "der"] }
+sha1.workspace = true
+sha2.workspace = true
+signature.workspace = true
+spki = "0.7"
+ssh-encoding.workspace = true
+ssh-key.workspace = true
+subtle = "2.4"
+thiserror.workspace = true
+tokio = { workspace = true, features = ["io-util", "sync", "time"] }
+typenum = "1.17"
+yasna = { version = "0.5.0", features = [
+  "bit-vec",
+  "num-bigint",
+], optional = true }
+zeroize = "1.7"
+base64ct = "~1.6" # can be removed in 2024 edition
+criterion = { version = "0.3", optional = true, features = ["html_reports"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { workspace = true, features = [
+  "io-util",
+  "rt-multi-thread",
+  "time",
+  "net",
+] }
+home.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+pageant = { version = "0.0.3", path = "../pageant" }
 
 [dev-dependencies]
-anyhow = "1.0"
-env_logger = "0.10"
-tokio = { version = "1.17.0", features = [
-    "io-util",
-    "rt-multi-thread",
-    "time",
-    "net",
-    "sync",
-    "macros",
+anyhow = "1.0.4"
+env_logger.workspace = true
+clap = { version = "3.2.3", features = ["derive"] }
+tokio = { workspace = true, features = [
+  "io-std",
+  "io-util",
+  "rt-multi-thread",
+  "time",
+  "net",
+  "sync",
+  "macros",
+  "process",
 ] }
-russh-sftp = "1.1"
+rand = "0.8.5"
+shell-escape = "0.1"
+tokio-fd = "0.3"
+termion = "2"
+ratatui = "0.29.0"
+tempfile = "3.14.0"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+russh-sftp = "2.1.0"
+tokio.workspace = true
+tokio-stream.workspace = true
 
 [package.metadata.docs.rs]
-features = ["openssl"]
+all-features = true
+
+[[bench]]
+name = "ciphers"
+harness = false
