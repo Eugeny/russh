@@ -3,11 +3,13 @@ use std::sync::Arc;
 
 use rand::RngCore;
 use rand_core::OsRng;
-use russh::keys::PrivateKeyWithHashAlg;
-use russh::server::{self, Auth, Msg, Server as _, Session};
-use russh::{client, Channel, ChannelMsg};
 use ssh_key::PrivateKey;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+use crate::keys::PrivateKeyWithHashAlg;
+use crate::server::{self, Auth, Msg, Server as _, Session};
+use crate::tests::test_init;
+use crate::{client, Channel, ChannelMsg};
 
 pub const WINDOW_SIZE: u32 = 8 * 2048;
 
@@ -94,8 +96,7 @@ async fn test_channel_halves() -> Result<(), anyhow::Error> {
 }
 
 async fn run_test(test: impl ChannelDataCopy) -> Result<(), anyhow::Error> {
-    static INIT: std::sync::Once = std::sync::Once::new();
-    INIT.call_once(env_logger::init);
+    test_init();
 
     let addr = addr();
     let data = data();
@@ -120,7 +121,7 @@ async fn stream(
     let config = Arc::new(client::Config::default());
     let key = Arc::new(PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap());
 
-    let mut session = russh::client::connect(config, addr, Client).await?;
+    let mut session = crate::client::connect(config, addr, Client).await?;
     let channel = match session
         .authenticate_publickey(
             "user",
@@ -176,7 +177,7 @@ impl Server {
     }
 }
 
-impl russh::server::Server for Server {
+impl crate::server::Server for Server {
     type Handler = Self;
 
     fn new_client(&mut self, _: Option<std::net::SocketAddr>) -> Self::Handler {
@@ -184,7 +185,7 @@ impl russh::server::Server for Server {
     }
 }
 
-impl russh::server::Handler for Server {
+impl crate::server::Handler for Server {
     type Error = anyhow::Error;
 
     async fn auth_publickey(
@@ -217,7 +218,7 @@ impl russh::server::Handler for Server {
 
 struct Client;
 
-impl russh::client::Handler for Client {
+impl crate::client::Handler for Client {
     type Error = anyhow::Error;
 
     async fn check_server_key(&mut self, _: &ssh_key::PublicKey) -> Result<bool, Self::Error> {
