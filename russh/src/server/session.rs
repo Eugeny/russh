@@ -543,11 +543,11 @@ impl Session {
                     reading.set(start_reading(stream_read, buffer, opening_cipher));
                 }
                 () = &mut keepalive_timer => {
+                    self.common.alive_timeouts = self.common.alive_timeouts.saturating_add(1);
                     if self.common.config.keepalive_max != 0 && self.common.alive_timeouts > self.common.config.keepalive_max {
                         debug!("Timeout, client not responding to keepalives");
                         return Err(crate::Error::KeepaliveTimeout.into());
                     }
-                    self.common.alive_timeouts = self.common.alive_timeouts.saturating_add(1);
                     sent_keepalive = true;
                     self.keepalive_request()?;
                 }
