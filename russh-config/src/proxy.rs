@@ -1,4 +1,3 @@
-use std::net::SocketAddr;
 use std::pin::Pin;
 use std::process::Stdio;
 
@@ -6,6 +5,7 @@ use futures::ready;
 use futures::task::*;
 use tokio::io::ReadBuf;
 use tokio::net::TcpStream;
+use tokio::net::ToSocketAddrs;
 use tokio::process::Command;
 
 /// A type to implement either a TCP socket, or proxying through an external command.
@@ -18,8 +18,8 @@ pub enum Stream {
 
 impl Stream {
     /// Connect a direct TCP stream (as opposed to a proxied one).
-    pub async fn tcp_connect(addr: &SocketAddr) -> Result<Stream, std::io::Error> {
-        Ok(Stream::Tcp(tokio::net::TcpStream::connect(addr).await?))
+    pub async fn tcp_connect(addrs: impl ToSocketAddrs) -> Result<Stream, std::io::Error> {
+        Ok(Stream::Tcp(tokio::net::TcpStream::connect(addrs).await?))
     }
     /// Connect through a proxy command.
     pub async fn proxy_command(cmd: &str, args: &[&str]) -> Result<Stream, std::io::Error> {
