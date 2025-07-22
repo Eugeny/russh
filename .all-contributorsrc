@@ -580,6 +580,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "plaflamme",
+      "name": "Philippe Laflamme",
+      "avatar_url": "https://avatars.githubusercontent.com/u/484152?v=4",
+      "profile": "https://github.com/plaflamme",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,
