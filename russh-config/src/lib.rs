@@ -25,7 +25,7 @@ pub enum Error {
 mod proxy;
 pub use proxy::*;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Config {
     pub user: String,
     pub host_name: String,
@@ -296,5 +296,11 @@ Host test_host
             config.user_known_hosts_file.as_deref()
         );
         assert!(!config.strict_host_key_checking);
+    }
+
+    #[test]
+    fn is_clone() {
+        let config: Config = Config::default("some_host");
+        let _ = config.clone();
     }
 }
