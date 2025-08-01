@@ -13,7 +13,7 @@ version = "0.53.0"
 rust-version = "1.75"
 
 [features]
-default = ["flate2", "aws-lc-rs"]
+default = ["flate2", "aws-lc-rs", "rsa"]
 aws-lc-rs = ["dep:aws-lc-rs"]
 async-trait = ["dep:async-trait"]
 legacy-ed25519-pkcs8-parser = ["yasna"]
@@ -22,6 +22,7 @@ des = ["dep:des"]
 # Danger: DSA algorithm is insecure.
 dsa = ["ssh-key/dsa"]
 ring = ["dep:ring"]
+rsa = ["dep:rsa", "dep:pkcs1", "ssh-key/rsa", "ssh-key/rsa-sha1"]
 _bench = ["dep:criterion"]
 
 [dependencies]
@@ -60,13 +61,13 @@ p256 = { version = "0.13", features = ["ecdh"] }
 p384 = { version = "0.13", features = ["ecdh"] }
 p521 = { version = "0.13", features = ["ecdh"] }
 pbkdf2 = "0.12"
-pkcs1 = "0.7"
+pkcs1 = { version = "0.7", optional = true }
 pkcs5 = "0.7"
 pkcs8 = { version = "0.10", features = ["pkcs5", "encryption"] }
 rand_core = { version = "0.6.4", features = ["getrandom", "std"] }
 rand.workspace = true
 ring = { version = "0.17.14", optional = true }
-rsa.workspace = true
+rsa = { version = "0.9", optional = true }
 russh-cryptovec = { version = "0.52.0", path = "../cryptovec", features = [
   "ssh-encoding",
 ] }

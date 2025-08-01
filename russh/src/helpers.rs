@@ -1,8 +1,6 @@
 use std::fmt::Debug;
 
 use ssh_encoding::{Decode, Encode};
-use ssh_key::private::KeypairData;
-use ssh_key::Algorithm;
 
 #[doc(hidden)]
 pub trait EncodedExt {
@@ -68,8 +66,9 @@ pub use map_err;
 #[doc(hidden)]
 pub fn sign_with_hash_alg(key: &PrivateKeyWithHashAlg, data: &[u8]) -> ssh_key::Result<Vec<u8>> {
     Ok(match key.key_data() {
-        KeypairData::Rsa(rsa_keypair) => {
-            let Algorithm::Rsa { hash } = key.algorithm() else {
+        #[cfg(feature = "rsa")]
+        ssh_key::private::KeypairData::Rsa(rsa_keypair) => {
+            let ssh_key::Algorithm::Rsa { hash } = key.algorithm() else {
                 unreachable!();
             };
             signature::Signer::try_sign(&(rsa_keypair, hash), data)?.encoded()?

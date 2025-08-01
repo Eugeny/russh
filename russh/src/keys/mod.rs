@@ -5,7 +5,7 @@
 //!
 //! The following example shows how to do all these in a single example:
 //! start and SSH agent server, connect to it with a client, decipher
-//! an encrypted private key (the password is `b"blabla"`), send it to
+//! an encrypted ED25519 private key (the password is `b"blabla"`), send it to
 //! the agent, and ask the agent to sign a piece of data
 //! (`b"Please sign this"`, below).
 //!
@@ -21,7 +21,7 @@
 //!     }
 //! }
 //!
-//! const PKCS8_ENCRYPTED: &'static str = "-----BEGIN ENCRYPTED PRIVATE KEY-----\nMIIFLTBXBgkqhkiG9w0BBQ0wSjApBgkqhkiG9w0BBQwwHAQITo1O0b8YrS0CAggA\nMAwGCCqGSIb3DQIJBQAwHQYJYIZIAWUDBAEqBBBtLH4T1KOfo1GGr7salhR8BIIE\n0KN9ednYwcTGSX3hg7fROhTw7JAJ1D4IdT1fsoGeNu2BFuIgF3cthGHe6S5zceI2\nMpkfwvHbsOlDFWMUIAb/VY8/iYxhNmd5J6NStMYRC9NC0fVzOmrJqE1wITqxtORx\nIkzqkgFUbaaiFFQPepsh5CvQfAgGEWV329SsTOKIgyTj97RxfZIKA+TR5J5g2dJY\nj346SvHhSxJ4Jc0asccgMb0HGh9UUDzDSql0OIdbnZW5KzYJPOx+aDqnpbz7UzY/\nP8N0w/pEiGmkdkNyvGsdttcjFpOWlLnLDhtLx8dDwi/sbEYHtpMzsYC9jPn3hnds\nTcotqjoSZ31O6rJD4z18FOQb4iZs3MohwEdDd9XKblTfYKM62aQJWH6cVQcg+1C7\njX9l2wmyK26Tkkl5Qg/qSfzrCveke5muZgZkFwL0GCcgPJ8RixSB4GOdSMa/hAMU\nkvFAtoV2GluIgmSe1pG5cNMhurxM1dPPf4WnD+9hkFFSsMkTAuxDZIdDk3FA8zof\nYhv0ZTfvT6V+vgH3Hv7Tqcxomy5Qr3tj5vvAqqDU6k7fC4FvkxDh2mG5ovWvc4Nb\nXv8sed0LGpYitIOMldu6650LoZAqJVv5N4cAA2Edqldf7S2Iz1QnA/usXkQd4tLa\nZ80+sDNv9eCVkfaJ6kOVLk/ghLdXWJYRLenfQZtVUXrPkaPpNXgD0dlaTN8KuvML\nUw/UGa+4ybnPsdVflI0YkJKbxouhp4iB4S5ACAwqHVmsH5GRnujf10qLoS7RjDAl\no/wSHxdT9BECp7TT8ID65u2mlJvH13iJbktPczGXt07nBiBse6OxsClfBtHkRLzE\nQF6UMEXsJnIIMRfrZQnduC8FUOkfPOSXc8r9SeZ3GhfbV/DmWZvFPCpjzKYPsM5+\nN8Bw/iZ7NIH4xzNOgwdp5BzjH9hRtCt4sUKVVlWfEDtTnkHNOusQGKu7HkBF87YZ\nRN/Nd3gvHob668JOcGchcOzcsqsgzhGMD8+G9T9oZkFCYtwUXQU2XjMN0R4VtQgZ\nrAxWyQau9xXMGyDC67gQ5xSn+oqMK0HmoW8jh2LG/cUowHFAkUxdzGadnjGhMOI2\nzwNJPIjF93eDF/+zW5E1l0iGdiYyHkJbWSvcCuvTwma9FIDB45vOh5mSR+YjjSM5\nnq3THSWNi7Cxqz12Q1+i9pz92T2myYKBBtu1WDh+2KOn5DUkfEadY5SsIu/Rb7ub\n5FBihk2RN3y/iZk+36I69HgGg1OElYjps3D+A9AjVby10zxxLAz8U28YqJZm4wA/\nT0HLxBiVw+rsHmLP79KvsT2+b4Diqih+VTXouPWC/W+lELYKSlqnJCat77IxgM9e\nYIhzD47OgWl33GJ/R10+RDoDvY4koYE+V5NLglEhbwjloo9Ryv5ywBJNS7mfXMsK\n/uf+l2AscZTZ1mhtL38efTQCIRjyFHc3V31DI0UdETADi+/Omz+bXu0D5VvX+7c6\nb1iVZKpJw8KUjzeUV8yOZhvGu3LrQbhkTPVYL555iP1KN0Eya88ra+FUKMwLgjYr\nJkUx4iad4dTsGPodwEP/Y9oX/Qk3ZQr+REZ8lg6IBoKKqqrQeBJ9gkm1jfKE6Xkc\nCog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux\n-----END ENCRYPTED PRIVATE KEY-----\n";
+//! const PKCS8_ENCRYPTED: &'static str = "-----BEGIN ENCRYPTED PRIVATE KEY-----\nMIGjMF8GCSqGSIb3DQEFDTBSMDEGCSqGSIb3DQEFDDAkBBAWQiUHKoocuxfoZ/hF\nYTjkAgIIADAMBggqhkiG9w0CCQUAMB0GCWCGSAFlAwQBKgQQ83d1d5/S2wz475uC\nCUrE7QRAvdVpD5e3zKH/MZjilWrMOm6cyI1LKBCssLztPyvOALtroLAPlp7WYWfu\n9Sncmm7u14n2lia7r1r5I3VBsVuH0g==\n-----END ENCRYPTED PRIVATE KEY-----\n";
 //!
 //! #[cfg(unix)]
 //! fn main() {
@@ -137,6 +137,7 @@ pub enum Error {
     #[error(transparent)]
     IO(#[from] std::io::Error),
 
+    #[cfg(feature = "rsa")]
     #[error("Rsa: {0}")]
     Rsa(#[from] rsa::Error),
 
@@ -152,6 +153,7 @@ pub enum Error {
     Der(#[from] der::Error),
     #[error("Spki: {0}")]
     Spki(#[from] spki::Error),
+    #[cfg(feature = "rsa")]
     #[error("Pkcs1: {0}")]
     Pkcs1(#[from] pkcs1::Error),
     #[error("Pkcs8: {0}")]
@@ -301,6 +303,7 @@ dP3jryYgvsCIBAA5jMWSjrmnOTXhidqcOy4xYCrAttzSnZ/cUadfBenL+DQq6neffw7j8r
 sJWR7W+cGvJ/vLsw==
 -----END OPENSSH PRIVATE KEY-----";
 
+    #[cfg(feature = "rsa")]
     const RSA_KEY: &str = "-----BEGIN OPENSSH PRIVATE KEY-----
 b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAABFwAAAAdzc2gtcn
 NhAAAAAwEAAQAAAQEAuSvQ9m76zhRB4m0BUKPf17lwccj7KQ1Qtse63AOqP/VYItqEH8un
@@ -377,6 +380,7 @@ Z9w7lshQhqowtrbLDFw4rXAxZuE=
         // We can't encode attributes, skip test_decode_encode_symmetry.
     }
 
+    #[cfg(feature = "rsa")]
     #[test]
     fn test_decode_rsa_secret_key() {
         env_logger::try_init().unwrap_or(());
@@ -509,6 +513,7 @@ Ve0k2ddxoEsSE15H4lgNHM2iuYKzIqZJOReHRCTff6QGgMYPDqDfFfL1Hc1Ntql0pwAAAA
         parse_public_key_base64(key).unwrap();
     }
 
+    #[cfg(feature = "rsa")]
     #[test]
     fn test_nikao() {
         env_logger::try_init().unwrap_or(());
@@ -543,6 +548,7 @@ QaChXiDsryJZwsRnruvMRX9nedtqHrgnIsJLTXjppIhGhq5Kg4RQfOU=
         decode_secret_key(key, None).unwrap();
     }
 
+    #[cfg(feature = "rsa")]
     #[test]
     fn test_decode_pkcs8_rsa_secret_key() {
         // Generated using: ssh-keygen -t rsa -b 1024 -m pkcs8 -f $file
@@ -680,6 +686,7 @@ ocyR
         assert_eq!(original_key_bytes, encoded_key_bytes);
     }
 
+    #[cfg(feature = "rsa")]
     #[test]
     fn test_o01eg() {
         env_logger::try_init().unwrap_or(());
@@ -718,6 +725,7 @@ br8gXU8KyiY9sZVbmplRPF+ar462zcI2kt0a18mr0vbrdqp2eMjb37QDbVBJ+rPE
         decode_secret_key(key, Some("12345")).unwrap();
     }
 
+    #[cfg(feature = "rsa")]
     pub const PKCS8_RSA: &str = "-----BEGIN RSA PRIVATE KEY-----
 MIIEpAIBAAKCAQEAwBGetHjW+3bDQpVktdemnk7JXgu1NBWUM+ysifYLDBvJ9ttX
 GNZSyQKA4v/dNr0FhAJ8I9BuOTjYCy1YfKylhl5D/DiSSXFPsQzERMmGgAlYvU2U
@@ -747,6 +755,7 @@ xV/JrzLAwPoKk3bkqys3bUmgo6DxVC/6RmMwPQ0rmpw78kOgEej90g==
 -----END RSA PRIVATE KEY-----
 ";
 
+    #[cfg(feature = "rsa")]
     #[test]
     fn test_pkcs8() {
         env_logger::try_init().unwrap_or(());
@@ -754,6 +763,7 @@ xV/JrzLAwPoKk3bkqys3bUmgo6DxVC/6RmMwPQ0rmpw78kOgEej90g==
         decode_secret_key(PKCS8_RSA, Some("blabla")).unwrap();
     }
 
+    #[cfg(feature = "rsa")]
     const PKCS8_ENCRYPTED: &str = "-----BEGIN ENCRYPTED PRIVATE KEY-----
 MIIFLTBXBgkqhkiG9w0BBQ0wSjApBgkqhkiG9w0BBQwwHAQITo1O0b8YrS0CAggA
 MAwGCCqGSIb3DQIJBQAwHQYJYIZIAWUDBAEqBBBtLH4T1KOfo1GGr7salhR8BIIE
@@ -815,6 +825,7 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
         ssh_key::PublicKey::decode(&key).unwrap();
     }
 
+    #[cfg(feature = "rsa")]
     #[test]
     fn test_pkcs8_encrypted() {
         env_logger::try_init().unwrap_or(());
@@ -877,21 +888,21 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
     }
 
     #[tokio::test]
-    #[cfg(unix)]
+    #[cfg(all(unix, feature = "rsa"))]
     async fn test_client_agent_rsa() {
         let key = decode_secret_key(PKCS8_ENCRYPTED, Some("blabla")).unwrap();
         test_client_agent(key).await.expect("ssh-agent test failed")
     }
 
     #[tokio::test]
-    #[cfg(unix)]
+    #[cfg(all(unix, feature = "rsa"))]
     async fn test_client_agent_openssh_rsa() {
         let key = decode_secret_key(RSA_KEY, None).unwrap();
         test_client_agent(key).await.expect("ssh-agent test failed")
     }
 
     #[test]
-    #[cfg(unix)]
+    #[cfg(all(unix, feature = "rsa"))]
     fn test_agent() {
         env_logger::try_init().unwrap_or(());
         let dir = tempfile::tempdir().unwrap();
@@ -912,9 +923,10 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
             }
         }
         let agent_path_ = agent_path.clone();
+        let (tx, rx) = tokio::sync::oneshot::channel();
         core.spawn(async move {
             let mut listener = tokio::net::UnixListener::bind(&agent_path_).unwrap();
-
+            let _ = tx.send(());
             agent::server::serve(
                 Incoming {
                     listener: &mut listener,
@@ -923,9 +935,12 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
             )
             .await
         });
+
         let key = decode_secret_key(PKCS8_ENCRYPTED, Some("blabla")).unwrap();
         core.block_on(async move {
             let public = key.public_key();
+            // make sure the listener created the file handle
+            rx.await.unwrap();
             let stream = tokio::net::UnixStream::connect(&agent_path).await.unwrap();
             let mut client = agent::client::AgentClient::connect(stream);
             client
