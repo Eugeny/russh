@@ -49,6 +49,7 @@ fn pkcs8_pki_into_keypair_data(pki: PrivateKeyInfo<'_>) -> Result<KeypairData, E
                 private: pk,
             }))
         }
+        #[cfg(feature = "rsa")]
         pkcs1::ALGORITHM_OID => {
             let sk = &pkcs1::RsaPrivateKey::try_from(pki.private_key)?;
             let pk = rsa::RsaPrivateKey::from_components(
@@ -137,6 +138,7 @@ pub fn encode_pkcs8(key: &ssh_key::PrivateKey) -> Result<Vec<u8>, Error> {
             let sk: ed25519_dalek::SigningKey = pair.try_into()?;
             sk.to_pkcs8_der()?
         }
+        #[cfg(feature = "rsa")]
         ssh_key::private::KeypairData::Rsa(ref pair) => {
             let sk: rsa::RsaPrivateKey = pair.try_into()?;
             sk.to_pkcs8_der()?

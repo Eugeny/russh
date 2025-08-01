@@ -14,7 +14,7 @@
 //
 use ssh_encoding::Decode;
 use ssh_key::public::KeyData;
-use ssh_key::{Algorithm, EcdsaCurve, HashAlg, PublicKey};
+use ssh_key::{Algorithm, EcdsaCurve, PublicKey};
 
 use crate::keys::Error;
 
@@ -109,12 +109,15 @@ pub const ALL_KEY_TYPES: &[Algorithm] = &[
         curve: EcdsaCurve::NistP521,
     },
     Algorithm::Ed25519,
+    #[cfg(feature = "rsa")]
     Algorithm::Rsa { hash: None },
+    #[cfg(feature = "rsa")]
     Algorithm::Rsa {
-        hash: Some(HashAlg::Sha256),
+        hash: Some(ssh_key::HashAlg::Sha256),
     },
+    #[cfg(feature = "rsa")]
     Algorithm::Rsa {
-        hash: Some(HashAlg::Sha512),
+        hash: Some(ssh_key::HashAlg::Sha512),
     },
     Algorithm::SkEcdsaSha2NistP256,
     Algorithm::SkEd25519,
