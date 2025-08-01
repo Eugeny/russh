@@ -45,7 +45,7 @@ use std::time::Duration;
 use futures::task::{Context, Poll};
 use futures::Future;
 use kex::ClientKex;
-use log::{debug, error, trace};
+use log::{debug, error, warn, trace};
 use russh_util::time::Instant;
 use ssh_encoding::Decode;
 use ssh_key::{Algorithm, Certificate, HashAlg, PrivateKey, PublicKey};
@@ -876,6 +876,12 @@ pub async fn connect<H: Handler + Send + 'static, A: tokio::net::ToSocketAddrs>(
     handler: H,
 ) -> Result<Handle<H>, H::Error> {
     let socket = map_err!(tokio::net::TcpStream::connect(addrs).await)?;
+    if config.as_ref().nodelay {
+        if let Err(e) = socket.set_nodelay(true) {
+            warn!("set_nodelay() failed: {e:?}");
+        }
+    }
+
     connect_stream(config, socket, handler).await
 }
 
@@ -1650,6 +1656,8 @@ pub struct Config {
     pub anonymous: bool,
     /// DH dynamic group exchange parameters.
     pub gex: GexParams,
+    /// If active, invoke `set_nodelay(true)` on the ssh socket; disabled by default (i.e. Nagle's algorithm is active).
+    pub nodelay: bool,
 }
 
 impl Default for Config {
@@ -1670,6 +1678,7 @@ impl Default for Config {
             keepalive_max: 3,
             anonymous: false,
             gex: Default::default(),
+            nodelay: false,
         }
     }
 }
