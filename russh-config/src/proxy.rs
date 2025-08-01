@@ -4,8 +4,7 @@ use std::process::Stdio;
 use futures::ready;
 use futures::task::*;
 use tokio::io::ReadBuf;
-use tokio::net::TcpStream;
-use tokio::net::ToSocketAddrs;
+use tokio::net::{TcpStream, ToSocketAddrs};
 use tokio::process::Command;
 
 /// A type to implement either a TCP socket, or proxying through an external command.

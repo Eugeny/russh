@@ -45,7 +45,7 @@ use std::time::Duration;
 use futures::task::{Context, Poll};
 use futures::Future;
 use kex::ClientKex;
-use log::{debug, error, warn, trace};
+use log::{debug, error, trace, warn};
 use russh_util::time::Instant;
 use ssh_encoding::Decode;
 use ssh_key::{Algorithm, Certificate, HashAlg, PrivateKey, PublicKey};
