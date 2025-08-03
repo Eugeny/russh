@@ -212,15 +212,6 @@ impl<C> CommonSession<C> {
         };
     }
 
-    /// Send a single byte message onto the channel.
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn byte(&mut self, channel: ChannelId, msg: u8) -> Result<(), crate::Error> {
-        if let Some(ref mut enc) = self.encrypted {
-            enc.byte(channel, msg)?
-        }
-        Ok(())
-    }
-
     pub(crate) fn reset_seqn(&mut self) {
         self.packet_writer.reset_seqn();
     }

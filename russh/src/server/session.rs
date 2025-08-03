@@ -887,12 +887,20 @@ impl Session {
 
     /// Close a channel.
     pub fn close(&mut self, channel: ChannelId) -> Result<(), Error> {
-        self.common.byte(channel, msg::CHANNEL_CLOSE)
+        if let Some(ref mut enc) = self.common.encrypted {
+            enc.close(channel)
+        } else {
+            unreachable!()
+        }
     }
 
     /// Send EOF to a channel
     pub fn eof(&mut self, channel: ChannelId) -> Result<(), Error> {
-        self.common.byte(channel, msg::CHANNEL_EOF)
+        if let Some(ref mut enc) = self.common.encrypted {
+            enc.eof(channel)
+        } else {
+            unreachable!()
+        }
     }
 
     /// Send data to a channel. On session channels, `extended` can be
