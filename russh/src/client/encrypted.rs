@@ -539,8 +539,8 @@ impl Session {
                 debug!("channel_window_adjust amount: {:?}", amount);
                 if let Some(ref mut enc) = self.common.encrypted {
                     if let Some(ref mut channel) = enc.channels.get_mut(&channel_num) {
-                        channel.recipient_window_size += amount;
-                        new_size = channel.recipient_window_size;
+                        new_size = channel.recipient_window_size.saturating_add(amount);
+                        channel.recipient_window_size = new_size;
                     } else {
                         return Err(crate::Error::WrongChannel.into());
                     }

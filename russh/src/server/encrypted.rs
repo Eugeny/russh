@@ -659,8 +659,8 @@ impl Session {
                 let mut new_size = 0;
                 if let Some(ref mut enc) = self.common.encrypted {
                     if let Some(channel) = enc.channels.get_mut(&channel_num) {
-                        channel.recipient_window_size += amount;
-                        new_size = channel.recipient_window_size;
+                        new_size = channel.recipient_window_size.saturating_add(amount);
+                        channel.recipient_window_size = new_size;
                     } else {
                         return Err(Error::WrongChannel.into());
                     }
