@@ -767,6 +767,13 @@ impl Session {
                     // The flush after the select sees the elapsed limit.
                     debug!("rekey time limit reached");
                 }
+                t = handler.trigger() => {
+                    debug!("handler trigger is invoked");
+                    match t {
+                        Ok(d) => handler.process(d,&mut self).await?,
+                        Err(e) => return Err(e)
+                    }
+                }
                 () = &mut keepalive_timer => {
                     self.common.alive_timeouts = self.common.alive_timeouts.saturating_add(1);
                     if self.common.config.keepalive_max != 0 && self.common.alive_timeouts > self.common.config.keepalive_max {
@@ -1597,12 +1604,14 @@ mod tests {
 
     impl crate::server::Handler for TestHandler {
         type Error = crate::Error;
+        type Data = ();
     }
 
     struct AcceptNoneHandler;
 
     impl crate::server::Handler for AcceptNoneHandler {
         type Error = crate::Error;
+        type Data = ();
 
         async fn auth_none(&mut self, _user: &str) -> Result<Auth, Self::Error> {
             Ok(Auth::Accept)

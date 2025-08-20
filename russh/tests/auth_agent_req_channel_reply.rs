@@ -33,6 +33,7 @@ struct Server;
 
 impl server::Handler for Server {
     type Error = russh::Error;
+    type Data = ();
 
     async fn auth_publickey(
         &mut self,
