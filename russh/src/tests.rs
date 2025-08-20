@@ -109,6 +109,7 @@ mod compress {
 
     impl server::Handler for Server {
         type Error = super::Error;
+        type Data = ();
 
         async fn channel_open_session(
             &mut self,
@@ -283,6 +284,7 @@ mod channels {
 
         impl server::Handler for ServerHandle {
             type Error = crate::Error;
+            type Data = ();
 
             async fn auth_publickey(
                 &mut self,
@@ -354,6 +356,7 @@ mod channels {
 
         impl server::Handler for ServerHandle {
             type Error = crate::Error;
+            type Data = ();
 
             async fn auth_publickey(
                 &mut self,
@@ -438,6 +441,7 @@ mod channels {
 
         impl server::Handler for ServerHandle {
             type Error = crate::Error;
+            type Data = ();
 
             async fn auth_publickey(
                 &mut self,
@@ -602,6 +606,7 @@ mod channels {
 
         impl server::Handler for ServerHandle {
             type Error = crate::Error;
+            type Data = ();
 
             async fn auth_publickey(
                 &mut self,
@@ -741,6 +746,7 @@ mod server_kex_junk {
 
     impl server::Handler for Server {
         type Error = super::Error;
+        type Data = ();
     }
 }
 

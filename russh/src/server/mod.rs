@@ -834,7 +834,7 @@ pub trait Handler: Sized {
     /// ```
     ///
     fn trigger(&mut self) -> impl Future<Output = Result<Self::Data, Self::Error>> + Send {
-        return std::future::pending();
+        std::future::pending()
     }
 
     /// Called after [`trigger`], See [`trigger`] for more.
