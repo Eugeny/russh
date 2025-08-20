@@ -809,12 +809,12 @@ pub trait Handler: Sized {
     /// use russh::server::Handler;
     ///
     /// struct App{
-    ///     foo: String
+    ///     foo: String,
     ///     recv: Receiver<String>,
     ///     trigger: Receiver<String>,
     /// }
     ///
-    /// impl App for Handler {
+    /// impl Handler for App {
     ///     type Error = russh::Error;
     ///     type Data = String;
     ///     async fn trigger(&mut self) -> Result<Self::Data, Self::Error> {
