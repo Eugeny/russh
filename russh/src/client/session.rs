@@ -128,11 +128,13 @@ impl Session {
 
                     ((1 + 5 * terminal_modes.len()) as u32).encode(&mut enc.write)?;
                     for &(code, value) in terminal_modes {
+                        if code == Pty::TTY_OP_END {
+                            continue;
+                        }
                         (code as u8).encode(&mut enc.write)?;
                         value.encode(&mut enc.write)?;
                     }
-                    // 0 code (to terminate the list)
-                    0u8.encode(&mut enc.write)?;
+                    (Pty::TTY_OP_END as u8).encode(&mut enc.write)?;
                 });
             }
         }
