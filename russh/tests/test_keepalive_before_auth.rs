@@ -26,6 +26,7 @@ struct TestServer;
 
 impl server::Handler for TestServer {
     type Error = russh::Error;
+    type Data = ();
 }
 
 /// Counts how many times the client session polls its socket for reading.

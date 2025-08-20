@@ -105,6 +105,7 @@ impl server::Server for Server {
 
 impl server::Handler for Server {
     type Error = anyhow::Error;
+    type Data = ();
 
     async fn auth_publickey(
         &mut self,
