@@ -132,6 +132,10 @@ impl<C> CommonSession<C> {
             self.packet_writer
                 .set_cipher(newkeys.cipher.local_to_remote);
             self.strict_kex = self.strict_kex || newkeys.names.strict_kex;
+
+            // Reset compression state
+            enc.client_compression.init_compress(self.packet_writer.compress());
+            enc.server_compression.init_decompress(&mut enc.decompress);
         }
     }
 
