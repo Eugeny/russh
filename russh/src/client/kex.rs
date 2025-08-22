@@ -301,7 +301,7 @@ impl ClientKex {
                     Ok(())
                 })?;
 
-                let reset_seqn = newkeys.names.strict_kex;
+                let reset_seqn = self.cause.is_strict_kex(&newkeys.names);
 
                 self.state = ClientKexState::WaitingForNewKeys {
                     server_host_key,
