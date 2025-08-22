@@ -131,7 +131,7 @@ impl<C> CommonSession<C> {
             self.remote_to_local = newkeys.cipher.remote_to_local;
             self.packet_writer
                 .set_cipher(newkeys.cipher.local_to_remote);
-            self.strict_kex = self.strict_kex || newkeys.names.strict_kex;
+            self.strict_kex = self.strict_kex || newkeys.names.strict_kex();
 
             // Reset compression state
             enc.client_compression
@@ -141,6 +141,7 @@ impl<C> CommonSession<C> {
     }
 
     pub fn encrypted(&mut self, state: EncryptedState, newkeys: NewKeys) {
+        let strict_kex = newkeys.names.strict_kex();
         self.encrypted = Some(Encrypted {
             exchange: Some(newkeys.exchange),
             kex: newkeys.kex,
@@ -164,7 +165,7 @@ impl<C> CommonSession<C> {
         self.remote_to_local = newkeys.cipher.remote_to_local;
         self.packet_writer
             .set_cipher(newkeys.cipher.local_to_remote);
-        self.strict_kex = newkeys.names.strict_kex;
+        self.strict_kex = strict_kex;
     }
 
     /// Send a disconnect message.

@@ -1118,7 +1118,7 @@ async fn reply<H: Handler + Send>(
                 KexProgress::Done { newkeys, .. } => {
                     debug!("kex impl has completed");
                     session.common.strict_kex =
-                        session.common.strict_kex || newkeys.names.strict_kex;
+                        session.common.strict_kex || newkeys.names.strict_kex();
 
                     if let Some(ref mut enc) = session.common.encrypted {
                         // This is a rekey

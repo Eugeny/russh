@@ -117,12 +117,20 @@ impl ClientKex {
                 let names = {
                     // read algorithms from packet.
                     self.exchange.server_kex_init.extend(&input.buffer);
-                    negotiation::Client::read_kex(&input.buffer, &self.config.preferred, None)?
+                    negotiation::Client::read_kex(
+                        &input.buffer,
+                        &self.config.preferred,
+                        None,
+                        &self.cause,
+                    )?
                 };
                 debug!("negotiated algorithms: {names:?}");
 
                 // seqno has already been incremented after read()
-                if self.cause.is_strict_kex(&names) && !self.cause.is_rekey() && input.seqn.0 != 1 {
+                if (names.strict_kex() || self.cause.is_strict_rekey())
+                    && !self.cause.is_rekey()
+                    && input.seqn.0 != 1
+                {
                     return Err(strict_kex_violation(
                         msg::KEXINIT,
                         input.seqn.0 as usize - 1,
@@ -301,7 +309,7 @@ impl ClientKex {
                     Ok(())
                 })?;
 
-                let reset_seqn = self.cause.is_strict_kex(&newkeys.names);
+                let reset_seqn = newkeys.names.strict_kex() || self.cause.is_strict_rekey();
 
                 self.state = ClientKexState::WaitingForNewKeys {
                     server_host_key,
