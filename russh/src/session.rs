@@ -52,6 +52,8 @@ pub(crate) struct Encrypted {
     pub client_compression: crate::compression::Compression,
     pub decompress: crate::compression::Decompress,
     pub rekey_wanted: bool,
+    pub received_extensions: Vec<String>,
+    pub extension_info_awaiters: HashMap<String, Vec<oneshot::Sender<()>>>,
 }
 
 pub(crate) struct CommonSession<Config> {
@@ -151,6 +153,8 @@ impl<C> CommonSession<C> {
             client_compression: newkeys.names.client_compression,
             decompress: crate::compression::Decompress::None,
             rekey_wanted: false,
+            received_extensions: Vec::new(),
+            extension_info_awaiters: HashMap::new(),
         });
         self.remote_to_local = newkeys.cipher.remote_to_local;
         self.packet_writer
@@ -183,6 +187,29 @@ impl<C> CommonSession<C> {
             };
         }
         Ok(())
+    }
+
+    /// Send a debug message.
+    pub fn debug(
+        &mut self,
+        always_display: bool,
+        message: &str,
+        language_tag: &str,
+    ) -> Result<(), crate::Error> {
+        let debug = |buf: &mut CryptoVec| {
+            push_packet!(buf, {
+                msg::DEBUG.encode(buf)?;
+                (always_display as u8).encode(buf)?;
+                message.encode(buf)?;
+                language_tag.encode(buf)?;
+            });
+            Ok(())
+        };
+        return if let Some(ref mut enc) = self.encrypted {
+            debug(&mut enc.write)
+        } else {
+            debug(&mut self.packet_writer.buffer().buffer)
+        };
     }
 
     /// Send a single byte message onto the channel.

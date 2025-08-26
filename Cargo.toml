@@ -28,7 +28,7 @@ signature = "2.2"
 ssh-encoding = { version = "0.2", features = [
     "bytes",
 ] }
-ssh-key = { version = "=0.6.9", features = [
+ssh-key = { version = "=0.6.10", features = [
     "ed25519",
     "rsa",
     "rsa-sha1",
@@ -37,6 +37,7 @@ ssh-key = { version = "=0.6.9", features = [
     "p521",
     "encryption",
     "ppk",
+    "hazmat-allow-insecure-rsa-keys",
 ], package = "internal-russh-forked-ssh-key" }
 thiserror = "1.0.30"
 tokio = { version = "1.17.0" }

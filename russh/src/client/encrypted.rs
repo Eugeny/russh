@@ -122,7 +122,8 @@ impl Session {
 
                             let remaining_methods: MethodSet =
                                 (&map_err!(NameList::decode(&mut r))?).into();
-                            debug!("remaining methods {remaining_methods:?}",);
+                            let partial_success = map_err!(u8::decode(&mut r))? != 0;
+                            debug!("remaining methods {remaining_methods:?}, partial success {partial_success:?}");
                             auth_request.methods = remaining_methods.clone();
 
                             let no_more_methods = auth_request.methods.is_empty();
@@ -130,6 +131,7 @@ impl Session {
                             self.sender
                                 .send(Reply::AuthFailure {
                                     proceed_with_methods: remaining_methods,
+                                    partial_success,
                                 })
                                 .map_err(|_| crate::Error::SendError)?;
 
@@ -281,6 +283,14 @@ impl Session {
             } else {
                 let data = Vec::<u8>::decode(r)?;
                 debug!("* {name:?} (unknown, data: {data:?})");
+            }
+            if let Some(ref mut enc) = self.common.encrypted {
+                enc.received_extensions.push(name.clone());
+                if let Some(mut senders) = enc.extension_info_awaiters.remove(&name) {
+                    senders.drain(..).for_each(|w| {
+                        let _ = w.send(());
+                    });
+                }
             }
         }
         Ok(())

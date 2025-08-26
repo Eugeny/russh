@@ -47,6 +47,8 @@ use log::{debug, error, trace};
 use russh_util::time::Instant;
 use ssh_encoding::Decode;
 use ssh_key::{Algorithm, Certificate, HashAlg, PrivateKey, PublicKey};
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadHalf, WriteHalf};
 use tokio::pin;
 use tokio::sync::mpsc::{
@@ -55,7 +57,9 @@ use tokio::sync::mpsc::{
 use tokio::sync::oneshot;
 
 pub use crate::auth::AuthResult;
-use crate::channels::{Channel, ChannelMsg, ChannelRef, WindowSizeRef};
+use crate::channels::{
+    Channel, ChannelMsg, ChannelReadHalf, ChannelRef, ChannelWriteHalf, WindowSizeRef,
+};
 use crate::cipher::{self, clear, OpeningKey};
 use crate::kex::{KexCause, KexProgress, SessionKexState};
 use crate::keys::PrivateKeyWithHashAlg;
@@ -105,6 +109,7 @@ enum Reply {
     AuthSuccess,
     AuthFailure {
         proceed_with_methods: MethodSet,
+        partial_success: bool,
     },
     ChannelOpenFailure,
     SignRequest {
@@ -181,8 +186,16 @@ pub enum Msg {
     },
     Channel(ChannelId, ChannelMsg),
     Rekey,
+    AwaitExtensionInfo {
+        extension_name: String,
+        reply_channel: oneshot::Sender<()>,
+    },
     GetServerSigAlgs {
         reply_channel: oneshot::Sender<Option<Vec<Algorithm>>>,
+    },
+    /// Send a keepalive packet to the remote
+    Keepalive {
+        want_reply: bool,
     },
 }
 
@@ -196,7 +209,11 @@ impl From<(ChannelId, ChannelMsg)> for Msg {
 pub enum KeyboardInteractiveAuthResponse {
     Success,
     Failure {
+        /// The server suggests to proceed with these auth methods
         remaining_methods: MethodSet,
+        /// The server says that though auth method has been accepted,
+        /// further authentication is required
+        partial_success: bool,
     },
     InfoRequest {
         name: String,
@@ -328,7 +345,13 @@ impl<H: Handler> Handle<H> {
                 Some(Reply::AuthSuccess) => return Ok(KeyboardInteractiveAuthResponse::Success),
                 Some(Reply::AuthFailure {
                     proceed_with_methods: remaining_methods,
-                }) => return Ok(KeyboardInteractiveAuthResponse::Failure { remaining_methods }),
+                    partial_success,
+                }) => {
+                    return Ok(KeyboardInteractiveAuthResponse::Failure {
+                        remaining_methods,
+                        partial_success,
+                    })
+                }
                 Some(Reply::AuthInfoRequest {
                     name,
                     instructions,
@@ -351,10 +374,17 @@ impl<H: Handler> Handle<H> {
                 Some(Reply::AuthSuccess) => return Ok(AuthResult::Success),
                 Some(Reply::AuthFailure {
                     proceed_with_methods: remaining_methods,
-                }) => return Ok(AuthResult::Failure { remaining_methods }),
+                    partial_success,
+                }) => {
+                    return Ok(AuthResult::Failure {
+                        remaining_methods,
+                        partial_success,
+                    })
+                }
                 None => {
                     return Ok(AuthResult::Failure {
                         remaining_methods: MethodSet::empty(),
+                        partial_success: false,
                     })
                 }
                 _ => {}
@@ -431,7 +461,13 @@ impl<H: Handler> Handle<H> {
                 Some(Reply::AuthSuccess) => return Ok(AuthResult::Success),
                 Some(Reply::AuthFailure {
                     proceed_with_methods: remaining_methods,
-                }) => return Ok(AuthResult::Failure { remaining_methods }),
+                    partial_success,
+                }) => {
+                    return Ok(AuthResult::Failure {
+                        remaining_methods,
+                        partial_success,
+                    })
+                }
                 Some(Reply::SignRequest { key, data }) => {
                     let data = signer.auth_publickey_sign(&key, hash_alg, data).await;
                     let data = match data {
@@ -445,6 +481,7 @@ impl<H: Handler> Handle<H> {
                 None => {
                     return Ok(AuthResult::Failure {
                         remaining_methods: MethodSet::empty(),
+                        partial_success: false,
                     })
                 }
                 _ => {}
@@ -468,11 +505,13 @@ impl<H: Handler> Handle<H> {
                     window_size_ref.update(window_size).await;
 
                     return Ok(Channel {
-                        id,
-                        sender: self.sender.clone(),
-                        receiver,
-                        max_packet_size,
-                        window_size: window_size_ref,
+                        write_half: ChannelWriteHalf {
+                            id,
+                            sender: self.sender.clone(),
+                            max_packet_size,
+                            window_size: window_size_ref,
+                        },
+                        read_half: ChannelReadHalf { receiver },
                     });
                 }
                 Some(ChannelMsg::OpenFailure(reason)) => {
@@ -489,6 +528,21 @@ impl<H: Handler> Handle<H> {
         }
     }
 
+    /// See [`Handle::best_supported_rsa_hash`].
+    #[cfg(not(target_arch = "wasm32"))]
+    async fn await_extension_info(&self, extension_name: String) -> Result<(), crate::Error> {
+        let (sender, receiver) = oneshot::channel();
+        self.sender
+            .send(Msg::AwaitExtensionInfo {
+                extension_name,
+                reply_channel: sender,
+            })
+            .await
+            .map_err(|_| crate::Error::SendError)?;
+        let _ = tokio::time::timeout(Duration::from_secs(1), receiver).await;
+        Ok(())
+    }
+
     /// Returns the best RSA hash algorithm supported by the server,
     /// as indicated by the `server-sig-algs` extension.
     /// If the server does not support the extension,
@@ -496,7 +550,19 @@ impl<H: Handler> Handle<H> {
     /// with `rsa-sha2-256` or `rsa-sha2-512` and hope for the best.
     /// If the server supports the extension, but does not support `rsa-sha2-*`,
     /// `Some(None)` is returned.
+    ///
+    /// Note that this method will wait for up to 1 second for the server to
+    /// send the extension info if it hasn't done so yet (except when running under
+    /// WebAssembly). Unfortunately the timing of the EXT_INFO message cannot be known
+    /// in advance (RFC 8308).
+    ///
+    /// If this method returns `None` once, then for most SSH servers
+    /// you can assume that it will return `None` every time.
     pub async fn best_supported_rsa_hash(&self) -> Result<Option<Option<HashAlg>>, Error> {
+        // Wait for the extension info from the server
+        #[cfg(not(target_arch = "wasm32"))]
+        self.await_extension_info("server-sig-algs".into()).await?;
+
         let (sender, receiver) = oneshot::channel();
 
         self.sender
@@ -757,6 +823,14 @@ impl<H: Handler> Handle<H> {
 
         Ok(())
     }
+
+    /// Send a keepalive package to the remote peer.
+    pub async fn send_keepalive(&self, want_reply: bool) -> Result<(), Error> {
+        self.sender
+            .send(Msg::Keepalive { want_reply })
+            .await
+            .map_err(|_| Error::SendError)
+    }
 }
 
 impl<H: Handler> Future for Handle<H> {
@@ -845,10 +919,10 @@ where
     let (kex_done_signal, kex_done_signal_rx) = oneshot::channel();
     let join = russh_util::runtime::spawn(session.run(stream, handler, Some(kex_done_signal)));
 
-    if kex_done_signal_rx.await.is_err() {
+    if let Err(err) = kex_done_signal_rx.await {
         // kex_done_signal Sender is dropped when the session
         // fails before a succesful key exchange
-        debug!("kex_done_signal sender was dropped");
+        debug!("kex_done_signal sender was dropped {err:?}");
         join.await.map_err(crate::Error::Join)??;
         return Err(H::Error::from(crate::Error::Disconnect));
     }
@@ -1271,8 +1345,29 @@ impl Session {
             }
             Msg::Channel(id, ChannelMsg::Close) => self.close(id)?,
             Msg::Rekey => self.initiate_rekey()?,
+            Msg::AwaitExtensionInfo {
+                extension_name,
+                reply_channel,
+            } => {
+                if let Some(ref mut enc) = self.common.encrypted {
+                    // Drop if the extension has been seen already
+                    if !enc.received_extensions.contains(&extension_name) {
+                        // There will be no new extension info after authentication
+                        // has succeeded
+                        if !matches!(enc.state, EncryptedState::Authenticated) {
+                            enc.extension_info_awaiters
+                                .entry(extension_name)
+                                .or_insert(vec![])
+                                .push(reply_channel);
+                        }
+                    }
+                }
+            }
             Msg::GetServerSigAlgs { reply_channel } => {
                 let _ = reply_channel.send(self.server_sig_algs.clone());
+            }
+            Msg::Keepalive { want_reply } => {
+                let _ = self.send_keepalive(want_reply);
             }
             msg => {
                 // should be unreachable, since the receiver only gets

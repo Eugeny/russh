@@ -517,6 +517,60 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "Itsusinn",
+      "name": "iHsin",
+      "avatar_url": "https://avatars.githubusercontent.com/u/30529002?v=4",
+      "profile": "https://github.com/Itsusinn",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "psychon",
+      "name": "Uli Schlachter",
+      "avatar_url": "https://avatars.githubusercontent.com/u/89482?v=4",
+      "profile": "https://github.com/psychon",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "jvanbrunt",
+      "name": "Jacob Van Brunt",
+      "avatar_url": "https://avatars.githubusercontent.com/u/3064793?v=4",
+      "profile": "https://github.com/jvanbrunt",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "lgmugnier",
+      "name": "lgmugnier",
+      "avatar_url": "https://avatars.githubusercontent.com/u/10800317?v=4",
+      "profile": "https://github.com/lgmugnier",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "MingweiSamuel",
+      "name": "Mingwei Samuel",
+      "avatar_url": "https://avatars.githubusercontent.com/u/6778341?v=4",
+      "profile": "https://github.com/MingweiSamuel",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "pgrange",
+      "name": "Pascal Grange",
+      "avatar_url": "https://avatars.githubusercontent.com/u/378506?v=4",
+      "profile": "https://twitter.com/pascalgrange",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,

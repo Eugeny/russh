@@ -6,13 +6,15 @@ edition = "2021"
 license = "Apache-2.0"
 name = "russh-cryptovec"
 repository = "https://github.com/warp-tech/russh"
-version = "0.50.2"
+version = "0.51.1"
 rust-version = "1.75"
 
 [dependencies]
-libc = "0.2"
 ssh-encoding = { workspace = true, optional = true }
 log.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.29", features = ["mman"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 winapi = { version = "0.3", features = [
@@ -23,6 +25,7 @@ winapi = { version = "0.3", features = [
     "sysinfoapi",
     "impl-default",
 ] }
+libc = "0.2"
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3.46"

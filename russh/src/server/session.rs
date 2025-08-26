@@ -1,4 +1,5 @@
 use std::collections::{HashMap, VecDeque};
+use std::io::ErrorKind;
 use std::sync::Arc;
 
 use channels::WindowSizeRef;
@@ -10,7 +11,7 @@ use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::oneshot;
 
 use super::*;
-use crate::channels::{Channel, ChannelMsg, ChannelRef};
+use crate::channels::{Channel, ChannelMsg, ChannelReadHalf, ChannelRef, ChannelWriteHalf};
 use crate::helpers::NameList;
 use crate::kex::{KexCause, SessionKexState, EXTENSION_SUPPORT_AS_CLIENT};
 use crate::{map_err, msg};
@@ -361,11 +362,13 @@ impl Handle {
                     window_size_ref.update(window_size).await;
 
                     return Ok(Channel {
-                        id,
-                        sender: self.sender.clone(),
-                        receiver,
-                        max_packet_size,
-                        window_size: window_size_ref,
+                        write_half: ChannelWriteHalf {
+                            id,
+                            sender: self.sender.clone(),
+                            max_packet_size,
+                            window_size: window_size_ref,
+                        },
+                        read_half: ChannelReadHalf { receiver },
                     });
                 }
                 Some(ChannelMsg::OpenFailure(reason)) => {
@@ -645,10 +648,14 @@ impl Session {
             if let Some((stream_read, buffer, opening_cipher)) = is_reading.take() {
                 reading.set(start_reading(stream_read, buffer, opening_cipher));
             }
-            let (n, r, b, opening_cipher) = (&mut reading).await?;
-            is_reading = Some((r, b, opening_cipher));
-            if n == 0 {
-                break;
+            match (&mut reading).await {
+                Ok((0, _, _, _)) => break,
+                Ok((_, r, b, opening_cipher)) => {
+                    is_reading = Some((r, b, opening_cipher));
+                }
+                // at this stage of session shutdown, EOF is not unexpected
+                Err(Error::IO(ref e)) if e.kind() == ErrorKind::UnexpectedEof => break,
+                Err(e) => return Err(e.into()),
             }
         }
 
@@ -743,6 +750,33 @@ impl Session {
         language_tag: &str,
     ) -> Result<(), Error> {
         self.common.disconnect(reason, description, language_tag)
+    }
+
+    /// Sends a debug message to the client.
+    ///
+    /// Debug messages are intended for debugging purposes and may be
+    /// optionally displayed by the client, depending on the
+    /// `always_display` flag and client configuration.
+    ///
+    /// # Parameters
+    ///
+    /// - `always_display`: If `true`, the client is encouraged to
+    ///   display the message regardless of user preferences.
+    /// - `message`: The debug message to be sent.
+    /// - `language_tag`: The language tag of the message.
+    ///
+    /// # Notes
+    ///
+    /// This message is informational and does not affect the SSH session
+    /// state. Most clients (e.g., OpenSSH) will only display the message
+    /// if verbose mode is enabled.
+    pub fn debug(
+        &mut self,
+        always_display: bool,
+        message: &str,
+        language_tag: &str,
+    ) -> Result<(), Error> {
+        self.common.debug(always_display, message, language_tag)
     }
 
     /// Send a "success" reply to a /global/ request (requests without

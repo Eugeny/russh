@@ -22,6 +22,18 @@ jobs:
     - name: Build (all features enabled)
       run: cargo build --verbose --all-features
 
+  Build-Windows:
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Build (no features enabled)
+      run: cargo build --verbose
+
+    - name: Build (all features enabled)
+      run: cargo build --verbose --all-features
+
   Build-WASM:
     runs-on: ubuntu-24.04
 

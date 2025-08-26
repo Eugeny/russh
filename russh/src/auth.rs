@@ -138,7 +138,13 @@ impl MethodSet {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthResult {
     Success,
-    Failure { remaining_methods: MethodSet },
+    Failure {
+        /// The server suggests to proceed with these auth methods
+        remaining_methods: MethodSet,
+        /// The server says that though auth method has been accepted,
+        /// further authentication is required
+        partial_success: bool,
+    },
 }
 
 impl AuthResult {

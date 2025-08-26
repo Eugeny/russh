@@ -4,30 +4,30 @@ use std::task::{Context, Poll};
 
 use tokio::io::{AsyncRead, AsyncWrite};
 
-use super::io::{ChannelRx, ChannelTx};
+use super::io::{ChannelCloseOnDrop, ChannelRx, ChannelTx};
 use super::{ChannelId, ChannelMsg};
 
 /// AsyncRead/AsyncWrite wrapper for SSH Channels
 pub struct ChannelStream<S>
 where
-    S: From<(ChannelId, ChannelMsg)> + 'static,
+    S: From<(ChannelId, ChannelMsg)> + Send + 'static,
 {
     tx: ChannelTx<S>,
-    rx: ChannelRx<'static, S>,
+    rx: ChannelRx<ChannelCloseOnDrop<S>>,
 }
 
 impl<S> ChannelStream<S>
 where
-    S: From<(ChannelId, ChannelMsg)>,
+    S: From<(ChannelId, ChannelMsg)> + Send,
 {
-    pub(super) fn new(tx: ChannelTx<S>, rx: ChannelRx<'static, S>) -> Self {
+    pub(super) fn new(tx: ChannelTx<S>, rx: ChannelRx<ChannelCloseOnDrop<S>>) -> Self {
         Self { tx, rx }
     }
 }
 
 impl<S> AsyncRead for ChannelStream<S>
 where
-    S: From<(ChannelId, ChannelMsg)>,
+    S: From<(ChannelId, ChannelMsg)> + Send,
 {
     fn poll_read(
         mut self: Pin<&mut Self>,

@@ -9,7 +9,7 @@ repository = "https://github.com/warp-tech/russh"
 version = "0.0.3"
 rust-version = "1.75"
 
-[dependencies]
+[target.'cfg(windows)'.dependencies]
 futures.workspace = true
 thiserror.workspace = true
 rand.workspace = true
@@ -18,6 +18,8 @@ tokio = { workspace = true }
 bytes.workspace = true
 delegate.workspace = true
 sha2 = { workspace = true, optional = true }
+windows = { version = "0.59", features = ["Win32_Security"] }
+windows-strings = { version = "0.3", optional = true }
 
 [features]
 default = ["wmmessage"]
@@ -41,6 +43,3 @@ namedpipes = [
     "windows/Win32_Security_Cryptography",
 ]
 
-[target.'cfg(windows)'.dependencies]
-windows = { version = "0.59", features = ["Win32_Security"] }
-windows-strings = { version = "0.3", optional = true }

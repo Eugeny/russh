@@ -1,48 +1,44 @@
-use super::{Channel, ChannelId, ChannelMsg};
-
 mod rx;
+use std::borrow::{Borrow, BorrowMut};
+
 pub use rx::ChannelRx;
 
 mod tx;
 pub use tx::ChannelTx;
 
-/// An enum with the ability to hold either an owned [`Channel`]
-/// or a `&mut` ref to it.
+use crate::{Channel, ChannelId, ChannelMsg, ChannelReadHalf};
+
 #[derive(Debug)]
-pub enum ChannelAsMut<'i, S>
-where
-    S: From<(ChannelId, ChannelMsg)>,
-{
-    Owned(Channel<S>),
-    RefMut(&'i mut Channel<S>),
-}
+pub struct ChannelCloseOnDrop<S: From<(ChannelId, ChannelMsg)> + Send + 'static>(pub Channel<S>);
 
-impl<'i, S> AsMut<Channel<S>> for ChannelAsMut<'i, S>
-where
-    S: From<(ChannelId, ChannelMsg)>,
+impl<S: From<(ChannelId, ChannelMsg)> + Send + 'static> Borrow<ChannelReadHalf>
+    for ChannelCloseOnDrop<S>
 {
-    fn as_mut(&mut self) -> &mut Channel<S> {
-        match self {
-            Self::Owned(channel) => channel,
-            Self::RefMut(ref_mut) => ref_mut,
-        }
+    fn borrow(&self) -> &ChannelReadHalf {
+        &self.0.read_half
     }
 }
 
-impl<S> From<Channel<S>> for ChannelAsMut<'static, S>
-where
-    S: From<(ChannelId, ChannelMsg)>,
+impl<S: From<(ChannelId, ChannelMsg)> + Send + 'static> BorrowMut<ChannelReadHalf>
+    for ChannelCloseOnDrop<S>
 {
-    fn from(value: Channel<S>) -> Self {
-        Self::Owned(value)
+    fn borrow_mut(&mut self) -> &mut ChannelReadHalf {
+        &mut self.0.read_half
     }
 }
 
-impl<'i, S> From<&'i mut Channel<S>> for ChannelAsMut<'i, S>
-where
-    S: From<(ChannelId, ChannelMsg)>,
-{
-    fn from(value: &'i mut Channel<S>) -> Self {
-        Self::RefMut(value)
+impl<S: From<(ChannelId, ChannelMsg)> + Send + 'static> Drop for ChannelCloseOnDrop<S> {
+    fn drop(&mut self) {
+        let id = self.0.write_half.id;
+        let sender = self.0.write_half.sender.clone();
+
+        // Best effort: async drop where possible
+        #[cfg(not(target_arch = "wasm32"))]
+        tokio::spawn(async move {
+            let _ = sender.send((id, ChannelMsg::Close).into()).await;
+        });
+
+        #[cfg(target_arch = "wasm32")]
+        let _ = sender.try_send((id, ChannelMsg::Close).into());
     }
 }

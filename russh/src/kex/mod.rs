@@ -30,7 +30,8 @@ use delegate::delegate;
 use dh::groups::DhGroup;
 use dh::{
     DhGexSha1KexType, DhGexSha256KexType, DhGroup14Sha1KexType, DhGroup14Sha256KexType,
-    DhGroup16Sha512KexType, DhGroup1Sha1KexType,
+    DhGroup15Sha512KexType, DhGroup16Sha512KexType, DhGroup17Sha512KexType, DhGroup18Sha512KexType,
+    DhGroup1Sha1KexType,
 };
 use digest::Digest;
 use ecdh_nistp::{EcdhNistP256KexType, EcdhNistP384KexType, EcdhNistP521KexType};
@@ -232,8 +233,14 @@ pub const DH_G1_SHA1: Name = Name("diffie-hellman-group1-sha1");
 pub const DH_G14_SHA1: Name = Name("diffie-hellman-group14-sha1");
 /// `diffie-hellman-group14-sha256`
 pub const DH_G14_SHA256: Name = Name("diffie-hellman-group14-sha256");
+/// `diffie-hellman-group15-sha512`
+pub const DH_G15_SHA512: Name = Name("diffie-hellman-group15-sha512");
 /// `diffie-hellman-group16-sha512`
 pub const DH_G16_SHA512: Name = Name("diffie-hellman-group16-sha512");
+/// `diffie-hellman-group17-sha512`
+pub const DH_G17_SHA512: Name = Name("diffie-hellman-group17-sha512");
+/// `diffie-hellman-group18-sha512`
+pub const DH_G18_SHA512: Name = Name("diffie-hellman-group18-sha512");
 /// `ecdh-sha2-nistp256`
 pub const ECDH_SHA2_NISTP256: Name = Name("ecdh-sha2-nistp256");
 /// `ecdh-sha2-nistp384`
@@ -257,7 +264,10 @@ const _DH_GEX_SHA256: DhGexSha256KexType = DhGexSha256KexType {};
 const _DH_G1_SHA1: DhGroup1Sha1KexType = DhGroup1Sha1KexType {};
 const _DH_G14_SHA1: DhGroup14Sha1KexType = DhGroup14Sha1KexType {};
 const _DH_G14_SHA256: DhGroup14Sha256KexType = DhGroup14Sha256KexType {};
+const _DH_G15_SHA512: DhGroup15Sha512KexType = DhGroup15Sha512KexType {};
 const _DH_G16_SHA512: DhGroup16Sha512KexType = DhGroup16Sha512KexType {};
+const _DH_G17_SHA512: DhGroup17Sha512KexType = DhGroup17Sha512KexType {};
+const _DH_G18_SHA512: DhGroup18Sha512KexType = DhGroup18Sha512KexType {};
 const _ECDH_SHA2_NISTP256: EcdhNistP256KexType = EcdhNistP256KexType {};
 const _ECDH_SHA2_NISTP384: EcdhNistP384KexType = EcdhNistP384KexType {};
 const _ECDH_SHA2_NISTP521: EcdhNistP521KexType = EcdhNistP521KexType {};
@@ -271,7 +281,10 @@ pub const ALL_KEX_ALGORITHMS: &[&Name] = &[
     &DH_G1_SHA1,
     &DH_G14_SHA1,
     &DH_G14_SHA256,
+    &DH_G15_SHA512,
     &DH_G16_SHA512,
+    &DH_G17_SHA512,
+    &DH_G18_SHA512,
     &ECDH_SHA2_NISTP256,
     &ECDH_SHA2_NISTP384,
     &ECDH_SHA2_NISTP521,
@@ -285,7 +298,10 @@ pub(crate) static KEXES: Lazy<HashMap<&'static Name, &(dyn KexType + Send + Sync
         h.insert(&CURVE25519_PRE_RFC_8731, &_CURVE25519);
         h.insert(&DH_GEX_SHA1, &_DH_GEX_SHA1);
         h.insert(&DH_GEX_SHA256, &_DH_GEX_SHA256);
+        h.insert(&DH_G18_SHA512, &_DH_G18_SHA512);
+        h.insert(&DH_G17_SHA512, &_DH_G17_SHA512);
         h.insert(&DH_G16_SHA512, &_DH_G16_SHA512);
+        h.insert(&DH_G15_SHA512, &_DH_G15_SHA512);
         h.insert(&DH_G14_SHA256, &_DH_G14_SHA256);
         h.insert(&DH_G14_SHA1, &_DH_G14_SHA1);
         h.insert(&DH_G1_SHA1, &_DH_G1_SHA1);
