@@ -45,6 +45,10 @@ pub enum Msg {
         originator_port: u32,
         channel_ref: ChannelRef,
     },
+    ChannelOpenDirectStreamLocal {
+        socket_path: String,
+        channel_ref: ChannelRef,
+    },
     ChannelOpenForwardedTcpIp {
         connected_address: String,
         connected_port: u32,
@@ -274,6 +278,26 @@ impl Handle {
                 port_to_connect,
                 originator_address: originator_address.into(),
                 originator_port,
+                channel_ref,
+            })
+            .await
+            .map_err(|_| Error::SendError)?;
+        self.wait_channel_confirmation(receiver, window_size_ref)
+            .await
+    }
+
+    /// Open a direct streamlocal (Unix domain socket) channel on the client.
+    pub async fn channel_open_direct_streamlocal<A: Into<String>>(
+        &self,
+        socket_path: A,
+    ) -> Result<Channel<Msg>, Error> {
+        let (sender, receiver) = channel(self.channel_buffer_size);
+        let channel_ref = ChannelRef::new(sender);
+        let window_size_ref = channel_ref.window_size().clone();
+
+        self.sender
+            .send(Msg::ChannelOpenDirectStreamLocal {
+                socket_path: socket_path.into(),
                 channel_ref,
             })
             .await
@@ -519,11 +543,11 @@ impl Session {
                     reading.set(start_reading(stream_read, buffer, opening_cipher));
                 }
                 () = &mut keepalive_timer => {
+                    self.common.alive_timeouts = self.common.alive_timeouts.saturating_add(1);
                     if self.common.config.keepalive_max != 0 && self.common.alive_timeouts > self.common.config.keepalive_max {
                         debug!("Timeout, client not responding to keepalives");
                         return Err(crate::Error::KeepaliveTimeout.into());
                     }
-                    self.common.alive_timeouts = self.common.alive_timeouts.saturating_add(1);
                     sent_keepalive = true;
                     self.keepalive_request()?;
                 }
@@ -573,6 +597,10 @@ impl Session {
                         }
                         Some(Msg::ChannelOpenDirectTcpIp { host_to_connect, port_to_connect, originator_address, originator_port, channel_ref }) => {
                             let id = self.channel_open_direct_tcpip(&host_to_connect, port_to_connect, &originator_address, originator_port)?;
+                            self.channels.insert(id, channel_ref);
+                        }
+                        Some(Msg::ChannelOpenDirectStreamLocal { socket_path, channel_ref }) => {
+                            let id = self.channel_open_direct_streamlocal(&socket_path)?;
                             self.channels.insert(id, channel_ref);
                         }
                         Some(Msg::ChannelOpenForwardedTcpIp { connected_address, connected_port, originator_address, originator_port, channel_ref }) => {
@@ -859,12 +887,20 @@ impl Session {
 
     /// Close a channel.
     pub fn close(&mut self, channel: ChannelId) -> Result<(), Error> {
-        self.common.byte(channel, msg::CHANNEL_CLOSE)
+        if let Some(ref mut enc) = self.common.encrypted {
+            enc.close(channel)
+        } else {
+            unreachable!()
+        }
     }
 
     /// Send EOF to a channel
     pub fn eof(&mut self, channel: ChannelId) -> Result<(), Error> {
-        self.common.byte(channel, msg::CHANNEL_EOF)
+        if let Some(ref mut enc) = self.common.encrypted {
+            enc.eof(channel)
+        } else {
+            unreachable!()
+        }
     }
 
     /// Send data to a channel. On session channels, `extended` can be
@@ -994,7 +1030,7 @@ impl Session {
         self.channel_open_generic(b"session", |_| Ok(()))
     }
 
-    /// Opens a direct TCP/IP channel on the client.
+    /// Opens a direct-tcpip channel on the client (non-standard).
     pub fn channel_open_direct_tcpip(
         &mut self,
         host_to_connect: &str,
@@ -1007,6 +1043,19 @@ impl Session {
             port_to_connect.encode(write)?; // sender channel id.
             originator_address.encode(write)?;
             originator_port.encode(write)?; // sender channel id.
+            Ok(())
+        })
+    }
+
+    /// Opens a direct-streamlocal channel on the client (non-standard).
+    pub fn channel_open_direct_streamlocal(
+        &mut self,
+        socket_path: &str,
+    ) -> Result<ChannelId, Error> {
+        self.channel_open_generic(b"direct-streamlocal@openssh.com", |write| {
+            socket_path.encode(write)?;
+            "".encode(write)?; // reserved
+            0u32.encode(write)?; // reserved
             Ok(())
         })
     }

@@ -62,8 +62,10 @@ impl Session {
             rejection_wait_until
         };
 
-        #[allow(clippy::unwrap_used)]
-        let enc = self.common.encrypted.as_mut().unwrap();
+        let Some(enc) = self.common.encrypted.as_mut() else {
+            return Err(Error::Inconsistent.into());
+        };
+
         // If we've successfully read a packet.
         match (&mut enc.state, buf.split_first()) {
             (
@@ -657,8 +659,8 @@ impl Session {
                 let mut new_size = 0;
                 if let Some(ref mut enc) = self.common.encrypted {
                     if let Some(channel) = enc.channels.get_mut(&channel_num) {
-                        channel.recipient_window_size += amount;
-                        new_size = channel.recipient_window_size;
+                        new_size = channel.recipient_window_size.saturating_add(amount);
+                        channel.recipient_window_size = new_size;
                     } else {
                         return Err(Error::WrongChannel.into());
                     }
@@ -1180,6 +1182,16 @@ impl Session {
                         d.originator_port,
                         self,
                     )
+                    .await;
+                if let Ok(allowed) = &mut result {
+                    self.channels.insert(sender_channel, reference);
+                    self.finalize_channel_open(&msg, channel_params, *allowed)?;
+                }
+                result
+            }
+            ChannelType::DirectStreamLocal(d) => {
+                let mut result = handler
+                    .channel_open_direct_streamlocal(channel, &d.socket_path, self)
                     .await;
                 if let Ok(allowed) = &mut result {
                     self.channels.insert(sender_channel, reference);

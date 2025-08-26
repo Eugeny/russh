@@ -10,6 +10,7 @@ use anyhow::Result;
 use clap::Parser;
 use key::PrivateKeyWithHashAlg;
 use log::info;
+use russh::client::Config;
 use russh::keys::*;
 use russh::*;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -81,7 +82,12 @@ impl Session {
         addrs: A,
     ) -> Result<Self> {
         let key_pair = load_secret_key(key_path, None)?;
-        let config = client::Config::default();
+
+        let config = Config {
+            nodelay: true,
+            ..Default::default()
+        };
+
         // load ssh certificate
         let mut openssh_cert = None;
         if openssh_cert_path.is_some() {

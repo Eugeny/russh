@@ -46,6 +46,7 @@ use ssh_key::{Certificate, PrivateKey};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, ToSocketAddrs};
 use tokio::pin;
+use tokio::sync::{broadcast, mpsc};
 
 use crate::cipher::{clear, OpeningKey};
 use crate::kex::dh::groups::{DhGroup, BUILTIN_SAFE_DH_GROUPS, DH_GROUP14};
@@ -352,7 +353,7 @@ pub trait Handler: Sized {
         async { Ok(false) }
     }
 
-    /// Called when a new TCP/IP is created.
+    /// Called when a new direct TCP/IP ("local TCP forwarding") channel is opened.
     /// Return value indicates whether the channel request should be granted.
     #[allow(unused_variables)]
     fn channel_open_direct_tcpip(
@@ -367,7 +368,7 @@ pub trait Handler: Sized {
         async { Ok(false) }
     }
 
-    /// Called when a new forwarded connection comes in.
+    /// Called when a new remote forwarded TCP connection comes in.
     /// <https://www.rfc-editor.org/rfc/rfc4254#section-7>
     #[allow(unused_variables)]
     fn channel_open_forwarded_tcpip(
@@ -377,6 +378,18 @@ pub trait Handler: Sized {
         port_to_connect: u32,
         originator_address: &str,
         originator_port: u32,
+        session: &mut Session,
+    ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
+        async { Ok(false) }
+    }
+
+    /// Called when a new direct-streamlocal ("local UNIX socket forwarding") channel is created.
+    /// Return value indicates whether the channel request should be granted.
+    #[allow(unused_variables)]
+    fn channel_open_direct_streamlocal(
+        &mut self,
+        channel: Channel<Msg>,
+        socket_path: &str,
         session: &mut Session,
     ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
         async { Ok(false) }
@@ -781,6 +794,40 @@ pub trait Handler: Sized {
     }
 }
 
+pub struct RunningServerHandle {
+    shutdown_tx: broadcast::Sender<String>,
+}
+
+impl RunningServerHandle {
+    /// Request graceful server shutdown.
+    /// Starts the shutdown and immediately returns.
+    /// To wait for all the clients to disconnect, await `RunningServer` .
+    pub fn shutdown(&self, reason: String) {
+        let _ = self.shutdown_tx.send(reason);
+    }
+}
+
+pub struct RunningServer<F: Future<Output = std::io::Result<()>> + Unpin + Send> {
+    inner: F,
+    shutdown_tx: broadcast::Sender<String>,
+}
+
+impl<F: Future<Output = std::io::Result<()>> + Unpin + Send> RunningServer<F> {
+    pub fn handle(&self) -> RunningServerHandle {
+        RunningServerHandle {
+            shutdown_tx: self.shutdown_tx.clone(),
+        }
+    }
+}
+
+impl<F: Future<Output = std::io::Result<()>> + Unpin + Send> Future for RunningServer<F> {
+    type Output = std::io::Result<()>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+        Future::poll(Pin::new(&mut self.inner), cx)
+    }
+}
+
 #[cfg_attr(feature = "async-trait", async_trait::async_trait)]
 /// Trait used to create new handlers when clients connect.
 pub trait Server {
@@ -797,11 +844,14 @@ pub trait Server {
         &mut self,
         config: Arc<Config>,
         socket: &TcpListener,
-    ) -> impl Future<Output = Result<(), std::io::Error>> + Send
+    ) -> RunningServer<impl Future<Output = std::io::Result<()>> + Unpin + Send>
     where
         Self: Send,
     {
-        async move {
+        let (shutdown_tx, mut shutdown_rx) = broadcast::channel(1);
+        let shutdown_tx2 = shutdown_tx.clone();
+
+        let fut = async move {
             if config.maximum_packet_size > 65535 {
                 error!(
                     "Maximum packet size ({:?}) should not larger than a TCP packet (65535)",
@@ -809,13 +859,19 @@ pub trait Server {
                 );
             }
 
-            let (error_tx, mut error_rx) = tokio::sync::mpsc::unbounded_channel();
+            let (error_tx, mut error_rx) = mpsc::unbounded_channel();
 
             loop {
                 tokio::select! {
+                    _ = shutdown_rx.recv() => {
+                        debug!("Server shutdown requested");
+                        return Ok(());
+                    },
                     accept_result = socket.accept() => {
                         match accept_result {
                             Ok((socket, _)) => {
+                                let mut shutdown_rx = shutdown_tx2.subscribe();
+
                                 let config = config.clone();
                                 let handler = self.new_client(socket.peer_addr().ok());
                                 let error_tx = error_tx.clone();
@@ -836,17 +892,32 @@ pub trait Server {
                                         }
                                     };
 
-                                    match session.await {
-                                        Ok(_) => debug!("Connection closed"),
-                                        Err(e) => {
-                                            debug!("Connection closed with error");
-                                            let _ = error_tx.send(e);
+                                    let handle = session.handle();
+
+                                    tokio::select! {
+                                        reason = shutdown_rx.recv() => {
+                                            if handle.disconnect(
+                                                Disconnect::ByApplication,
+                                                reason.unwrap_or_else(|_| "".into()),
+                                                "".into()
+                                            ).await.is_err() {
+                                                debug!("Failed to send disconnect message");
+                                            }
+                                        },
+                                        result = session => {
+                                            if let Err(e) = result {
+                                                debug!("Connection closed with error");
+                                                let _ = error_tx.send(e);
+                                            } else {
+                                                debug!("Connection closed");
+                                            }
                                         }
                                     }
                                 });
                             }
-
-                            _ => break,
+                            Err(e) => {
+                                return Err(e);
+                            }
                         }
                     },
 
@@ -855,25 +926,28 @@ pub trait Server {
                     }
                 }
             }
+        };
 
-            Ok(())
+        RunningServer {
+            inner: Box::pin(fut),
+            shutdown_tx,
         }
     }
 
     /// Run a server.
-    /// Create a new `Connection` from the server's configuration, a
-    /// stream and a [`Handler`](trait.Handler.html).
+    /// This is a convenience function; consider using `run_on_socket` for more control.
     fn run_on_address<A: ToSocketAddrs + Send>(
         &mut self,
         config: Arc<Config>,
         addrs: A,
-    ) -> impl Future<Output = Result<(), std::io::Error>> + Send
+    ) -> impl Future<Output = std::io::Result<()>> + Send
     where
         Self: Send,
     {
-        async move {
+        async {
             let socket = TcpListener::bind(addrs).await?;
-            self.run_on_socket(config, &socket).await
+            self.run_on_socket(config, &socket).await?;
+            Ok(())
         }
     }
 }
@@ -1044,7 +1118,7 @@ async fn reply<H: Handler + Send>(
                 KexProgress::Done { newkeys, .. } => {
                     debug!("kex impl has completed");
                     session.common.strict_kex =
-                        session.common.strict_kex || newkeys.names.strict_kex;
+                        session.common.strict_kex || newkeys.names.strict_kex();
 
                     if let Some(ref mut enc) = session.common.encrypted {
                         // This is a rekey

@@ -5,6 +5,7 @@ use rand_core::OsRng;
 use russh::keys::{Certificate, *};
 use russh::server::{Msg, Server as _, Session};
 use russh::*;
+use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 
 #[tokio::main]
@@ -31,7 +32,17 @@ async fn main() {
         clients: Arc::new(Mutex::new(HashMap::new())),
         id: 0,
     };
-    sh.run_on_address(config, ("0.0.0.0", 2222)).await.unwrap();
+
+    let socket = TcpListener::bind(("0.0.0.0", 2222)).await.unwrap();
+    let server = sh.run_on_socket(config, &socket);
+    let handle = server.handle();
+
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(600)).await;
+        handle.shutdown("Server shutting down after 10 minutes".into());
+    });
+
+    server.await.unwrap()
 }
 
 #[derive(Clone)]

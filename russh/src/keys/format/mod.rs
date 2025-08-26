@@ -1,9 +1,6 @@
-use std::convert::TryInto;
 use std::io::Write;
 
 use data_encoding::{BASE64_MIME, HEXLOWER_PERMISSIVE};
-use pkcs1::DecodeRsaPrivateKey;
-use ssh_key::private::RsaKeypair;
 use ssh_key::PrivateKey;
 
 use super::is_base64_char;
@@ -37,6 +34,7 @@ pub enum Encryption {
 
 #[derive(Clone, Debug)]
 enum Format {
+    #[cfg(feature = "rsa")]
     Rsa,
     Openssh,
     Pkcs5Encrypted(Encryption),
@@ -76,8 +74,18 @@ pub fn decode_secret_key(secret: &str, password: Option<&str>) -> Result<Private
                 started = true;
                 format = Some(Format::Openssh);
             } else if l == "-----BEGIN RSA PRIVATE KEY-----" {
-                started = true;
-                format = Some(Format::Rsa);
+                #[cfg(feature = "rsa")]
+                {
+                    started = true;
+                    format = Some(Format::Rsa);
+                }
+                #[cfg(not(feature = "rsa"))]
+                {
+                    return Err(Error::UnsupportedKeyType {
+                        key_type_string: "RSA".to_string(),
+                        key_type_raw: vec![],
+                    });
+                }
             } else if l == "-----BEGIN ENCRYPTED PRIVATE KEY-----" {
                 started = true;
                 format = Some(Format::Pkcs8Encrypted);
@@ -92,6 +100,7 @@ pub fn decode_secret_key(secret: &str, password: Option<&str>) -> Result<Private
     let secret = BASE64_MIME.decode(secret.as_bytes())?;
     match format {
         Some(Format::Openssh) => decode_openssh(&secret, password),
+        #[cfg(feature = "rsa")]
         Some(Format::Rsa) => Ok(decode_rsa_pkcs1_der(&secret)?.into()),
         Some(Format::Pkcs5Encrypted(enc)) => decode_pkcs5(&secret, password, enc),
         Some(Format::Pkcs8Encrypted) | Some(Format::Pkcs8) => {
@@ -133,6 +142,11 @@ pub fn encode_pkcs8_pem_encrypted<W: Write>(
     Ok(())
 }
 
-fn decode_rsa_pkcs1_der(secret: &[u8]) -> Result<RsaKeypair, Error> {
+#[cfg(feature = "rsa")]
+fn decode_rsa_pkcs1_der(secret: &[u8]) -> Result<ssh_key::private::RsaKeypair, Error> {
+    use std::convert::TryInto;
+
+    use pkcs1::DecodeRsaPrivateKey;
+
     Ok(rsa::RsaPrivateKey::from_pkcs1_der(secret)?.try_into()?)
 }

@@ -571,6 +571,33 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "wyhaya",
+      "name": "wyhaya",
+      "avatar_url": "https://avatars.githubusercontent.com/u/23690145?v=4",
+      "profile": "https://github.com/wyhaya",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "plaflamme",
+      "name": "Philippe Laflamme",
+      "avatar_url": "https://avatars.githubusercontent.com/u/484152?v=4",
+      "profile": "https://github.com/plaflamme",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "tom-90",
+      "name": "Tom",
+      "avatar_url": "https://avatars.githubusercontent.com/u/12208221?v=4",
+      "profile": "https://github.com/tom-90",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,

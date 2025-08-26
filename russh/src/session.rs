@@ -131,11 +131,17 @@ impl<C> CommonSession<C> {
             self.remote_to_local = newkeys.cipher.remote_to_local;
             self.packet_writer
                 .set_cipher(newkeys.cipher.local_to_remote);
-            self.strict_kex = self.strict_kex || newkeys.names.strict_kex;
+            self.strict_kex = self.strict_kex || newkeys.names.strict_kex();
+
+            // Reset compression state
+            enc.client_compression
+                .init_compress(self.packet_writer.compress());
+            enc.server_compression.init_decompress(&mut enc.decompress);
         }
     }
 
     pub fn encrypted(&mut self, state: EncryptedState, newkeys: NewKeys) {
+        let strict_kex = newkeys.names.strict_kex();
         self.encrypted = Some(Encrypted {
             exchange: Some(newkeys.exchange),
             kex: newkeys.kex,
@@ -159,7 +165,7 @@ impl<C> CommonSession<C> {
         self.remote_to_local = newkeys.cipher.remote_to_local;
         self.packet_writer
             .set_cipher(newkeys.cipher.local_to_remote);
-        self.strict_kex = newkeys.names.strict_kex;
+        self.strict_kex = strict_kex;
     }
 
     /// Send a disconnect message.
@@ -210,15 +216,6 @@ impl<C> CommonSession<C> {
         } else {
             debug(&mut self.packet_writer.buffer().buffer)
         };
-    }
-
-    /// Send a single byte message onto the channel.
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn byte(&mut self, channel: ChannelId, msg: u8) -> Result<(), crate::Error> {
-        if let Some(ref mut enc) = self.encrypted {
-            enc.byte(channel, msg)?
-        }
-        Ok(())
     }
 
     pub(crate) fn reset_seqn(&mut self) {
@@ -585,6 +582,8 @@ pub(crate) struct NewKeys {
 pub(crate) enum GlobalRequestResponse {
     /// request was for Keepalive, ignore result
     Keepalive,
+    /// request was for NoMoreSessions, disallow additional sessions
+    NoMoreSessions,
     /// request was for TcpIpForward, sends Some(port) for success or None for failure
     TcpIpForward(oneshot::Sender<Option<u32>>),
     /// request was for CancelTcpIpForward, sends true for success or false for failure

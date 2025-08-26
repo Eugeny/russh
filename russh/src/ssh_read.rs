@@ -153,11 +153,15 @@ impl<R: AsyncRead + Unpin> SshRead<R> {
 
             if ssh_id.bytes_read > 0 {
                 // If we have a full line, handle it.
-                if i >= 8 && ssh_id.buf.get(0..8) == Some(b"SSH-2.0-") {
-                    // Either the line starts with "SSH-2.0-"
-                    ssh_id.sshid_len = i;
-                    #[allow(clippy::indexing_slicing)] // length checked
-                    return Ok(&ssh_id.buf[..ssh_id.sshid_len]);
+                if i >= 8 {
+                    // Check if we have a valid SSH protocol identifier
+                    #[allow(clippy::indexing_slicing)]
+                    if let Ok(s) = std::str::from_utf8(&ssh_id.buf[..i]) {
+                        if s.starts_with("SSH-1.99-") || s.starts_with("SSH-2.0-") {
+                            ssh_id.sshid_len = i;
+                            return Ok(ssh_id.id());
+                        }
+                    }
                 }
                 // Else, it is a "preliminary" (see
                 // https://tools.ietf.org/html/rfc4253#section-4.2),

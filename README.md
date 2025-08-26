@@ -1,7 +1,7 @@
 # Russh
 
 [![Rust](https://github.com/warp-tech/russh/actions/workflows/rust.yml/badge.svg)](https://github.com/warp-tech/russh/actions/workflows/rust.yml)  <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
-[![All Contributors](https://img.shields.io/badge/all_contributors-63-orange.svg?style=flat-square)](#contributors-)
+[![All Contributors](https://img.shields.io/badge/all_contributors-66-orange.svg?style=flat-square)](#contributors-)
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
 
 Low-level Tokio SSH2 client and server implementation.
@@ -20,6 +20,7 @@ This is a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Éti
 * `forward-streamlocal` (remote UNIX socket forwarding) ✨
 * Ciphers:
   * `chacha20-poly1305@openssh.com`
+  * `aes128-gcm@openssh.com` ✨
   * `aes256-gcm@openssh.com` ✨
   * `aes256-ctr` ✨
   * `aes192-ctr` ✨
@@ -101,7 +102,7 @@ This is a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Éti
 * [lapdev](https://github.com/lapce/lapdev) - Self-Hosted Remote Dev Environment
   * Uses `russh::server` to construct a proxy into your development environment.
 * [medusa](https://github.com/evilsocket/medusa) - A fast and secure multi protocol honeypot.
-  * Uses `russh::server` to be the basis of the honyepot.
+  * Uses `russh::server` to be the basis of the honeypot.
 * [rebels-in-the-sky](https://github.com/ricott1/rebels-in-the-sky) - P2P terminal game about spacepirates playing basketball across the galaxy
   * Uses `russh::server` to deliver the game, using `ratatui` as the rendering engine.
 * [warpgate](https://github.com/warp-tech/warpgate) - Smart SSH, HTTPS and MySQL bastion that requires no additional client-side software
@@ -110,6 +111,8 @@ This is a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Éti
   * Uses `russh::client` for the web-based SSH client of the standalone web application.
 * [Sandhole](https://github.com/EpicEric/sandhole) - Expose HTTP/SSH/TCP services through SSH port forwarding. A reverse proxy that just works with an OpenSSH client.
   * Uses `russh::server` for reverse forwarding connections, local forwarding tunnels, and the `ratatui` based admin interface.
+* [Motor OS](https://github.com/moturus/motor-os) -  A new Rust-based operating system for VMs.
+  * Uses `russh::server` as the base for its own [SSH Server](https://github.com/moturus/motor-os/tree/main/src/bin/russhd). 
 
 ## Contributors ✨
 
@@ -200,6 +203,11 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/lgmugnier"><img src="https://avatars.githubusercontent.com/u/10800317?v=4?s=100" width="100px;" alt="lgmugnier"/><br /><sub><b>lgmugnier</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=lgmugnier" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/MingweiSamuel"><img src="https://avatars.githubusercontent.com/u/6778341?v=4?s=100" width="100px;" alt="Mingwei Samuel"/><br /><sub><b>Mingwei Samuel</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=MingweiSamuel" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://twitter.com/pascalgrange"><img src="https://avatars.githubusercontent.com/u/378506?v=4?s=100" width="100px;" alt="Pascal Grange"/><br /><sub><b>Pascal Grange</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=pgrange" title="Code">💻</a></td>
+    </tr>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/wyhaya"><img src="https://avatars.githubusercontent.com/u/23690145?v=4?s=100" width="100px;" alt="wyhaya"/><br /><sub><b>wyhaya</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=wyhaya" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/plaflamme"><img src="https://avatars.githubusercontent.com/u/484152?v=4?s=100" width="100px;" alt="Philippe Laflamme"/><br /><sub><b>Philippe Laflamme</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=plaflamme" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/tom-90"><img src="https://avatars.githubusercontent.com/u/12208221?v=4?s=100" width="100px;" alt="Tom"/><br /><sub><b>Tom</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=tom-90" title="Code">💻</a></td>
     </tr>
   </tbody>
 </table>

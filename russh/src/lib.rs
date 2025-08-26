@@ -316,6 +316,11 @@ pub enum Error {
 
     #[error("Invalid config: {0}")]
     InvalidConfig(String),
+
+    /// This error occurs when the channel is closed and there are no remaining messages in the channel buffer.
+    /// This is common in SSH-Agent, for example when the Agent client directly rejects an authorization request.
+    #[error("Unable to receive more messages from the channel")]
+    RecvError,
 }
 
 pub(crate) fn strict_kex_violation(message_type: u8, sequence_number: usize) -> crate::Error {

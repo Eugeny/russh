@@ -39,16 +39,16 @@ use std::convert::TryInto;
 use std::num::Wrapping;
 use std::pin::Pin;
 use std::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::Duration;
 
 use futures::task::{Context, Poll};
 use futures::Future;
 use kex::ClientKex;
-use log::{debug, error, trace};
+use log::{debug, error, trace, warn};
 use russh_util::time::Instant;
 use ssh_encoding::Decode;
 use ssh_key::{Algorithm, Certificate, HashAlg, PrivateKey, PublicKey};
-#[cfg(not(target_arch = "wasm32"))]
-use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadHalf, WriteHalf};
 use tokio::pin;
 use tokio::sync::mpsc::{
@@ -75,6 +75,9 @@ use crate::{
 mod encrypted;
 mod kex;
 mod session;
+
+#[cfg(test)]
+mod test;
 
 /// Actual client session's state.
 ///
@@ -195,6 +198,9 @@ pub enum Msg {
     },
     /// Send a keepalive packet to the remote
     Keepalive {
+        want_reply: bool,
+    },
+    NoMoreSessions {
         want_reply: bool,
     },
 }
@@ -363,6 +369,7 @@ impl<H: Handler> Handle<H> {
                         prompts,
                     });
                 }
+                None => return Err(crate::Error::RecvError),
                 _ => {}
             }
         }
@@ -831,6 +838,14 @@ impl<H: Handler> Handle<H> {
             .await
             .map_err(|_| Error::SendError)
     }
+
+    /// Send a no-more-sessions request to the remote peer.
+    pub async fn no_more_sessions(&self, want_reply: bool) -> Result<(), Error> {
+        self.sender
+            .send(Msg::NoMoreSessions { want_reply })
+            .await
+            .map_err(|_| Error::SendError)
+    }
 }
 
 impl<H: Handler> Future for Handle<H> {
@@ -861,6 +876,12 @@ pub async fn connect<H: Handler + Send + 'static, A: tokio::net::ToSocketAddrs>(
     handler: H,
 ) -> Result<Handle<H>, H::Error> {
     let socket = map_err!(tokio::net::TcpStream::connect(addrs).await)?;
+    if config.as_ref().nodelay {
+        if let Err(e) = socket.set_nodelay(true) {
+            warn!("set_nodelay() failed: {e:?}");
+        }
+    }
+
     connect_stream(config, socket, handler).await
 }
 
@@ -879,12 +900,16 @@ where
 {
     // Writing SSH id.
     let mut write_buffer = SSHBuffer::new();
+
+    debug!("ssh id = {:?}", config.as_ref().client_id);
+
     write_buffer.send_ssh_id(&config.as_ref().client_id);
     map_err!(stream.write_all(&write_buffer.buffer).await)?;
 
     // Reading SSH id and allocating a session if correct.
     let mut stream = SshRead::new(stream);
     let sshid = stream.read_ssh_id().await?;
+
     let (handle_sender, session_receiver) = channel(10);
     let (session_sender, handle_receiver) = unbounded_channel();
     if config.maximum_packet_size > 65535 {
@@ -1096,13 +1121,13 @@ impl Session {
                     reading.set(start_reading(stream_read, buffer, opening_cipher));
                 }
                 () = &mut keepalive_timer => {
+                    self.common.alive_timeouts = self.common.alive_timeouts.saturating_add(1);
                     if self.common.config.keepalive_max != 0 && self.common.alive_timeouts > self.common.config.keepalive_max {
                         debug!("Timeout, server not responding to keepalives");
                         return Err(crate::Error::KeepaliveTimeout.into());
                     }
-                    self.common.alive_timeouts = self.common.alive_timeouts.saturating_add(1);
-                    self.send_keepalive(true)?;
                     sent_keepalive = true;
+                    self.send_keepalive(true)?;
                 }
                 () = &mut inactivity_timer => {
                     debug!("timeout");
@@ -1369,6 +1394,9 @@ impl Session {
             Msg::Keepalive { want_reply } => {
                 let _ = self.send_keepalive(want_reply);
             }
+            Msg::NoMoreSessions { want_reply } => {
+                let _ = self.no_more_sessions(want_reply);
+            }
             msg => {
                 // should be unreachable, since the receiver only gets
                 // messages from methods implemented within russh
@@ -1473,7 +1501,7 @@ async fn reply<H: Handler>(
                 } => {
                     debug!("kex impl has completed");
                     session.common.strict_kex =
-                        session.common.strict_kex || newkeys.names.strict_kex;
+                        session.common.strict_kex || newkeys.names.strict_kex();
 
                     if let Some(ref mut enc) = session.common.encrypted {
                         // This is a rekey
@@ -1628,6 +1656,8 @@ pub struct Config {
     pub anonymous: bool,
     /// DH dynamic group exchange parameters.
     pub gex: GexParams,
+    /// If active, invoke `set_nodelay(true)` on the ssh socket; disabled by default (i.e. Nagle's algorithm is active).
+    pub nodelay: bool,
 }
 
 impl Default for Config {
@@ -1648,6 +1678,7 @@ impl Default for Config {
             keepalive_max: 3,
             anonymous: false,
             gex: Default::default(),
+            nodelay: false,
         }
     }
 }
@@ -1823,7 +1854,7 @@ pub trait Handler: Sized + Send {
         async { Ok(()) }
     }
 
-    /// Called when the server opens a direct tcp/ip channel.
+    /// Called when the server opens a direct tcp/ip channel (non-standard).
     #[allow(unused_variables)]
     fn server_channel_open_direct_tcpip(
         &mut self,
@@ -1832,6 +1863,17 @@ pub trait Handler: Sized + Send {
         port_to_connect: u32,
         originator_address: &str,
         originator_port: u32,
+        session: &mut Session,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
+    }
+
+    /// Called when the server opens a direct-streamlocal channel (non-standard).
+    #[allow(unused_variables)]
+    fn server_channel_open_direct_streamlocal(
+        &mut self,
+        channel: Channel<Msg>,
+        socket_path: &str,
         session: &mut Session,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
         async { Ok(()) }

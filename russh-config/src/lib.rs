@@ -5,7 +5,6 @@
     clippy::panic
 )]
 use std::io::Read;
-use std::net::ToSocketAddrs;
 use std::path::Path;
 
 use globset::Glob;
@@ -19,8 +18,6 @@ pub enum Error {
     HostNotFound,
     #[error("No home directory")]
     NoHome,
-    #[error("Cannot resolve the address")]
-    NotResolvable,
     #[error("{}", 0)]
     Io(#[from] std::io::Error),
 }
@@ -28,7 +25,7 @@ pub enum Error {
 mod proxy;
 pub use proxy::*;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Config {
     pub user: String,
     pub host_name: String,
@@ -80,11 +77,9 @@ impl Config {
                 .await
                 .map_err(Into::into)
         } else {
-            let address = (self.host_name.as_str(), self.port)
-                .to_socket_addrs()?
-                .next()
-                .ok_or(Error::NotResolvable)?;
-            Stream::tcp_connect(&address).await.map_err(Into::into)
+            Stream::tcp_connect((self.host_name.as_str(), self.port))
+                .await
+                .map_err(Into::into)
         }
     }
 }
@@ -301,5 +296,11 @@ Host test_host
             config.user_known_hosts_file.as_deref()
         );
         assert!(!config.strict_host_key_checking);
+    }
+
+    #[test]
+    fn is_clone() {
+        let config: Config = Config::default("some_host");
+        let _ = config.clone();
     }
 }

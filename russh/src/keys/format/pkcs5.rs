@@ -29,7 +29,18 @@ pub fn decode_pkcs5(
             }
             Encryption::Aes256Cbc(_) => unimplemented!(),
         };
-        super::decode_rsa_pkcs1_der(&sec).map(Into::into)
+        // TODO: presumably pkcs5 could contain non-RSA keys?
+        #[cfg(feature = "rsa")]
+        {
+            super::decode_rsa_pkcs1_der(&sec).map(Into::into)
+        }
+        #[cfg(not(feature = "rsa"))]
+        {
+            Err(Error::UnsupportedKeyType {
+                key_type_string: "RSA".to_string(),
+                key_type_raw: vec![],
+            })
+        }
     } else {
         Err(Error::KeyIsEncrypted)
     }

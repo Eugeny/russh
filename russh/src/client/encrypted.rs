@@ -190,6 +190,7 @@ impl Session {
                                         Some(Msg::AuthInfoResponse { responses }) => {
                                             break responses
                                         }
+                                        None => return Err(crate::Error::RecvError.into()),
                                         _ => {}
                                     }
                                 };
@@ -239,6 +240,7 @@ impl Session {
                                     self.common.buffer = loop {
                                         match self.receiver.recv().await {
                                             Some(Msg::Signed { data }) => break data,
+                                            None => return Err(crate::Error::RecvError.into()),
                                             _ => {}
                                         }
                                     };
@@ -537,8 +539,8 @@ impl Session {
                 debug!("channel_window_adjust amount: {:?}", amount);
                 if let Some(ref mut enc) = self.common.encrypted {
                     if let Some(ref mut channel) = enc.channels.get_mut(&channel_num) {
-                        channel.recipient_window_size += amount;
-                        new_size = channel.recipient_window_size;
+                        new_size = channel.recipient_window_size.saturating_add(amount);
+                        channel.recipient_window_size = new_size;
                     } else {
                         return Err(crate::Error::WrongChannel.into());
                     }
@@ -662,6 +664,17 @@ impl Session {
                                 )
                                 .await?
                         }
+                        ChannelType::DirectStreamLocal(d) => {
+                            confirm()?;
+                            let channel = self.accept_server_initiated_channel(id, &msg);
+                            client
+                                .server_channel_open_direct_streamlocal(
+                                    channel,
+                                    &d.socket_path,
+                                    self,
+                                )
+                                .await?
+                        }
                         ChannelType::X11 {
                             originator_address,
                             originator_port,
@@ -731,6 +744,9 @@ impl Session {
                     Some(GlobalRequestResponse::Keepalive) => {
                         // ignore keepalives
                     }
+                    Some(GlobalRequestResponse::NoMoreSessions) => {
+                        debug!("no-more-sessions@openssh.com requests success");
+                    }
                     Some(GlobalRequestResponse::TcpIpForward(return_channel)) => {
                         let result = if r.is_empty() {
                             // If a specific port was requested, the reply has no data
@@ -766,6 +782,9 @@ impl Session {
                 match self.open_global_requests.pop_front() {
                     Some(GlobalRequestResponse::Keepalive) => {
                         // ignore keepalives
+                    }
+                    Some(GlobalRequestResponse::NoMoreSessions) => {
+                        warn!("no-more-sessions@openssh.com requests failure");
                     }
                     Some(GlobalRequestResponse::TcpIpForward(return_channel)) => {
                         let _ = return_channel.send(None);

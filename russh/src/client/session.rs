@@ -128,11 +128,13 @@ impl Session {
 
                     ((1 + 5 * terminal_modes.len()) as u32).encode(&mut enc.write)?;
                     for &(code, value) in terminal_modes {
+                        if code == Pty::TTY_OP_END {
+                            continue;
+                        }
                         (code as u8).encode(&mut enc.write)?;
                         value.encode(&mut enc.write)?;
                     }
-                    // 0 code (to terminate the list)
-                    0u8.encode(&mut enc.write)?;
+                    (Pty::TTY_OP_END as u8).encode(&mut enc.write)?;
                 });
             }
         }
@@ -408,6 +410,19 @@ impl Session {
             push_packet!(enc.write, {
                 msg::GLOBAL_REQUEST.encode(&mut enc.write)?;
                 "keepalive@openssh.com".encode(&mut enc.write)?;
+                (want_reply as u8).encode(&mut enc.write)?;
+            });
+        }
+        Ok(())
+    }
+
+    pub fn no_more_sessions(&mut self, want_reply: bool) -> Result<(), crate::Error> {
+        self.open_global_requests
+            .push_back(crate::session::GlobalRequestResponse::NoMoreSessions);
+        if let Some(ref mut enc) = self.common.encrypted {
+            push_packet!(enc.write, {
+                msg::GLOBAL_REQUEST.encode(&mut enc.write)?;
+                "no-more-sessions@openssh.com".encode(&mut enc.write)?;
                 (want_reply as u8).encode(&mut enc.write)?;
             });
         }
