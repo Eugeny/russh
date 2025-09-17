@@ -144,8 +144,9 @@ pub fn encode_pkcs8_pem_encrypted<W: Write>(
 
 #[cfg(feature = "rsa")]
 fn decode_rsa_pkcs1_der(secret: &[u8]) -> Result<ssh_key::private::RsaKeypair, Error> {
-    use pkcs1::DecodeRsaPrivateKey;
     use std::convert::TryInto;
+
+    use pkcs1::DecodeRsaPrivateKey;
 
     Ok(rsa::RsaPrivateKey::from_pkcs1_der(secret)?.try_into()?)
 }

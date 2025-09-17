@@ -21,7 +21,9 @@ use ssh_key::{Algorithm, EcdsaCurve, HashAlg, PrivateKey};
 
 use crate::cipher::CIPHERS;
 use crate::helpers::NameList;
-use crate::kex::{EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT, EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER};
+use crate::kex::{
+    KexCause, EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT, EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER,
+};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::server::Config;
 use crate::sshbuffer::PacketWriter;
@@ -44,7 +46,16 @@ pub struct Names {
     pub server_compression: compression::Compression,
     pub client_compression: compression::Compression,
     pub ignore_guessed: bool,
-    pub strict_kex: bool,
+    // Prevent accidentally contructing [Names] without a [KeyCause]
+    // as strict kext algo is not sent during a rekey and hence the state
+    // of [strict_kex] cannot be known without a [KexCause].
+    strict_kex: bool,
+}
+
+impl Names {
+    pub fn strict_kex(&self) -> bool {
+        self.strict_kex
+    }
 }
 
 /// Lists of preferred algorithms. This is normally hard-coded into implementations.
@@ -188,6 +199,7 @@ pub(crate) trait Select {
         buffer: &[u8],
         pref: &Preferred,
         available_host_keys: Option<&[PrivateKey]>,
+        cause: &KexCause,
     ) -> Result<Names, Error> {
         let Some(mut r) = &buffer.get(17..) else {
             return Err(Error::Inconsistent);
@@ -316,7 +328,7 @@ pub(crate) trait Select {
             server_compression,
             // Ignore the next packet if (1) it follows and (2) it's not the correct guess.
             ignore_guessed: follows && !(kex_both_first && key_both_first),
-            strict_kex: strict_kex_requested && strict_kex_provided,
+            strict_kex: (strict_kex_requested && strict_kex_provided) || cause.is_strict_rekey(),
         })
     }
 }

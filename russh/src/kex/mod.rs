@@ -48,7 +48,6 @@ use ssh_key::PublicKey;
 use crate::cipher::CIPHERS;
 use crate::client::GexParams;
 use crate::mac::{self, MACS};
-use crate::negotiation::Names;
 use crate::session::{Exchange, NewKeys};
 use crate::{cipher, CryptoVec, Error};
 
@@ -93,8 +92,8 @@ pub(crate) enum KexCause {
 }
 
 impl KexCause {
-    pub fn is_strict_kex(&self, names: &Names) -> bool {
-        names.strict_kex || matches!(self, Self::Rekey { strict: true, .. })
+    pub fn is_strict_rekey(&self) -> bool {
+        matches!(self, Self::Rekey { strict: true, .. })
     }
 
     pub fn is_rekey(&self) -> bool {

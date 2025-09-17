@@ -114,12 +114,13 @@ impl ServerKex {
                         &input.buffer,
                         &self.config.preferred,
                         Some(&self.config.keys),
+                        &self.cause,
                     )?
                 };
                 debug!("negotiated: {names:?}");
 
                 // seqno has already been incremented after read()
-                if !self.cause.is_rekey() && self.cause.is_strict_kex(&names) && input.seqn.0 != 1 {
+                if names.strict_kex() && input.seqn.0 != 1 {
                     return Err(strict_kex_violation(
                         msg::KEXINIT,
                         input.seqn.0 as usize - 1,
@@ -302,7 +303,7 @@ impl ServerKex {
                     self.cause.session_id(),
                 )?;
 
-                let reset_seqn = self.cause.is_strict_kex(&newkeys.names);
+                let reset_seqn = newkeys.names.strict_kex() || self.cause.is_strict_rekey();
 
                 self.state = ServerKexState::WaitingForNewKeys { newkeys };
 
