@@ -841,6 +841,7 @@ pub trait Handler: Sized {
     fn process(
         &mut self,
         data: Self::Data,
+        session: &mut Session,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
         async { Ok(()) }
     }
