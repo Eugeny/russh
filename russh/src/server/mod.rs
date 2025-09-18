@@ -807,7 +807,7 @@ pub trait Handler: Sized {
     ///
     /// ```
     /// use tokio::sync::mpsc::Receiver;
-    /// use russh::server::Handler;
+    /// use russh::server::{Handler, Session};
     ///
     /// struct App{
     ///     foo: String,
@@ -825,7 +825,7 @@ pub trait Handler: Sized {
     ///         }
     ///     }
     ///
-    ///     async fn process(&mut self, s: Self::Data) -> Result<(), Self::Error> {
+    ///     async fn process(&mut self, s: Self::Data, session: &mut Session) -> Result<(), Self::Error> {
     ///         let s = self.recv.recv().await.unwrap();
     ///         self.foo = s;
     ///         Ok(())
