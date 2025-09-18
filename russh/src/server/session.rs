@@ -552,7 +552,7 @@ impl Session {
                 t = handler.trigger() => {
                     debug!("handler trigger is invoked");
                     match t {
-                        Ok(d) => handler.process(d).await?,
+                        Ok(d) => handler.process(d,&mut self).await?,
                         Err(e) => return Err(e)
                     }
                 }
