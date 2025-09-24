@@ -6,7 +6,7 @@ edition = "2021"
 license = "Apache-2.0"
 name = "pageant"
 repository = "https://github.com/warp-tech/russh"
-version = "0.0.3"
+version = "0.0.4"
 rust-version = "1.75"
 
 [target.'cfg(windows)'.dependencies]
