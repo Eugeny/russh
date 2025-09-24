@@ -101,7 +101,7 @@ tokio = { workspace = true, features = [
 home.workspace = true
 
 [target.'cfg(windows)'.dependencies]
-pageant = { version = "0.0.3", path = "../pageant" }
+pageant = { version = "0.1", path = "../pageant" }
 
 [dev-dependencies]
 anyhow = "1.0.4"
