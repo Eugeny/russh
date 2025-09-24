@@ -13,11 +13,12 @@ rust-version = "1.75"
 futures.workspace = true
 thiserror.workspace = true
 rand.workspace = true
+byteorder.workspace = true
 log.workspace = true
 tokio = { workspace = true, features = ["io-util", "rt"] }
 bytes.workspace = true
 delegate.workspace = true
-windows = { version = "0.58", features = [
+windows = { version = "0.59", features = [
     "Win32_UI_WindowsAndMessaging",
     "Win32_System_Memory",
     "Win32_Security",
