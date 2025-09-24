@@ -1,3 +1,4 @@
+use byteorder::{BigEndian, ByteOrder};
 use std::io::IoSlice;
 use std::mem::size_of;
 use std::pin::Pin;
@@ -61,7 +62,14 @@ impl PageantStream {
                 if n == 0 {
                     break;
                 }
-                let msg = buf.split().freeze();
+                if buf.len() < 4 {
+                    continue;
+                }
+                let len = BigEndian::read_u32(&buf) as usize;
+                if buf.len() < len + 4 {
+                    continue;
+                }
+                let msg = buf.split_to(len + 4).freeze();
                 let Ok(response) = query_pageant_direct(cookie.clone(), &msg).map_err(|e| {
                     debug!("Pageant query failed: {:?}", e);
                     e
@@ -253,14 +261,14 @@ pub fn query_pageant_direct(cookie: String, msg: &[u8]) -> Result<Vec<u8>, Error
     let sa = SECURITY_ATTRIBUTES {
         lpSecurityDescriptor: &mut sd as *mut _ as *mut _,
         bInheritHandle: true.into(),
-        ..Default::default()
+        nLength: size_of::<SECURITY_ATTRIBUTES>() as u32,
     };
 
     let psd = PSECURITY_DESCRIPTOR(&mut sd as *mut _ as *mut _);
 
     unsafe {
         InitializeSecurityDescriptor(psd, 1)?;
-        SetSecurityDescriptorOwner(psd, user.User.Sid, false)?;
+        SetSecurityDescriptorOwner(psd, Some(user.User.Sid), false)?;
     }
 
     let mut map: MemoryMap = MemoryMap::new(map_name.clone(), _AGENT_MAX_MSGLEN, Some(sa))?;
