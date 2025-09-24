@@ -209,6 +209,7 @@ impl Auth {
 #[cfg_attr(feature = "async-trait", async_trait::async_trait)]
 pub trait Handler: Sized {
     type Error: From<crate::Error> + Send;
+    type Data: Send;
 
     /// Check authentication using the "none" method. Russh makes
     /// sure rejection happens in time `config.auth_rejection_time`,
@@ -791,6 +792,58 @@ pub trait Handler: Sized {
 
             Ok(Some(best_group.clone()))
         }
+    }
+
+    /// Called when the handler needs to be updated.
+    /// ['trigger'] should be used with ['process']
+    ///
+    /// # Cancel safety
+    ///
+    /// The safety of this method depends entirely on how you implement it;
+    /// it provides no inherent security guarantees.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use tokio::sync::mpsc::Receiver;
+    /// use russh::server::{Handler, Session};
+    ///
+    /// struct App{
+    ///     foo: String,
+    ///     recv: Receiver<String>,
+    ///     trigger: Receiver<String>,
+    /// }
+    ///
+    /// impl Handler for App {
+    ///     type Error = russh::Error;
+    ///     type Data = String;
+    ///     async fn trigger(&mut self) -> Result<Self::Data, Self::Error> {
+    ///         match self.trigger.recv().await {
+    ///             Some(d) => Ok(d),
+    ///             None => std::future::pending().await,
+    ///         }
+    ///     }
+    ///
+    ///     async fn process(&mut self, s: Self::Data, session: &mut Session) -> Result<(), Self::Error> {
+    ///         let s = self.recv.recv().await.unwrap();
+    ///         self.foo = s;
+    ///         Ok(())
+    ///     }
+    /// }
+    /// ```
+    ///
+    fn trigger(&mut self) -> impl Future<Output = Result<Self::Data, Self::Error>> + Send {
+        std::future::pending()
+    }
+
+    /// Called after [`trigger`], See [`trigger`] for more.
+    #[allow(unused_variables)]
+    fn process(
+        &mut self,
+        data: Self::Data,
+        session: &mut Session,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 }
 
