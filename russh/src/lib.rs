@@ -86,6 +86,11 @@
 //! messages sent through a `server::Handle` are processed when there
 //! is no incoming packet to read.
 
+#[cfg(not(any(feature = "ring", feature = "aws-lc-rs")))]
+compile_error!(
+    "`russh` requires enabling either the `ring` or `aws-lc-rs` feature as a crypto backend."
+);
+
 use std::convert::TryFrom;
 use std::fmt::{Debug, Display, Formatter};
 use std::future::{Future, Pending};
