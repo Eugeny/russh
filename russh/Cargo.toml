@@ -9,7 +9,7 @@ license = "Apache-2.0"
 name = "russh"
 readme = "../README.md"
 repository = "https://github.com/warp-tech/russh"
-version = "0.54.3"
+version = "0.54.4"
 rust-version = "1.75"
 
 [features]
@@ -101,7 +101,7 @@ tokio = { workspace = true, features = [
 home.workspace = true
 
 [target.'cfg(windows)'.dependencies]
-pageant = { version = "0.0.3", path = "../pageant" }
+pageant = { version = "0.1", path = "../pageant" }
 
 [dev-dependencies]
 anyhow = "1.0.4"

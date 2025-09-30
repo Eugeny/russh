@@ -1,7 +1,7 @@
 # Russh
 
 [![Rust](https://github.com/warp-tech/russh/actions/workflows/rust.yml/badge.svg)](https://github.com/warp-tech/russh/actions/workflows/rust.yml)  <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
-[![All Contributors](https://img.shields.io/badge/all_contributors-66-orange.svg?style=flat-square)](#contributors-)
+[![All Contributors](https://img.shields.io/badge/all_contributors-67-orange.svg?style=flat-square)](#contributors-)
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
 
 Low-level Tokio SSH2 client and server implementation.
@@ -208,6 +208,7 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/wyhaya"><img src="https://avatars.githubusercontent.com/u/23690145?v=4?s=100" width="100px;" alt="wyhaya"/><br /><sub><b>wyhaya</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=wyhaya" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/plaflamme"><img src="https://avatars.githubusercontent.com/u/484152?v=4?s=100" width="100px;" alt="Philippe Laflamme"/><br /><sub><b>Philippe Laflamme</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=plaflamme" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/tom-90"><img src="https://avatars.githubusercontent.com/u/12208221?v=4?s=100" width="100px;" alt="Tom"/><br /><sub><b>Tom</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=tom-90" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="http://dog-tunnel.tk"><img src="https://avatars.githubusercontent.com/u/4971777?v=4?s=100" width="100px;" alt="vzex"/><br /><sub><b>vzex</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=vzex" title="Code">💻</a></td>
     </tr>
   </tbody>
 </table>
