@@ -73,9 +73,9 @@ impl HostConfig {
         // Special-case IdentityFile param
         if let Some(right_identity_files) = right.identity_file.as_deref() {
             if let Some(identity_files) = left.identity_file.as_mut() {
-                identity_files.extend(right_identity_files.into_iter().cloned())
+                identity_files.extend(right_identity_files.iter().cloned())
             } else {
-                left.identity_file = Some(Vec::from_iter(right_identity_files.into_iter().cloned()))
+                left.identity_file = Some(Vec::from_iter(right_identity_files.iter().cloned()))
             }
         }
         left
@@ -107,7 +107,7 @@ impl HostEntry {
                 matches = true;
             }
         }
-        return matches;
+        matches
     }
 }
 
@@ -151,20 +151,20 @@ impl Config {
     fn user(&self) -> String {
         self.user
             .as_deref()
-            .or_else(|| self.host_config.user.as_deref())
+            .or(self.host_config.user.as_deref())
             .map(ToString::to_string)
-            .unwrap_or_else(|| whoami::username())
+            .unwrap_or_else(whoami::username)
     }
 
     fn port(&self) -> u16 {
-        self.host_config.port.or_else(|| self.port).unwrap_or(22)
+        self.host_config.port.or(self.port).unwrap_or(22)
     }
 
     fn host(&self) -> &str {
         self.host_config
             .hostname
             .as_ref()
-            .unwrap_or_else(|| &self.host_name)
+            .unwrap_or(&self.host_name)
     }
 
     // Look for any of the ssh_config(5) percent-style tokens and expand them
@@ -174,8 +174,8 @@ impl Config {
     fn expand_tokens(&self, original: &str) -> String {
         let mut string = original.to_string();
         string = string.replace("%u", &self.user());
-        string = string.replace("%h", &self.host()); // remote hostname (from context "host")
-        string = string.replace("%H", &self.host()); // remote hostname (from context "host")
+        string = string.replace("%h", self.host()); // remote hostname (from context "host")
+        string = string.replace("%H", self.host()); // remote hostname (from context "host")
         string = string.replace("%p", &format!("{}", self.port())); // original typed hostname (from context "host")
         string = string.replace("%%", "%");
         string
