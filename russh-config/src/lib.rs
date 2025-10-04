@@ -5,7 +5,7 @@
     clippy::panic
 )]
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use globset::Glob;
 use log::debug;
@@ -25,63 +25,284 @@ pub enum Error {
 mod proxy;
 pub use proxy::*;
 
-#[derive(Clone, Debug)]
-pub struct Config {
-    pub user: String,
-    pub host_name: String,
-    pub port: u16,
-    pub identity_file: Option<String>,
-    pub proxy_command: Option<String>,
-    pub proxy_jump: Option<String>,
-    pub add_keys_to_agent: AddKeysToAgent,
-    pub user_known_hosts_file: Option<String>,
-    pub strict_host_key_checking: bool,
+#[derive(Clone, Debug, Default)]
+struct HostConfig {
+    /// http://man.openbsd.org/OpenBSD-current/man5/ssh_config.5#User
+    user: Option<String>,
+    /// http://man.openbsd.org/OpenBSD-current/man5/ssh_config.5#Hostname
+    hostname: Option<String>,
+    /// http://man.openbsd.org/OpenBSD-current/man5/ssh_config.5#Port
+    port: Option<u16>,
+    /// http://man.openbsd.org/OpenBSD-current/man5/ssh_config.5#IdentityFile
+    identity_file: Option<Vec<PathBuf>>,
+    /// http://man.openbsd.org/OpenBSD-current/man5/ssh_config.5#ProxyCommand
+    proxy_command: Option<String>,
+    /// http://man.openbsd.org/OpenBSD-current/man5/ssh_config.5#ProxyJump
+    proxy_jump: Option<String>,
+    /// http://man.openbsd.org/OpenBSD-current/man5/ssh_config.5#AddKeysToAgent
+    add_keys_to_agent: Option<AddKeysToAgent>,
+    /// http://man.openbsd.org/OpenBSD-current/man5/ssh_config.5#UserKnownHostsFile
+    user_known_hosts_file: Option<PathBuf>,
+    /// http://man.openbsd.org/OpenBSD-current/man5/ssh_config.5#StrictHostKeyChecking
+    strict_host_key_checking: Option<bool>,
 }
 
-impl Config {
-    pub fn default(host_name: &str) -> Self {
-        Config {
-            user: whoami::username(),
-            host_name: host_name.to_string(),
-            port: 22,
-            identity_file: None,
-            proxy_command: None,
-            proxy_jump: None,
-            add_keys_to_agent: AddKeysToAgent::default(),
-            user_known_hosts_file: None,
-            strict_host_key_checking: true,
+impl HostConfig {
+    fn merge(mut left: Self, right: &Self) -> Self {
+        macro_rules! clone_if_none {
+            ($left:ident, $right:ident, $($field:ident),+) => {
+                $(if $left.$field.is_none() {
+                    $left.$field = $right.$field.clone();
+                })+
+            };
         }
+
+        clone_if_none!(
+            left,
+            right,
+            user,
+            hostname,
+            port,
+            proxy_command,
+            proxy_jump,
+            add_keys_to_agent,
+            user_known_hosts_file,
+            strict_host_key_checking
+        );
+
+        // Special-case IdentityFile param
+        if let Some(right_identity_files) = right.identity_file.as_deref() {
+            if let Some(identity_files) = left.identity_file.as_mut() {
+                identity_files.extend(right_identity_files.iter().cloned())
+            } else {
+                left.identity_file = Some(Vec::from_iter(right_identity_files.iter().cloned()))
+            }
+        }
+        left
     }
 }
 
+/// https://man.openbsd.org/OpenBSD-current/man5/ssh_config.5#PATTERNS
+#[derive(Clone, Debug)]
+struct HostPattern {
+    pattern: String,
+    negated: bool,
+}
+
+#[derive(Clone, Debug, Default)]
+struct HostEntry {
+    host_patterns: Vec<HostPattern>,
+    host_config: HostConfig,
+}
+
+impl HostEntry {
+    fn matches(&self, host: &str) -> bool {
+        let mut matches = false;
+        for host_pattern in self.host_patterns.iter() {
+            if check_host_against_glob_pattern(host, &host_pattern.pattern) {
+                if host_pattern.negated {
+                    // "If a negated entry is matched, then the Host entry is ignored, regardless of whether any other patterns on the line match."
+                    return false;
+                }
+                matches = true;
+            }
+        }
+        matches
+    }
+}
+
+struct SshConfig {
+    entries: Vec<HostEntry>,
+}
+
+impl SshConfig {
+    pub fn query(&self, host: &str) -> HostConfig {
+        self.entries
+            .iter()
+            .filter_map(|e| {
+                if e.matches(host) {
+                    Some(&e.host_config)
+                } else {
+                    None
+                }
+            })
+            .fold(HostConfig::default(), HostConfig::merge)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Config {
+    host_name: String,
+    user: Option<String>,
+    port: Option<u16>,
+    host_config: HostConfig,
+}
+
 impl Config {
+    pub fn default(host: &str) -> Self {
+        Self {
+            host_name: host.to_string(),
+            user: None,
+            port: None,
+            host_config: HostConfig::default(),
+        }
+    }
+
+    fn user(&self) -> String {
+        self.user
+            .as_deref()
+            .or(self.host_config.user.as_deref())
+            .map(ToString::to_string)
+            .unwrap_or_else(whoami::username)
+    }
+
+    fn port(&self) -> u16 {
+        self.host_config.port.or(self.port).unwrap_or(22)
+    }
+
+    fn host(&self) -> &str {
+        self.host_config
+            .hostname
+            .as_ref()
+            .unwrap_or(&self.host_name)
+    }
+
     // Look for any of the ssh_config(5) percent-style tokens and expand them
     // based on current data in the struct, returning a new String. This function
     // can be employed late/lazy eg just before establishing a stream using ProxyCommand
     // but also can be used to modify Hostname as config parse time
     fn expand_tokens(&self, original: &str) -> String {
         let mut string = original.to_string();
-        string = string.replace("%u", &self.user);
-        string = string.replace("%h", &self.host_name); // remote hostname (from context "host")
-        string = string.replace("%H", &self.host_name); // remote hostname (from context "host")
-        string = string.replace("%p", &format!("{}", self.port)); // original typed hostname (from context "host")
+        string = string.replace("%u", &self.user());
+        string = string.replace("%h", self.host()); // remote hostname (from context "host")
+        string = string.replace("%H", self.host()); // remote hostname (from context "host")
+        string = string.replace("%p", &format!("{}", self.port())); // original typed hostname (from context "host")
         string = string.replace("%%", "%");
         string
     }
 
     pub async fn stream(&self) -> Result<Stream, Error> {
-        if let Some(ref proxy_command) = self.proxy_command {
+        if let Some(ref proxy_command) = self.host_config.proxy_command {
             let proxy_command = self.expand_tokens(proxy_command);
             let cmd: Vec<&str> = proxy_command.split(' ').collect();
             Stream::proxy_command(cmd.first().unwrap_or(&""), cmd.get(1..).unwrap_or(&[]))
                 .await
                 .map_err(Into::into)
         } else {
-            Stream::tcp_connect((self.host_name.as_str(), self.port))
+            Stream::tcp_connect((self.host(), self.port()))
                 .await
                 .map_err(Into::into)
         }
     }
+}
+
+fn parse_ssh_config(contents: &str) -> Result<SshConfig, Error> {
+    let mut entries = Vec::new();
+
+    let mut host_patterns: Option<Vec<HostPattern>> = None;
+    let mut config = HostConfig::default();
+
+    for line in contents.lines() {
+        let tokens = line.trim().splitn(2, ' ').collect::<Vec<&str>>();
+        if tokens.len() == 2 {
+            let (key, value) = (tokens.first().unwrap_or(&""), tokens.get(1).unwrap_or(&""));
+            let lower = key.to_lowercase();
+            match lower.as_str() {
+                "host" => {
+                    let patterns = value
+                        .split_ascii_whitespace()
+                        .filter_map(|pattern| {
+                            if pattern.is_empty() {
+                                None
+                            } else {
+                                let (pattern, negated) =
+                                    if let Some(pattern) = pattern.strip_prefix('!') {
+                                        (pattern, true)
+                                    } else {
+                                        (pattern, false)
+                                    };
+                                Some(HostPattern {
+                                    pattern: pattern.to_string(),
+                                    negated,
+                                })
+                            }
+                        })
+                        .collect();
+
+                    if let Some(host_patterns) = host_patterns.take() {
+                        let host_config = std::mem::take(&mut config);
+                        entries.push(HostEntry {
+                            host_patterns,
+                            host_config,
+                        });
+                    }
+
+                    host_patterns = Some(patterns);
+                }
+                "user" => config.user = Some(value.trim_start().to_string()),
+                "hostname" => config.hostname = Some(value.trim_start().to_string()),
+                "port" => {
+                    if let Ok(port) = value.trim_start().parse::<u16>() {
+                        config.port = Some(port)
+                    }
+                }
+                "identityfile" => {
+                    let identity_file = value.trim_start().strip_quotes().expand_home()?;
+                    if let Some(files) = config.identity_file.as_mut() {
+                        files.push(identity_file);
+                    } else {
+                        config.identity_file = Some(vec![identity_file])
+                    }
+                }
+                "proxycommand" => config.proxy_command = Some(value.trim_start().to_string()),
+                "proxyjump" => config.proxy_jump = Some(value.trim_start().to_string()),
+                "addkeystoagent" => {
+                    let value = match value.to_lowercase().as_str() {
+                        "yes" => AddKeysToAgent::Yes,
+                        "confirm" => AddKeysToAgent::Confirm,
+                        "ask" => AddKeysToAgent::Ask,
+                        _ => AddKeysToAgent::No,
+                    };
+                    config.add_keys_to_agent = Some(value)
+                }
+                "userknownhostsfile" => {
+                    config.user_known_hosts_file =
+                        Some(value.trim_start().strip_quotes().expand_home()?);
+                }
+                "stricthostkeychecking" => match value.to_lowercase().as_str() {
+                    "no" => config.strict_host_key_checking = Some(false),
+                    _ => config.strict_host_key_checking = Some(true),
+                },
+                key => {
+                    debug!("{:?}", key);
+                }
+            }
+        }
+    }
+
+    if let Some(host_patterns) = host_patterns.take() {
+        let host_config = std::mem::take(&mut config);
+        entries.push(HostEntry {
+            host_patterns,
+            host_config,
+        });
+    } else {
+        // Found configurations, but no Host (or Match) key.
+        return Err(Error::HostNotFound);
+    }
+
+    Ok(SshConfig { entries })
+}
+
+pub fn parse(file: &str, host: &str) -> Result<Config, Error> {
+    let ssh_config = parse_ssh_config(file)?;
+    let host_config = ssh_config.query(host);
+    Ok(Config {
+        host_name: host.to_string(),
+        user: None,
+        port: None,
+        host_config,
+    })
 }
 
 pub fn parse_home(host: &str) -> Result<Config, Error> {
@@ -111,61 +332,6 @@ pub enum AddKeysToAgent {
     No,
 }
 
-pub fn parse(file: &str, host: &str) -> Result<Config, Error> {
-    let mut config = Config::default(host);
-    let mut matches_current = false;
-    for line in file.lines() {
-        let tokens = line.trim().splitn(2, ' ').collect::<Vec<&str>>();
-        if tokens.len() == 2 {
-            let (key, value) = (tokens.first().unwrap_or(&""), tokens.get(1).unwrap_or(&""));
-            let lower = key.to_lowercase();
-            if lower.as_str() == "host" {
-                matches_current = value
-                    .split_whitespace()
-                    .any(|x| check_host_against_glob_pattern(host, x));
-            }
-            if matches_current {
-                match lower.as_str() {
-                    "user" => {
-                        config.user.clear();
-                        config.user.push_str(value.trim_start());
-                    }
-                    "hostname" => config.host_name = config.expand_tokens(value.trim_start()),
-                    "port" => {
-                        if let Ok(port) = value.trim_start().parse() {
-                            config.port = port
-                        }
-                    }
-                    "identityfile" => {
-                        config.identity_file =
-                            Some(value.trim_start().strip_quotes().expand_home()?);
-                    }
-                    "proxycommand" => config.proxy_command = Some(value.trim_start().to_string()),
-                    "proxyjump" => config.proxy_jump = Some(value.trim_start().to_string()),
-                    "addkeystoagent" => match value.to_lowercase().as_str() {
-                        "yes" => config.add_keys_to_agent = AddKeysToAgent::Yes,
-                        "confirm" => config.add_keys_to_agent = AddKeysToAgent::Confirm,
-                        "ask" => config.add_keys_to_agent = AddKeysToAgent::Ask,
-                        _ => config.add_keys_to_agent = AddKeysToAgent::No,
-                    },
-                    "userknownhostsfile" => {
-                        config.user_known_hosts_file =
-                            Some(value.trim_start().strip_quotes().expand_home()?);
-                    }
-                    "stricthostkeychecking" => match value.to_lowercase().as_str() {
-                        "no" => config.strict_host_key_checking = false,
-                        _ => config.strict_host_key_checking = true,
-                    },
-                    key => {
-                        debug!("{:?}", key);
-                    }
-                }
-            }
-        }
-    }
-    Ok(config)
-}
-
 fn check_host_against_glob_pattern(candidate: &str, glob_pattern: &str) -> bool {
     match Glob::new(glob_pattern) {
         Ok(glob) => glob.compile_matcher().is_match(candidate),
@@ -175,7 +341,7 @@ fn check_host_against_glob_pattern(candidate: &str, glob_pattern: &str) -> bool 
 
 trait SshConfigStrExt {
     fn strip_quotes(&self) -> Self;
-    fn expand_home(&self) -> Result<String, Error>;
+    fn expand_home(&self) -> Result<PathBuf, Error>;
 }
 
 impl SshConfigStrExt for &str {
@@ -191,24 +357,16 @@ impl SshConfigStrExt for &str {
         }
     }
 
-    fn expand_home(&self) -> Result<String, Error> {
+    fn expand_home(&self) -> Result<PathBuf, Error> {
         if self.starts_with("~/") {
             if let Some(mut home) = home::home_dir() {
                 home.push(self.split_at(2).1);
-                Ok(home
-                    .to_str()
-                    .ok_or_else(|| {
-                        std::io::Error::new(
-                            std::io::ErrorKind::Other,
-                            "Failed to convert home directory to string",
-                        )
-                    })?
-                    .to_string())
+                Ok(home)
             } else {
                 Err(Error::NoHome)
             }
         } else {
-            Ok(self.to_string())
+            Ok(self.into())
         }
     }
 }
@@ -216,7 +374,9 @@ impl SshConfigStrExt for &str {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used)]
-    use crate::{parse, AddKeysToAgent, Config, SshConfigStrExt};
+    use std::path::{Path, PathBuf};
+
+    use crate::{parse, AddKeysToAgent, Config, Error, SshConfigStrExt};
 
     #[test]
     fn strip_quotes() {
@@ -249,22 +409,22 @@ mod tests {
                 home::home_dir().expect("homedir").to_str().expect("to_str"),
                 "/some/folder"
             ),
-            value
+            value.to_str().unwrap()
         );
     }
 
     #[test]
     fn default_config() {
         let config: Config = Config::default("some_host");
-        assert_eq!(whoami::username(), config.user);
+        assert_eq!(whoami::username(), config.user());
         assert_eq!("some_host", config.host_name);
-        assert_eq!(22, config.port);
-        assert_eq!(None, config.identity_file);
-        assert_eq!(None, config.proxy_command);
-        assert_eq!(None, config.proxy_jump);
-        assert_eq!(AddKeysToAgent::No, config.add_keys_to_agent);
-        assert_eq!(None, config.user_known_hosts_file);
-        assert!(config.strict_host_key_checking);
+        assert_eq!(22, config.port());
+        assert_eq!(None, config.host_config.identity_file);
+        assert_eq!(None, config.host_config.proxy_command);
+        assert_eq!(None, config.host_config.proxy_jump);
+        assert_eq!(None, config.host_config.add_keys_to_agent);
+        assert_eq!(None, config.host_config.user_known_hosts_file);
+        assert_eq!(None, config.host_config.strict_host_key_checking);
     }
 
     #[test]
@@ -275,27 +435,73 @@ Host test_host
   User trinity
   Hostname foo.com
   Port 23
+  AddKeysToAgent confirm
   UserKnownHostsFile /some/special/host_file
   StrictHostKeyChecking no
 #";
-        let identity_file = format!(
+        let identity_file = PathBuf::from(format!(
             "{}{}",
             home::home_dir().expect("homedir").to_str().expect("to_str"),
             "/.ssh/id_ed25519"
-        );
+        ));
         let config = parse(value, "test_host").expect("parse");
-        assert_eq!("trinity", config.user);
-        assert_eq!("foo.com", config.host_name);
-        assert_eq!(23, config.port);
-        assert_eq!(Some(identity_file), config.identity_file);
-        assert_eq!(None, config.proxy_command);
-        assert_eq!(None, config.proxy_jump);
-        assert_eq!(AddKeysToAgent::No, config.add_keys_to_agent);
+        assert_eq!("trinity", config.user());
+        assert_eq!("foo.com", config.host());
+        assert_eq!(23, config.port());
+        assert_eq!(Some(vec![identity_file,]), config.host_config.identity_file);
+        assert_eq!(None, config.host_config.proxy_command);
+        assert_eq!(None, config.host_config.proxy_jump);
         assert_eq!(
-            Some("/some/special/host_file"),
-            config.user_known_hosts_file.as_deref()
+            Some(AddKeysToAgent::Confirm),
+            config.host_config.add_keys_to_agent
         );
-        assert!(!config.strict_host_key_checking);
+        assert_eq!(
+            Some(Path::new("/some/special/host_file")),
+            config.host_config.user_known_hosts_file.as_deref()
+        );
+        assert_eq!(Some(false), config.host_config.strict_host_key_checking);
+    }
+
+    #[test]
+    fn multiple_patterns() {
+        let config = parse(
+            r#"
+Host a.test_host
+    Port 42
+    IdentityFile '/path/to/id_ed25519'
+Host b.test_host
+    User invalid
+Host *.test_host
+    Hostname foo.com
+Host *.test_host !a.test_host
+    User invalid
+Host *
+    User trinity
+    Hostname invalid
+    IdentityFile '/path/to/id_rsa'
+        "#,
+            "a.test_host",
+        )
+        .expect("config is valid");
+
+        assert_eq!("trinity", config.user());
+        assert_eq!("foo.com", config.host());
+        assert_eq!(42, config.port());
+        assert_eq!(
+            Some(vec![
+                PathBuf::from("/path/to/id_ed25519"),
+                PathBuf::from("/path/to/id_rsa")
+            ]),
+            config.host_config.identity_file
+        )
+    }
+
+    #[test]
+    fn malformed() {
+        assert!(matches!(
+            parse("Hostname foo.com", "malformed"),
+            Err(Error::HostNotFound)
+        ))
     }
 
     #[test]
