@@ -201,12 +201,16 @@ fn parse_ssh_config(contents: &str) -> Result<SshConfig, Error> {
 
     let mut host_patterns: Option<Vec<HostPattern>> = None;
     let mut config = HostConfig::default();
+    let mut found_params = false;
 
     for line in contents.lines() {
         let tokens = line.trim().splitn(2, ' ').collect::<Vec<&str>>();
         if tokens.len() == 2 {
             let (key, value) = (tokens.first().unwrap_or(&""), tokens.get(1).unwrap_or(&""));
             let lower = key.to_lowercase();
+            if lower != "host" {
+                found_params = true;
+            }
             match lower.as_str() {
                 "host" => {
                     let patterns = value
@@ -235,8 +239,11 @@ fn parse_ssh_config(contents: &str) -> Result<SshConfig, Error> {
                             host_patterns,
                             host_config,
                         });
+                    } else if found_params {
+                        return Err(Error::HostNotFound);
                     }
 
+                    found_params = false;
                     host_patterns = Some(patterns);
                 }
                 "user" => config.user = Some(value.trim_start().to_string()),
@@ -286,7 +293,7 @@ fn parse_ssh_config(contents: &str) -> Result<SshConfig, Error> {
             host_patterns,
             host_config,
         });
-    } else {
+    } else if found_params {
         // Found configurations, but no Host (or Match) key.
         return Err(Error::HostNotFound);
     }
@@ -497,9 +504,20 @@ Host *
     }
 
     #[test]
+    fn empty_ssh_config() {
+        let ssh_config = parse("\n\n\n", "test_host").expect("parse");
+        assert_eq!(ssh_config.host(), "test_host");
+        assert_eq!(ssh_config.port(), 22);
+    }
+
+    #[test]
     fn malformed() {
         assert!(matches!(
             parse("Hostname foo.com", "malformed"),
+            Err(Error::HostNotFound)
+        ));
+        assert!(matches!(
+            parse("Hostname foo.com\nHost foo", "malformed"),
             Err(Error::HostNotFound)
         ))
     }
