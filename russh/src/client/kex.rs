@@ -127,10 +127,7 @@ impl ClientKex {
                 debug!("negotiated algorithms: {names:?}");
 
                 // seqno has already been incremented after read()
-                if (names.strict_kex() || self.cause.is_strict_rekey())
-                    && !self.cause.is_rekey()
-                    && input.seqn.0 != 1
-                {
+                if names.strict_kex() && !self.cause.is_rekey() && input.seqn.0 != 1 {
                     return Err(strict_kex_violation(
                         msg::KEXINIT,
                         input.seqn.0 as usize - 1,
