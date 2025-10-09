@@ -744,6 +744,9 @@ impl Session {
                     Some(GlobalRequestResponse::Keepalive) => {
                         // ignore keepalives
                     }
+                    Some(GlobalRequestResponse::Ping(return_channel)) => {
+                        let _ = return_channel.send(());
+                    }
                     Some(GlobalRequestResponse::NoMoreSessions) => {
                         debug!("no-more-sessions@openssh.com requests success");
                     }
@@ -782,6 +785,9 @@ impl Session {
                 match self.open_global_requests.pop_front() {
                     Some(GlobalRequestResponse::Keepalive) => {
                         // ignore keepalives
+                    }
+                    Some(GlobalRequestResponse::Ping(return_channel)) => {
+                        let _ = return_channel.send(());
                     }
                     Some(GlobalRequestResponse::NoMoreSessions) => {
                         warn!("no-more-sessions@openssh.com requests failure");
