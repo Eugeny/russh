@@ -607,6 +607,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "kruton",
+      "name": "Kenny Root",
+      "avatar_url": "https://avatars.githubusercontent.com/u/50407?v=4",
+      "profile": "https://the-b.org/",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,
