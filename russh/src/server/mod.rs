@@ -869,11 +869,12 @@ pub trait Server {
                     },
                     accept_result = socket.accept() => {
                         match accept_result {
-                            Ok((socket, _)) => {
+                            Ok((socket, peer_addr)) => {
                                 let mut shutdown_rx = shutdown_tx2.subscribe();
 
                                 let config = config.clone();
-                                let handler = self.new_client(socket.peer_addr().ok());
+                                // NOTE: For backwards compatibility, we keep the Option signature as changing it would be a breaking change.
+                                let handler = self.new_client(Some(peer_addr));
                                 let error_tx = error_tx.clone();
 
                                 russh_util::runtime::spawn(async move {
