@@ -14,14 +14,15 @@ rust-version = "1.75"
 
 [features]
 default = ["flate2", "aws-lc-rs", "rsa"]
-aws-lc-rs = ["dep:aws-lc-rs"]
+# Crypto backends: enable at least one of `aws-lc-rs` or `ring`.
+aws-lc-rs = ["dep:aws-lc-rs"] # Default crypto backend.
 async-trait = ["dep:async-trait"]
 legacy-ed25519-pkcs8-parser = ["yasna"]
 # Danger: 3DES cipher is insecure.
 des = ["dep:des"]
 # Danger: DSA algorithm is insecure.
 dsa = ["ssh-key/dsa"]
-ring = ["dep:ring"]
+ring = ["dep:ring"] # Alternative crypto backend.
 rsa = ["dep:rsa", "dep:pkcs1", "ssh-key/rsa", "ssh-key/rsa-sha1"]
 _bench = ["dep:criterion"]
 
