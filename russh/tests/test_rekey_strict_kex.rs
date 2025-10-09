@@ -16,8 +16,8 @@ async fn test_rekey_with_strict_kex() {
     let _ = env_logger::try_init();
 
     // Generate keys
-    let client_key = PrivateKey::random(&mut rand_core::OsRng, ssh_key::Algorithm::Ed25519)
-        .unwrap();
+    let client_key =
+        PrivateKey::random(&mut rand_core::OsRng, ssh_key::Algorithm::Ed25519).unwrap();
 
     // Server config with strict kex enabled
     let mut server_config = server::Config::default();
@@ -31,19 +31,14 @@ async fn test_rekey_with_strict_kex() {
     server_config.preferred = {
         let mut p = Preferred::default();
         // Include the strict kex extension marker for server
-        p.kex = Cow::Borrowed(&[
-            kex::CURVE25519,
-            kex::EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER,
-        ]);
+        p.kex = Cow::Borrowed(&[kex::CURVE25519, kex::EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER]);
         p
     };
 
     let server_config = Arc::new(server_config);
 
     // Setup server
-    let socket = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .unwrap();
+    let socket = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = socket.local_addr().unwrap();
 
     tokio::spawn(async move {
@@ -58,10 +53,7 @@ async fn test_rekey_with_strict_kex() {
     client_config.preferred = {
         let mut p = Preferred::default();
         // Include the strict kex extension marker for client
-        p.kex = Cow::Borrowed(&[
-            kex::CURVE25519,
-            kex::EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT,
-        ]);
+        p.kex = Cow::Borrowed(&[kex::CURVE25519, kex::EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT]);
         p
     };
     let client_config = Arc::new(client_config);
