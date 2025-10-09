@@ -29,7 +29,7 @@ use ctr::Ctr128BE;
 use delegate::delegate;
 use log::trace;
 use once_cell::sync::Lazy;
-#[cfg(all(not(feature = "aws-lc-rs"), feature = "ring"))]
+#[cfg(not(feature = "aws-lc-rs"))]
 use ring::aead::{AES_128_GCM as ALGORITHM_AES_128_GCM, AES_256_GCM as ALGORITHM_AES_256_GCM};
 use ssh_encoding::Encode;
 use tokio::io::{AsyncRead, AsyncReadExt};

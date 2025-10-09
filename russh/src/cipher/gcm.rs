@@ -26,7 +26,7 @@ use aws_lc_rs::{
     error::Unspecified,
 };
 use rand::RngCore;
-#[cfg(all(not(feature = "aws-lc-rs"), feature = "ring"))]
+#[cfg(not(feature = "aws-lc-rs"))]
 use ring::{
     aead::{
         Aad, Algorithm, BoundKey, Nonce as AeadNonce, NonceSequence, OpeningKey as AeadOpeningKey,

@@ -17,7 +17,7 @@
 
 #[cfg(feature = "aws-lc-rs")]
 use aws_lc_rs::aead::chacha20_poly1305_openssh;
-#[cfg(all(not(feature = "aws-lc-rs"), feature = "ring"))]
+#[cfg(not(feature = "aws-lc-rs"))]
 use ring::aead::chacha20_poly1305_openssh;
 
 use super::super::Error;

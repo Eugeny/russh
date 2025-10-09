@@ -36,6 +36,7 @@ pub fn decode_pkcs5(
         }
         #[cfg(not(feature = "rsa"))]
         {
+            let _ = sec;
             Err(Error::UnsupportedKeyType {
                 key_type_string: "RSA".to_string(),
                 key_type_raw: vec![],
