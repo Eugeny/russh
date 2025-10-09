@@ -542,7 +542,7 @@ impl Session {
                         new_size = channel.recipient_window_size.saturating_add(amount);
                         channel.recipient_window_size = new_size;
                     } else {
-                        return Err(crate::Error::WrongChannel.into());
+                        return Ok(());
                     }
                 }
 
