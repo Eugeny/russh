@@ -1,9 +1,9 @@
-use byteorder::{BigEndian, ByteOrder};
 use std::io::IoSlice;
 use std::mem::size_of;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
+use byteorder::{BigEndian, ByteOrder};
 use bytes::BytesMut;
 use delegate::delegate;
 use log::debug;
