@@ -13,7 +13,7 @@ use ssh_encoding::{Decode, Encode, Reader, Writer};
 use self::groups::{
     DhGroup, DH_GROUP1, DH_GROUP14, DH_GROUP15, DH_GROUP16, DH_GROUP17, DH_GROUP18,
 };
-use super::{compute_keys, KexAlgorithm, KexAlgorithmImplementor, KexType};
+use super::{compute_keys, KexAlgorithm, KexAlgorithmImplementor, KexType, SharedSecret};
 use crate::client::GexParams;
 use crate::session::Exchange;
 use crate::{cipher, mac, msg, CryptoVec, Error};
@@ -309,8 +309,14 @@ impl<D: Digest> KexAlgorithmImplementor for DhGroupKex<D> {
         local_to_remote_mac: mac::Name,
         is_server: bool,
     ) -> Result<super::cipher::CipherPair, Error> {
+        let shared_secret = self
+            .shared_secret
+            .as_deref()
+            .map(SharedSecret::from_mpint)
+            .transpose()?;
+
         compute_keys::<D>(
-            self.shared_secret.as_deref(),
+            shared_secret.as_ref(),
             session_id,
             exchange_hash,
             cipher,
