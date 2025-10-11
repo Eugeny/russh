@@ -5,8 +5,9 @@ use curve25519_dalek::scalar::Scalar;
 use log::debug;
 use ssh_encoding::{Encode, Writer};
 
-use super::{compute_keys, KexAlgorithm, KexAlgorithmImplementor, KexType};
-use crate::kex::encode_mpint;
+use super::{
+    compute_keys, encode_mpint, KexAlgorithm, KexAlgorithmImplementor, KexType, SharedSecret,
+};
 use crate::mac::{self};
 use crate::session::Exchange;
 use crate::{cipher, msg, CryptoVec};
@@ -151,8 +152,14 @@ impl KexAlgorithmImplementor for Curve25519Kex {
         local_to_remote_mac: mac::Name,
         is_server: bool,
     ) -> Result<super::cipher::CipherPair, crate::Error> {
+        let shared_secret = self
+            .shared_secret
+            .as_ref()
+            .map(|x| SharedSecret::from_mpint(&x.0))
+            .transpose()?;
+
         compute_keys::<sha2::Sha256>(
-            self.shared_secret.as_ref().map(|x| x.0.as_slice()),
+            shared_secret.as_ref(),
             session_id,
             exchange_hash,
             cipher,
