@@ -196,13 +196,13 @@ impl KexAlgorithmImplementor for MlKem768X25519Kex {
         hasher.update(&combined);
         let k = hasher.finalize();
 
-        k.as_slice().encode(buffer)?;
+        (*k).encode(buffer)?;
 
         let mut hasher = sha2::Sha256::new();
         hasher.update(&buffer);
 
         let mut res = CryptoVec::new();
-        res.extend(hasher.finalize().as_slice());
+        res.extend(&hasher.finalize());
         Ok(res)
     }
 
@@ -226,7 +226,7 @@ impl KexAlgorithmImplementor for MlKem768X25519Kex {
         hasher.update(&combined);
         let k = hasher.finalize();
 
-        let shared_secret = SharedSecret::from_string(k.as_slice())?;
+        let shared_secret = SharedSecret::from_string(&k)?;
 
         compute_keys::<sha2::Sha256>(
             Some(&shared_secret),

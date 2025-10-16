@@ -4,9 +4,20 @@ use aes::cipher::{
 };
 use cbc::{Decryptor, Encryptor};
 use digest::crypto_common::InnerUser;
-use generic_array::GenericArray;
+#[allow(deprecated)]
+use digest::generic_array::GenericArray;
 
 use super::block::BlockStreamCipher;
+
+// Allow deprecated generic-array 0.14 usage until RustCrypto crates (cipher, cbc, etc.)
+// upgrade to generic-array 1.x. Remove this when dependencies no longer use 0.14.
+#[allow(deprecated)]
+fn generic_array_from_slice<N>(chunk: &[u8]) -> GenericArray<u8, N>
+where
+    N: digest::generic_array::ArrayLength<u8>,
+{
+    GenericArray::from_slice(chunk).clone()
+}
 
 pub struct CbcWrapper<C: BlockEncrypt + BlockCipher + BlockDecrypt> {
     encryptor: Encryptor<C>,
@@ -24,17 +35,17 @@ impl<C: BlockEncrypt + BlockCipher + BlockDecrypt> IvSizeUser for CbcWrapper<C> 
 impl<C: BlockEncrypt + BlockCipher + BlockDecrypt> BlockStreamCipher for CbcWrapper<C> {
     fn encrypt_data(&mut self, data: &mut [u8]) {
         for chunk in data.chunks_exact_mut(C::block_size()) {
-            let mut block: GenericArray<u8, _> = GenericArray::clone_from_slice(chunk);
+            let mut block = generic_array_from_slice(chunk);
             self.encryptor.encrypt_block_mut(&mut block);
-            chunk.clone_from_slice(&block);
+            chunk.copy_from_slice(&block);
         }
     }
 
     fn decrypt_data(&mut self, data: &mut [u8]) {
         for chunk in data.chunks_exact_mut(C::block_size()) {
-            let mut block = GenericArray::clone_from_slice(chunk);
+            let mut block = generic_array_from_slice(chunk);
             self.decryptor.decrypt_block_mut(&mut block);
-            chunk.clone_from_slice(&block);
+            chunk.copy_from_slice(&block);
         }
     }
 }
