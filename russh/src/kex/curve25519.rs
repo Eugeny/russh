@@ -139,7 +139,7 @@ impl KexAlgorithmImplementor for Curve25519Kex {
         hasher.update(&buffer);
 
         let mut res = CryptoVec::new();
-        res.extend(hasher.finalize().as_slice());
+        res.extend(&hasher.finalize());
         Ok(res)
     }
 
