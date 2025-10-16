@@ -47,11 +47,11 @@ jobs:
 
     - name: Install target
       run: |
-        rustup toolchain add 1.81.0
-        rustup target add --toolchain 1.81.0 wasm32-wasip1
+        rustup toolchain add 1.86.0
+        rustup target add --toolchain 1.86.0 wasm32-wasip1
 
     - name: Build (WASM-compatible features)
-      run: cargo +1.81.0 build --verbose --target wasm32-wasip1 --no-default-features --features flate2,ring -p russh
+      run: cargo +1.86.0 build --verbose --target wasm32-wasip1 --no-default-features --features flate2,ring -p russh
 
   Formatting:
     runs-on: ubuntu-24.04

@@ -470,7 +470,7 @@ impl Encrypted {
             Err(e) => match e {
                 ssh_key::Error::AlgorithmUnknown
                 | ssh_key::Error::AlgorithmUnsupported { .. }
-                | ssh_key::Error::CertificateValidation { .. } => {
+                | ssh_key::Error::CertificateValidation => {
                     debug!("public key error: {e}");
                     reject_auth_request(until, &mut self.write, auth_request).await?;
                     Ok(())
