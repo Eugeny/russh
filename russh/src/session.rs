@@ -29,7 +29,7 @@ use crate::kex::dh::groups::DhGroup;
 use crate::kex::{KexAlgorithm, KexAlgorithmImplementor};
 use crate::sshbuffer::PacketWriter;
 use crate::{
-    auth, cipher, mac, msg, negotiation, ChannelId, ChannelParams, CryptoVec, Disconnect, Limits,
+    ChannelId, ChannelParams, CryptoVec, Disconnect, Limits, auth, cipher, mac, msg, negotiation,
 };
 
 #[derive(Debug)]
@@ -211,11 +211,11 @@ impl<C> CommonSession<C> {
             });
             Ok(())
         };
-        return if let Some(ref mut enc) = self.encrypted {
+        if let Some(ref mut enc) = self.encrypted {
             debug(&mut enc.write)
         } else {
             debug(&mut self.packet_writer.buffer().buffer)
-        };
+        }
     }
 
     pub(crate) fn reset_seqn(&mut self) {
@@ -270,8 +270,7 @@ impl Encrypted {
         if let Some(channel) = self.channels.get_mut(&channel) {
             trace!(
                 "adjust_window_size, channel = {}, size = {},",
-                channel.sender_channel,
-                target
+                channel.sender_channel, target
             );
             // Ignore extra data.
             // https://tools.ietf.org/html/rfc4254#section-5.2

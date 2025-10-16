@@ -2,7 +2,7 @@
 authors = ["Pierre-Étienne Meunier <pe@pijul.org>"]
 description = "A client and server SSH library."
 documentation = "https://docs.rs/russh"
-edition = "2021"
+edition = "2024"
 homepage = "https://github.com/warp-tech/russh"
 keywords = ["ssh"]
 license = "Apache-2.0"
@@ -10,7 +10,7 @@ name = "russh"
 readme = "../README.md"
 repository = "https://github.com/warp-tech/russh"
 version = "0.54.6"
-rust-version = "1.75"
+rust-version = "1.85"
 
 [features]
 default = ["flate2", "aws-lc-rs", "rsa"]

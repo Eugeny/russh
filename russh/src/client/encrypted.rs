@@ -1002,7 +1002,7 @@ impl Encrypted {
                     self.write.extend(&buffer[i0..]);
                 })
             }
-            auth::Method::OpenSshCertificate { ref key, ref cert } => {
+            auth::Method::OpenSshCertificate { key, cert } => {
                 let i0 = self.client_make_to_sign(
                     user,
                     &PublicKeyOrCertificate::Certificate(cert.clone()),

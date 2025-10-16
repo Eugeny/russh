@@ -5,7 +5,7 @@ use rand::RngCore;
 use rand_core::OsRng;
 use russh::keys::PrivateKeyWithHashAlg;
 use russh::server::{self, Auth, Msg, Server as _, Session};
-use russh::{client, Channel, ChannelMsg};
+use russh::{Channel, ChannelMsg, client};
 use ssh_key::PrivateKey;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -28,7 +28,8 @@ impl ChannelDataCopy for ReaderAndWriter {
         data: &[u8],
     ) -> anyhow::Result<Vec<u8>> {
         let mut buf = Vec::<u8>::new();
-        let (mut writer, mut reader) = (channel.make_writer_ext(Some(1)), channel.make_reader());
+        let mut writer = channel.make_writer_ext(Some(1));
+        let mut reader = channel.make_reader();
 
         let (r0, r1) = tokio::join!(
             async {
