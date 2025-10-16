@@ -2,12 +2,12 @@
 authors = ["Eugene <inbox@null.page>"]
 description = "Pageant SSH agent transport client."
 documentation = "https://docs.rs/pageant"
-edition = "2021"
+edition = "2024"
 license = "Apache-2.0"
 name = "pageant"
 repository = "https://github.com/warp-tech/russh"
 version = "0.1.0"
-rust-version = "1.75"
+rust-version = "1.85"
 
 [target.'cfg(windows)'.dependencies]
 futures.workspace = true

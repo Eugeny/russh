@@ -195,12 +195,12 @@ impl ClientKex {
                 let mut r = &input.buffer[1..];
 
                 let prime = Mpint::decode(&mut r)?;
-                let gen = Mpint::decode(&mut r)?;
-                debug!("received gex group: prime={}, gen={}", prime, gen);
+                let generator = Mpint::decode(&mut r)?;
+                debug!("received gex group: prime={}, generator={}", prime, generator);
 
                 let group = DhGroup {
                     prime: prime.as_bytes().to_vec().into(),
-                    generator: gen.as_bytes().to_vec().into(),
+                    generator: generator.as_bytes().to_vec().into(),
                 };
 
                 if group.bit_size() < self.config.gex.min_group_size

@@ -202,7 +202,7 @@ pub(crate) trait Select {
         available_host_keys: Option<&[PrivateKey]>,
         cause: &KexCause,
     ) -> Result<Names, Error> {
-        let Some(mut r) = &buffer.get(17..) else {
+        let &Some(mut r) = &buffer.get(17..) else {
             return Err(Error::Inconsistent);
         };
 

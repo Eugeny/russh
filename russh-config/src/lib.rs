@@ -383,7 +383,7 @@ mod tests {
     #![allow(clippy::expect_used)]
     use std::path::{Path, PathBuf};
 
-    use crate::{parse, AddKeysToAgent, Config, Error, SshConfigStrExt};
+    use crate::{AddKeysToAgent, Config, Error, SshConfigStrExt, parse};
 
     #[test]
     fn strip_quotes() {

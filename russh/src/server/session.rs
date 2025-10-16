@@ -1228,7 +1228,7 @@ impl Session {
             // If client sent a ext-info-c message in the kex list, it supports RFC 8308 extension negotiation.
             let mut key_extension_client = false;
             if let Some(e) = &enc.exchange {
-                let Some(mut r) = &e.client_kex_init.as_ref().get(17..) else {
+                let &Some(mut r) = &e.client_kex_init.as_ref().get(17..) else {
                     return Ok(());
                 };
                 if let Ok(kex_string) = String::decode(&mut r) {
