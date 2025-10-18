@@ -1611,17 +1611,17 @@ impl GexParams {
     pub(crate) fn validate(&self) -> Result<(), Error> {
         if self.min_group_size < 2048 {
             return Err(Error::InvalidConfig(
-                "min_group_size must be at least 2048 bits".into(),
+                format!("min_group_size must be at least 2048 bits. We got {} bits", self.min_group_size),
             ));
         }
         if self.preferred_group_size < self.min_group_size {
             return Err(Error::InvalidConfig(
-                "preferred_group_size must be at least as large as min_group_size".into(),
+                format!("preferred_group_size must be at least as large as min_group_size. We have preferred_group_size = {} < min_group_size = {}", self.preferred_group_size, self.min_group_size),
             ));
         }
         if self.max_group_size < self.preferred_group_size {
             return Err(Error::InvalidConfig(
-                "max_group_size must be at least as large as preferred_group_size".into(),
+                format!("max_group_size must be at least as large as preferred_group_size. We have max_group_size = {} < preferred_group_size = {}", self.max_group_size, self.preferred_group_size),
             ));
         }
         Ok(())
