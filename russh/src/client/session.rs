@@ -416,6 +416,19 @@ impl Session {
         Ok(())
     }
 
+    pub fn send_ping(&mut self, reply_channel: oneshot::Sender<()>) -> Result<(), crate::Error> {
+        self.open_global_requests
+            .push_back(crate::session::GlobalRequestResponse::Ping(reply_channel));
+        if let Some(ref mut enc) = self.common.encrypted {
+            push_packet!(enc.write, {
+                msg::GLOBAL_REQUEST.encode(&mut enc.write)?;
+                "keepalive@openssh.com".encode(&mut enc.write)?;
+                (true as u8).encode(&mut enc.write)?;
+            });
+        }
+        Ok(())
+    }
+
     pub fn no_more_sessions(&mut self, want_reply: bool) -> Result<(), crate::Error> {
         self.open_global_requests
             .push_back(crate::session::GlobalRequestResponse::NoMoreSessions);

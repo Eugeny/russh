@@ -542,7 +542,7 @@ impl Session {
                         new_size = channel.recipient_window_size.saturating_add(amount);
                         channel.recipient_window_size = new_size;
                     } else {
-                        return Err(crate::Error::WrongChannel.into());
+                        return Ok(());
                     }
                 }
 
@@ -744,6 +744,9 @@ impl Session {
                     Some(GlobalRequestResponse::Keepalive) => {
                         // ignore keepalives
                     }
+                    Some(GlobalRequestResponse::Ping(return_channel)) => {
+                        let _ = return_channel.send(());
+                    }
                     Some(GlobalRequestResponse::NoMoreSessions) => {
                         debug!("no-more-sessions@openssh.com requests success");
                     }
@@ -782,6 +785,9 @@ impl Session {
                 match self.open_global_requests.pop_front() {
                     Some(GlobalRequestResponse::Keepalive) => {
                         // ignore keepalives
+                    }
+                    Some(GlobalRequestResponse::Ping(return_channel)) => {
+                        let _ = return_channel.send(());
                     }
                     Some(GlobalRequestResponse::NoMoreSessions) => {
                         warn!("no-more-sessions@openssh.com requests failure");
@@ -996,7 +1002,7 @@ impl Encrypted {
                     self.write.extend(&buffer[i0..]);
                 })
             }
-            auth::Method::OpenSshCertificate { ref key, ref cert } => {
+            auth::Method::OpenSshCertificate { key, cert } => {
                 let i0 = self.client_make_to_sign(
                     user,
                     &PublicKeyOrCertificate::Certificate(cert.clone()),

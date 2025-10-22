@@ -2,7 +2,7 @@ use std::marker::PhantomData;
 
 use byteorder::{BigEndian, ByteOrder};
 use digest::typenum::Unsigned;
-use digest::KeyInit;
+use digest::{KeyInit, OutputSizeUser};
 use generic_array::{ArrayLength, GenericArray};
 use subtle::ConstantTimeEq;
 
@@ -10,16 +10,18 @@ use super::{Mac, MacAlgorithm};
 
 pub struct CryptoMacAlgorithm<
     M: digest::Mac + KeyInit + Send + 'static,
-    KL: ArrayLength<u8> + 'static,
+    KL: ArrayLength + 'static,
 >(pub PhantomData<M>, pub PhantomData<KL>);
 
-pub struct CryptoMac<M: digest::Mac + KeyInit + Send + 'static, KL: ArrayLength<u8> + 'static> {
+pub struct CryptoMac<M: digest::Mac + KeyInit + Send + 'static, KL: ArrayLength + 'static> {
     pub(crate) key: GenericArray<u8, KL>,
     pub(crate) p: PhantomData<M>,
 }
 
-impl<M: digest::Mac + KeyInit + Send + 'static, KL: ArrayLength<u8> + 'static> MacAlgorithm
+impl<M: digest::Mac + KeyInit + Send + 'static, KL: ArrayLength + 'static> MacAlgorithm
     for CryptoMacAlgorithm<M, KL>
+where
+    <M as OutputSizeUser>::OutputSize: ArrayLength,
 {
     fn key_len(&self) -> usize {
         KL::to_usize()
@@ -27,7 +29,7 @@ impl<M: digest::Mac + KeyInit + Send + 'static, KL: ArrayLength<u8> + 'static> M
 
     fn make_mac(&self, mac_key: &[u8]) -> Box<dyn Mac + Send> {
         let mut key = GenericArray::<u8, KL>::default();
-        key.clone_from_slice(mac_key);
+        key.copy_from_slice(mac_key);
         Box::new(CryptoMac::<M, KL> {
             key,
             p: PhantomData,
@@ -35,8 +37,9 @@ impl<M: digest::Mac + KeyInit + Send + 'static, KL: ArrayLength<u8> + 'static> M
     }
 }
 
-impl<M: digest::Mac + KeyInit + Send + 'static, KL: ArrayLength<u8> + 'static> Mac
-    for CryptoMac<M, KL>
+impl<M: digest::Mac + KeyInit + Send + 'static, KL: ArrayLength + 'static> Mac for CryptoMac<M, KL>
+where
+    <M as OutputSizeUser>::OutputSize: ArrayLength,
 {
     fn mac_len(&self) -> usize {
         M::OutputSize::to_usize()
@@ -49,7 +52,7 @@ impl<M: digest::Mac + KeyInit + Send + 'static, KL: ArrayLength<u8> + 'static> M
         BigEndian::write_u32(&mut seqno_buf, sequence_number);
         hmac.update(&seqno_buf);
         hmac.update(payload);
-        output.clone_from_slice(&hmac.finalize().into_bytes());
+        output.copy_from_slice(&hmac.finalize().into_bytes());
     }
 
     fn verify(&self, sequence_number: u32, payload: &[u8], mac: &[u8]) -> bool {

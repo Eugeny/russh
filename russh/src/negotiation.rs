@@ -100,6 +100,7 @@ impl Preferred {
 }
 
 const SAFE_KEX_ORDER: &[kex::Name] = &[
+    kex::MLKEM768X25519_SHA256,
     kex::CURVE25519,
     kex::CURVE25519_PRE_RFC_8731,
     kex::DH_GEX_SHA256,
@@ -201,7 +202,7 @@ pub(crate) trait Select {
         available_host_keys: Option<&[PrivateKey]>,
         cause: &KexCause,
     ) -> Result<Names, Error> {
-        let Some(mut r) = &buffer.get(17..) else {
+        let &Some(mut r) = &buffer.get(17..) else {
             return Err(Error::Inconsistent);
         };
 

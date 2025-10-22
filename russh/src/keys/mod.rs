@@ -860,7 +860,10 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
         client.request_identities().await?;
         let buf = russh_cryptovec::CryptoVec::from_slice(b"blabla");
         let len = buf.len();
-        let buf = client.sign_request(public, None, buf).await.unwrap();
+        let buf = client
+            .sign_request(public, Some(HashAlg::Sha256), buf)
+            .await
+            .unwrap();
         let (a, b) = buf.split_at(len);
 
         match key.public_key().key_data() {

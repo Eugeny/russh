@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use digest::KeyInit;
+use digest::{KeyInit, OutputSizeUser};
 use generic_array::{ArrayLength, GenericArray};
 
 use super::crypto::{CryptoMac, CryptoMacAlgorithm};
@@ -8,11 +8,13 @@ use super::{Mac, MacAlgorithm};
 
 pub struct CryptoEtmMacAlgorithm<
     M: digest::Mac + KeyInit + Send + 'static,
-    KL: ArrayLength<u8> + 'static,
+    KL: ArrayLength + 'static,
 >(pub PhantomData<M>, pub PhantomData<KL>);
 
-impl<M: digest::Mac + KeyInit + Send + 'static, KL: ArrayLength<u8> + 'static> MacAlgorithm
+impl<M: digest::Mac + KeyInit + Send + 'static, KL: ArrayLength + 'static> MacAlgorithm
     for CryptoEtmMacAlgorithm<M, KL>
+where
+    <M as OutputSizeUser>::OutputSize: ArrayLength,
 {
     fn key_len(&self) -> usize {
         CryptoMacAlgorithm::<M, KL>(self.0, self.1).key_len()
@@ -20,7 +22,7 @@ impl<M: digest::Mac + KeyInit + Send + 'static, KL: ArrayLength<u8> + 'static> M
 
     fn make_mac(&self, mac_key: &[u8]) -> Box<dyn Mac + Send> {
         let mut key = GenericArray::<u8, KL>::default();
-        key.clone_from_slice(mac_key);
+        key.copy_from_slice(mac_key);
         Box::new(CryptoEtmMac::<M, KL>(CryptoMac::<M, KL> {
             key,
             p: PhantomData,
@@ -28,12 +30,14 @@ impl<M: digest::Mac + KeyInit + Send + 'static, KL: ArrayLength<u8> + 'static> M
     }
 }
 
-pub struct CryptoEtmMac<M: digest::Mac + KeyInit + Send + 'static, KL: ArrayLength<u8> + 'static>(
+pub struct CryptoEtmMac<M: digest::Mac + KeyInit + Send + 'static, KL: ArrayLength + 'static>(
     CryptoMac<M, KL>,
 );
 
-impl<M: digest::Mac + KeyInit + Send + 'static, KL: ArrayLength<u8> + 'static> Mac
+impl<M: digest::Mac + KeyInit + Send + 'static, KL: ArrayLength + 'static> Mac
     for CryptoEtmMac<M, KL>
+where
+    <M as OutputSizeUser>::OutputSize: ArrayLength,
 {
     fn is_etm(&self) -> bool {
         true

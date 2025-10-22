@@ -13,7 +13,7 @@ use p521::NistP521;
 use sha2::{Digest, Sha256, Sha384, Sha512};
 use ssh_encoding::{Encode, Writer};
 
-use super::{encode_mpint, KexAlgorithm};
+use super::{encode_mpint, KexAlgorithm, SharedSecret as KexSharedSecret};
 use crate::kex::{compute_keys, KexAlgorithmImplementor, KexType};
 use crate::mac::{self};
 use crate::session::Exchange;
@@ -173,7 +173,7 @@ where
         hasher.update(&buffer);
 
         let mut res = CryptoVec::new();
-        res.extend(hasher.finalize().as_slice());
+        res.extend(&hasher.finalize());
         Ok(res)
     }
 
@@ -186,10 +186,14 @@ where
         local_to_remote_mac: mac::Name,
         is_server: bool,
     ) -> Result<crate::kex::cipher::CipherPair, crate::Error> {
+        let shared_secret = self
+            .shared_secret
+            .as_ref()
+            .map(|x| KexSharedSecret::from_mpint(x.raw_secret_bytes()))
+            .transpose()?;
+
         compute_keys::<D>(
-            self.shared_secret
-                .as_ref()
-                .map(|x| x.raw_secret_bytes() as &[u8]),
+            shared_secret.as_ref(),
             session_id,
             exchange_hash,
             cipher,

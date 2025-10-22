@@ -200,6 +200,9 @@ pub enum Msg {
     Keepalive {
         want_reply: bool,
     },
+    Ping {
+        reply_channel: oneshot::Sender<()>,
+    },
     NoMoreSessions {
         want_reply: bool,
     },
@@ -839,6 +842,19 @@ impl<H: Handler> Handle<H> {
             .map_err(|_| Error::SendError)
     }
 
+    /// Send a keepalive/ping package to the remote peer, and wait for the reply/pong.
+    pub async fn send_ping(&self) -> Result<(), Error> {
+        let (sender, receiver) = oneshot::channel();
+        self.sender
+            .send(Msg::Ping {
+                reply_channel: sender,
+            })
+            .await
+            .map_err(|_| Error::SendError)?;
+        let _ = receiver.await;
+        Ok(())
+    }
+
     /// Send a no-more-sessions request to the remote peer.
     pub async fn no_more_sessions(&self, want_reply: bool) -> Result<(), Error> {
         self.sender
@@ -1393,6 +1409,9 @@ impl Session {
             }
             Msg::Keepalive { want_reply } => {
                 let _ = self.send_keepalive(want_reply);
+            }
+            Msg::Ping { reply_channel } => {
+                let _ = self.send_ping(reply_channel);
             }
             Msg::NoMoreSessions { want_reply } => {
                 let _ = self.no_more_sessions(want_reply);

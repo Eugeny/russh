@@ -5,8 +5,8 @@ use p384::NistP384;
 use p521::NistP521;
 use pkcs8::{AssociatedOid, EncodePrivateKey, PrivateKeyInfo, SecretDocument};
 use spki::ObjectIdentifier;
-use ssh_key::private::{EcdsaKeypair, Ed25519Keypair, Ed25519PrivateKey, KeypairData};
 use ssh_key::PrivateKey;
+use ssh_key::private::{EcdsaKeypair, Ed25519Keypair, Ed25519PrivateKey, KeypairData};
 
 use crate::keys::Error;
 
@@ -134,16 +134,16 @@ pub fn encode_pkcs8_encrypted(
 /// Encode into a PKCS#8-encoded private key.
 pub fn encode_pkcs8(key: &ssh_key::PrivateKey) -> Result<Vec<u8>, Error> {
     let v = match key.key_data() {
-        ssh_key::private::KeypairData::Ed25519(ref pair) => {
+        ssh_key::private::KeypairData::Ed25519(pair) => {
             let sk: ed25519_dalek::SigningKey = pair.try_into()?;
             sk.to_pkcs8_der()?
         }
         #[cfg(feature = "rsa")]
-        ssh_key::private::KeypairData::Rsa(ref pair) => {
+        ssh_key::private::KeypairData::Rsa(pair) => {
             let sk: rsa::RsaPrivateKey = pair.try_into()?;
             sk.to_pkcs8_der()?
         }
-        ssh_key::private::KeypairData::Ecdsa(ref pair) => match pair {
+        ssh_key::private::KeypairData::Ecdsa(pair) => match pair {
             EcdsaKeypair::NistP256 { private, .. } => {
                 let sk = p256::SecretKey::from_bytes(private.as_slice().into())?;
                 sk.to_pkcs8_der()?

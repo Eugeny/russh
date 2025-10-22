@@ -120,7 +120,7 @@ impl ServerKex {
                 debug!("negotiated: {names:?}");
 
                 // seqno has already been incremented after read()
-                if names.strict_kex() && input.seqn.0 != 1 {
+                if names.strict_kex() && !self.cause.is_rekey() && input.seqn.0 != 1 {
                     return Err(strict_kex_violation(
                         msg::KEXINIT,
                         input.seqn.0 as usize - 1,

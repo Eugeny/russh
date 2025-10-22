@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use log::{error, info, LevelFilter};
+use log::{LevelFilter, error, info};
 use russh::keys::*;
 use russh::*;
 use russh_sftp::client::SftpSession;
