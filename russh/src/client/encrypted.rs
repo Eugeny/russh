@@ -909,9 +909,30 @@ impl Encrypted {
                     "publickey".encode(&mut self.write)?;
                     self.write.push(0); // This is a probe
 
-                    debug!("write_auth_request: key - {:?}", key.algorithm());
-                    key.algorithm().as_str().encode(&mut self.write)?;
-                    key.public_key().to_bytes()?.encode(&mut self.write)?;
+                    let algo = key.algorithm();
+                    debug!("write_auth_request: key - {:?}", algo);
+
+                    // Check if this is an opaque certificate from the agent
+                    let algo_str = algo.as_str();
+                    if algo_str.contains("-cert-v01@openssh.com") {
+                        // For certificates, try to retrieve the stored blob
+                        let fingerprint = format!("{}", key.public_key().fingerprint(ssh_key::HashAlg::Sha256));
+                        if let Some(cert_blob) = crate::keys::agent::client::get_cert_blob(&fingerprint) {
+                            // Send the full certificate blob from storage
+                            algo.to_certificate_type().encode(&mut self.write)?;
+                            cert_blob.as_slice().encode(&mut self.write)?;
+                            debug!("write_auth_request: sending stored certificate blob ({} bytes)", cert_blob.len());
+                        } else {
+                            // Fallback: try using key_data (will be incomplete but better than nothing)
+                            algo.to_certificate_type().encode(&mut self.write)?;
+                            key.public_key().key_data().encoded()?.encode(&mut self.write)?;
+                            debug!("write_auth_request: certificate blob not found, sending key_data");
+                        }
+                    } else {
+                        // For regular keys, use standard encoding
+                        algo_str.encode(&mut self.write)?;
+                        key.public_key().to_bytes()?.encode(&mut self.write)?;
+                    }
                     true
                 }
                 auth::Method::OpenSshCertificate { ref cert, .. } => {
@@ -933,12 +954,33 @@ impl Encrypted {
                     "publickey".encode(&mut self.write)?;
                     self.write.push(0); // This is a probe
 
-                    key.algorithm()
-                        .with_hash_alg(hash_alg)
-                        .as_str()
-                        .encode(&mut self.write)?;
+                    // Check if this is a certificate by examining the algorithm name
+                    let algo = key.algorithm();
+                    let algo_str = algo.as_str();
 
-                    key.to_bytes()?.as_slice().encode(&mut self.write)?;
+                    if algo_str.contains("-cert-") {
+                        // For certificates, retrieve the stored blob
+                        let fingerprint = format!("{}", key.fingerprint(ssh_key::HashAlg::Sha256));
+
+                        if let Some(cert_blob) = crate::keys::agent::client::get_cert_blob(&fingerprint) {
+                            // Use algorithm as-is (already a certificate type)
+                            // Do NOT call to_certificate_type() - it would double-append the cert suffix
+                            algo_str.encode(&mut self.write)?;
+                            cert_blob.as_slice().encode(&mut self.write)?;
+                        } else {
+                            // This shouldn't happen - certificate blob should have been stored
+                            debug!("Certificate blob not found for {}, auth may fail", fingerprint);
+                            algo.to_certificate_type().encode(&mut self.write)?;
+                            key.to_bytes()?.as_slice().encode(&mut self.write)?;
+                        }
+                    } else {
+                        // For regular keys, use with_hash_alg
+                        algo.with_hash_alg(hash_alg)
+                            .as_str()
+                            .encode(&mut self.write)?;
+                        key.to_bytes()?.as_slice().encode(&mut self.write)?;
+                    }
+
                     true
                 }
                 auth::Method::KeyboardInteractive { ref submethods } => {
@@ -976,8 +1018,27 @@ impl Encrypted {
                 cert.to_bytes()?.encode(buffer)?;
             }
             PublicKeyOrCertificate::PublicKey { key, hash_alg } => {
-                key.algorithm().with_hash_alg(*hash_alg).encode(buffer)?;
-                key.to_bytes()?.encode(buffer)?;
+                // Check if this is a certificate by examining the algorithm name
+                let algo = key.algorithm();
+                let algo_str = algo.as_str();
+                if algo_str.contains("-cert-") {
+                    // For certificates, retrieve the stored blob
+                    let fingerprint = format!("{}", key.fingerprint(ssh_key::HashAlg::Sha256));
+                    if let Some(cert_blob) = crate::keys::agent::client::get_cert_blob(&fingerprint) {
+                        // Use algorithm as-is (already a certificate type)
+                        algo_str.encode(buffer)?;
+                        cert_blob.as_slice().encode(buffer)?;
+                    } else {
+                        // This shouldn't happen - certificate blob should have been stored
+                        debug!("Certificate blob not found for {}, signature may fail", fingerprint);
+                        algo.to_certificate_type().encode(buffer)?;
+                        key.key_data().encoded()?.encode(buffer)?;
+                    }
+                } else {
+                    // For regular keys, use with_hash_alg
+                    algo.with_hash_alg(*hash_alg).encode(buffer)?;
+                    key.to_bytes()?.encode(buffer)?;
+                }
             }
         }
         Ok(i0)

@@ -1,4 +1,6 @@
 use core::str;
+use std::sync::{Mutex, OnceLock};
+use std::collections::HashMap;
 
 use byteorder::{BigEndian, ByteOrder};
 use bytes::Bytes;
@@ -12,6 +14,30 @@ use super::{msg, Constraint};
 use crate::helpers::EncodedExt;
 use crate::keys::{key, Error};
 use crate::CryptoVec;
+
+// Global storage for certificate blobs, keyed by fingerprint
+// This is a workaround for the ssh-key crate not preserving full certificate blobs
+static CERT_BLOBS: OnceLock<Mutex<HashMap<String, Vec<u8>>>> = OnceLock::new();
+
+fn get_cert_blobs_map() -> &'static Mutex<HashMap<String, Vec<u8>>> {
+    CERT_BLOBS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Store a certificate blob for later retrieval during authentication
+pub fn store_cert_blob(fingerprint: String, blob: Vec<u8>) {
+    if let Ok(mut map) = get_cert_blobs_map().lock() {
+        map.insert(fingerprint, blob);
+    }
+}
+
+/// Retrieve a stored certificate blob by fingerprint
+pub fn get_cert_blob(fingerprint: &str) -> Option<Vec<u8>> {
+    if let Ok(map) = get_cert_blobs_map().lock() {
+        map.get(fingerprint).cloned()
+    } else {
+        None
+    }
+}
 
 pub trait AgentStream: AsyncRead + AsyncWrite {}
 
@@ -273,8 +299,30 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
             for _ in 0..n {
                 let key_blob = Bytes::decode(&mut r)?;
                 let comment = String::decode(&mut r)?;
+
+                // Check if this is a certificate by peeking at the algorithm name
+                let mut peek_reader = &key_blob[..];
+                let is_cert = if let Ok(algo_name) = String::decode(&mut peek_reader) {
+                    algo_name.contains("-cert-v01@openssh.com")
+                } else {
+                    false
+                };
+
+                // Parse the key
                 let mut key = key::parse_public_key(&key_blob)?;
                 key.set_comment(comment);
+
+                // If it's a certificate, store the original blob for later use
+                if is_cert {
+                    let fingerprint = format!("{}", key.fingerprint(HashAlg::Sha256));
+                    debug!(
+                        "Certificate detected: {} ({} bytes), storing for authentication",
+                        key.algorithm(),
+                        key_blob.len()
+                    );
+                    store_cert_blob(fingerprint, key_blob.to_vec());
+                }
+
                 keys.push(key);
             }
         }
@@ -316,9 +364,25 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
         self.buf.clear();
         self.buf.resize(4);
         msg::SIGN_REQUEST.encode(&mut self.buf)?;
-        public.key_data().encoded()?.encode(&mut self.buf)?;
+
+        // For certificates, send the full certificate blob
+        let algo = public.algorithm();
+        let algo_str = algo.as_str();
+        if algo_str.contains("-cert-") {
+            let fingerprint = format!("{}", public.fingerprint(HashAlg::Sha256));
+            if let Some(cert_blob) = get_cert_blob(&fingerprint) {
+                // Send full certificate blob to agent for signature
+                cert_blob.as_slice().encode(&mut self.buf)?;
+            } else {
+                // This shouldn't happen - certificate blob should have been stored
+                debug!("Certificate blob not found for {}, signature may fail", fingerprint);
+                public.key_data().encoded()?.encode(&mut self.buf)?;
+            }
+        } else {
+            public.key_data().encoded()?.encode(&mut self.buf)?;
+        }
+
         data.encode(&mut self.buf)?;
-        debug!("public = {:?}", public);
 
         let hash = match public.algorithm() {
             Algorithm::Rsa { .. } => match hash_alg {
