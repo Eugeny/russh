@@ -26,12 +26,12 @@ use super::IncomingSshPacket;
 use crate::auth::AuthRequest;
 use crate::cert::PublicKeyOrCertificate;
 use crate::client::{Handler, Msg, Prompt, Reply, Session};
-use crate::helpers::{map_err, sign_with_hash_alg, AlgorithmExt, EncodedExt, NameList};
+use crate::helpers::{sign_with_hash_alg, AlgorithmExt, EncodedExt, NameList};
 use crate::keys::key::parse_public_key;
 use crate::parsing::{ChannelOpenConfirmation, ChannelType, OpenChannelMessage};
 use crate::session::{Encrypted, EncryptedState, GlobalRequestResponse};
 use crate::{
-    auth, msg, Channel, ChannelId, ChannelMsg, ChannelOpenFailure, ChannelParams, CryptoVec, Error,
+    auth, map_err, msg, Channel, ChannelId, ChannelMsg, ChannelOpenFailure, ChannelParams, CryptoVec, Error,
     MethodSet, Sig,
 };
 

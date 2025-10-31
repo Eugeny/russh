@@ -52,17 +52,6 @@ impl Decode for NameList {
     type Error = ssh_encoding::Error;
 }
 
-#[macro_export]
-#[doc(hidden)]
-#[allow(clippy::crate_in_macro_def)]
-macro_rules! map_err {
-    ($result:expr) => {
-        $result.map_err(|e| crate::Error::from(e))
-    };
-}
-
-pub use map_err;
-
 #[doc(hidden)]
 pub fn sign_with_hash_alg(key: &PrivateKeyWithHashAlg, data: &[u8]) -> ssh_key::Result<Vec<u8>> {
     Ok(match key.key_data() {
