@@ -196,7 +196,7 @@ impl ClientKex {
 
                 let prime = Mpint::decode(&mut r)?;
                 let generator = Mpint::decode(&mut r)?;
-                debug!("received gex group: prime={}, generator={}", prime, generator);
+                debug!("received gex group: prime={prime}, generator={generator}");
 
                 let group = DhGroup {
                     prime: prime.as_bytes().to_vec().into(),

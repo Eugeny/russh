@@ -289,7 +289,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
         hash_alg: Option<HashAlg>,
         mut data: CryptoVec,
     ) -> Result<CryptoVec, Error> {
-        debug!("sign_request: {:?}", data);
+        debug!("sign_request: {data:?}");
         let hash = self.prepare_sign_request(public, hash_alg, &data)?;
 
         self.read_response().await?;
@@ -318,7 +318,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
         msg::SIGN_REQUEST.encode(&mut self.buf)?;
         public.key_data().encoded()?.encode(&mut self.buf)?;
         data.encode(&mut self.buf)?;
-        debug!("public = {:?}", public);
+        debug!("public = {public:?}");
 
         let hash = match public.algorithm() {
             Algorithm::Rsa { .. } => match hash_alg {
@@ -350,7 +350,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
             sig.encode(data)?;
             Ok(())
         } else {
-            error!("unexpected agent signature type: {:?}", t);
+            error!("unexpected agent signature type: {t:?}");
             Err(Error::AgentProtocolError)
         }
     }
@@ -362,7 +362,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
         hash_alg: Option<HashAlg>,
         data: &[u8],
     ) -> impl futures::Future<Output = (Self, Result<String, Error>)> {
-        debug!("sign_request: {:?}", data);
+        debug!("sign_request: {data:?}");
         let r = self.prepare_sign_request(public, hash_alg, data);
         async move {
             if let Err(e) = r {
@@ -391,7 +391,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
         hash_alg: Option<HashAlg>,
         data: &[u8],
     ) -> Result<Signature, Error> {
-        debug!("sign_request: {:?}", data);
+        debug!("sign_request: {data:?}");
 
         self.prepare_sign_request(public, hash_alg, data)?;
         self.read_response().await?;

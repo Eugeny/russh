@@ -73,7 +73,7 @@ impl Session {
                 Some((&msg::SERVICE_REQUEST, mut r)),
             ) => {
                 let request = map_err!(String::decode(&mut r))?;
-                debug!("request: {:?}", request);
+                debug!("request: {request:?}");
                 if request == "ssh-userauth" {
                     let auth_request = server_accept_service(
                         handler.authentication_banner().await?,
@@ -263,7 +263,7 @@ impl Encrypted {
                 auth_user.push_str(&user);
                 let _ = map_err!(String::decode(r))?; // language_tag, deprecated.
                 let submethods = map_err!(String::decode(r))?;
-                debug!("{:?}", submethods);
+                debug!("{submethods:?}");
                 auth_request.current = Some(CurrentRequest::KeyboardInteractive {
                     submethods: submethods.to_string(),
                 });
@@ -321,7 +321,7 @@ impl Encrypted {
         // Parse the public key or certificate
         match key_or_cert {
             Ok(pk_or_cert) => {
-                debug!("is_real = {:?}", is_real);
+                debug!("is_real = {is_real:?}");
 
                 // Handle certificates specifically
                 let pubkey = match pk_or_cert {
@@ -437,7 +437,7 @@ impl Encrypted {
 
                             let mut algo = CryptoVec::new();
                             algo.extend(pubkey_algo.as_bytes());
-                            debug!("pubkey_key: {:?}", pubkey_key);
+                            debug!("pubkey_key: {pubkey_key:?}");
                             push_packet!(self.write, {
                                 self.write.push(msg::USERAUTH_PK_OK);
                                 map_err!(pubkey_algo.encode(&mut self.write))?;
@@ -486,7 +486,7 @@ async fn reject_auth_request(
     write: &mut CryptoVec,
     auth_request: &mut AuthRequest,
 ) -> Result<(), Error> {
-    debug!("rejecting {:?}", auth_request);
+    debug!("rejecting {auth_request:?}");
     push_packet!(write, {
         write.push(msg::USERAUTH_FAILURE);
         NameList::from(&auth_request.methods).encode(write)?;
@@ -597,7 +597,7 @@ impl Session {
                     enc.channels.remove(&channel_num);
                 }
                 self.channels.remove(&channel_num);
-                debug!("handler.channel_close {:?}", channel_num);
+                debug!("handler.channel_close {channel_num:?}");
                 handler.channel_close(channel_num, self).await
             }
             msg::CHANNEL_EOF => {
@@ -605,7 +605,7 @@ impl Session {
                 if let Some(chan) = self.channels.get(&channel_num) {
                     chan.send(ChannelMsg::Eof).await.unwrap_or(())
                 }
-                debug!("handler.channel_eof {:?}", channel_num);
+                debug!("handler.channel_eof {channel_num:?}");
                 handler.channel_eof(channel_num, self).await
             }
             msg::CHANNEL_EXTENDED_DATA | msg::CHANNEL_DATA => {
@@ -616,7 +616,7 @@ impl Session {
                 } else {
                     Some(map_err!(u32::decode(r))?)
                 };
-                trace!("handler.data {:?} {:?}", ext, channel_num);
+                trace!("handler.data {ext:?} {channel_num:?}");
                 let data = map_err!(Bytes::decode(r))?;
                 let target = self.target_window_size;
 
@@ -673,7 +673,7 @@ impl Session {
                         .await
                         .unwrap_or(())
                 }
-                debug!("handler.window_adjusted {:?}", channel_num);
+                debug!("handler.window_adjusted {channel_num:?}");
                 handler.window_adjusted(channel_num, new_size, self).await
             }
 
@@ -703,7 +703,7 @@ impl Session {
                         .await
                         .unwrap_or(());
                 } else {
-                    error!("no channel for id {:?}", local_id);
+                    error!("no channel for id {local_id:?}");
                 }
                 handler
                     .channel_open_confirmation(
@@ -743,7 +743,7 @@ impl Session {
                                 }
                                 #[allow(clippy::indexing_slicing)] // length checked
                                 let num = BigEndian::read_u32(&mode_string[5 * i + 1..]);
-                                debug!("code = {:?}", code);
+                                debug!("code = {code:?}");
                                 if let Some(code) = Pty::from_u8(code) {
                                     #[allow(clippy::indexing_slicing)] // length checked
                                     if i < 130 {
@@ -752,7 +752,7 @@ impl Session {
                                         error!("pty-req: too many pty codes");
                                     }
                                 } else {
-                                    info!("pty-req: unknown pty code {:?}", code);
+                                    info!("pty-req: unknown pty code {code:?}");
                                 }
                                 i += 1
                             }
@@ -772,7 +772,7 @@ impl Session {
                                 .await;
                         }
 
-                        debug!("handler.pty_request {:?}", channel_num);
+                        debug!("handler.pty_request {channel_num:?}");
                         #[allow(clippy::indexing_slicing)] // `modes` length checked
                         handler
                             .pty_request(
@@ -804,7 +804,7 @@ impl Session {
                                 })
                                 .await;
                         }
-                        debug!("handler.x11_request {:?}", channel_num);
+                        debug!("handler.x11_request {channel_num:?}");
                         handler
                             .x11_request(
                                 channel_num,
@@ -830,7 +830,7 @@ impl Session {
                                 .await;
                         }
 
-                        debug!("handler.env_request {:?}", channel_num);
+                        debug!("handler.env_request {channel_num:?}");
                         handler
                             .env_request(channel_num, &env_variable, &env_value, self)
                             .await
@@ -841,7 +841,7 @@ impl Session {
                                 .send(ChannelMsg::RequestShell { want_reply: true })
                                 .await;
                         }
-                        debug!("handler.shell_request {:?}", channel_num);
+                        debug!("handler.shell_request {channel_num:?}");
                         handler.shell_request(channel_num, self).await
                     }
                     "auth-agent-req@openssh.com" => {
@@ -850,7 +850,7 @@ impl Session {
                                 .send(ChannelMsg::AgentForward { want_reply: true })
                                 .await;
                         }
-                        debug!("handler.agent_request {:?}", channel_num);
+                        debug!("handler.agent_request {channel_num:?}");
 
                         let response = handler.agent_request(channel_num, self).await?;
                         if response {
@@ -870,7 +870,7 @@ impl Session {
                                 })
                                 .await;
                         }
-                        debug!("handler.exec_request {:?}", channel_num);
+                        debug!("handler.exec_request {channel_num:?}");
                         handler.exec_request(channel_num, &req, self).await
                     }
                     "subsystem" => {
@@ -884,7 +884,7 @@ impl Session {
                                 })
                                 .await;
                         }
-                        debug!("handler.subsystem_request {:?}", channel_num);
+                        debug!("handler.subsystem_request {channel_num:?}");
                         handler.subsystem_request(channel_num, &name, self).await
                     }
                     "window-change" => {
@@ -904,7 +904,7 @@ impl Session {
                                 .await;
                         }
 
-                        debug!("handler.window_change {:?}", channel_num);
+                        debug!("handler.window_change {channel_num:?}");
                         handler
                             .window_change_request(
                                 channel_num,
@@ -925,7 +925,7 @@ impl Session {
                             .await
                             .unwrap_or(())
                         }
-                        debug!("handler.signal {:?} {:?}", channel_num, signal);
+                        debug!("handler.signal {channel_num:?} {signal:?}");
                         handler.signal(channel_num, signal, self).await
                     }
                     x => {
@@ -942,7 +942,7 @@ impl Session {
                     "tcpip-forward" => {
                         let address = map_err!(String::decode(r))?;
                         let port = map_err!(u32::decode(r))?;
-                        debug!("handler.tcpip_forward {:?} {:?}", address, port);
+                        debug!("handler.tcpip_forward {address:?} {port:?}");
                         let mut returned_port = port;
                         let result = handler
                             .tcpip_forward(&address, &mut returned_port, self)
@@ -964,7 +964,7 @@ impl Session {
                     "cancel-tcpip-forward" => {
                         let address = map_err!(String::decode(r))?;
                         let port = map_err!(u32::decode(r))?;
-                        debug!("handler.cancel_tcpip_forward {:?} {:?}", address, port);
+                        debug!("handler.cancel_tcpip_forward {address:?} {port:?}");
                         let result = handler.cancel_tcpip_forward(&address, port, self).await?;
                         if let Some(ref mut enc) = self.common.encrypted {
                             if result {
@@ -977,7 +977,7 @@ impl Session {
                     }
                     "streamlocal-forward@openssh.com" => {
                         let server_socket_path = map_err!(String::decode(r))?;
-                        debug!("handler.streamlocal_forward {:?}", server_socket_path);
+                        debug!("handler.streamlocal_forward {server_socket_path:?}");
                         let result = handler
                             .streamlocal_forward(&server_socket_path, self)
                             .await?;
@@ -992,7 +992,7 @@ impl Session {
                     }
                     "cancel-streamlocal-forward@openssh.com" => {
                         let socket_path = map_err!(String::decode(r))?;
-                        debug!("handler.cancel_streamlocal_forward {:?}", socket_path);
+                        debug!("handler.cancel_streamlocal_forward {socket_path:?}");
                         let result = handler
                             .cancel_streamlocal_forward(&socket_path, self)
                             .await?;
@@ -1088,7 +1088,7 @@ impl Session {
                 Ok(())
             }
             m => {
-                debug!("unknown message received: {:?}", m);
+                debug!("unknown message received: {m:?}");
                 Ok(())
             }
         }

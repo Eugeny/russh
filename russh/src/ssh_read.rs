@@ -122,7 +122,7 @@ impl<R: AsyncRead + Unpin> SshRead<R> {
 
             #[allow(clippy::indexing_slicing)] // length checked
             let n = AsyncReadExt::read(&mut self.r, &mut ssh_id.buf[ssh_id.total..]).await?;
-            trace!("read {:?}", n);
+            trace!("read {n:?}");
 
             ssh_id.total += n;
             #[allow(clippy::indexing_slicing)] // length checked

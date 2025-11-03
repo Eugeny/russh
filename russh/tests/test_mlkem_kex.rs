@@ -75,7 +75,7 @@ async fn test_mlkem768x25519_handshake() {
         ChannelMsg::Data { data } => {
             assert_eq!(&*data, b"test data with mlkem");
         }
-        msg => panic!("Unexpected message: {:?}", msg),
+        msg => panic!("Unexpected message: {msg:?}"),
     }
 
     channel.eof().await.unwrap();
@@ -150,7 +150,7 @@ async fn test_mlkem768x25519_with_fallback() {
         ChannelMsg::Data { data } => {
             assert_eq!(&*data, b"test with fallback");
         }
-        msg => panic!("Unexpected message: {:?}", msg),
+        msg => panic!("Unexpected message: {msg:?}"),
     }
 
     channel.eof().await.unwrap();
@@ -222,7 +222,7 @@ async fn test_mlkem768x25519_rekey() {
         ChannelMsg::Data { data } => {
             assert_eq!(&*data, b"before rekey");
         }
-        msg => panic!("Unexpected message before rekey: {:?}", msg),
+        msg => panic!("Unexpected message before rekey: {msg:?}"),
     }
 
     session.rekey_soon().await.unwrap();
@@ -235,7 +235,7 @@ async fn test_mlkem768x25519_rekey() {
         ChannelMsg::Data { data } => {
             assert_eq!(&*data, b"after rekey");
         }
-        msg => panic!("Unexpected message after rekey: {:?}", msg),
+        msg => panic!("Unexpected message after rekey: {msg:?}"),
     }
 
     channel.eof().await.unwrap();
@@ -310,7 +310,7 @@ async fn test_mlkem768x25519_multiple_channels() {
         ChannelMsg::Data { data } => {
             assert_eq!(&*data, b"channel 1 data");
         }
-        msg => panic!("Unexpected message on channel 1: {:?}", msg),
+        msg => panic!("Unexpected message on channel 1: {msg:?}"),
     }
 
     let msg2 = channel2.wait().await.unwrap();
@@ -318,7 +318,7 @@ async fn test_mlkem768x25519_multiple_channels() {
         ChannelMsg::Data { data } => {
             assert_eq!(&*data, b"channel 2 data");
         }
-        msg => panic!("Unexpected message on channel 2: {:?}", msg),
+        msg => panic!("Unexpected message on channel 2: {msg:?}"),
     }
 
     channel1.eof().await.unwrap();

@@ -44,7 +44,7 @@ async fn main() -> Result<()> {
     info!("Server: {}:{} Connected", cli.host, cli.port);
 
     let (socket, o_addr) = listener.accept().await?;
-    info!("originator address: {}", o_addr);
+    info!("originator address: {o_addr}");
     ssh.call(socket, o_addr, forward_addr).await?;
 
     ssh.close().await?;

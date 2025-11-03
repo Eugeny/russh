@@ -237,8 +237,7 @@ pub enum Error {
 
 pub(crate) fn strict_kex_violation(message_type: u8, sequence_number: usize) -> crate::Error {
     warn!(
-        "strict kex violated at sequence no. {:?}, message type: {:?}",
-        sequence_number, message_type
+        "strict kex violated at sequence no. {sequence_number:?}, message type: {message_type:?}"
     );
     crate::Error::StrictKeyExchangeViolation {
         message_type,
