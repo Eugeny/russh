@@ -20,6 +20,7 @@ use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::num::Wrapping;
+use std::sync::LazyLock;
 
 use aes::{Aes128, Aes192, Aes256};
 #[cfg(feature = "aws-lc-rs")]
@@ -28,16 +29,15 @@ use byteorder::{BigEndian, ByteOrder};
 use ctr::Ctr128BE;
 use delegate::delegate;
 use log::trace;
-use once_cell::sync::Lazy;
 #[cfg(all(not(feature = "aws-lc-rs"), feature = "ring"))]
 use ring::aead::{AES_128_GCM as ALGORITHM_AES_128_GCM, AES_256_GCM as ALGORITHM_AES_256_GCM};
 use ssh_encoding::Encode;
 use tokio::io::{AsyncRead, AsyncReadExt};
 
 use self::cbc::CbcWrapper;
+use crate::Error;
 use crate::mac::MacAlgorithm;
 use crate::sshbuffer::SSHBuffer;
-use crate::Error;
 
 pub(crate) mod block;
 pub(crate) mod cbc;
@@ -129,8 +129,8 @@ pub static ALL_CIPHERS: &[&Name] = &[
     &CHACHA20_POLY1305,
 ];
 
-pub(crate) static CIPHERS: Lazy<HashMap<&'static Name, &(dyn Cipher + Send + Sync)>> =
-    Lazy::new(|| {
+pub(crate) static CIPHERS: LazyLock<HashMap<&'static Name, &(dyn Cipher + Send + Sync)>> =
+    LazyLock::new(|| {
         let mut h: HashMap<&'static Name, &(dyn Cipher + Send + Sync)> = HashMap::new();
         h.insert(&CLEAR, &_CLEAR);
         h.insert(&NONE, &_CLEAR);
