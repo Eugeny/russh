@@ -116,7 +116,7 @@ mod tests {
                 .unwrap();
         });
 
-        println!("Server listening on {}", addr);
+        println!("Server listening on {addr}");
 
         // Configure the client
         let client_config = Arc::new(Config::default());
@@ -155,7 +155,7 @@ mod tests {
             crate::channels::ChannelMsg::Data { data: msg_data } => {
                 assert_eq!(test_data.as_slice(), &msg_data[..]);
             }
-            msg => panic!("Unexpected message {:?}", msg),
+            msg => panic!("Unexpected message {msg:?}"),
         }
     }
 }

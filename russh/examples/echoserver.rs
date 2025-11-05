@@ -54,7 +54,7 @@ struct Server {
 impl Server {
     async fn post(&mut self, data: CryptoVec) {
         let mut clients = self.clients.lock().await;
-        for (id, (channel, ref mut s)) in clients.iter_mut() {
+        for (id, (channel, s)) in clients.iter_mut() {
             if *id != self.id {
                 let _ = s.data(*channel, data.clone()).await;
             }
@@ -70,7 +70,7 @@ impl server::Server for Server {
         s
     }
     fn handle_session_error(&mut self, _error: <Self::Handler as russh::server::Handler>::Error) {
-        eprintln!("Session error: {:#?}", _error);
+        eprintln!("Session error: {_error:#?}");
     }
 }
 

@@ -15,12 +15,20 @@ use std::convert::TryInto;
 use std::marker::PhantomData;
 
 use aes::cipher::{IvSizeUser, KeyIvInit, KeySizeUser, StreamCipher};
-use generic_array::GenericArray;
+#[allow(deprecated)]
+use digest::generic_array::GenericArray as GenericArray_0_14;
 use rand::RngCore;
 
 use super::super::Error;
 use super::PACKET_LENGTH_LEN;
 use crate::mac::{Mac, MacAlgorithm};
+
+// Allow deprecated generic-array 0.14 usage until RustCrypto crates (cipher, digest, etc.)
+// upgrade to generic-array 1.x. Remove this when dependencies no longer use 0.14.
+#[allow(deprecated)]
+fn new_cipher_from_slices<C: KeyIvInit>(k: &[u8], n: &[u8]) -> C {
+    C::new(GenericArray_0_14::from_slice(k), GenericArray_0_14::from_slice(n))
+}
 
 pub struct SshBlockCipher<C: BlockStreamCipher + KeySizeUser + IvSizeUser>(pub PhantomData<C>);
 
@@ -46,12 +54,8 @@ impl<C: BlockStreamCipher + KeySizeUser + IvSizeUser + KeyIvInit + Send + 'stati
         m: &[u8],
         mac: &dyn MacAlgorithm,
     ) -> Box<dyn super::OpeningKey + Send> {
-        let mut key = GenericArray::<u8, C::KeySize>::default();
-        let mut nonce = GenericArray::<u8, C::IvSize>::default();
-        key.clone_from_slice(k);
-        nonce.clone_from_slice(n);
         Box::new(OpeningKey {
-            cipher: C::new(&key, &nonce),
+            cipher: new_cipher_from_slices::<C>(k, n),
             mac: mac.make_mac(m),
         })
     }
@@ -63,12 +67,8 @@ impl<C: BlockStreamCipher + KeySizeUser + IvSizeUser + KeyIvInit + Send + 'stati
         m: &[u8],
         mac: &dyn MacAlgorithm,
     ) -> Box<dyn super::SealingKey + Send> {
-        let mut key = GenericArray::<u8, C::KeySize>::default();
-        let mut nonce = GenericArray::<u8, C::IvSize>::default();
-        key.clone_from_slice(k);
-        nonce.clone_from_slice(n);
         Box::new(SealingKey {
-            cipher: C::new(&key, &nonce),
+            cipher: new_cipher_from_slices::<C>(k, n),
             mac: mac.make_mac(m),
         })
     }

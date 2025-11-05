@@ -47,11 +47,11 @@ jobs:
 
     - name: Install target
       run: |
-        rustup toolchain add 1.81.0
-        rustup target add --toolchain 1.81.0 wasm32-wasip1
+        rustup toolchain add 1.88.0
+        rustup target add --toolchain 1.88.0 wasm32-wasip1
 
     - name: Build (WASM-compatible features)
-      run: cargo +1.81.0 build --verbose --target wasm32-wasip1 --no-default-features --features flate2,ring -p russh
+      run: cargo +1.88.0 build --verbose --target wasm32-wasip1 --no-default-features --features flate2,ring -p russh
 
   Formatting:
     runs-on: ubuntu-24.04
@@ -105,10 +105,10 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
+    - uses: dtolnay/rust-toolchain@nightly
     - uses: taiki-e/install-action@cargo-hack
     - uses: taiki-e/install-action@cargo-minimal-versions
 
     - name: Check with minimal dependency versions
       run: |
-        rustup toolchain add 1.75.0
-        cargo +1.75.0 minimal-versions check --all-features --no-dev-deps
+        cargo minimal-versions check --all-features --no-dev-deps

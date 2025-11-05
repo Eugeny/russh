@@ -120,7 +120,7 @@ impl ServerKex {
                 debug!("negotiated: {names:?}");
 
                 // seqno has already been incremented after read()
-                if names.strict_kex() && input.seqn.0 != 1 {
+                if names.strict_kex() && !self.cause.is_rekey() && input.seqn.0 != 1 {
                     return Err(strict_kex_violation(
                         msg::KEXINIT,
                         input.seqn.0 as usize - 1,
@@ -174,7 +174,7 @@ impl ServerKex {
 
                 #[allow(clippy::indexing_slicing)] // length checked
                 let gex_params = GexParams::decode(&mut &input.buffer[1..])?;
-                debug!("client requests a gex group: {:?}", gex_params);
+                debug!("client requests a gex group: {gex_params:?}");
 
                 let Some(dh_group) = handler.lookup_dh_gex_group(&gex_params).await? else {
                     debug!("server::Handler impl did not find a matching DH group (is lookup_dh_gex_group implemented?)");
@@ -271,7 +271,7 @@ impl ServerKex {
                 })?;
 
                 // Hash signature
-                debug!("signing with key {:?}", key);
+                debug!("signing with key {key:?}");
                 let signature = sign_with_hash_alg(
                     &PrivateKeyWithHashAlg::new(Arc::new(key.clone()), signature_hash_alg),
                     &hash,

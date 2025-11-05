@@ -320,7 +320,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
             let blob = Bytes::decode(r)?;
             let k = self.keys.0.read().or(Err(Error::AgentFailure))?;
             if let Some((key, _, constraints)) = k.get(&blob.to_vec()) {
-                if constraints.iter().any(|c| *c == Constraint::Confirm) {
+                if constraints.contains(&Constraint::Confirm) {
                     needs_confirm = true;
                 }
                 key.clone()

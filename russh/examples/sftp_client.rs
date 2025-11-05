@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use log::{error, info, LevelFilter};
+use log::{LevelFilter, error, info};
 use russh::keys::*;
 use russh::*;
 use russh_sftp::client::SftpSession;
@@ -16,7 +16,7 @@ impl client::Handler for Client {
         &mut self,
         server_public_key: &ssh_key::PublicKey,
     ) -> Result<bool, Self::Error> {
-        info!("check_server_key: {:?}", server_public_key);
+        info!("check_server_key: {server_public_key:?}");
         Ok(true)
     }
 

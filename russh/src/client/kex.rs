@@ -127,10 +127,7 @@ impl ClientKex {
                 debug!("negotiated algorithms: {names:?}");
 
                 // seqno has already been incremented after read()
-                if (names.strict_kex() || self.cause.is_strict_rekey())
-                    && !self.cause.is_rekey()
-                    && input.seqn.0 != 1
-                {
+                if names.strict_kex() && !self.cause.is_rekey() && input.seqn.0 != 1 {
                     return Err(strict_kex_violation(
                         msg::KEXINIT,
                         input.seqn.0 as usize - 1,
@@ -198,12 +195,12 @@ impl ClientKex {
                 let mut r = &input.buffer[1..];
 
                 let prime = Mpint::decode(&mut r)?;
-                let gen = Mpint::decode(&mut r)?;
-                debug!("received gex group: prime={}, gen={}", prime, gen);
+                let generator = Mpint::decode(&mut r)?;
+                debug!("received gex group: prime={prime}, generator={generator}");
 
                 let group = DhGroup {
                     prime: prime.as_bytes().to_vec().into(),
-                    generator: gen.as_bytes().to_vec().into(),
+                    generator: generator.as_bytes().to_vec().into(),
                 };
 
                 if group.bit_size() < self.config.gex.min_group_size

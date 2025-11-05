@@ -20,6 +20,7 @@ use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::num::Wrapping;
+use std::sync::LazyLock;
 
 use aes::{Aes128, Aes192, Aes256};
 #[cfg(feature = "aws-lc-rs")]
@@ -28,16 +29,15 @@ use byteorder::{BigEndian, ByteOrder};
 use ctr::Ctr128BE;
 use delegate::delegate;
 use log::trace;
-use once_cell::sync::Lazy;
 #[cfg(all(not(feature = "aws-lc-rs"), feature = "ring"))]
 use ring::aead::{AES_128_GCM as ALGORITHM_AES_128_GCM, AES_256_GCM as ALGORITHM_AES_256_GCM};
 use ssh_encoding::Encode;
 use tokio::io::{AsyncRead, AsyncReadExt};
 
 use self::cbc::CbcWrapper;
+use crate::Error;
 use crate::mac::MacAlgorithm;
 use crate::sshbuffer::SSHBuffer;
-use crate::Error;
 
 pub(crate) mod block;
 pub(crate) mod cbc;
@@ -129,8 +129,8 @@ pub static ALL_CIPHERS: &[&Name] = &[
     &CHACHA20_POLY1305,
 ];
 
-pub(crate) static CIPHERS: Lazy<HashMap<&'static Name, &(dyn Cipher + Send + Sync)>> =
-    Lazy::new(|| {
+pub(crate) static CIPHERS: LazyLock<HashMap<&'static Name, &(dyn Cipher + Send + Sync)>> =
+    LazyLock::new(|| {
         let mut h: HashMap<&'static Name, &(dyn Cipher + Send + Sync)> = HashMap::new();
         h.insert(&CLEAR, &_CLEAR);
         h.insert(&NONE, &_CLEAR);
@@ -217,9 +217,9 @@ pub(crate) trait SealingKey {
         trace!("writing, seqn = {:?}", buffer.seqn.0);
 
         let padding_length = self.padding_length(payload);
-        trace!("padding length {:?}", padding_length);
+        trace!("padding length {padding_length:?}");
         let packet_length = PADDING_LENGTH_LEN + payload.len() + padding_length;
-        trace!("packet_length {:?}", packet_length);
+        trace!("packet_length {packet_length:?}");
         let offset = buffer.buffer.len();
 
         // Maximum packet length:
@@ -256,12 +256,12 @@ pub(crate) async fn read<R: AsyncRead + Unpin>(
         let mut len = vec![0; cipher.packet_length_to_read_for_block_length()];
 
         stream.read_exact(&mut len).await?;
-        trace!("reading, len = {:?}", len);
+        trace!("reading, len = {len:?}");
         {
             let seqn = buffer.seqn.0;
             buffer.buffer.clear();
             buffer.buffer.extend(&len);
-            trace!("reading, seqn = {:?}", seqn);
+            trace!("reading, seqn = {seqn:?}");
             let len = cipher.decrypt_packet_length(seqn, &len);
             let len = BigEndian::read_u32(&len) as usize;
 
@@ -287,7 +287,7 @@ pub(crate) async fn read<R: AsyncRead + Unpin>(
     let plaintext = cipher.open(seqn, &mut buffer.buffer)?;
 
     let padding_length = *plaintext.first().to_owned().unwrap_or(&0) as usize;
-    trace!("reading, padding_length {:?}", padding_length);
+    trace!("reading, padding_length {padding_length:?}");
     let plaintext_end = plaintext
         .len()
         .checked_sub(padding_length)

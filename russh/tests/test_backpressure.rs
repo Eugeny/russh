@@ -6,7 +6,7 @@ use rand::RngCore;
 use rand_core::OsRng;
 use russh::keys::PrivateKeyWithHashAlg;
 use russh::server::{self, Auth, Msg, Server as _, Session};
-use russh::{client, Channel, ChannelMsg};
+use russh::{Channel, ChannelMsg, client};
 use ssh_key::PrivateKey;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::watch;
@@ -137,7 +137,7 @@ impl russh::server::Handler for Server {
             while let Ok(_) = rx.changed().await {
                 match channel.wait().await {
                     Some(ChannelMsg::Data { .. }) => (),
-                    other => panic!("unexpected message {:?}", other),
+                    other => panic!("unexpected message {other:?}"),
                 }
             }
         });

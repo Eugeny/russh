@@ -29,7 +29,7 @@ use crate::kex::dh::groups::DhGroup;
 use crate::kex::{KexAlgorithm, KexAlgorithmImplementor};
 use crate::sshbuffer::PacketWriter;
 use crate::{
-    auth, cipher, mac, msg, negotiation, ChannelId, ChannelParams, CryptoVec, Disconnect, Limits,
+    ChannelId, ChannelParams, CryptoVec, Disconnect, Limits, auth, cipher, mac, msg, negotiation,
 };
 
 #[derive(Debug)]
@@ -211,11 +211,11 @@ impl<C> CommonSession<C> {
             });
             Ok(())
         };
-        return if let Some(ref mut enc) = self.encrypted {
+        if let Some(ref mut enc) = self.encrypted {
             debug(&mut enc.write)
         } else {
             debug(&mut self.packet_writer.buffer().buffer)
-        };
+        }
     }
 
     pub(crate) fn reset_seqn(&mut self) {
@@ -270,8 +270,7 @@ impl Encrypted {
         if let Some(channel) = self.channels.get_mut(&channel) {
             trace!(
                 "adjust_window_size, channel = {}, size = {},",
-                channel.sender_channel,
-                target
+                channel.sender_channel, target
             );
             // Ignore extra data.
             // https://tools.ietf.org/html/rfc4254#section-5.2
@@ -442,7 +441,7 @@ impl Encrypted {
                 channel.pending_data.push_back((buf0, None, buf_len))
             }
         } else {
-            debug!("{:?} not saved for this session", channel);
+            debug!("{channel:?} not saved for this session");
         }
         Ok(())
     }
@@ -481,7 +480,7 @@ impl Encrypted {
                 let len = BigEndian::read_u32(&self.write[self.write_cursor..]) as usize;
                 #[allow(clippy::indexing_slicing)]
                 let to_write = &self.write[(self.write_cursor + 4)..(self.write_cursor + 4 + len)];
-                trace!("session_write_encrypted, buf = {:?}", to_write);
+                trace!("session_write_encrypted, buf = {to_write:?}");
 
                 writer.packet_raw(to_write)?;
                 self.write_cursor += 4 + len
@@ -582,6 +581,8 @@ pub(crate) struct NewKeys {
 pub(crate) enum GlobalRequestResponse {
     /// request was for Keepalive, ignore result
     Keepalive,
+    /// request was for Keepalive but with notification of the result
+    Ping(oneshot::Sender<()>),
     /// request was for NoMoreSessions, disallow additional sessions
     NoMoreSessions,
     /// request was for TcpIpForward, sends Some(port) for success or None for failure

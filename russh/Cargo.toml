@@ -2,26 +2,27 @@
 authors = ["Pierre-Étienne Meunier <pe@pijul.org>"]
 description = "A client and server SSH library."
 documentation = "https://docs.rs/russh"
-edition = "2021"
+edition = "2024"
 homepage = "https://github.com/warp-tech/russh"
 keywords = ["ssh"]
 license = "Apache-2.0"
 name = "russh"
 readme = "../README.md"
 repository = "https://github.com/warp-tech/russh"
-version = "0.54.3"
-rust-version = "1.75"
+version = "0.54.6"
+rust-version = "1.85"
 
 [features]
 default = ["flate2", "aws-lc-rs", "rsa"]
-aws-lc-rs = ["dep:aws-lc-rs"]
+# Crypto backends: enable at least one of `aws-lc-rs` or `ring`.
+aws-lc-rs = ["dep:aws-lc-rs"] # Default crypto backend.
 async-trait = ["dep:async-trait"]
 legacy-ed25519-pkcs8-parser = ["yasna"]
 # Danger: 3DES cipher is insecure.
 des = ["dep:des"]
 # Danger: DSA algorithm is insecure.
 dsa = ["ssh-key/dsa"]
-ring = ["dep:ring"]
+ring = ["dep:ring"] # Alternative crypto backend.
 rsa = ["dep:rsa", "dep:pkcs1", "ssh-key/rsa", "ssh-key/rsa-sha1"]
 _bench = ["dep:criterion"]
 
@@ -47,16 +48,16 @@ elliptic-curve = { version = "0.13", features = ["ecdh"] }
 enum_dispatch = "0.3.13"
 flate2 = { version = "1.0.15", optional = true }
 futures.workspace = true
-generic-array = "0.14"
+generic-array = { version = "1.3.3", features = ["compat-0_14"] }
 getrandom = { version = "0.2.15", features = ["js"] }
 hex-literal = "0.4"
 hmac.workspace = true
 inout = { version = "0.1", features = ["std"] }
+libcrux-ml-kem = { version = "0.0.3" }
 log.workspace = true
 md5 = "0.7"
 num-bigint = { version = "0.4.2", features = ["rand"] }
 # num-integer = "0.1"
-once_cell = "1.13"
 p256 = { version = "0.13", features = ["ecdh"] }
 p384 = { version = "0.13", features = ["ecdh"] }
 p521 = { version = "0.13", features = ["ecdh"] }
@@ -88,7 +89,6 @@ yasna = { version = "0.5.0", features = [
   "num-bigint",
 ], optional = true }
 zeroize = "1.7"
-base64ct = "~1.6" # can be removed in 2024 edition
 criterion = { version = "0.3", optional = true, features = ["html_reports"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
@@ -101,7 +101,7 @@ tokio = { workspace = true, features = [
 home.workspace = true
 
 [target.'cfg(windows)'.dependencies]
-pageant = { version = "0.0.3", path = "../pageant" }
+pageant = { version = "0.1", path = "../pageant" }
 
 [dev-dependencies]
 anyhow = "1.0.4"

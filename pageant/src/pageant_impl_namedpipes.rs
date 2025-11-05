@@ -12,7 +12,7 @@ use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeClient};
 use windows::Win32::Foundation::ERROR_PIPE_BUSY;
 use windows::Win32::Security::Authentication::Identity::{GetUserNameExA, NameUserPrincipal};
 use windows::Win32::Security::Cryptography::{
-    CryptProtectMemory, CRYPTPROTECTMEMORY_BLOCK_SIZE, CRYPTPROTECTMEMORY_CROSS_PROCESS,
+    CRYPTPROTECTMEMORY_BLOCK_SIZE, CRYPTPROTECTMEMORY_CROSS_PROCESS, CryptProtectMemory,
 };
 use windows_strings::PSTR;
 
@@ -39,7 +39,7 @@ pub enum Error {
 
 impl Error {
     fn from_win32() -> Self {
-        Self::WindowsError(windows::core::Error::from_win32())
+        Self::WindowsError(windows::core::Error::from_thread())
     }
 }
 

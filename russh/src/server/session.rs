@@ -402,7 +402,7 @@ impl Handle {
                     return Err(Error::Disconnect);
                 }
                 msg => {
-                    debug!("msg = {:?}", msg);
+                    debug!("msg = {msg:?}");
                 }
             }
         }
@@ -585,7 +585,7 @@ impl Session {
                             self.exit_signal_request(id, signal_name, core_dumped, &error_message, &lang_tag)?;
                         }
                         Some(Msg::Channel(id, ChannelMsg::WindowAdjusted { new_size })) => {
-                            debug!("window adjusted to {:?} for channel {:?}", new_size, id);
+                            debug!("window adjusted to {new_size:?} for channel {id:?}");
                         }
                         Some(Msg::ChannelOpenAgent { channel_ref }) => {
                             let id = self.channel_open_agent()?;
@@ -837,7 +837,7 @@ impl Session {
                 assert!(channel.confirmed);
                 if channel.wants_reply {
                     channel.wants_reply = false;
-                    debug!("channel_success {:?}", channel);
+                    debug!("channel_success {channel:?}");
                     push_packet!(enc.write, {
                         msg::CHANNEL_SUCCESS.encode(&mut enc.write)?;
                         channel.recipient_channel.encode(&mut enc.write)?;
@@ -1228,7 +1228,7 @@ impl Session {
             // If client sent a ext-info-c message in the kex list, it supports RFC 8308 extension negotiation.
             let mut key_extension_client = false;
             if let Some(e) = &enc.exchange {
-                let Some(mut r) = &e.client_kex_init.as_ref().get(17..) else {
+                let &Some(mut r) = &e.client_kex_init.as_ref().get(17..) else {
                     return Ok(());
                 };
                 if let Ok(kex_string) = String::decode(&mut r) {

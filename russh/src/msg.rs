@@ -41,6 +41,12 @@ pub const KEX_DH_GEX_GROUP: u8 = 31;
 pub const KEX_DH_GEX_INIT: u8 = 32;
 pub const KEX_DH_GEX_REPLY: u8 = 33;
 
+// PQ/T Hybrid Key Exchange with ML-KEM
+// https://datatracker.ietf.org/doc/draft-ietf-sshm-mlkem-hybrid-kex/
+pub const KEX_HYBRID_INIT: u8 = 30;
+#[allow(dead_code)]
+pub const KEX_HYBRID_REPLY: u8 = 31;
+
 // https://tools.ietf.org/html/rfc4250#section-4.1.2
 pub const USERAUTH_REQUEST: u8 = 50;
 pub const USERAUTH_FAILURE: u8 = 51;

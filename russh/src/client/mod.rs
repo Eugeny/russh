@@ -42,8 +42,8 @@ use std::sync::Arc;
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::Duration;
 
-use futures::task::{Context, Poll};
 use futures::Future;
+use futures::task::{Context, Poll};
 use kex::ClientKex;
 use log::{debug, error, trace, warn};
 use russh_util::time::Instant;
@@ -52,7 +52,7 @@ use ssh_key::{Algorithm, Certificate, HashAlg, PrivateKey, PublicKey};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadHalf, WriteHalf};
 use tokio::pin;
 use tokio::sync::mpsc::{
-    channel, unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender,
+    Receiver, Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel,
 };
 use tokio::sync::oneshot;
 
@@ -60,7 +60,7 @@ pub use crate::auth::AuthResult;
 use crate::channels::{
     Channel, ChannelMsg, ChannelReadHalf, ChannelRef, ChannelWriteHalf, WindowSizeRef,
 };
-use crate::cipher::{self, clear, OpeningKey};
+use crate::cipher::{self, OpeningKey, clear};
 use crate::kex::{KexCause, KexProgress, SessionKexState};
 use crate::keys::PrivateKeyWithHashAlg;
 use crate::msg::{is_kex_msg, validate_server_msg_strict_kex};
@@ -68,8 +68,8 @@ use crate::session::{CommonSession, EncryptedState, GlobalRequestResponse, NewKe
 use crate::ssh_read::SshRead;
 use crate::sshbuffer::{IncomingSshPacket, PacketWriter, SSHBuffer, SshId};
 use crate::{
-    auth, map_err, msg, negotiation, ChannelId, ChannelOpenFailure, CryptoVec, Disconnect, Error,
-    Limits, MethodSet, Sig,
+    ChannelId, ChannelOpenFailure, CryptoVec, Disconnect, Error, Limits, MethodSet, Sig, auth,
+    map_err, msg, negotiation,
 };
 
 mod encrypted;
@@ -127,6 +127,7 @@ enum Reply {
 }
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum Msg {
     Authenticate {
         user: String,
@@ -199,6 +200,9 @@ pub enum Msg {
     /// Send a keepalive packet to the remote
     Keepalive {
         want_reply: bool,
+    },
+    Ping {
+        reply_channel: oneshot::Sender<()>,
     },
     NoMoreSessions {
         want_reply: bool,
@@ -356,7 +360,7 @@ impl<H: Handler> Handle<H> {
                     return Ok(KeyboardInteractiveAuthResponse::Failure {
                         remaining_methods,
                         partial_success,
-                    })
+                    });
                 }
                 Some(Reply::AuthInfoRequest {
                     name,
@@ -386,13 +390,13 @@ impl<H: Handler> Handle<H> {
                     return Ok(AuthResult::Failure {
                         remaining_methods,
                         partial_success,
-                    })
+                    });
                 }
                 None => {
                     return Ok(AuthResult::Failure {
                         remaining_methods: MethodSet::empty(),
                         partial_success: false,
-                    })
+                    });
                 }
                 _ => {}
             }
@@ -473,7 +477,7 @@ impl<H: Handler> Handle<H> {
                     return Ok(AuthResult::Failure {
                         remaining_methods,
                         partial_success,
-                    })
+                    });
                 }
                 Some(Reply::SignRequest { key, data }) => {
                     let data = signer.auth_publickey_sign(&key, hash_alg, data).await;
@@ -489,7 +493,7 @@ impl<H: Handler> Handle<H> {
                     return Ok(AuthResult::Failure {
                         remaining_methods: MethodSet::empty(),
                         partial_success: false,
-                    })
+                    });
                 }
                 _ => {}
             }
@@ -529,7 +533,7 @@ impl<H: Handler> Handle<H> {
                     return Err(crate::Error::Disconnect);
                 }
                 msg => {
-                    debug!("msg = {:?}", msg);
+                    debug!("msg = {msg:?}");
                 }
             }
         }
@@ -837,6 +841,19 @@ impl<H: Handler> Handle<H> {
             .send(Msg::Keepalive { want_reply })
             .await
             .map_err(|_| Error::SendError)
+    }
+
+    /// Send a keepalive/ping package to the remote peer, and wait for the reply/pong.
+    pub async fn send_ping(&self) -> Result<(), Error> {
+        let (sender, receiver) = oneshot::channel();
+        self.sender
+            .send(Msg::Ping {
+                reply_channel: sender,
+            })
+            .await
+            .map_err(|_| Error::SendError)?;
+        let _ = receiver.await;
+        Ok(())
     }
 
     /// Send a no-more-sessions request to the remote peer.
@@ -1394,6 +1411,9 @@ impl Session {
             Msg::Keepalive { want_reply } => {
                 let _ = self.send_keepalive(want_reply);
             }
+            Msg::Ping { reply_channel } => {
+                let _ = self.send_ping(reply_channel);
+            }
             Msg::NoMoreSessions { want_reply } => {
                 let _ = self.no_more_sessions(want_reply);
             }
@@ -1591,19 +1611,22 @@ impl GexParams {
 
     pub(crate) fn validate(&self) -> Result<(), Error> {
         if self.min_group_size < 2048 {
-            return Err(Error::InvalidConfig(
-                "min_group_size must be at least 2048 bits".into(),
-            ));
+            return Err(Error::InvalidConfig(format!(
+                "min_group_size must be at least 2048 bits. We got {} bits",
+                self.min_group_size
+            )));
         }
         if self.preferred_group_size < self.min_group_size {
-            return Err(Error::InvalidConfig(
-                "preferred_group_size must be at least as large as min_group_size".into(),
-            ));
+            return Err(Error::InvalidConfig(format!(
+                "preferred_group_size must be at least as large as min_group_size. We have preferred_group_size = {} < min_group_size = {}",
+                self.preferred_group_size, self.min_group_size
+            )));
         }
         if self.max_group_size < self.preferred_group_size {
-            return Err(Error::InvalidConfig(
-                "max_group_size must be at least as large as preferred_group_size".into(),
-            ));
+            return Err(Error::InvalidConfig(format!(
+                "max_group_size must be at least as large as preferred_group_size. We have max_group_size = {} < preferred_group_size = {}",
+                self.max_group_size, self.preferred_group_size
+            )));
         }
         Ok(())
     }
@@ -1988,7 +2011,7 @@ pub trait Handler: Sized + Send {
         session: &mut Session,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
         async move {
-            debug!("openssh_ext_hostkeys_announced: {:?}", keys);
+            debug!("openssh_ext_hostkeys_announced: {keys:?}");
             Ok(())
         }
     }
@@ -2002,7 +2025,7 @@ pub trait Handler: Sized + Send {
         reason: DisconnectReason<Self::Error>,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
         async {
-            debug!("disconnected: {:?}", reason);
+            debug!("disconnected: {reason:?}");
             match reason {
                 DisconnectReason::ReceivedDisconnect(_) => Ok(()),
                 DisconnectReason::Error(e) => Err(e),

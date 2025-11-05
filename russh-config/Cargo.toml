@@ -2,18 +2,18 @@
 authors = ["Pierre-Étienne Meunier <pe@pijul.org>"]
 description = "Utilities to parse .ssh/config files, including helpers to implement ProxyCommand in Russh."
 documentation = "https://docs.rs/russh-config"
-edition = "2021"
+edition = "2024"
 include = ["Cargo.toml", "src/lib.rs", "src/proxy.rs"]
 license = "Apache-2.0"
 name = "russh-config"
 repository = "https://github.com/warp-tech/russh"
-version = "0.54.0"
-rust-version = "1.75"
+version = "0.54.5"
+rust-version = "1.85"
 
 [dependencies]
 home.workspace = true
 futures.workspace = true
-globset = "0.3"
+globset = "0.4"
 log.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["io-util", "net", "macros", "process"] }

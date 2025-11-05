@@ -598,6 +598,42 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "vzex",
+      "name": "vzex",
+      "avatar_url": "https://avatars.githubusercontent.com/u/4971777?v=4",
+      "profile": "http://dog-tunnel.tk",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "kruton",
+      "name": "Kenny Root",
+      "avatar_url": "https://avatars.githubusercontent.com/u/50407?v=4",
+      "profile": "https://the-b.org/",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "moshevds",
+      "name": "Môshe van der Sterre",
+      "avatar_url": "https://avatars.githubusercontent.com/u/1497288?v=4",
+      "profile": "https://github.com/moshevds",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "Lucy-dot-dot",
+      "name": "Lucy",
+      "avatar_url": "https://avatars.githubusercontent.com/u/178554709?v=4",
+      "profile": "https://github.com/Lucy-dot-dot",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,

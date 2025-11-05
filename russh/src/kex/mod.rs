@@ -18,25 +18,26 @@
 mod curve25519;
 pub mod dh;
 mod ecdh_nistp;
+mod hybrid_mlkem;
 mod none;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt::Debug;
-use std::ops::DerefMut;
+use std::sync::LazyLock;
 
 use curve25519::Curve25519KexType;
 use delegate::delegate;
 use dh::groups::DhGroup;
 use dh::{
-    DhGexSha1KexType, DhGexSha256KexType, DhGroup14Sha1KexType, DhGroup14Sha256KexType,
-    DhGroup15Sha512KexType, DhGroup16Sha512KexType, DhGroup17Sha512KexType, DhGroup18Sha512KexType,
-    DhGroup1Sha1KexType,
+    DhGexSha1KexType, DhGexSha256KexType, DhGroup1Sha1KexType, DhGroup14Sha1KexType,
+    DhGroup14Sha256KexType, DhGroup15Sha512KexType, DhGroup16Sha512KexType, DhGroup17Sha512KexType,
+    DhGroup18Sha512KexType,
 };
 use digest::Digest;
 use ecdh_nistp::{EcdhNistP256KexType, EcdhNistP384KexType, EcdhNistP521KexType};
 use enum_dispatch::enum_dispatch;
-use once_cell::sync::Lazy;
+use hybrid_mlkem::MlKem768X25519KexType;
 use p256::NistP256;
 use p384::NistP384;
 use p521::NistP521;
@@ -49,7 +50,7 @@ use crate::cipher::CIPHERS;
 use crate::client::GexParams;
 use crate::mac::{self, MACS};
 use crate::session::{Exchange, NewKeys};
-use crate::{cipher, CryptoVec, Error};
+use crate::{CryptoVec, Error, cipher};
 
 #[derive(Debug)]
 pub(crate) enum SessionKexState<K> {
@@ -133,6 +134,7 @@ pub(crate) enum KexAlgorithm {
     EcdhNistP256Kex(ecdh_nistp::EcdhNistPKex<NistP256, Sha256>),
     EcdhNistP384Kex(ecdh_nistp::EcdhNistPKex<NistP384, Sha384>),
     EcdhNistP521Kex(ecdh_nistp::EcdhNistPKex<NistP521, Sha512>),
+    MlKem768X25519Kex(hybrid_mlkem::MlKem768X25519Kex),
     None(none::NoneKexAlgorithm),
 }
 
@@ -222,6 +224,8 @@ impl TryFrom<&str> for Name {
 pub const CURVE25519: Name = Name("curve25519-sha256");
 /// `curve25519-sha256@libssh.org`
 pub const CURVE25519_PRE_RFC_8731: Name = Name("curve25519-sha256@libssh.org");
+/// `mlkem768x25519-sha256`
+pub const MLKEM768X25519_SHA256: Name = Name("mlkem768x25519-sha256");
 /// `diffie-hellman-group-exchange-sha1`.
 pub const DH_GEX_SHA1: Name = Name("diffie-hellman-group-exchange-sha1");
 /// `diffie-hellman-group-exchange-sha256`.
@@ -270,9 +274,11 @@ const _DH_G18_SHA512: DhGroup18Sha512KexType = DhGroup18Sha512KexType {};
 const _ECDH_SHA2_NISTP256: EcdhNistP256KexType = EcdhNistP256KexType {};
 const _ECDH_SHA2_NISTP384: EcdhNistP384KexType = EcdhNistP384KexType {};
 const _ECDH_SHA2_NISTP521: EcdhNistP521KexType = EcdhNistP521KexType {};
+const _MLKEM768X25519_SHA256: MlKem768X25519KexType = MlKem768X25519KexType {};
 const _NONE: none::NoneKexType = none::NoneKexType {};
 
 pub const ALL_KEX_ALGORITHMS: &[&Name] = &[
+    &MLKEM768X25519_SHA256,
     &CURVE25519,
     &CURVE25519_PRE_RFC_8731,
     &DH_GEX_SHA1,
@@ -290,9 +296,10 @@ pub const ALL_KEX_ALGORITHMS: &[&Name] = &[
     &NONE,
 ];
 
-pub(crate) static KEXES: Lazy<HashMap<&'static Name, &(dyn KexType + Send + Sync)>> =
-    Lazy::new(|| {
+pub(crate) static KEXES: LazyLock<HashMap<&'static Name, &(dyn KexType + Send + Sync)>> =
+    LazyLock::new(|| {
         let mut h: HashMap<&'static Name, &(dyn KexType + Send + Sync)> = HashMap::new();
+        h.insert(&MLKEM768X25519_SHA256, &_MLKEM768X25519_SHA256);
         h.insert(&CURVE25519, &_CURVE25519);
         h.insert(&CURVE25519_PRE_RFC_8731, &_CURVE25519);
         h.insert(&DH_GEX_SHA1, &_DH_GEX_SHA1);
@@ -319,8 +326,33 @@ thread_local! {
     static BUFFER: RefCell<CryptoVec> = RefCell::new(CryptoVec::new());
 }
 
+pub(crate) enum SharedSecret {
+    Mpint(CryptoVec),
+    String(CryptoVec),
+}
+
+impl SharedSecret {
+    pub fn from_mpint(bytes: &[u8]) -> Result<Self, Error> {
+        let mut encoded = CryptoVec::new();
+        encode_mpint(bytes, &mut encoded)?;
+        Ok(SharedSecret::Mpint(encoded))
+    }
+
+    pub fn from_string(bytes: &[u8]) -> Result<Self, Error> {
+        let mut encoded = CryptoVec::new();
+        bytes.encode(&mut encoded)?;
+        Ok(SharedSecret::String(encoded))
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        match self {
+            SharedSecret::Mpint(v) | SharedSecret::String(v) => v.as_ref(),
+        }
+    }
+}
+
 pub(crate) fn compute_keys<D: Digest>(
-    shared_secret: Option<&[u8]>,
+    shared_secret: Option<&SharedSecret>,
     session_id: &CryptoVec,
     exchange_hash: &CryptoVec,
     cipher: cipher::Name,
@@ -343,7 +375,7 @@ pub(crate) fn compute_keys<D: Digest>(
                         key.clear();
 
                         if let Some(shared) = shared_secret {
-                            encode_mpint(shared, buffer.deref_mut())?;
+                            buffer.extend(shared.as_bytes());
                         }
 
                         buffer.extend(exchange_hash.as_ref());
@@ -360,7 +392,7 @@ pub(crate) fn compute_keys<D: Digest>(
                             // extend.
                             buffer.clear();
                             if let Some(shared) = shared_secret {
-                                encode_mpint(shared, buffer.deref_mut())?;
+                                buffer.extend(shared.as_bytes());
                             }
                             buffer.extend(exchange_hash.as_ref());
                             buffer.extend(key);
