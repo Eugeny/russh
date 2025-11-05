@@ -83,7 +83,7 @@ async fn test_rekey_with_strict_kex() {
         ChannelMsg::Data { data } => {
             assert_eq!(&*data, b"before rekey");
         }
-        msg => panic!("Unexpected message before rekey: {:?}", msg),
+        msg => panic!("Unexpected message before rekey: {msg:?}"),
     }
 
     session.rekey_soon().await.unwrap();
@@ -100,7 +100,7 @@ async fn test_rekey_with_strict_kex() {
         ChannelMsg::Data { data } => {
             assert_eq!(&*data, b"after rekey");
         }
-        msg => panic!("Unexpected message after rekey: {:?}", msg),
+        msg => panic!("Unexpected message after rekey: {msg:?}"),
     }
 
     // Close the channel

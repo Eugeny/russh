@@ -48,7 +48,7 @@ async fn main() -> Result<()> {
         )
         .await?;
 
-    println!("Exitcode: {:?}", code);
+    println!("Exitcode: {code:?}");
     ssh.close().await?;
     Ok(())
 }

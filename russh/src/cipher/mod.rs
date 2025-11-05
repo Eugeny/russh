@@ -217,9 +217,9 @@ pub(crate) trait SealingKey {
         trace!("writing, seqn = {:?}", buffer.seqn.0);
 
         let padding_length = self.padding_length(payload);
-        trace!("padding length {:?}", padding_length);
+        trace!("padding length {padding_length:?}");
         let packet_length = PADDING_LENGTH_LEN + payload.len() + padding_length;
-        trace!("packet_length {:?}", packet_length);
+        trace!("packet_length {packet_length:?}");
         let offset = buffer.buffer.len();
 
         // Maximum packet length:
@@ -256,12 +256,12 @@ pub(crate) async fn read<R: AsyncRead + Unpin>(
         let mut len = vec![0; cipher.packet_length_to_read_for_block_length()];
 
         stream.read_exact(&mut len).await?;
-        trace!("reading, len = {:?}", len);
+        trace!("reading, len = {len:?}");
         {
             let seqn = buffer.seqn.0;
             buffer.buffer.clear();
             buffer.buffer.extend(&len);
-            trace!("reading, seqn = {:?}", seqn);
+            trace!("reading, seqn = {seqn:?}");
             let len = cipher.decrypt_packet_length(seqn, &len);
             let len = BigEndian::read_u32(&len) as usize;
 
@@ -287,7 +287,7 @@ pub(crate) async fn read<R: AsyncRead + Unpin>(
     let plaintext = cipher.open(seqn, &mut buffer.buffer)?;
 
     let padding_length = *plaintext.first().to_owned().unwrap_or(&0) as usize;
-    trace!("reading, padding_length {:?}", padding_length);
+    trace!("reading, padding_length {padding_length:?}");
     let plaintext_end = plaintext
         .len()
         .checked_sub(padding_length)

@@ -238,7 +238,7 @@ impl CryptoVec {
                 if self.p.is_null() {
                     #[allow(clippy::panic)]
                     {
-                        panic!("Realloc failed, pointer = {:?} {:?}", self, size)
+                        panic!("Realloc failed, pointer = {self:?} {size:?}")
                     }
                 } else {
                     self.capacity = next_capacity;

@@ -137,7 +137,7 @@ impl russh::server::Handler for Server {
             while let Ok(_) = rx.changed().await {
                 match channel.wait().await {
                     Some(ChannelMsg::Data { .. }) => (),
-                    other => panic!("unexpected message {:?}", other),
+                    other => panic!("unexpected message {other:?}"),
                 }
             }
         });

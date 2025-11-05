@@ -183,7 +183,7 @@ impl<D: Digest> KexAlgorithmImplementor for DhGroupKex<D> {
                 .ok_or(Error::Inconsistent)?
         };
 
-        trace!("client_pubkey: {:?}", client_pubkey);
+        trace!("client_pubkey: {client_pubkey:?}");
 
         dh.generate_private_key(true);
         let server_pubkey = &dh.generate_public_key();

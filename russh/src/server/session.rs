@@ -402,7 +402,7 @@ impl Handle {
                     return Err(Error::Disconnect);
                 }
                 msg => {
-                    debug!("msg = {:?}", msg);
+                    debug!("msg = {msg:?}");
                 }
             }
         }
@@ -585,7 +585,7 @@ impl Session {
                             self.exit_signal_request(id, signal_name, core_dumped, &error_message, &lang_tag)?;
                         }
                         Some(Msg::Channel(id, ChannelMsg::WindowAdjusted { new_size })) => {
-                            debug!("window adjusted to {:?} for channel {:?}", new_size, id);
+                            debug!("window adjusted to {new_size:?} for channel {id:?}");
                         }
                         Some(Msg::ChannelOpenAgent { channel_ref }) => {
                             let id = self.channel_open_agent()?;
@@ -837,7 +837,7 @@ impl Session {
                 assert!(channel.confirmed);
                 if channel.wants_reply {
                     channel.wants_reply = false;
-                    debug!("channel_success {:?}", channel);
+                    debug!("channel_success {channel:?}");
                     push_packet!(enc.write, {
                         msg::CHANNEL_SUCCESS.encode(&mut enc.write)?;
                         channel.recipient_channel.encode(&mut enc.write)?;

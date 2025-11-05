@@ -38,7 +38,7 @@ impl TerminalHandle {
             while let Some(data) = receiver.recv().await {
                 let result = handle.data(channel_id, data.into()).await;
                 if result.is_err() {
-                    eprintln!("Failed to send data: {:?}", result);
+                    eprintln!("Failed to send data: {result:?}");
                 }
             }
         });
