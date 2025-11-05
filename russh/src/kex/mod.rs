@@ -24,20 +24,20 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt::Debug;
+use std::sync::LazyLock;
 
 use curve25519::Curve25519KexType;
 use delegate::delegate;
 use dh::groups::DhGroup;
 use dh::{
-    DhGexSha1KexType, DhGexSha256KexType, DhGroup14Sha1KexType, DhGroup14Sha256KexType,
-    DhGroup15Sha512KexType, DhGroup16Sha512KexType, DhGroup17Sha512KexType, DhGroup18Sha512KexType,
-    DhGroup1Sha1KexType,
+    DhGexSha1KexType, DhGexSha256KexType, DhGroup1Sha1KexType, DhGroup14Sha1KexType,
+    DhGroup14Sha256KexType, DhGroup15Sha512KexType, DhGroup16Sha512KexType, DhGroup17Sha512KexType,
+    DhGroup18Sha512KexType,
 };
 use digest::Digest;
 use ecdh_nistp::{EcdhNistP256KexType, EcdhNistP384KexType, EcdhNistP521KexType};
 use enum_dispatch::enum_dispatch;
 use hybrid_mlkem::MlKem768X25519KexType;
-use once_cell::sync::Lazy;
 use p256::NistP256;
 use p384::NistP384;
 use p521::NistP521;
@@ -50,7 +50,7 @@ use crate::cipher::CIPHERS;
 use crate::client::GexParams;
 use crate::mac::{self, MACS};
 use crate::session::{Exchange, NewKeys};
-use crate::{cipher, CryptoVec, Error};
+use crate::{CryptoVec, Error, cipher};
 
 #[derive(Debug)]
 pub(crate) enum SessionKexState<K> {
@@ -296,8 +296,8 @@ pub const ALL_KEX_ALGORITHMS: &[&Name] = &[
     &NONE,
 ];
 
-pub(crate) static KEXES: Lazy<HashMap<&'static Name, &(dyn KexType + Send + Sync)>> =
-    Lazy::new(|| {
+pub(crate) static KEXES: LazyLock<HashMap<&'static Name, &(dyn KexType + Send + Sync)>> =
+    LazyLock::new(|| {
         let mut h: HashMap<&'static Name, &(dyn KexType + Send + Sync)> = HashMap::new();
         h.insert(&MLKEM768X25519_SHA256, &_MLKEM768X25519_SHA256);
         h.insert(&CURVE25519, &_CURVE25519);

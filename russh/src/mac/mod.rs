@@ -16,11 +16,11 @@
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::marker::PhantomData;
+use std::sync::LazyLock;
 
 use delegate::delegate;
 use digest::typenum::{U20, U32, U64};
 use hmac::Hmac;
-use once_cell::sync::Lazy;
 use sha1::Sha1;
 use sha2::{Sha256, Sha512};
 use ssh_encoding::Encode;
@@ -108,8 +108,8 @@ pub const ALL_MAC_ALGORITHMS: &[&Name] = &[
     &HMAC_SHA512_ETM,
 ];
 
-pub(crate) static MACS: Lazy<HashMap<&'static Name, &(dyn MacAlgorithm + Send + Sync)>> =
-    Lazy::new(|| {
+pub(crate) static MACS: LazyLock<HashMap<&'static Name, &(dyn MacAlgorithm + Send + Sync)>> =
+    LazyLock::new(|| {
         let mut h: HashMap<&'static Name, &(dyn MacAlgorithm + Send + Sync)> = HashMap::new();
         h.insert(&NONE, &_NONE);
         h.insert(&HMAC_SHA1, &_HMAC_SHA1);
