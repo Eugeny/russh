@@ -11,14 +11,17 @@
     clippy::panic
 )]
 
-#[cfg(all(windows, feature = "wmmessage", not(feature = "namedpipes")))]
-mod pageant_impl;
+mod error;
+pub use error::*;
 
-#[cfg(all(windows, feature = "wmmessage", not(feature = "namedpipes")))]
-pub use pageant_impl::*;
-
-#[cfg(all(windows, feature = "namedpipes"))]
-mod pageant_impl_namedpipes;
+#[cfg(all(windows, feature = "wmmessage"))]
+pub mod wmmessage;
 
 #[cfg(all(windows, feature = "namedpipes"))]
-pub use pageant_impl_namedpipes::*;
+pub mod namedpipes;
+
+#[cfg(windows)]
+mod interface;
+
+#[cfg(windows)]
+pub use interface::*;

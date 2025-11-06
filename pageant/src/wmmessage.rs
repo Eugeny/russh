@@ -3,39 +3,35 @@ use std::io::IoSlice;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
+use byteorder::{BigEndian, ByteOrder};
 use bytes::BytesMut;
 use delegate::delegate;
 use log::debug;
-use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, DuplexStream, ReadBuf};
-use windows::core::HSTRING;
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND, INVALID_HANDLE_VALUE, LPARAM, WPARAM};
 use windows::Win32::Security::{
-    GetTokenInformation, InitializeSecurityDescriptor, SetSecurityDescriptorOwner, TokenUser,
-    PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES, SECURITY_DESCRIPTOR, TOKEN_QUERY, TOKEN_USER,
+    GetTokenInformation, InitializeSecurityDescriptor, PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES,
+    SECURITY_DESCRIPTOR, SetSecurityDescriptorOwner, TOKEN_QUERY, TOKEN_USER, TokenUser,
 };
 use windows::Win32::System::DataExchange::COPYDATASTRUCT;
 use windows::Win32::System::Memory::{
-    CreateFileMappingW, MapViewOfFile, UnmapViewOfFile, FILE_MAP_WRITE, MEMORY_MAPPED_VIEW_ADDRESS,
-    PAGE_READWRITE,
+    CreateFileMappingW, FILE_MAP_WRITE, MEMORY_MAPPED_VIEW_ADDRESS, MapViewOfFile, PAGE_READWRITE,
+    UnmapViewOfFile,
 };
 use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, SendMessageA, WM_COPYDATA};
+use windows::core::HSTRING;
 
-impl Error {
-    fn from_win32() -> Self {
-        Self::WindowsError(windows::core::Error::from_win32())
-    }
-}
+use crate::Error;
 
 /// Pageant transport stream. Implements [AsyncRead] and [AsyncWrite].
 ///
 /// The stream has a unique cookie and requests made in the same stream are considered the same "session".
-pub struct WmMessageStream {
+pub struct PageantStream {
     stream: DuplexStream,
 }
 
-impl WmMessageStream {
+impl PageantStream {
     pub async fn new() -> Result<Self, Error> {
         let (one, mut two) = tokio::io::duplex(_AGENT_MAX_MSGLEN * 100);
 
@@ -46,7 +42,14 @@ impl WmMessageStream {
                 if n == 0 {
                     break;
                 }
-                let msg = buf.split().freeze();
+                if buf.len() < 4 {
+                    continue;
+                }
+                let len = BigEndian::read_u32(&buf) as usize;
+                if buf.len() < len + 4 {
+                    continue;
+                }
+                let msg = buf.split_to(len + 4).freeze();
                 let Ok(response) = query_pageant_direct(cookie.clone(), &msg).map_err(|e| {
                     debug!("Pageant query failed: {:?}", e);
                     e
@@ -62,7 +65,7 @@ impl WmMessageStream {
     }
 }
 
-impl AsyncRead for WmMessageStream {
+impl AsyncRead for PageantStream {
     delegate! {
         to Pin::new(&mut self.stream) {
             fn poll_read(
@@ -75,7 +78,7 @@ impl AsyncRead for WmMessageStream {
     }
 }
 
-impl AsyncWrite for WmMessageStream {
+impl AsyncWrite for PageantStream {
     delegate! {
         to Pin::new(&mut self.stream) {
             fn poll_write(
@@ -236,7 +239,7 @@ pub fn query_pageant_direct(cookie: String, msg: &[u8]) -> Result<Vec<u8>, Error
     let sa = SECURITY_ATTRIBUTES {
         lpSecurityDescriptor: &mut sd as *mut _ as *mut _,
         bInheritHandle: true.into(),
-        ..Default::default()
+        nLength: size_of::<SECURITY_ATTRIBUTES>() as u32,
     };
 
     let psd = PSECURITY_DESCRIPTOR(&mut sd as *mut _ as *mut _);

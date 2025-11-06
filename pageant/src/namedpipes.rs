@@ -6,57 +6,36 @@ use std::time::Duration;
 use delegate::delegate;
 use log::debug;
 use sha2::{Digest, Sha256};
-use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeClient};
 use windows::Win32::Foundation::ERROR_PIPE_BUSY;
 use windows::Win32::Security::Authentication::Identity::{GetUserNameExA, NameUserPrincipal};
 use windows::Win32::Security::Cryptography::{
-    CryptProtectMemory, CRYPTPROTECTMEMORY_BLOCK_SIZE, CRYPTPROTECTMEMORY_CROSS_PROCESS,
+    CRYPTPROTECTMEMORY_BLOCK_SIZE, CRYPTPROTECTMEMORY_CROSS_PROCESS, CryptProtectMemory,
 };
 use windows_strings::PSTR;
 
-#[derive(Error, Debug)]
-pub enum Error {
-    #[error("Pageant not found")]
-    NotFound,
-
-    #[error("Buffer overflow")]
-    Overflow,
-
-    #[error("No response from Pageant")]
-    NoResponse,
-
-    #[error("Invalid Username")]
-    InvalidUsername,
-
-    #[error(transparent)]
-    WindowsError(#[from] windows::core::Error),
-
-    #[error(transparent)]
-    IoError(#[from] std::io::Error),
-}
-
-impl Error {
-    fn from_win32() -> Self {
-        Self::WindowsError(windows::core::Error::from_win32())
-    }
-}
+use crate::Error;
 
 /// Pageant transport stream. Implements [AsyncRead] and [AsyncWrite].
-pub struct NamedPipes {
+pub struct PageantStream {
     stream: NamedPipeClient,
 }
 
-impl NamedPipes {
+impl PageantStream {
     pub async fn new() -> Result<Self, Error> {
         let pipe_name = Self::determine_pipe_name()?;
         debug!("Opening pipe '{}'", pipe_name);
+        let mut timeout_counter = 0;
         let stream = loop {
             match ClientOptions::new().open(&pipe_name) {
                 Ok(client) => break client,
                 Err(e) if e.raw_os_error() == Some(ERROR_PIPE_BUSY.0 as i32) => (),
                 Err(e) => return Err(e.into()),
+            }
+            timeout_counter += 1;
+            if timeout_counter > 40 {
+                return Err(Error::PipeBusy);
             }
 
             tokio::time::sleep(Duration::from_millis(50)).await;
@@ -134,7 +113,7 @@ impl NamedPipes {
     }
 }
 
-impl AsyncRead for NamedPipes {
+impl AsyncRead for PageantStream {
     delegate! {
         to Pin::new(&mut self.stream) {
             fn poll_read(
@@ -147,7 +126,7 @@ impl AsyncRead for NamedPipes {
     }
 }
 
-impl AsyncWrite for NamedPipes {
+impl AsyncWrite for PageantStream {
     delegate! {
         to Pin::new(&mut self.stream) {
             fn poll_write(
