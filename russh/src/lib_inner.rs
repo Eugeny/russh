@@ -40,6 +40,8 @@ pub use sshbuffer::SshId;
 
 mod helpers;
 
+pub(crate) use helpers::map_err;
+
 macro_rules! push_packet {
     ( $buffer:expr, $x:expr ) => {{
         use byteorder::{BigEndian, ByteOrder};
