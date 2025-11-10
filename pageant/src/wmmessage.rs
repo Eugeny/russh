@@ -1,5 +1,5 @@
+use std::ffi::CString;
 use std::io::IoSlice;
-use std::mem::size_of;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
@@ -7,7 +7,6 @@ use byteorder::{BigEndian, ByteOrder};
 use bytes::BytesMut;
 use delegate::delegate;
 use log::debug;
-use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, DuplexStream, ReadBuf};
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND, INVALID_HANDLE_VALUE, LPARAM, WPARAM};
 use windows::Win32::Security::{
@@ -23,26 +22,7 @@ use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, SendMessageA, WM_COPYDATA};
 use windows::core::HSTRING;
 
-#[derive(Error, Debug)]
-pub enum Error {
-    #[error("Pageant not found")]
-    NotFound,
-
-    #[error("Buffer overflow")]
-    Overflow,
-
-    #[error("No response from Pageant")]
-    NoResponse,
-
-    #[error(transparent)]
-    WindowsError(#[from] windows::core::Error),
-}
-
-impl Error {
-    fn from_win32() -> Self {
-        Self::WindowsError(windows::core::Error::from_win32())
-    }
-}
+use crate::Error;
 
 /// Pageant transport stream. Implements [AsyncRead] and [AsyncWrite].
 ///
@@ -52,7 +32,7 @@ pub struct PageantStream {
 }
 
 impl PageantStream {
-    pub fn new() -> Self {
+    pub async fn new() -> Result<Self, Error> {
         let (one, mut two) = tokio::io::duplex(_AGENT_MAX_MSGLEN * 100);
 
         let cookie = rand::random::<u64>().to_string();
@@ -81,13 +61,7 @@ impl PageantStream {
             std::io::Result::Ok(())
         });
 
-        Self { stream: one }
-    }
-}
-
-impl Default for PageantStream {
-    fn default() -> Self {
-        Self::new()
+        Ok(Self { stream: one })
     }
 }
 
@@ -228,12 +202,8 @@ pub fn is_pageant_running() -> bool {
     find_pageant_window().is_ok()
 }
 
-/// Send a one-off query to Pageant and return a response.
-pub fn query_pageant_direct(cookie: String, msg: &[u8]) -> Result<Vec<u8>, Error> {
-    let hwnd = find_pageant_window()?;
-    let map_name = format!("PageantRequest{cookie}");
-
-    let user = unsafe {
+fn get_current_process_user() -> Result<TOKEN_USER, Error> {
+    unsafe {
         let mut process_token = HANDLE::default();
         OpenProcessToken(
             GetCurrentProcess(),
@@ -254,8 +224,16 @@ pub fn query_pageant_direct(cookie: String, msg: &[u8]) -> Result<Vec<u8>, Error
         )?;
         let user: TOKEN_USER = *(buffer.as_ptr() as *const _);
         let _ = CloseHandle(process_token);
-        user
-    };
+        Ok(user)
+    }
+}
+
+/// Send a one-off query to Pageant and return a response.
+pub fn query_pageant_direct(cookie: String, msg: &[u8]) -> Result<Vec<u8>, Error> {
+    let hwnd = find_pageant_window()?;
+    let map_name = format!("PageantRequest{cookie}");
+
+    let user = get_current_process_user()?;
 
     let mut sd = SECURITY_DESCRIPTOR::default();
     let sa = SECURITY_ATTRIBUTES {
@@ -274,19 +252,18 @@ pub fn query_pageant_direct(cookie: String, msg: &[u8]) -> Result<Vec<u8>, Error
     let mut map: MemoryMap = MemoryMap::new(map_name.clone(), _AGENT_MAX_MSGLEN, Some(sa))?;
     map.write(msg)?;
 
-    let mut char_buffer = map_name.as_bytes().to_vec();
-    char_buffer.push(0);
+    let char_buffer = CString::new(map_name.as_bytes()).map_err(|_| Error::InvalidCookie)?;
     let cds = COPYDATASTRUCT {
         dwData: _AGENT_COPYDATA_ID as usize,
-        cbData: char_buffer.len() as u32,
-        lpData: char_buffer.as_ptr() as *mut _,
+        cbData: char_buffer.as_bytes().len() as u32,
+        lpData: char_buffer.as_bytes().as_ptr() as *mut _,
     };
 
     let response = unsafe {
         SendMessageA(
             hwnd,
             WM_COPYDATA,
-            WPARAM(size_of::<COPYDATASTRUCT>()),
+            WPARAM(0), // Should be window handle to requesting app, which we don't have
             LPARAM(&cds as *const _ as isize),
         )
     };

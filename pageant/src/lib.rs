@@ -11,8 +11,17 @@
     clippy::panic
 )]
 
-#[cfg(windows)]
-mod pageant_impl;
+mod error;
+pub use error::*;
+
+#[cfg(all(windows, feature = "wmmessage"))]
+pub mod wmmessage;
+
+#[cfg(all(windows, feature = "namedpipes"))]
+pub mod namedpipes;
 
 #[cfg(windows)]
-pub use pageant_impl::*;
+mod interface;
+
+#[cfg(windows)]
+pub use interface::*;
