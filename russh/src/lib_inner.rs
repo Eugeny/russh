@@ -121,6 +121,10 @@ pub enum Error {
     #[error("Not yet authenticated")]
     NotAuthenticated,
 
+    /// The client has presented an unsupported authentication method.
+    #[error("Unsupported authentication method")]
+    UnsupportedAuthMethod,
+
     /// Index out of bounds.
     #[error("Index out of bounds")]
     IndexOutOfBounds,
