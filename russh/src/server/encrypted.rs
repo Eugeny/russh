@@ -575,7 +575,7 @@ async fn reply_userauth_info_response(
             })?;
             Ok(false)
         }
-        Auth::UnsupportedMethod => unreachable!(),
+        Auth::UnsupportedMethod => Err(Error::UnsupportedAuthMethod),
     }
 }
 
