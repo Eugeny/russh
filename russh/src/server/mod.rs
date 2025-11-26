@@ -48,13 +48,13 @@ use tokio::net::{TcpListener, ToSocketAddrs};
 use tokio::pin;
 use tokio::sync::{broadcast, mpsc};
 
-use crate::cipher::{clear, OpeningKey};
-use crate::kex::dh::groups::{DhGroup, BUILTIN_SAFE_DH_GROUPS, DH_GROUP14};
+use crate::cipher::{OpeningKey, clear};
+use crate::kex::dh::groups::{BUILTIN_SAFE_DH_GROUPS, DH_GROUP14, DhGroup};
 use crate::kex::{KexProgress, SessionKexState};
 use crate::session::*;
 use crate::ssh_read::*;
 use crate::sshbuffer::*;
-use crate::{*};
+use crate::*;
 
 mod kex;
 mod session;
@@ -813,6 +813,10 @@ pub struct RunningServer<F: Future<Output = std::io::Result<()>> + Unpin + Send>
 }
 
 impl<F: Future<Output = std::io::Result<()>> + Unpin + Send> RunningServer<F> {
+    pub fn new(inner: F, shutdown_tx: broadcast::Sender<String>) -> Self {
+        Self { inner, shutdown_tx }
+    }
+
     pub fn handle(&self) -> RunningServerHandle {
         RunningServerHandle {
             shutdown_tx: self.shutdown_tx.clone(),
