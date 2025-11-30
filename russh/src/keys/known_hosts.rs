@@ -48,11 +48,9 @@ pub fn check_known_hosts_path<P: AsRef<Path>>(
 }
 
 fn known_hosts_path() -> Result<PathBuf, Error> {
-    if let Some(home_dir) = home::home_dir() {
-        Ok(home_dir.join(".ssh").join("known_hosts"))
-    } else {
-        Err(Error::NoHomeDir)
-    }
+    home::home_dir()
+        .map(|home_dir| home_dir.join(".ssh").join("known_hosts"))
+        .ok_or(Error::NoHomeDir)
 }
 
 /// Get the server key that matches the one recorded in the user's known_hosts file.
