@@ -148,6 +148,10 @@ where
         Ok(())
     }
 
+    fn shared_secret_bytes(&self) -> Option<&[u8]> {
+        self.shared_secret.as_ref().map(|s| s.raw_secret_bytes().as_slice())
+    }
+
     fn compute_exchange_hash(
         &self,
         key: &CryptoVec,

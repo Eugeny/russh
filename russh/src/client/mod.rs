@@ -61,7 +61,7 @@ use crate::channels::{
     Channel, ChannelMsg, ChannelReadHalf, ChannelRef, ChannelWriteHalf, WindowSizeRef,
 };
 use crate::cipher::{self, OpeningKey, clear};
-use crate::kex::{KexCause, KexProgress, SessionKexState};
+use crate::kex::{KexAlgorithmImplementor, KexCause, KexProgress, SessionKexState};
 use crate::keys::PrivateKeyWithHashAlg;
 use crate::msg::{is_kex_msg, validate_server_msg_strict_kex};
 use crate::session::{CommonSession, EncryptedState, GlobalRequestResponse, NewKeys};
@@ -1523,6 +1523,13 @@ async fn reply<H: Handler>(
                     session.common.strict_kex =
                         session.common.strict_kex || newkeys.names.strict_kex();
 
+                    // Call the kex_done handler before consuming newkeys
+                    let kex_algorithm = newkeys.names.kex.as_ref();
+                    let shared_secret = newkeys.kex.shared_secret_bytes();
+                    handler
+                        .kex_done(kex_algorithm, shared_secret, &newkeys.names, session)
+                        .await?;
+
                     if let Some(ref mut enc) = session.common.encrypted {
                         // This is a rekey
                         enc.last_rekey = Instant::now();
@@ -1740,6 +1747,35 @@ pub trait Handler: Sized + Send {
         server_public_key: &ssh_key::PublicKey,
     ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
         async { Ok(false) }
+    }
+
+    /// Called when key exchange has completed.
+    ///
+    /// This callback provides access to the raw shared secret from the KEX,
+    /// which is useful for protocols that derive additional keys from the
+    /// SSH shared secret (e.g., for secondary encrypted channels).
+    ///
+    /// The `names` parameter contains all negotiated algorithms (kex, cipher, mac, etc.).
+    ///
+    /// **Security Warning:** The shared secret is sensitive cryptographic material.
+    /// Handle it with care and zero it after use if stored.
+    ///
+    /// # Arguments
+    ///
+    /// * `kex_algorithm` - Name of the key exchange algorithm used
+    /// * `shared_secret` - The raw shared secret bytes from the key exchange.
+    ///   For some algorithms (like `none`), this may be `None`.
+    /// * `names` - The negotiated algorithm names
+    /// * `session` - The current session
+    #[allow(unused_variables)]
+    fn kex_done(
+        &mut self,
+        kex_algorithm: &str,
+        shared_secret: Option<&[u8]>,
+        names: &negotiation::Names,
+        session: &mut Session,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// Called when the server confirmed our request to open a

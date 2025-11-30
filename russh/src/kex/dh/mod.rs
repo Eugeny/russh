@@ -264,6 +264,10 @@ impl<D: Digest> KexAlgorithmImplementor for DhGroupKex<D> {
         Ok(())
     }
 
+    fn shared_secret_bytes(&self) -> Option<&[u8]> {
+        self.shared_secret.as_deref()
+    }
+
     fn compute_exchange_hash(
         &self,
         key: &CryptoVec,

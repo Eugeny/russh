@@ -39,6 +39,10 @@ impl KexAlgorithmImplementor for NoneKexAlgorithm {
         Ok(())
     }
 
+    fn shared_secret_bytes(&self) -> Option<&[u8]> {
+        None
+    }
+
     fn compute_exchange_hash(
         &self,
         _key: &russh_cryptovec::CryptoVec,
