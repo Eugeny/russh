@@ -46,8 +46,7 @@ async fn test_kex_done_callback_receives_shared_secret() {
 
     // Set up client with shared secret capture
     let captured_secret: Arc<Mutex<Option<Vec<u8>>>> = Arc::new(Mutex::new(None));
-    let captured_kex_alg: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
-    let captured_names: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+    let captured_names: Arc<Mutex<Option<Names>>> = Arc::new(Mutex::new(None));
 
     let mut client_config = client::Config::default();
     client_config.preferred = {
@@ -59,7 +58,6 @@ async fn test_kex_done_callback_receives_shared_secret() {
 
     let client = TestClientWithKexCapture {
         shared_secret: captured_secret.clone(),
-        kex_algorithm: captured_kex_alg.clone(),
         negotiated_cipher: captured_names.clone(),
     };
 
@@ -80,24 +78,24 @@ async fn test_kex_done_callback_receives_shared_secret() {
     let secret = captured_secret.lock().unwrap();
     assert!(secret.is_some(), "Shared secret should be captured");
     let secret_bytes = secret.as_ref().unwrap();
-    assert!(!secret_bytes.is_empty(), "Shared secret should not be empty");
+    assert!(
+        !secret_bytes.is_empty(),
+        "Shared secret should not be empty"
+    );
     assert_eq!(
         secret_bytes.len(),
         32,
         "Curve25519 shared secret should be 32 bytes"
     );
 
-    // Verify KEX algorithm was captured
-    let kex_alg = captured_kex_alg.lock().unwrap();
-    assert!(kex_alg.is_some(), "KEX algorithm should be captured");
-    assert!(
-        kex_alg.as_ref().unwrap().contains("curve25519"),
-        "KEX algorithm should be curve25519"
-    );
-
     // Verify negotiated cipher was captured
     let cipher = captured_names.lock().unwrap();
     assert!(cipher.is_some(), "Negotiated cipher should be captured");
+
+    assert!(
+        cipher.as_ref().unwrap().kex.as_ref().contains("curve25519"),
+        "KEX algorithm should be curve25519"
+    );
 
     session
         .disconnect(Disconnect::ByApplication, "", "")
@@ -137,7 +135,7 @@ async fn test_kex_done_with_ecdh_nistp256() {
     });
 
     let captured_secret: Arc<Mutex<Option<Vec<u8>>>> = Arc::new(Mutex::new(None));
-    let captured_kex_alg: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+    let captured_names: Arc<Mutex<Option<Names>>> = Arc::new(Mutex::new(None));
 
     let mut client_config = client::Config::default();
     client_config.preferred = {
@@ -149,8 +147,7 @@ async fn test_kex_done_with_ecdh_nistp256() {
 
     let client = TestClientWithKexCapture {
         shared_secret: captured_secret.clone(),
-        kex_algorithm: captured_kex_alg.clone(),
-        negotiated_cipher: Arc::new(Mutex::new(None)),
+        negotiated_cipher: captured_names.clone(),
     };
 
     let mut session = client::connect(client_config, addr, client).await.unwrap();
@@ -168,7 +165,10 @@ async fn test_kex_done_with_ecdh_nistp256() {
     let secret = captured_secret.lock().unwrap();
     assert!(secret.is_some(), "Shared secret should be captured");
     let secret_bytes = secret.as_ref().unwrap();
-    assert!(!secret_bytes.is_empty(), "Shared secret should not be empty");
+    assert!(
+        !secret_bytes.is_empty(),
+        "Shared secret should not be empty"
+    );
     // NIST P-256 shared secret is 32 bytes
     assert_eq!(
         secret_bytes.len(),
@@ -176,9 +176,9 @@ async fn test_kex_done_with_ecdh_nistp256() {
         "ECDH-NISTP256 shared secret should be 32 bytes"
     );
 
-    let kex_alg = captured_kex_alg.lock().unwrap();
+    let kex_alg = captured_names.lock().unwrap();
     assert!(
-        kex_alg.as_ref().unwrap().contains("nistp256"),
+        kex_alg.as_ref().unwrap().kex.as_ref().contains("nistp256"),
         "KEX algorithm should be nistp256"
     );
 
@@ -323,8 +323,7 @@ impl server::Handler for TestServer {
 
 struct TestClientWithKexCapture {
     shared_secret: Arc<Mutex<Option<Vec<u8>>>>,
-    kex_algorithm: Arc<Mutex<Option<String>>>,
-    negotiated_cipher: Arc<Mutex<Option<String>>>,
+    negotiated_cipher: Arc<Mutex<Option<Names>>>,
 }
 
 impl client::Handler for TestClientWithKexCapture {
@@ -339,7 +338,6 @@ impl client::Handler for TestClientWithKexCapture {
 
     async fn kex_done(
         &mut self,
-        kex_algorithm: &str,
         shared_secret: Option<&[u8]>,
         names: &Names,
         _session: &mut client::Session,
@@ -349,11 +347,8 @@ impl client::Handler for TestClientWithKexCapture {
             *self.shared_secret.lock().unwrap() = Some(secret.to_vec());
         }
 
-        // Capture the KEX algorithm name
-        *self.kex_algorithm.lock().unwrap() = Some(kex_algorithm.to_string());
-
         // Capture the negotiated cipher name
-        *self.negotiated_cipher.lock().unwrap() = Some(names.cipher.as_ref().to_string());
+        *self.negotiated_cipher.lock().unwrap() = Some(names.clone());
 
         Ok(())
     }
@@ -377,7 +372,6 @@ impl client::Handler for TestClientWithRekeyCapture {
 
     async fn kex_done(
         &mut self,
-        _kex_algorithm: &str,
         shared_secret: Option<&[u8]>,
         _names: &Names,
         _session: &mut client::Session,
@@ -396,4 +390,3 @@ impl client::Handler for TestClientWithRekeyCapture {
         Ok(())
     }
 }
-

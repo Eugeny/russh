@@ -1524,10 +1524,9 @@ async fn reply<H: Handler>(
                         session.common.strict_kex || newkeys.names.strict_kex();
 
                     // Call the kex_done handler before consuming newkeys
-                    let kex_algorithm = newkeys.names.kex.as_ref();
                     let shared_secret = newkeys.kex.shared_secret_bytes();
                     handler
-                        .kex_done(kex_algorithm, shared_secret, &newkeys.names, session)
+                        .kex_done(shared_secret, &newkeys.names, session)
                         .await?;
 
                     if let Some(ref mut enc) = session.common.encrypted {
@@ -1770,7 +1769,6 @@ pub trait Handler: Sized + Send {
     #[allow(unused_variables)]
     fn kex_done(
         &mut self,
-        kex_algorithm: &str,
         shared_secret: Option<&[u8]>,
         names: &negotiation::Names,
         session: &mut Session,
