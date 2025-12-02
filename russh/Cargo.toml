@@ -53,7 +53,7 @@ getrandom = { version = "0.2.15", features = ["js"] }
 hex-literal = "0.4"
 hmac.workspace = true
 inout = { version = "0.1", features = ["std"] }
-libcrux-ml-kem = { version = "0.0.3" }
+libcrux-ml-kem = { version = "0.0.4" }
 log.workspace = true
 md5 = "0.7"
 num-bigint = { version = "0.4.2", features = ["rand"] }
