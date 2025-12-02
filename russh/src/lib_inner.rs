@@ -31,7 +31,7 @@ mod negotiation;
 mod ssh_read;
 mod sshbuffer;
 
-pub use negotiation::Preferred;
+pub use negotiation::{Names, Preferred};
 
 mod pty;
 

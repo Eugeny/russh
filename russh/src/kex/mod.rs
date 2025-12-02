@@ -180,6 +180,14 @@ pub(crate) trait KexAlgorithmImplementor {
 
     fn compute_shared_secret(&mut self, remote_pubkey_: &[u8]) -> Result<(), Error>;
 
+    /// Get the raw shared secret bytes.
+    ///
+    /// This is useful for protocols that need to derive additional keys from the
+    /// SSH shared secret (e.g., for secondary encrypted channels).
+    ///
+    /// Returns `None` if the shared secret hasn't been computed yet.
+    fn shared_secret_bytes(&self) -> Option<&[u8]>;
+
     fn compute_exchange_hash(
         &self,
         key: &CryptoVec,
