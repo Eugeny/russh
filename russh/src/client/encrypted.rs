@@ -26,12 +26,12 @@ use super::IncomingSshPacket;
 use crate::auth::AuthRequest;
 use crate::cert::PublicKeyOrCertificate;
 use crate::client::{Handler, Msg, Prompt, Reply, Session};
-use crate::helpers::{map_err, sign_with_hash_alg, AlgorithmExt, EncodedExt, NameList};
+use crate::helpers::{sign_with_hash_alg, AlgorithmExt, EncodedExt, NameList};
 use crate::keys::key::parse_public_key;
 use crate::parsing::{ChannelOpenConfirmation, ChannelType, OpenChannelMessage};
 use crate::session::{Encrypted, EncryptedState, GlobalRequestResponse};
 use crate::{
-    auth, msg, Channel, ChannelId, ChannelMsg, ChannelOpenFailure, ChannelParams, CryptoVec, Error,
+    auth, map_err, msg, Channel, ChannelId, ChannelMsg, ChannelOpenFailure, ChannelParams, CryptoVec, Error,
     MethodSet, Sig,
 };
 
@@ -536,7 +536,7 @@ impl Session {
                 let channel_num = map_err!(ChannelId::decode(&mut r))?;
                 let amount = map_err!(u32::decode(&mut r))?;
                 let mut new_size = 0;
-                debug!("channel_window_adjust amount: {:?}", amount);
+                debug!("channel_window_adjust amount: {amount:?}");
                 if let Some(ref mut enc) = self.common.encrypted {
                     if let Some(ref mut channel) = enc.channels.get_mut(&channel_num) {
                         new_size = channel.recipient_window_size.saturating_add(amount);
@@ -633,7 +633,7 @@ impl Session {
                     };
 
                     let confirm = || {
-                        debug!("confirming channel: {:?}", msg);
+                        debug!("confirming channel: {msg:?}");
                         map_err!(msg.confirm(
                             &mut enc.write,
                             id.0,
@@ -811,7 +811,7 @@ impl Session {
                 Ok(())
             }
             m => {
-                debug!("unknown message received: {:?}", m);
+                debug!("unknown message received: {m:?}");
                 Ok(())
             }
         }
@@ -862,8 +862,7 @@ impl Session {
                 EncryptedState::InitCompression | EncryptedState::Authenticated => false,
             };
             debug!(
-                "write_auth_request_if_needed: is_waiting = {:?}",
-                is_waiting
+                "write_auth_request_if_needed: is_waiting = {is_waiting:?}"
             );
             if is_waiting {
                 enc.write_auth_request(user, &meth)?;

@@ -54,7 +54,7 @@ use crate::kex::{KexProgress, SessionKexState};
 use crate::session::*;
 use crate::ssh_read::*;
 use crate::sshbuffer::*;
-use crate::{map_err, *};
+use crate::{*};
 
 mod kex;
 mod session;

@@ -42,8 +42,8 @@ use std::sync::Arc;
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::Duration;
 
-use futures::task::{Context, Poll};
 use futures::Future;
+use futures::task::{Context, Poll};
 use kex::ClientKex;
 use log::{debug, error, trace, warn};
 use russh_util::time::Instant;
@@ -52,7 +52,7 @@ use ssh_key::{Algorithm, Certificate, HashAlg, PrivateKey, PublicKey};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadHalf, WriteHalf};
 use tokio::pin;
 use tokio::sync::mpsc::{
-    channel, unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender,
+    Receiver, Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel,
 };
 use tokio::sync::oneshot;
 
@@ -60,16 +60,16 @@ pub use crate::auth::AuthResult;
 use crate::channels::{
     Channel, ChannelMsg, ChannelReadHalf, ChannelRef, ChannelWriteHalf, WindowSizeRef,
 };
-use crate::cipher::{self, clear, OpeningKey};
-use crate::kex::{KexCause, KexProgress, SessionKexState};
+use crate::cipher::{self, OpeningKey, clear};
+use crate::kex::{KexAlgorithmImplementor, KexCause, KexProgress, SessionKexState};
 use crate::keys::PrivateKeyWithHashAlg;
 use crate::msg::{is_kex_msg, validate_server_msg_strict_kex};
 use crate::session::{CommonSession, EncryptedState, GlobalRequestResponse, NewKeys};
 use crate::ssh_read::SshRead;
 use crate::sshbuffer::{IncomingSshPacket, PacketWriter, SSHBuffer, SshId};
 use crate::{
-    auth, map_err, msg, negotiation, ChannelId, ChannelOpenFailure, CryptoVec, Disconnect, Error,
-    Limits, MethodSet, Sig,
+    ChannelId, ChannelOpenFailure, CryptoVec, Disconnect, Error, Limits, MethodSet, Sig, auth,
+    map_err, msg, negotiation,
 };
 
 mod encrypted;
@@ -127,6 +127,7 @@ enum Reply {
 }
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum Msg {
     Authenticate {
         user: String,
@@ -359,7 +360,7 @@ impl<H: Handler> Handle<H> {
                     return Ok(KeyboardInteractiveAuthResponse::Failure {
                         remaining_methods,
                         partial_success,
-                    })
+                    });
                 }
                 Some(Reply::AuthInfoRequest {
                     name,
@@ -389,13 +390,13 @@ impl<H: Handler> Handle<H> {
                     return Ok(AuthResult::Failure {
                         remaining_methods,
                         partial_success,
-                    })
+                    });
                 }
                 None => {
                     return Ok(AuthResult::Failure {
                         remaining_methods: MethodSet::empty(),
                         partial_success: false,
-                    })
+                    });
                 }
                 _ => {}
             }
@@ -476,7 +477,7 @@ impl<H: Handler> Handle<H> {
                     return Ok(AuthResult::Failure {
                         remaining_methods,
                         partial_success,
-                    })
+                    });
                 }
                 Some(Reply::SignRequest { key, data }) => {
                     let data = signer.auth_publickey_sign(&key, hash_alg, data).await;
@@ -492,7 +493,7 @@ impl<H: Handler> Handle<H> {
                     return Ok(AuthResult::Failure {
                         remaining_methods: MethodSet::empty(),
                         partial_success: false,
-                    })
+                    });
                 }
                 _ => {}
             }
@@ -532,7 +533,7 @@ impl<H: Handler> Handle<H> {
                     return Err(crate::Error::Disconnect);
                 }
                 msg => {
-                    debug!("msg = {:?}", msg);
+                    debug!("msg = {msg:?}");
                 }
             }
         }
@@ -1522,6 +1523,12 @@ async fn reply<H: Handler>(
                     session.common.strict_kex =
                         session.common.strict_kex || newkeys.names.strict_kex();
 
+                    // Call the kex_done handler before consuming newkeys
+                    let shared_secret = newkeys.kex.shared_secret_bytes();
+                    handler
+                        .kex_done(shared_secret, &newkeys.names, session)
+                        .await?;
+
                     if let Some(ref mut enc) = session.common.encrypted {
                         // This is a rekey
                         enc.last_rekey = Instant::now();
@@ -1610,19 +1617,22 @@ impl GexParams {
 
     pub(crate) fn validate(&self) -> Result<(), Error> {
         if self.min_group_size < 2048 {
-            return Err(Error::InvalidConfig(
-                "min_group_size must be at least 2048 bits".into(),
-            ));
+            return Err(Error::InvalidConfig(format!(
+                "min_group_size must be at least 2048 bits. We got {} bits",
+                self.min_group_size
+            )));
         }
         if self.preferred_group_size < self.min_group_size {
-            return Err(Error::InvalidConfig(
-                "preferred_group_size must be at least as large as min_group_size".into(),
-            ));
+            return Err(Error::InvalidConfig(format!(
+                "preferred_group_size must be at least as large as min_group_size. We have preferred_group_size = {} < min_group_size = {}",
+                self.preferred_group_size, self.min_group_size
+            )));
         }
         if self.max_group_size < self.preferred_group_size {
-            return Err(Error::InvalidConfig(
-                "max_group_size must be at least as large as preferred_group_size".into(),
-            ));
+            return Err(Error::InvalidConfig(format!(
+                "max_group_size must be at least as large as preferred_group_size. We have max_group_size = {} < preferred_group_size = {}",
+                self.max_group_size, self.preferred_group_size
+            )));
         }
         Ok(())
     }
@@ -1736,6 +1746,34 @@ pub trait Handler: Sized + Send {
         server_public_key: &ssh_key::PublicKey,
     ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
         async { Ok(false) }
+    }
+
+    /// Called when key exchange has completed.
+    ///
+    /// This callback provides access to the raw shared secret from the KEX,
+    /// which is useful for protocols that derive additional keys from the
+    /// SSH shared secret (e.g., for secondary encrypted channels).
+    ///
+    /// The `names` parameter contains all negotiated algorithms (kex, cipher, mac, etc.).
+    ///
+    /// **Security Warning:** The shared secret is sensitive cryptographic material.
+    /// Handle it with care and zero it after use if stored.
+    ///
+    /// # Arguments
+    ///
+    /// * `kex_algorithm` - Name of the key exchange algorithm used
+    /// * `shared_secret` - The raw shared secret bytes from the key exchange.
+    ///   For some algorithms (like `none`), this may be `None`.
+    /// * `names` - The negotiated algorithm names
+    /// * `session` - The current session
+    #[allow(unused_variables)]
+    fn kex_done(
+        &mut self,
+        shared_secret: Option<&[u8]>,
+        names: &negotiation::Names,
+        session: &mut Session,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// Called when the server confirmed our request to open a
@@ -2007,7 +2045,7 @@ pub trait Handler: Sized + Send {
         session: &mut Session,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
         async move {
-            debug!("openssh_ext_hostkeys_announced: {:?}", keys);
+            debug!("openssh_ext_hostkeys_announced: {keys:?}");
             Ok(())
         }
     }
@@ -2021,7 +2059,7 @@ pub trait Handler: Sized + Send {
         reason: DisconnectReason<Self::Error>,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
         async {
-            debug!("disconnected: {:?}", reason);
+            debug!("disconnected: {reason:?}");
             match reason {
                 DisconnectReason::ReceivedDisconnect(_) => Ok(()),
                 DisconnectReason::Error(e) => Err(e),

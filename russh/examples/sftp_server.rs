@@ -45,7 +45,7 @@ impl russh::server::Handler for SshSession {
     type Data = ();
 
     async fn auth_password(&mut self, user: &str, password: &str) -> Result<Auth, Self::Error> {
-        info!("credentials: {}, {}", user, password);
+        info!("credentials: {user}, {password}");
         Ok(Auth::Accept)
     }
 
@@ -54,7 +54,7 @@ impl russh::server::Handler for SshSession {
         user: &str,
         public_key: &russh::keys::ssh_key::PublicKey,
     ) -> Result<Auth, Self::Error> {
-        info!("credentials: {}, {:?}", user, public_key);
+        info!("credentials: {user}, {public_key:?}");
         Ok(Auth::Accept)
     }
 
@@ -87,7 +87,7 @@ impl russh::server::Handler for SshSession {
         name: &str,
         session: &mut Session,
     ) -> Result<(), Self::Error> {
-        info!("subsystem: {}", name);
+        info!("subsystem: {name}");
 
         if name == "sftp" {
             let channel = self.get_channel(channel_id).await;
@@ -140,13 +140,13 @@ impl russh_sftp::server::Handler for SftpSession {
     }
 
     async fn opendir(&mut self, id: u32, path: String) -> Result<Handle, Self::Error> {
-        info!("opendir: {}", path);
+        info!("opendir: {path}");
         self.root_dir_read_done = false;
         Ok(Handle { id, handle: path })
     }
 
     async fn readdir(&mut self, id: u32, handle: String) -> Result<Name, Self::Error> {
-        info!("readdir handle: {}", handle);
+        info!("readdir handle: {handle}");
         if handle == "/" && !self.root_dir_read_done {
             self.root_dir_read_done = true;
             return Ok(Name {
@@ -162,7 +162,7 @@ impl russh_sftp::server::Handler for SftpSession {
     }
 
     async fn realpath(&mut self, id: u32, path: String) -> Result<Name, Self::Error> {
-        info!("realpath: {}", path);
+        info!("realpath: {path}");
         Ok(Name {
             id,
             files: vec![File::dummy("/")],

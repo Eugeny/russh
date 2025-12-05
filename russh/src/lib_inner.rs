@@ -31,7 +31,7 @@ mod negotiation;
 mod ssh_read;
 mod sshbuffer;
 
-pub use negotiation::Preferred;
+pub use negotiation::{Names, Preferred};
 
 mod pty;
 
@@ -39,6 +39,8 @@ pub use pty::Pty;
 pub use sshbuffer::SshId;
 
 mod helpers;
+
+pub(crate) use helpers::map_err;
 
 macro_rules! push_packet {
     ( $buffer:expr, $x:expr ) => {{
@@ -118,6 +120,10 @@ pub enum Error {
     /// The client is not yet authenticated.
     #[error("Not yet authenticated")]
     NotAuthenticated,
+
+    /// The client has presented an unsupported authentication method.
+    #[error("Unsupported authentication method")]
+    UnsupportedAuthMethod,
 
     /// Index out of bounds.
     #[error("Index out of bounds")]
@@ -237,8 +243,7 @@ pub enum Error {
 
 pub(crate) fn strict_kex_violation(message_type: u8, sequence_number: usize) -> crate::Error {
     warn!(
-        "strict kex violated at sequence no. {:?}, message type: {:?}",
-        sequence_number, message_type
+        "strict kex violated at sequence no. {sequence_number:?}, message type: {message_type:?}"
     );
     crate::Error::StrictKeyExchangeViolation {
         message_type,

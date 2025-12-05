@@ -83,7 +83,7 @@
 //! to them by calling the provided `Handler`, which fills some
 //! buffers. If the buffers are non-empty, the event loop then sends
 //! them to the socket, flushes the socket, empties the buffers and
-//! starts again. In the special case of the server, unsollicited
+//! starts again. In the special case of the server, unsolicited
 //! messages sent through a `server::Handle` are processed when there
 //! is no incoming packet to read.
 

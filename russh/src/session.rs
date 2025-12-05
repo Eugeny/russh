@@ -441,7 +441,7 @@ impl Encrypted {
                 channel.pending_data.push_back((buf0, None, buf_len))
             }
         } else {
-            debug!("{:?} not saved for this session", channel);
+            debug!("{channel:?} not saved for this session");
         }
         Ok(())
     }
@@ -480,7 +480,7 @@ impl Encrypted {
                 let len = BigEndian::read_u32(&self.write[self.write_cursor..]) as usize;
                 #[allow(clippy::indexing_slicing)]
                 let to_write = &self.write[(self.write_cursor + 4)..(self.write_cursor + 4 + len)];
-                trace!("session_write_encrypted, buf = {:?}", to_write);
+                trace!("session_write_encrypted, buf = {to_write:?}");
 
                 writer.packet_raw(to_write)?;
                 self.write_cursor += 4 + len

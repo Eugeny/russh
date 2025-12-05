@@ -168,6 +168,14 @@ impl KexAlgorithmImplementor for MlKem768X25519Kex {
         Ok(())
     }
 
+    fn shared_secret_bytes(&self) -> Option<&[u8]> {
+        // For hybrid KEX, the shared secret is a combination of ML-KEM and X25519.
+        // The actual combined secret is computed during compute_keys.
+        // We return the X25519 portion as that's what's directly available.
+        // Users needing the full hybrid secret should use compute_keys.
+        self.k_cl.as_ref().map(|k| k.0.as_slice())
+    }
+
     fn compute_exchange_hash(
         &self,
         key: &CryptoVec,

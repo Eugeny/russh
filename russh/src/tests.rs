@@ -70,7 +70,7 @@ mod compress {
             ChannelMsg::Data { data: msg_data } => {
                 assert_eq!(*data, *msg_data)
             }
-            msg => panic!("Unexpected message {:?}", msg),
+            msg => panic!("Unexpected message {msg:?}"),
         }
     }
 
@@ -289,7 +289,7 @@ mod channels {
                 if let ChannelMsg::Data { data } = msg {
                     assert_eq!(data.as_ref(), &b"hey there!"[..]);
                 } else {
-                    panic!("Unexpected message {:?}", msg);
+                    panic!("Unexpected message {msg:?}");
                 }
                 s
             },
@@ -345,7 +345,7 @@ mod channels {
                 _session: &mut server::Session,
             ) -> Result<bool, Self::Error> {
                 if let Some(a) = self.channel.take() {
-                    println!("channel open session {:?}", a);
+                    println!("channel open session {a:?}");
                     a.send(channel).unwrap();
                 }
                 Ok(true)
@@ -457,7 +457,7 @@ mod channels {
                 if let ChannelMsg::Data { data } = msg {
                     assert_eq!(data.as_ref(), &b"hello world!"[..]);
                 } else {
-                    panic!("Unexpected message {:?}", msg);
+                    panic!("Unexpected message {msg:?}");
                 }
 
                 assert!(ch.wait().await.is_none());
@@ -516,7 +516,7 @@ mod channels {
                 _session: &mut server::Session,
             ) -> Result<bool, Self::Error> {
                 if let Some(a) = self.channel.take() {
-                    println!("channel open session {:?}", a);
+                    println!("channel open session {a:?}");
                     a.send(channel).unwrap();
                 }
                 Ok(true)
@@ -559,7 +559,7 @@ mod channels {
                                 break;
                             }
                         }
-                        _ => panic!("Unexpected message {:?}", msg),
+                        _ => panic!("Unexpected message {msg:?}"),
                     }
                 }
 

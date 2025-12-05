@@ -88,9 +88,9 @@ pub fn known_host_keys_path<P: AsRef<Path>>(
     let host_port = if port == 22 {
         Cow::Borrowed(host)
     } else {
-        Cow::Owned(format!("[{}]:{}", host, port))
+        Cow::Owned(format!("[{host}]:{port}"))
     };
-    debug!("host_port = {:?}", host_port);
+    debug!("host_port = {host_port:?}");
     let mut line = 1;
     let mut matches = vec![];
     while f.read_line(&mut buffer)? > 0 {
@@ -99,13 +99,13 @@ pub fn known_host_keys_path<P: AsRef<Path>>(
                 buffer.clear();
                 continue;
             }
-            debug!("line = {:?}", buffer);
+            debug!("line = {buffer:?}");
             let mut s = buffer.split(' ');
             let hosts = s.next();
             let _ = s.next();
             let key = s.next();
             if let (Some(h), Some(k)) = (hosts, key) {
-                debug!("{:?} {:?}", h, k);
+                debug!("{h:?} {k:?}");
                 if match_hostname(&host_port, h) {
                     matches.push((line, parse_public_key_base64(k)?));
                 }
@@ -175,9 +175,9 @@ pub fn learn_known_hosts_path<P: AsRef<Path>>(
         file.write_all(b"\n")?;
     }
     if port != 22 {
-        write!(file, "[{}]:{} ", host, port)?
+        write!(file, "[{host}]:{port} ")?
     } else {
-        write!(file, "{} ", host)?
+        write!(file, "{host} ")?
     }
     file.write_all(pubkey.to_openssh()?.as_bytes())?;
     file.write_all(b"\n")?;

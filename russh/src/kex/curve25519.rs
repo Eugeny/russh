@@ -113,6 +113,10 @@ impl KexAlgorithmImplementor for Curve25519Kex {
         Ok(())
     }
 
+    fn shared_secret_bytes(&self) -> Option<&[u8]> {
+        self.shared_secret.as_ref().map(|s| s.0.as_slice())
+    }
+
     fn compute_exchange_hash(
         &self,
         key: &CryptoVec,

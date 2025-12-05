@@ -35,8 +35,7 @@ mod error {
             let warning_previously_shown = MLOCK_WARNING_SHOWN.swap(true, Ordering::Relaxed);
             if !warning_previously_shown {
                 warn!(
-                    "Security warning: OS has failed to lock/unlock memory for a cryptographic buffer: {}",
-                    message
+                    "Security warning: OS has failed to lock/unlock memory for a cryptographic buffer: {message}"
                 );
                 #[cfg(unix)]
                 warn!("You might need to increase the RLIMIT_MEMLOCK limit.");

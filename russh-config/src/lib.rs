@@ -281,7 +281,7 @@ fn parse_ssh_config(contents: &str) -> Result<SshConfig, Error> {
                     _ => config.strict_host_key_checking = Some(true),
                 },
                 key => {
-                    debug!("{:?}", key);
+                    debug!("{key:?}");
                 }
             }
         }
