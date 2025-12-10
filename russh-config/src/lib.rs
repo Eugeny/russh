@@ -203,8 +203,15 @@ fn parse_ssh_config(contents: &str) -> Result<SshConfig, Error> {
     let mut config = HostConfig::default();
     let mut found_params = false;
 
-    for line in contents.lines() {
-        let tokens = line.trim().splitn(2, ' ').collect::<Vec<&str>>();
+    for line in contents.lines().map(|line| line.trim()) {
+        if line.is_empty() || line.starts_with('#') {
+            // skip comments and empty lines
+            //
+            // Reference: http://man.openbsd.org/OpenBSD-current/man5/ssh_config.5
+            // "Lines starting with ‘#’ and empty lines are interpreted as comments."
+            continue;
+        }
+        let tokens = line.splitn(2, ' ').collect::<Vec<&str>>();
         if tokens.len() == 2 {
             let (key, value) = (tokens.first().unwrap_or(&""), tokens.get(1).unwrap_or(&""));
             let lower = key.to_lowercase();
@@ -526,5 +533,33 @@ Host *
     fn is_clone() {
         let config: Config = Config::default("some_host");
         let _ = config.clone();
+    }
+
+    #[test]
+    fn comment_handling() {
+        const CONFIG: &str = r#"
+# top of the config file
+Host a.test_host
+    # indented comment
+    User a
+    # indented comment between parameters
+    Hostname alias_of_a
+# middle of the config file
+Host b.test_host
+    # multiple line
+    # indented comment
+    User b
+    # multiple line
+    # indented comment between parameters
+    Hostname alias_of_b
+# end of the config file
+    "#;
+        let config = parse(CONFIG, "a.test_host").expect("config is invalid");
+        assert_eq!("a", config.user());
+        assert_eq!("alias_of_a", config.host());
+
+        let config = parse(CONFIG, "b.test_host").expect("config is invalid");
+        assert_eq!("b", config.user());
+        assert_eq!("alias_of_b", config.host());
     }
 }
