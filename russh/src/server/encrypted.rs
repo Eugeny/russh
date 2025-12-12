@@ -1045,6 +1045,9 @@ impl Session {
                     Some(GlobalRequestResponse::Keepalive) => {
                         // ignore keepalives
                     }
+                    Some(GlobalRequestResponse::Ping(return_channel)) => {
+                        let _ = return_channel.send(());
+                    }
                     Some(GlobalRequestResponse::TcpIpForward(return_channel)) => {
                         let result = if r.is_finished() {
                             // If a specific port was requested, the reply has no data
@@ -1074,6 +1077,9 @@ impl Session {
                 match self.open_global_requests.pop_front() {
                     Some(GlobalRequestResponse::Keepalive) => {
                         // ignore keepalives
+                    }
+                    Some(GlobalRequestResponse::Ping(return_channel)) => {
+                        let _ = return_channel.send(());
                     }
                     Some(GlobalRequestResponse::TcpIpForward(return_channel)) => {
                         let _ = return_channel.send(None);
