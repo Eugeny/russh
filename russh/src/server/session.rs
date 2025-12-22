@@ -975,6 +975,21 @@ impl Session {
         Ok(())
     }
 
+    /// Ping the client with a Keepalive and get a notification when the client responds.
+    pub fn send_ping(&mut self, reply_channel: oneshot::Sender<()>) -> Result<(), Error> {
+        let want_reply = u8::from(true);
+        if let Some(ref mut enc) = self.common.encrypted {
+            self.open_global_requests
+                .push_back(GlobalRequestResponse::Ping(reply_channel));
+            push_packet!(enc.write, {
+                msg::GLOBAL_REQUEST.encode(&mut enc.write)?;
+                "keepalive@openssh.com".encode(&mut enc.write)?;
+                want_reply.encode(&mut enc.write)?;
+            })
+        }
+        Ok(())
+    }
+
     /// Send the exit status of a program.
     pub fn exit_status_request(
         &mut self,
