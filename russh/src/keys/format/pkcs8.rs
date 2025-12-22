@@ -40,6 +40,21 @@ pub fn decode_pkcs8(
 }
 
 fn pkcs8_pki_into_keypair_data(pki: PrivateKeyInfo<'_>) -> Result<KeypairData, Error> {
+    // Temporary if {} due to multiple const_oid crate versions
+    #[cfg(feature = "rsa")]
+    if pki.algorithm.oid.as_bytes() == pkcs1::ALGORITHM_OID.as_bytes() {
+        let sk = &pkcs1::RsaPrivateKey::try_from(pki.private_key)?;
+        let pk = rsa::RsaPrivateKey::from_components(
+            rsa::BoxedUint::from_be_slice_vartime(sk.modulus.as_bytes()),
+            rsa::BoxedUint::from_be_slice_vartime(sk.public_exponent.as_bytes()),
+            rsa::BoxedUint::from_be_slice_vartime(sk.private_exponent.as_bytes()),
+            vec![
+                rsa::BoxedUint::from_be_slice_vartime(sk.prime1.as_bytes()),
+                rsa::BoxedUint::from_be_slice_vartime(sk.prime2.as_bytes()),
+            ],
+        )?;
+        return Ok(KeypairData::Rsa(pk.try_into()?));
+    }
     match pki.algorithm.oid {
         ed25519_dalek::pkcs8::ALGORITHM_OID => {
             let kpb = ed25519_dalek::pkcs8::KeypairBytes::try_from(pki)?;
@@ -48,20 +63,6 @@ fn pkcs8_pki_into_keypair_data(pki: PrivateKeyInfo<'_>) -> Result<KeypairData, E
                 public: pk.clone().into(),
                 private: pk,
             }))
-        }
-        #[cfg(feature = "rsa")]
-        pkcs1::ALGORITHM_OID => {
-            let sk = &pkcs1::RsaPrivateKey::try_from(pki.private_key)?;
-            let pk = rsa::RsaPrivateKey::from_components(
-                rsa::BigUint::from_bytes_be(sk.modulus.as_bytes()),
-                rsa::BigUint::from_bytes_be(sk.public_exponent.as_bytes()),
-                rsa::BigUint::from_bytes_be(sk.private_exponent.as_bytes()),
-                vec![
-                    rsa::BigUint::from_bytes_be(sk.prime1.as_bytes()),
-                    rsa::BigUint::from_bytes_be(sk.prime2.as_bytes()),
-                ],
-            )?;
-            Ok(KeypairData::Rsa(pk.try_into()?))
         }
         sec1::ALGORITHM_OID => Ok(KeypairData::Ecdsa(ec_key_data_into_keypair(
             pki.algorithm.parameters_oid()?,
@@ -136,25 +137,26 @@ pub fn encode_pkcs8(key: &ssh_key::PrivateKey) -> Result<Vec<u8>, Error> {
     let v = match key.key_data() {
         ssh_key::private::KeypairData::Ed25519(pair) => {
             let sk: ed25519_dalek::SigningKey = pair.try_into()?;
-            sk.to_pkcs8_der()?
+            sk.to_pkcs8_der()?.as_bytes().to_vec()
         }
         #[cfg(feature = "rsa")]
         ssh_key::private::KeypairData::Rsa(pair) => {
+            use rsa::pkcs8::EncodePrivateKey;
             let sk: rsa::RsaPrivateKey = pair.try_into()?;
-            sk.to_pkcs8_der()?
+            sk.to_pkcs8_der()?.as_bytes().to_vec()
         }
         ssh_key::private::KeypairData::Ecdsa(pair) => match pair {
             EcdsaKeypair::NistP256 { private, .. } => {
                 let sk = p256::SecretKey::from_bytes(private.as_slice().into())?;
-                sk.to_pkcs8_der()?
+                sk.to_pkcs8_der()?.as_bytes().to_vec()
             }
             EcdsaKeypair::NistP384 { private, .. } => {
                 let sk = p384::SecretKey::from_bytes(private.as_slice().into())?;
-                sk.to_pkcs8_der()?
+                sk.to_pkcs8_der()?.as_bytes().to_vec()
             }
             EcdsaKeypair::NistP521 { private, .. } => {
                 let sk = p521::SecretKey::from_bytes(private.as_slice().into())?;
-                sk.to_pkcs8_der()?
+                sk.to_pkcs8_der()?.as_bytes().to_vec()
             }
         },
         _ => {
@@ -165,8 +167,6 @@ pub fn encode_pkcs8(key: &ssh_key::PrivateKey) -> Result<Vec<u8>, Error> {
                 key_type_raw: kt.as_bytes().into(),
             });
         }
-    }
-    .as_bytes()
-    .to_vec();
+    };
     Ok(v)
 }

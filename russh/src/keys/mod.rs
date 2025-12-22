@@ -158,6 +158,9 @@ pub enum Error {
     Pkcs1(#[from] pkcs1::Error),
     #[error("Pkcs8: {0}")]
     Pkcs8(#[from] ::pkcs8::Error),
+    #[cfg(feature = "rsa")]
+    #[error("Pkcs8: {0}")]
+    Pkcs8Next(#[from] ::rsa::pkcs8::Error),
     #[error("Sec1: {0}")]
     Sec1(#[from] sec1::Error),
 
