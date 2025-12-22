@@ -19,7 +19,7 @@ sha1 = { version = "0.10.5", features = ["oid"] }
 sha2 = { version = "0.10.6", features = ["oid"] }
 signature = "2.2"
 ssh-encoding = { version = "0.2", features = ["bytes"] }
-ssh-key = { version = "=0.6.11", features = [
+ssh-key = { version = "=0.6.14", features = [
     "ed25519",
     "p256",
     "p384",
