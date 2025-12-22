@@ -22,12 +22,12 @@ use ssh_key::{Algorithm, EcdsaCurve, HashAlg, PrivateKey};
 use crate::cipher::CIPHERS;
 use crate::helpers::NameList;
 use crate::kex::{
-    KexCause, EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT, EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER,
+    EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT, EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER, KexCause,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use crate::server::Config;
 use crate::sshbuffer::PacketWriter;
-use crate::{cipher, compression, kex, mac, msg, AlgorithmKind, CryptoVec, Error};
+use crate::{AlgorithmKind, CryptoVec, Error, cipher, compression, kex, mac, msg};
 
 #[cfg(target_arch = "wasm32")]
 /// WASM-only stub
@@ -109,6 +109,13 @@ const SAFE_KEX_ORDER: &[kex::Name] = &[
     kex::DH_G16_SHA512,
     kex::DH_G15_SHA512,
     kex::DH_G14_SHA256,
+    kex::EXTENSION_SUPPORT_AS_CLIENT,
+    kex::EXTENSION_SUPPORT_AS_SERVER,
+    kex::EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT,
+    kex::EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER,
+];
+
+const KEX_EXTENSION_NAMES: &[kex::Name] = &[
     kex::EXTENSION_SUPPORT_AS_CLIENT,
     kex::EXTENSION_SUPPORT_AS_SERVER,
     kex::EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT,
@@ -209,9 +216,25 @@ pub(crate) trait Select {
         // Key exchange
 
         let kex_string = String::decode(&mut r)?;
+        // Filter out extension kex names from both lists before selecting
+        let _local_kexes_no_ext = pref
+            .kex
+            .iter()
+            .filter(|k| !KEX_EXTENSION_NAMES.contains(k))
+            .cloned()
+            .collect::<Vec<_>>();
+        let _remote_kexes_no_ext = parse_kex_algo_list(&kex_string)
+            .into_iter()
+            .filter(|k| {
+                kex::Name::try_from(*k)
+                    .ok()
+                    .map(|k| !KEX_EXTENSION_NAMES.contains(&k))
+                    .unwrap_or(false)
+            })
+            .collect::<Vec<_>>();
         let (kex_both_first, kex_algorithm) = Self::select(
-            &pref.kex,
-            &parse_kex_algo_list(&kex_string),
+            &_local_kexes_no_ext,
+            &_remote_kexes_no_ext,
             AlgorithmKind::Kex,
         )?;
 
