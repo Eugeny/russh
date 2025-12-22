@@ -141,7 +141,7 @@ pub fn encode_pkcs8(key: &ssh_key::PrivateKey) -> Result<Vec<u8>, Error> {
         }
         #[cfg(feature = "rsa")]
         ssh_key::private::KeypairData::Rsa(pair) => {
-            use pkcs8_next::EncodePrivateKey;
+            use rsa::pkcs8::EncodePrivateKey;
             let sk: rsa::RsaPrivateKey = pair.try_into()?;
             sk.to_pkcs8_der()?.as_bytes().to_vec()
         }

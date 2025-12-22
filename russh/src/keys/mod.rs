@@ -159,7 +159,7 @@ pub enum Error {
     #[error("Pkcs8: {0}")]
     Pkcs8(#[from] ::pkcs8::Error),
     #[error("Pkcs8: {0}")]
-    Pkcs8Next(#[from] ::pkcs8_next::Error),
+    Pkcs8Next(#[from] ::rsa::pkcs8::Error),
     #[error("Sec1: {0}")]
     Sec1(#[from] sec1::Error),
 
