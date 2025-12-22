@@ -634,6 +634,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "mbund",
+      "name": "Mark Bundschuh",
+      "avatar_url": "https://avatars.githubusercontent.com/u/25110595?v=4",
+      "profile": "http://mbund.dev",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,
