@@ -7,7 +7,7 @@ include = ["Cargo.toml", "src/lib.rs", "src/proxy.rs"]
 license = "Apache-2.0"
 name = "russh-config"
 repository = "https://github.com/warp-tech/russh"
-version = "0.54.5"
+version = "0.56.0"
 rust-version = "1.85"
 
 [dependencies]
