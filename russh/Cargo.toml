@@ -64,8 +64,8 @@ p521 = { version = "0.13", features = ["ecdh"] }
 pbkdf2 = "0.12"
 pkcs1 = { version = "0.8.0-rc.4", optional = true }
 pkcs5 = "0.7"
-pkcs8 = { version = "0.10", features = ["pkcs5", "encryption"] }
-pkcs8_next = { package = "pkcs8", version = "0.11.0-rc.8", features = ["pkcs5", "encryption"] }
+pkcs8 = { version = "0.10", features = ["pkcs5", "encryption", "std"] }
+pkcs8_next = { package = "pkcs8", version = "0.11.0-rc.8", features = ["pkcs5", "encryption", "std"] }
 rand_core = { version = "0.6.4", features = ["getrandom", "std"] }
 rand.workspace = true
 ring = { version = "0.17.14", optional = true }
