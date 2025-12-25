@@ -76,6 +76,7 @@ impl server::Server for Server {
 
 impl server::Handler for Server {
     type Error = russh::Error;
+    type Data = ();
 
     async fn channel_open_session(
         &mut self,

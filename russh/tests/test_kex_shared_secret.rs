@@ -292,6 +292,7 @@ struct TestServer {}
 
 impl server::Handler for TestServer {
     type Error = russh::Error;
+    type Data = ();
 
     async fn auth_publickey(
         &mut self,

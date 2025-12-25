@@ -33,6 +33,7 @@ mod tests {
 
     impl ServerHandler for TestServer {
         type Error = Error;
+        type Data = ();
 
         async fn channel_open_session(
             &mut self,
