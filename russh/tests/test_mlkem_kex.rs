@@ -20,9 +20,11 @@ async fn test_mlkem768x25519_handshake() {
     let mut server_config = server::Config::default();
     server_config.inactivity_timeout = None;
     server_config.auth_rejection_time = std::time::Duration::from_secs(3);
-    server_config
-        .keys
-        .push(PrivateKey::random(&mut rand_core::OsRng, ssh_key::Algorithm::Ed25519).unwrap());
+    server_config.keys.push(
+        PrivateKey::random(&mut rand_core::OsRng, ssh_key::Algorithm::Ed25519)
+            .unwrap()
+            .into(),
+    );
 
     server_config.preferred = {
         let mut p = Preferred::default();
@@ -95,9 +97,11 @@ async fn test_mlkem768x25519_with_fallback() {
     let mut server_config = server::Config::default();
     server_config.inactivity_timeout = None;
     server_config.auth_rejection_time = std::time::Duration::from_secs(3);
-    server_config
-        .keys
-        .push(PrivateKey::random(&mut rand_core::OsRng, ssh_key::Algorithm::Ed25519).unwrap());
+    server_config.keys.push(
+        PrivateKey::random(&mut rand_core::OsRng, ssh_key::Algorithm::Ed25519)
+            .unwrap()
+            .into(),
+    );
 
     server_config.preferred = {
         let mut p = Preferred::default();
@@ -170,9 +174,11 @@ async fn test_mlkem768x25519_rekey() {
     let mut server_config = server::Config::default();
     server_config.inactivity_timeout = None;
     server_config.auth_rejection_time = std::time::Duration::from_secs(3);
-    server_config
-        .keys
-        .push(PrivateKey::random(&mut rand_core::OsRng, ssh_key::Algorithm::Ed25519).unwrap());
+    server_config.keys.push(
+        PrivateKey::random(&mut rand_core::OsRng, ssh_key::Algorithm::Ed25519)
+            .unwrap()
+            .into(),
+    );
 
     server_config.preferred = {
         let mut p = Preferred::default();
@@ -255,9 +261,11 @@ async fn test_mlkem768x25519_multiple_channels() {
     let mut server_config = server::Config::default();
     server_config.inactivity_timeout = None;
     server_config.auth_rejection_time = std::time::Duration::from_secs(3);
-    server_config
-        .keys
-        .push(PrivateKey::random(&mut rand_core::OsRng, ssh_key::Algorithm::Ed25519).unwrap());
+    server_config.keys.push(
+        PrivateKey::random(&mut rand_core::OsRng, ssh_key::Algorithm::Ed25519)
+            .unwrap()
+            .into(),
+    );
 
     server_config.preferred = {
         let mut p = Preferred::default();

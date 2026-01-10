@@ -8,10 +8,8 @@ use ssh_encoding::Encode;
 use ssh_key::Algorithm;
 
 use super::*;
-use crate::helpers::sign_with_hash_alg;
 use crate::kex::dh::biguint_to_mpint;
 use crate::kex::{KexAlgorithm, KexAlgorithmImplementor, KexCause, KEXES};
-use crate::keys::key::PrivateKeyWithHashAlg;
 use crate::negotiation::{is_key_compatible_with_algo, Names, Select};
 use crate::{msg, negotiation};
 
@@ -258,25 +256,27 @@ impl ServerKex {
                     _ => None,
                 };
 
+                // Get the public key bytes for computing the exchange hash
+                let pubkey_bytes = key.public_key_bytes().map_err(Error::from)?;
+
                 let hash = HASH_BUF.with(|buffer| {
                     let mut buffer = buffer.borrow_mut();
                     buffer.clear();
 
                     let mut pubkey_vec = CryptoVec::new();
-                    key.public_key().to_bytes()?.encode(&mut pubkey_vec)?;
+                    pubkey_bytes.encode(&mut pubkey_vec)?;
 
                     let hash = kex.compute_exchange_hash(&pubkey_vec, exchange, &mut buffer)?;
 
                     Ok::<_, Error>(hash)
                 })?;
 
-                // Hash signature
+                // Sign the exchange hash (async to support external signers like KMS)
                 debug!("signing with key {key:?}");
-                let signature = sign_with_hash_alg(
-                    &PrivateKeyWithHashAlg::new(Arc::new(key.clone()), signature_hash_alg),
-                    &hash,
-                )
-                .map_err(Into::into)?;
+                let signature = key
+                    .sign(&hash, signature_hash_alg)
+                    .await
+                    .map_err(Error::from)?;
 
                 output.packet(|w| {
                     match kex.is_dh_gex() {
@@ -284,7 +284,7 @@ impl ServerKex {
                         false => &msg::KEX_ECDH_REPLY,
                     }
                     .encode(w)?;
-                    key.public_key().to_bytes()?.encode(w)?;
+                    pubkey_bytes.encode(w)?;
                     exchange.server_ephemeral.encode(w)?;
                     signature.encode(w)?;
                     Ok(())

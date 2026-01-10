@@ -42,7 +42,9 @@ use log::{debug, error, info, warn};
 use msg::{is_kex_msg, validate_client_msg_strict_kex};
 use russh_util::runtime::JoinHandle;
 use russh_util::time::Instant;
-use ssh_key::{Certificate, PrivateKey};
+use ssh_key::Certificate;
+
+use crate::keys::KeyPair;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, ToSocketAddrs};
 use tokio::pin;
@@ -74,7 +76,11 @@ pub struct Config {
     /// OpenSSH clients will send an initial "none" auth to probe for authentication methods.
     pub auth_rejection_time_initial: Option<std::time::Duration>,
     /// The server's keys. The first key pair in the client's preference order will be chosen.
-    pub keys: Vec<PrivateKey>,
+    ///
+    /// Keys can be either local `PrivateKey`s or external signers (like AWS KMS).
+    /// Use `KeyPair::from(private_key)` or `private_key.into()` to convert a
+    /// `PrivateKey` to a `KeyPair`.
+    pub keys: Vec<KeyPair>,
     /// The bytes and time limits before key re-exchange.
     pub limits: Limits,
     /// The initial size of a channel (used for flow control).

@@ -179,7 +179,9 @@ async fn main() {
         auth_rejection_time: Duration::from_secs(3),
         auth_rejection_time_initial: Some(Duration::from_secs(0)),
         keys: vec![
-            russh::keys::PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap(),
+            russh::keys::PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519)
+                .unwrap()
+                .into(),
         ],
         ..Default::default()
     };
