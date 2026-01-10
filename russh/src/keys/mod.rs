@@ -72,7 +72,7 @@ pub mod key;
 pub use key::PrivateKeyWithHashAlg;
 
 mod signer;
-pub use signer::{KeyPair, LocalSigner, PrivateKeySigner};
+pub use signer::{KeyPair, LocalSigner, PrivateKeySigner, SignerWrapper};
 
 mod format;
 pub use format::*;

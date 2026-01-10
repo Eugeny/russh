@@ -72,6 +72,9 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use ssh_key::{Algorithm, HashAlg, PrivateKey, PublicKey, Signature};
+use tokio::sync::Mutex;
+
+use crate::CryptoVec;
 
 use crate::helpers::{AlgorithmExt, EncodedExt};
 
@@ -290,4 +293,82 @@ fn sign_local_key(
         }
         keypair => Ok(signature::Signer::try_sign(keypair, data)?),
     }
+}
+
+/// A wrapper that adapts an [`crate::auth::Signer`] into a [`PrivateKeySigner`].
+///
+/// This allows using SSH agent clients or other `Signer` implementations as host keys.
+/// The wrapper uses a `Mutex` internally since `Signer::auth_publickey_sign` takes `&mut self`.
+///
+/// # Example
+///
+/// ```ignore
+/// use russh::keys::{KeyPair, SignerWrapper};
+/// use russh::keys::agent::client::AgentClient;
+///
+/// // Connect to SSH agent and get keys
+/// let mut agent = AgentClient::connect_env().await?;
+/// let identities = agent.request_identities().await?;
+/// let public_key = identities[0].clone();
+///
+/// // Wrap the agent as a PrivateKeySigner
+/// let signer = SignerWrapper::new(agent, public_key, None);
+/// let keypair = KeyPair::new(signer);
+/// ```
+pub struct SignerWrapper<S> {
+    signer: Mutex<S>,
+    public_key: PublicKey,
+    hash_alg: Option<HashAlg>,
+}
+
+impl<S> SignerWrapper<S> {
+    /// Creates a new wrapper around a `Signer`.
+    ///
+    /// # Arguments
+    /// * `signer` - The signer to wrap (e.g., an SSH agent client)
+    /// * `public_key` - The public key corresponding to this signer
+    /// * `hash_alg` - Optional hash algorithm for RSA signatures
+    pub fn new(signer: S, public_key: PublicKey, hash_alg: Option<HashAlg>) -> Self {
+        Self {
+            signer: Mutex::new(signer),
+            public_key,
+            hash_alg,
+        }
+    }
+}
+
+impl<S> PrivateKeySigner for SignerWrapper<S>
+where
+    S: crate::auth::Signer + Send + Sync + 'static,
+    S::Error: std::fmt::Debug,
+{
+    fn public_key(&self) -> &PublicKey {
+        &self.public_key
+    }
+
+    fn sign<'a>(
+        &'a self,
+        data: &'a [u8],
+    ) -> Pin<Box<dyn Future<Output = Result<Signature, ssh_key::Error>> + Send + 'a>> {
+        Box::pin(async move {
+            let mut signer = self.signer.lock().await;
+            let to_sign = CryptoVec::from_slice(data);
+
+            let signature_bytes = signer
+                .auth_publickey_sign(&self.public_key, self.hash_alg, to_sign)
+                .await
+                .map_err(|_| ssh_key::Error::Crypto)?;
+
+            // The signature from auth_publickey_sign is already in SSH wire format
+            // (algorithm name + signature blob), so we need to decode it
+            decode_signature_from_wire(&signature_bytes)
+        })
+    }
+}
+
+/// Decodes an SSH signature from wire format (algorithm name string + signature blob).
+fn decode_signature_from_wire(data: &[u8]) -> Result<Signature, ssh_key::Error> {
+    use ssh_encoding::Decode;
+    let mut reader = data;
+    Signature::decode(&mut reader)
 }
