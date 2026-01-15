@@ -236,12 +236,6 @@ pub fn query_pageant_direct(cookie: String, msg: &[u8]) -> Result<Vec<u8>, Error
     let user = get_current_process_user()?;
 
     let mut sd = SECURITY_DESCRIPTOR::default();
-    let sa = SECURITY_ATTRIBUTES {
-        lpSecurityDescriptor: &mut sd as *mut _ as *mut _,
-        bInheritHandle: true.into(),
-        nLength: size_of::<SECURITY_ATTRIBUTES>() as u32,
-    };
-
     let psd = PSECURITY_DESCRIPTOR(&mut sd as *mut _ as *mut _);
 
     unsafe {
@@ -249,13 +243,13 @@ pub fn query_pageant_direct(cookie: String, msg: &[u8]) -> Result<Vec<u8>, Error
         SetSecurityDescriptorOwner(psd, Some(user.User.Sid), false)?;
     }
 
-    let mut map: MemoryMap = MemoryMap::new(map_name.clone(), _AGENT_MAX_MSGLEN, Some(sa))?;
+    let mut map: MemoryMap = MemoryMap::new(map_name.clone(), _AGENT_MAX_MSGLEN, None)?;
     map.write(msg)?;
 
     let char_buffer = CString::new(map_name.as_bytes()).map_err(|_| Error::InvalidCookie)?;
     let cds = COPYDATASTRUCT {
         dwData: _AGENT_COPYDATA_ID as usize,
-        cbData: char_buffer.as_bytes().len() as u32,
+        cbData: char_buffer.as_bytes().len() as u32 + 1,
         lpData: char_buffer.as_bytes().as_ptr() as *mut _,
     };
 
