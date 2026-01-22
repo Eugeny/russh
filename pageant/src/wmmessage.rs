@@ -233,24 +233,15 @@ pub fn query_pageant_direct(cookie: String, msg: &[u8]) -> Result<Vec<u8>, Error
     let hwnd = find_pageant_window()?;
     let map_name = format!("PageantRequest{cookie}");
 
-    let user = get_current_process_user()?;
-
-    let mut sd = SECURITY_DESCRIPTOR::default();
-    let psd = PSECURITY_DESCRIPTOR(&mut sd as *mut _ as *mut _);
-
-    unsafe {
-        InitializeSecurityDescriptor(psd, 1)?;
-        SetSecurityDescriptorOwner(psd, Some(user.User.Sid), false)?;
-    }
-
     let mut map: MemoryMap = MemoryMap::new(map_name.clone(), _AGENT_MAX_MSGLEN, None)?;
     map.write(msg)?;
 
     let char_buffer = CString::new(map_name.as_bytes()).map_err(|_| Error::InvalidCookie)?;
+    let char_buffer_bytes = char_buffer.as_bytes_with_nul();
     let cds = COPYDATASTRUCT {
         dwData: _AGENT_COPYDATA_ID as usize,
-        cbData: char_buffer.as_bytes().len() as u32 + 1,
-        lpData: char_buffer.as_bytes().as_ptr() as *mut _,
+        cbData: char_buffer_bytes.len() as u32,
+        lpData: char_buffer_bytes.as_ptr() as *mut _,
     };
 
     let response = unsafe {
