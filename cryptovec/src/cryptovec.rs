@@ -227,9 +227,7 @@ impl CryptoVec {
 
                 if self.capacity > 0 {
                     std::ptr::copy_nonoverlapping(old_ptr, self.p, self.size);
-                    for i in 0..self.size {
-                        std::ptr::write_volatile(old_ptr.add(i), 0)
-                    }
+                    zeroize(old_ptr, self.size);
                     let _ = munlock(old_ptr, self.capacity);
                     let layout = std::alloc::Layout::from_size_align_unchecked(self.capacity, 1);
                     std::alloc::dealloc(old_ptr, layout);
@@ -366,14 +364,69 @@ impl Drop for CryptoVec {
     fn drop(&mut self) {
         if self.capacity > 0 {
             unsafe {
-                for i in 0..self.size {
-                    std::ptr::write_volatile(self.p.add(i), 0);
-                }
+                zeroize(self.p, self.size);
                 let _ = platform::munlock(self.p, self.capacity);
                 let layout = std::alloc::Layout::from_size_align_unchecked(self.capacity, 1);
                 std::alloc::dealloc(self.p, layout);
             }
         }
+    }
+}
+
+unsafe fn zeroize(dst: *mut u8, size: usize) {
+    unsafe {
+        std::ptr::write_bytes(dst, 0, size);
+    }
+    optimization_barrier(dst);
+}
+
+// https://github.com/RustCrypto/utils/blob/a9f3f461baa3e02f69a205c772b6b2d3eac4eda8/zeroize/src/barrier.rs
+fn optimization_barrier(dst: *mut u8) {
+    #[cfg(all(
+        not(miri),
+        any(
+            target_arch = "aarch64",
+            target_arch = "arm",
+            target_arch = "arm64ec",
+            target_arch = "loongarch64",
+            target_arch = "riscv32",
+            target_arch = "riscv64",
+            target_arch = "s390x",
+            target_arch = "x86",
+            target_arch = "x86_64",
+        )
+    ))]
+    unsafe {
+        core::arch::asm!(
+            "# {}",
+            in(reg) dst,
+            options(readonly, preserves_flags, nostack),
+        );
+    }
+    #[cfg(not(all(
+        not(miri),
+        any(
+            target_arch = "aarch64",
+            target_arch = "arm",
+            target_arch = "arm64ec",
+            target_arch = "loongarch64",
+            target_arch = "riscv32",
+            target_arch = "riscv64",
+            target_arch = "s390x",
+            target_arch = "x86",
+            target_arch = "x86_64",
+        )
+    )))]
+    {
+        /// Custom version of `core::hint::black_box` implemented using
+        /// `#[inline(never)]` and `read_volatile`.
+        #[inline(never)]
+        fn custom_black_box(p: *const u8) {
+            let _ = unsafe { core::ptr::read_volatile(p) };
+        }
+
+        core::hint::black_box(dst);
+        custom_black_box(dst);
     }
 }
 
