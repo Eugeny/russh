@@ -9,6 +9,7 @@ use ssh_key::PrivateKey;
 use ssh_key::private::{EcdsaKeypair, Ed25519Keypair, Ed25519PrivateKey, KeypairData};
 
 use crate::keys::Error;
+use crate::keys::key::safe_rng;
 
 /// Decode a PKCS#8-encoded private key (ASN.1 or X9.62)
 pub fn decode_pkcs8(
@@ -118,7 +119,7 @@ pub fn encode_pkcs8_encrypted(
     let pvi = PrivateKeyInfo::try_from(pvi_bytes.as_slice())?;
 
     use rand::RngCore;
-    let mut rng = rand::thread_rng();
+    let mut rng = safe_rng();
     let mut salt = [0; 64];
     rng.fill_bytes(&mut salt);
     let mut iv = [0; 16];

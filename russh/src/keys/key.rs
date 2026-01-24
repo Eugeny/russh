@@ -1,3 +1,4 @@
+use rand::rng;
 // Copyright 2016 Pierre-Étienne Meunier
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -41,8 +42,8 @@ pub fn parse_public_key(mut p: &[u8]) -> Result<PublicKey, Error> {
 }
 
 /// Obtain a cryptographic-safe random number generator.
-pub fn safe_rng() -> impl rand::CryptoRng + rand::RngCore {
-    rand::thread_rng()
+pub fn safe_rng() -> impl rand::CryptoRng {
+    rng()
 }
 
 mod private_key_with_hash_alg {

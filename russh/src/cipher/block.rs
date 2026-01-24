@@ -21,13 +21,17 @@ use rand::RngCore;
 
 use super::super::Error;
 use super::PACKET_LENGTH_LEN;
+use crate::keys::key::safe_rng;
 use crate::mac::{Mac, MacAlgorithm};
 
 // Allow deprecated generic-array 0.14 usage until RustCrypto crates (cipher, digest, etc.)
 // upgrade to generic-array 1.x. Remove this when dependencies no longer use 0.14.
 #[allow(deprecated)]
 fn new_cipher_from_slices<C: KeyIvInit>(k: &[u8], n: &[u8]) -> C {
-    C::new(GenericArray_0_14::from_slice(k), GenericArray_0_14::from_slice(n))
+    C::new(
+        GenericArray_0_14::from_slice(k),
+        GenericArray_0_14::from_slice(n),
+    )
 }
 
 pub struct SshBlockCipher<C: BlockStreamCipher + KeySizeUser + IvSizeUser>(pub PhantomData<C>);
@@ -177,7 +181,7 @@ impl<C: BlockStreamCipher + KeySizeUser + IvSizeUser> super::SealingKey for Seal
     }
 
     fn fill_padding(&self, padding_out: &mut [u8]) {
-        rand::thread_rng().fill_bytes(padding_out);
+        safe_rng().fill_bytes(padding_out);
     }
 
     fn tag_len(&self) -> usize {

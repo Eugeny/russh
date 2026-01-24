@@ -4,13 +4,13 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use log::debug;
-    use rand_core::OsRng;
     use ssh_key::PrivateKey;
     use tokio::net::TcpListener;
 
     // Import client types directly since we're in the client module
-    use crate::client::{connect, Config, Handler};
+    use crate::client::{Config, Handler, connect};
     use crate::keys::PrivateKeyWithHashAlg;
+    use crate::keys::ssh_key::rand_core::OsRng;
     use crate::server::{self, Auth, Handler as ServerHandler, Server, Session};
     use crate::{ChannelId, SshId}; // Import directly from crate root
     use crate::{CryptoVec, Error};

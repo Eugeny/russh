@@ -148,7 +148,7 @@ impl Config {
         }
     }
 
-    fn user(&self) -> String {
+    pub fn user(&self) -> String {
         self.user
             .as_deref()
             .or(self.host_config.user.as_deref())
@@ -156,11 +156,11 @@ impl Config {
             .unwrap_or_else(whoami::username)
     }
 
-    fn port(&self) -> u16 {
+    pub fn port(&self) -> u16 {
         self.host_config.port.or(self.port).unwrap_or(22)
     }
 
-    fn host(&self) -> &str {
+    pub fn host(&self) -> &str {
         self.host_config
             .hostname
             .as_ref()

@@ -1,6 +1,7 @@
 use std::marker::PhantomData;
 use std::ops::Deref;
 
+use crate::keys::ssh_key::rand_core::OsRng;
 use byteorder::{BigEndian, ByteOrder};
 use elliptic_curve::ecdh::{EphemeralSecret, SharedSecret};
 use elliptic_curve::point::PointCompression;
@@ -105,8 +106,7 @@ where
                 .map_err(|_| crate::Error::Inconsistent)?
         };
 
-        let server_secret =
-            elliptic_curve::ecdh::EphemeralSecret::<C>::random(&mut rand_core::OsRng);
+        let server_secret = elliptic_curve::ecdh::EphemeralSecret::<C>::random(&mut OsRng);
         let server_pubkey = server_secret.public_key();
 
         // fill exchange.
@@ -125,8 +125,7 @@ where
         client_ephemeral: &mut CryptoVec,
         writer: &mut impl Writer,
     ) -> Result<(), crate::Error> {
-        let client_secret =
-            elliptic_curve::ecdh::EphemeralSecret::<C>::random(&mut rand_core::OsRng);
+        let client_secret = elliptic_curve::ecdh::EphemeralSecret::<C>::random(&mut OsRng);
         let client_pubkey = client_secret.public_key();
 
         // fill exchange.
@@ -217,14 +216,14 @@ mod tests {
     #[test]
     fn test_shared_secret() {
         let mut party1 = EcdhNistPKex::<NistP256, Sha256> {
-            local_secret: Some(EphemeralSecret::<NistP256>::random(&mut rand_core::OsRng)),
+            local_secret: Some(EphemeralSecret::<NistP256>::random(&mut OsRng)),
             shared_secret: None,
             _digest: PhantomData,
         };
         let p1_pubkey = party1.local_secret.as_ref().unwrap().public_key();
 
         let mut party2 = EcdhNistPKex::<NistP256, Sha256> {
-            local_secret: Some(EphemeralSecret::<NistP256>::random(&mut rand_core::OsRng)),
+            local_secret: Some(EphemeralSecret::<NistP256>::random(&mut OsRng)),
             shared_secret: None,
             _digest: PhantomData,
         };

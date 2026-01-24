@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use log::{LevelFilter, error, info};
-use rand_core::OsRng;
+use russh::keys::ssh_key::rand_core::OsRng;
 use russh::server::{Auth, Msg, Server as _, Session};
 use russh::{Channel, ChannelId};
 use russh_sftp::protocol::{File, FileAttributes, Handle, Name, Status, StatusCode, Version};

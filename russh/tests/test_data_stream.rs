@@ -2,8 +2,9 @@ use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::Arc;
 
 use rand::RngCore;
-use rand_core::OsRng;
 use russh::keys::PrivateKeyWithHashAlg;
+use russh::keys::key::safe_rng;
+use russh::keys::ssh_key::rand_core::OsRng;
 use russh::server::{self, Auth, Msg, Server as _, Session};
 use russh::{Channel, ChannelMsg, client};
 use ssh_key::PrivateKey;
@@ -145,11 +146,8 @@ async fn stream(
 }
 
 fn data() -> Vec<u8> {
-    let mut rng = rand::thread_rng();
-
     let mut data = vec![0u8; WINDOW_SIZE as usize * 2 + 7]; // Check whether the window_size resizing works
-    rng.fill_bytes(&mut data);
-
+    safe_rng().fill_bytes(&mut data);
     data
 }
 
