@@ -8,6 +8,7 @@ use std::borrow::Cow;
 use std::sync::Arc;
 
 use russh::keys::PrivateKeyWithHashAlg;
+use russh::keys::ssh_key::rand_core::OsRng;
 use russh::*;
 use ssh_key::PrivateKey;
 
@@ -16,8 +17,7 @@ async fn test_rekey_with_strict_kex() {
     let _ = env_logger::try_init();
 
     // Generate keys
-    let client_key =
-        PrivateKey::random(&mut rand_core::OsRng, ssh_key::Algorithm::Ed25519).unwrap();
+    let client_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap();
 
     // Server config with strict kex enabled
     let mut server_config = server::Config::default();
@@ -25,7 +25,7 @@ async fn test_rekey_with_strict_kex() {
     server_config.auth_rejection_time = std::time::Duration::from_secs(3);
     server_config
         .keys
-        .push(PrivateKey::random(&mut rand_core::OsRng, ssh_key::Algorithm::Ed25519).unwrap());
+        .push(PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap());
 
     // Enable strict kex by including the strict kex extension
     server_config.preferred = {

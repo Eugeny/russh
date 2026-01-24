@@ -9,6 +9,7 @@ use std::borrow::Cow;
 use std::sync::{Arc, Mutex};
 
 use russh::keys::PrivateKeyWithHashAlg;
+use russh::keys::ssh_key::rand_core::OsRng;
 use russh::*;
 use ssh_key::PrivateKey;
 
@@ -17,8 +18,7 @@ use ssh_key::PrivateKey;
 async fn test_kex_done_callback_receives_shared_secret() {
     let _ = env_logger::try_init();
 
-    let client_key =
-        PrivateKey::random(&mut rand_core::OsRng, ssh_key::Algorithm::Ed25519).unwrap();
+    let client_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap();
 
     // Set up server
     let mut server_config = server::Config::default();
@@ -26,7 +26,7 @@ async fn test_kex_done_callback_receives_shared_secret() {
     server_config.auth_rejection_time = std::time::Duration::from_secs(3);
     server_config
         .keys
-        .push(PrivateKey::random(&mut rand_core::OsRng, ssh_key::Algorithm::Ed25519).unwrap());
+        .push(PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap());
     server_config.preferred = {
         let mut p = Preferred::default();
         p.kex = Cow::Borrowed(&[kex::CURVE25519]);
@@ -108,15 +108,14 @@ async fn test_kex_done_callback_receives_shared_secret() {
 async fn test_kex_done_with_ecdh_nistp256() {
     let _ = env_logger::try_init();
 
-    let client_key =
-        PrivateKey::random(&mut rand_core::OsRng, ssh_key::Algorithm::Ed25519).unwrap();
+    let client_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap();
 
     let mut server_config = server::Config::default();
     server_config.inactivity_timeout = None;
     server_config.auth_rejection_time = std::time::Duration::from_secs(3);
     server_config
         .keys
-        .push(PrivateKey::random(&mut rand_core::OsRng, ssh_key::Algorithm::Ed25519).unwrap());
+        .push(PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap());
     server_config.preferred = {
         let mut p = Preferred::default();
         p.kex = Cow::Borrowed(&[kex::ECDH_SHA2_NISTP256]);
@@ -193,15 +192,14 @@ async fn test_kex_done_with_ecdh_nistp256() {
 async fn test_kex_done_on_rekey() {
     let _ = env_logger::try_init();
 
-    let client_key =
-        PrivateKey::random(&mut rand_core::OsRng, ssh_key::Algorithm::Ed25519).unwrap();
+    let client_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap();
 
     let mut server_config = server::Config::default();
     server_config.inactivity_timeout = None;
     server_config.auth_rejection_time = std::time::Duration::from_secs(3);
     server_config
         .keys
-        .push(PrivateKey::random(&mut rand_core::OsRng, ssh_key::Algorithm::Ed25519).unwrap());
+        .push(PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap());
     server_config.preferred = {
         let mut p = Preferred::default();
         p.kex = Cow::Borrowed(&[kex::CURVE25519]);

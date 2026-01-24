@@ -7,6 +7,7 @@ use std::borrow::Cow;
 use std::sync::Arc;
 
 use russh::keys::PrivateKeyWithHashAlg;
+use russh::keys::ssh_key::rand_core::OsRng;
 use russh::*;
 use ssh_key::PrivateKey;
 
@@ -14,15 +15,14 @@ use ssh_key::PrivateKey;
 async fn test_mlkem768x25519_handshake() {
     let _ = env_logger::try_init();
 
-    let client_key =
-        PrivateKey::random(&mut rand_core::OsRng, ssh_key::Algorithm::Ed25519).unwrap();
+    let client_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap();
 
     let mut server_config = server::Config::default();
     server_config.inactivity_timeout = None;
     server_config.auth_rejection_time = std::time::Duration::from_secs(3);
     server_config
         .keys
-        .push(PrivateKey::random(&mut rand_core::OsRng, ssh_key::Algorithm::Ed25519).unwrap());
+        .push(PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap());
 
     server_config.preferred = {
         let mut p = Preferred::default();
@@ -89,15 +89,14 @@ async fn test_mlkem768x25519_handshake() {
 async fn test_mlkem768x25519_with_fallback() {
     let _ = env_logger::try_init();
 
-    let client_key =
-        PrivateKey::random(&mut rand_core::OsRng, ssh_key::Algorithm::Ed25519).unwrap();
+    let client_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap();
 
     let mut server_config = server::Config::default();
     server_config.inactivity_timeout = None;
     server_config.auth_rejection_time = std::time::Duration::from_secs(3);
     server_config
         .keys
-        .push(PrivateKey::random(&mut rand_core::OsRng, ssh_key::Algorithm::Ed25519).unwrap());
+        .push(PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap());
 
     server_config.preferred = {
         let mut p = Preferred::default();
@@ -164,15 +163,14 @@ async fn test_mlkem768x25519_with_fallback() {
 async fn test_mlkem768x25519_rekey() {
     let _ = env_logger::try_init();
 
-    let client_key =
-        PrivateKey::random(&mut rand_core::OsRng, ssh_key::Algorithm::Ed25519).unwrap();
+    let client_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap();
 
     let mut server_config = server::Config::default();
     server_config.inactivity_timeout = None;
     server_config.auth_rejection_time = std::time::Duration::from_secs(3);
     server_config
         .keys
-        .push(PrivateKey::random(&mut rand_core::OsRng, ssh_key::Algorithm::Ed25519).unwrap());
+        .push(PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap());
 
     server_config.preferred = {
         let mut p = Preferred::default();
@@ -249,15 +247,14 @@ async fn test_mlkem768x25519_rekey() {
 async fn test_mlkem768x25519_multiple_channels() {
     let _ = env_logger::try_init();
 
-    let client_key =
-        PrivateKey::random(&mut rand_core::OsRng, ssh_key::Algorithm::Ed25519).unwrap();
+    let client_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap();
 
     let mut server_config = server::Config::default();
     server_config.inactivity_timeout = None;
     server_config.auth_rejection_time = std::time::Duration::from_secs(3);
     server_config
         .keys
-        .push(PrivateKey::random(&mut rand_core::OsRng, ssh_key::Algorithm::Ed25519).unwrap());
+        .push(PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap());
 
     server_config.preferred = {
         let mut p = Preferred::default();

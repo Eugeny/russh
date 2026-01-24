@@ -8,9 +8,9 @@ mod compress {
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
 
+    use crate::keys::ssh_key::rand_core::OsRng;
     use keys::PrivateKeyWithHashAlg;
     use log::debug;
-    use rand_core::OsRng;
     use ssh_key::PrivateKey;
 
     use super::server::{Server as _, Session};
@@ -139,8 +139,8 @@ mod compress {
 }
 
 mod channels {
+    use elliptic_curve::rand_core::OsRng;
     use keys::PrivateKeyWithHashAlg;
-    use rand_core::OsRng;
     use server::Session;
     use ssh_key::PrivateKey;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};

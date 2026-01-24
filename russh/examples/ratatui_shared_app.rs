@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use rand_core::OsRng;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::{Terminal, TerminalOptions, Viewport};
 use russh::keys::ssh_key::PublicKey;
+use russh::keys::ssh_key::rand_core::OsRng;
 use russh::server::*;
 use russh::{Channel, ChannelId, Pty};
 use tokio::sync::Mutex;

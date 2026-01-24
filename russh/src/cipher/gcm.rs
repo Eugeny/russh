@@ -20,8 +20,8 @@ use std::convert::TryInto;
 #[cfg(feature = "aws-lc-rs")]
 use aws_lc_rs::{
     aead::{
-        Aad, Algorithm, BoundKey, Nonce as AeadNonce, NonceSequence, OpeningKey as AeadOpeningKey,
-        SealingKey as AeadSealingKey, UnboundKey, NONCE_LEN,
+        Aad, Algorithm, BoundKey, NONCE_LEN, Nonce as AeadNonce, NonceSequence,
+        OpeningKey as AeadOpeningKey, SealingKey as AeadSealingKey, UnboundKey,
     },
     error::Unspecified,
 };
@@ -29,13 +29,14 @@ use rand::RngCore;
 #[cfg(all(not(feature = "aws-lc-rs"), feature = "ring"))]
 use ring::{
     aead::{
-        Aad, Algorithm, BoundKey, Nonce as AeadNonce, NonceSequence, OpeningKey as AeadOpeningKey,
-        SealingKey as AeadSealingKey, UnboundKey, NONCE_LEN,
+        Aad, Algorithm, BoundKey, NONCE_LEN, Nonce as AeadNonce, NonceSequence,
+        OpeningKey as AeadOpeningKey, SealingKey as AeadSealingKey, UnboundKey,
     },
     error::Unspecified,
 };
 
 use super::super::Error;
+use crate::keys::key::safe_rng;
 use crate::mac::MacAlgorithm;
 
 pub struct GcmCipher(pub(crate) &'static Algorithm);
@@ -156,7 +157,7 @@ impl<N: NonceSequence> super::SealingKey for SealingKey<N> {
     }
 
     fn fill_padding(&self, padding_out: &mut [u8]) {
-        rand::thread_rng().fill_bytes(padding_out);
+        safe_rng().fill_bytes(padding_out);
     }
 
     fn tag_len(&self) -> usize {

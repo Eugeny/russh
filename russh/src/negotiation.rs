@@ -24,6 +24,7 @@ use crate::helpers::NameList;
 use crate::kex::{
     EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT, EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER, KexCause,
 };
+use crate::keys::key::safe_rng;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::server::Config;
 use crate::sshbuffer::PacketWriter;
@@ -424,7 +425,7 @@ pub(crate) fn write_kex(
         msg::KEXINIT.encode(w)?;
 
         let mut cookie = [0; 16];
-        rand::thread_rng().fill_bytes(&mut cookie);
+        safe_rng().fill_bytes(&mut cookie);
         for b in cookie {
             b.encode(w)?;
         }

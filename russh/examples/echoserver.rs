@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use rand_core::OsRng;
+use russh::keys::ssh_key::rand_core::OsRng;
 use russh::keys::{Certificate, *};
 use russh::server::{Msg, Server as _, Session};
 use russh::*;
