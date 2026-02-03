@@ -668,10 +668,10 @@ impl Session {
                 }
                 if let Some(chan) = self.channels.get(&channel_num) {
                     chan.window_size().update(new_size).await;
-
-                    chan.send(ChannelMsg::WindowAdjusted { new_size })
-                        .await
-                        .unwrap_or(())
+                    // Use try_send to avoid blocking the session loop when channel buffer is full.
+                    // WindowAdjusted is informational - the critical side effect (updating
+                    // WindowSizeRef and notifying ChannelTx) already happens in update().
+                    let _ = chan.try_send(ChannelMsg::WindowAdjusted { new_size });
                 }
                 debug!("handler.window_adjusted {channel_num:?}");
                 handler.window_adjusted(channel_num, new_size, self).await
