@@ -26,9 +26,3 @@ pub fn mlock(ptr: *const u8, len: usize) -> Result<(), MemoryLockError> {
     }
     Ok(())
 }
-
-pub fn memset(ptr: *mut u8, value: i32, size: usize) {
-    unsafe {
-        nix::libc::memset(ptr as *mut c_void, value, size);
-    }
-}

@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 use std::ops::{Deref, DerefMut, Index, IndexMut, Range, RangeFrom, RangeFull, RangeTo};
 
-use crate::platform::{self, memset, mlock, munlock};
+use crate::platform::{self, mlock, munlock};
 
 /// A buffer which zeroes its memory on `.clear()`, `.resize()`, and
 /// reallocations, to avoid copying secrets around.
@@ -213,7 +213,7 @@ impl CryptoVec {
         } else if size <= self.size {
             // If this is a truncation, resize and erase the extra memory.
             unsafe {
-                memset(self.p.add(size), 0, self.size - size);
+                zeroize(self.p.add(size), self.size - size);
             }
             self.size = size;
         } else {
@@ -377,11 +377,11 @@ unsafe fn zeroize(dst: *mut u8, size: usize) {
     unsafe {
         std::ptr::write_bytes(dst, 0, size);
     }
-    optimization_barrier(dst);
+    optimization_barrier(dst, size);
 }
 
 // https://github.com/RustCrypto/utils/blob/a9f3f461baa3e02f69a205c772b6b2d3eac4eda8/zeroize/src/barrier.rs
-fn optimization_barrier(dst: *mut u8) {
+fn optimization_barrier(dst: *mut u8, size: usize) {
     #[cfg(all(
         not(miri),
         any(
@@ -396,12 +396,15 @@ fn optimization_barrier(dst: *mut u8) {
             target_arch = "x86_64",
         )
     ))]
-    unsafe {
-        core::arch::asm!(
-            "# {}",
-            in(reg) dst,
-            options(readonly, preserves_flags, nostack),
-        );
+    {
+        let _ = size;
+        unsafe {
+            core::arch::asm!(
+                "# {}",
+                in(reg) dst,
+                options(readonly, preserves_flags, nostack),
+            );
+        }
     }
     #[cfg(not(all(
         not(miri),
@@ -426,7 +429,9 @@ fn optimization_barrier(dst: *mut u8) {
         }
 
         core::hint::black_box(dst);
-        custom_black_box(dst);
+        if size > 0 {
+            custom_black_box(dst);
+        }
     }
 }
 
@@ -457,6 +462,14 @@ mod test {
         assert_eq!(crypto_vec.size, 5);
         // Ensure shrinking keeps the previous elements intact
         assert_eq!(crypto_vec.len(), 5);
+    }
+
+    #[test]
+    fn test_resize_zero() {
+        let mut crypto_vec = CryptoVec::new();
+        crypto_vec.resize(0);
+        assert_eq!(crypto_vec.size, 0);
+        assert_eq!(crypto_vec.len(), 0);
     }
 
     #[test]
