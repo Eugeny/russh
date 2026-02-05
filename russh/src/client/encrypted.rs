@@ -252,6 +252,38 @@ impl Session {
                                         })
                                     }
                                 }
+                                Some(auth::Method::FutureCertificate { cert, hash_alg }) => {
+                                    debug!("certificate");
+                                    self.common.buffer.clear();
+                                    let i = enc.client_make_to_sign(
+                                        &self.common.auth_user,
+                                        &PublicKeyOrCertificate::Certificate(cert.clone()),
+                                        &mut self.common.buffer,
+                                    )?;
+                                    let len = self.common.buffer.len();
+                                    let buf = std::mem::replace(
+                                        &mut self.common.buffer,
+                                        CryptoVec::new(),
+                                    );
+
+                                    self.sender
+                                        .send(Reply::SignRequestCert { cert, hash_alg, data: buf })
+                                        .map_err(|_| crate::Error::SendError)?;
+                                    self.common.buffer = loop {
+                                        match self.receiver.recv().await {
+                                            Some(Msg::Signed { data }) => break data,
+                                            None => return Err(crate::Error::RecvError.into()),
+                                            _ => {}
+                                        }
+                                    };
+                                    if self.common.buffer.len() != len {
+                                        // The buffer was modified.
+                                        push_packet!(enc.write, {
+                                            #[allow(clippy::indexing_slicing)] // length checked
+                                            enc.write.extend(&self.common.buffer[i..]);
+                                        })
+                                    }
+                                }
                                 _ => {}
                             }
                         }
@@ -938,6 +970,18 @@ impl Encrypted {
                         .encode(&mut self.write)?;
 
                     key.to_bytes()?.as_slice().encode(&mut self.write)?;
+                    true
+                }
+                auth::Method::FutureCertificate { ref cert, .. } => {
+                    user.as_bytes().encode(&mut self.write)?;
+                    "ssh-connection".encode(&mut self.write)?;
+                    "publickey".encode(&mut self.write)?;
+                    self.write.push(0); // This is a probe
+
+                    cert.algorithm()
+                        .to_certificate_type()
+                        .encode(&mut self.write)?;
+                    cert.to_bytes()?.as_slice().encode(&mut self.write)?;
                     true
                 }
                 auth::Method::KeyboardInteractive { ref submethods } => {

@@ -163,6 +163,22 @@ pub trait Signer: Sized {
         hash_alg: Option<HashAlg>,
         to_sign: CryptoVec,
     ) -> impl Future<Output = Result<CryptoVec, Self::Error>> + Send;
+
+    /// Sign authentication data using a certificate identity.
+    ///
+    /// The default implementation returns an error, indicating certificate
+    /// signing is not supported. Implementations that support certificate
+    /// signing (e.g., SSH agent clients) should override this method.
+    ///
+    /// For RSA certificates, you can specify the hash algorithm to use.
+    fn auth_certificate_sign(
+        &mut self,
+        _cert: &Certificate,
+        _hash_alg: Option<HashAlg>,
+        _to_sign: CryptoVec,
+    ) -> impl Future<Output = Result<CryptoVec, Self::Error>> + Send {
+        async { Err((crate::SendError {}).into()) }
+    }
 }
 
 #[derive(Debug, Error)]
@@ -192,6 +208,20 @@ impl<R: AsyncRead + AsyncWrite + Unpin + Send + 'static> Signer
                 .map_err(Into::into)
         }
     }
+
+    #[allow(clippy::manual_async_fn)]
+    fn auth_certificate_sign(
+        &mut self,
+        cert: &Certificate,
+        hash_alg: Option<HashAlg>,
+        to_sign: CryptoVec,
+    ) -> impl Future<Output = Result<CryptoVec, Self::Error>> {
+        async move {
+            self.sign_request_cert(cert, hash_alg, to_sign)
+                .await
+                .map_err(Into::into)
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -210,6 +240,12 @@ pub enum Method {
     },
     FuturePublicKey {
         key: ssh_key::PublicKey,
+        hash_alg: Option<HashAlg>,
+    },
+    /// Certificate-based authentication using an external signer (e.g., SSH agent).
+    /// The certificate is sent to the server, but signing is delegated to the signer.
+    FutureCertificate {
+        cert: Certificate,
         hash_alg: Option<HashAlg>,
     },
     KeyboardInteractive {

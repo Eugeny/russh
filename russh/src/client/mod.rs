@@ -119,6 +119,11 @@ enum Reply {
         key: ssh_key::PublicKey,
         data: CryptoVec,
     },
+    SignRequestCert {
+        cert: Certificate,
+        hash_alg: Option<HashAlg>,
+        data: CryptoVec,
+    },
     AuthInfoRequest {
         name: String,
         instructions: String,
@@ -481,6 +486,64 @@ impl<H: Handler> Handle<H> {
                 }
                 Some(Reply::SignRequest { key, data }) => {
                     let data = signer.auth_publickey_sign(&key, hash_alg, data).await;
+                    let data = match data {
+                        Ok(data) => data,
+                        Err(e) => return Err(e),
+                    };
+                    if self.sender.send(Msg::Signed { data }).await.is_err() {
+                        return Err((crate::SendError {}).into());
+                    }
+                }
+                None => {
+                    return Ok(AuthResult::Failure {
+                        remaining_methods: MethodSet::empty(),
+                        partial_success: false,
+                    });
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Authenticate using a certificate with a custom signer that implements the
+    /// [`Signer`][auth::Signer] trait. This is for certificate-based authentication
+    /// where the signing is delegated to an external signer (e.g., SSH agent).
+    ///
+    /// For RSA certificates, you can specify the hash algorithm to use.
+    pub async fn authenticate_certificate_with<U: Into<String>, S: auth::Signer>(
+        &mut self,
+        user: U,
+        cert: Certificate,
+        hash_alg: Option<HashAlg>,
+        signer: &mut S,
+    ) -> Result<AuthResult, S::Error> {
+        let user = user.into();
+        if self
+            .sender
+            .send(Msg::Authenticate {
+                user,
+                method: auth::Method::FutureCertificate { cert, hash_alg },
+            })
+            .await
+            .is_err()
+        {
+            return Err((crate::SendError {}).into());
+        }
+        loop {
+            let reply = self.receiver.recv().await;
+            match reply {
+                Some(Reply::AuthSuccess) => return Ok(AuthResult::Success),
+                Some(Reply::AuthFailure {
+                    proceed_with_methods: remaining_methods,
+                    partial_success,
+                }) => {
+                    return Ok(AuthResult::Failure {
+                        remaining_methods,
+                        partial_success,
+                    });
+                }
+                Some(Reply::SignRequestCert { cert, hash_alg, data }) => {
+                    let data = signer.auth_certificate_sign(&cert, hash_alg, data).await;
                     let data = match data {
                         Ok(data) => data,
                         Err(e) => return Err(e),
