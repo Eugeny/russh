@@ -4,30 +4,30 @@ resolver = "2"
 
 [workspace.dependencies]
 aes = "0.8"
-async-trait = "0.1.50"
-byteorder = "1.4"
-bytes = "1.7"
+async-trait = "0.1.89"
+byteorder = "1.5"
+bytes = "1.11"
 digest = "0.10"
 delegate = "0.13"
-env_logger = "0.6"
+env_logger = "0.11"
 futures = "0.3"
 home = "0.5"
 hmac = "0.12"
-log = "0.4.11"
+log = "0.4.29"
 rand = { version = "0.9", features = ["thread_rng"] }
-sha1 = { version = "0.10.5", features = ["oid"] }
-sha2 = { version = "0.10.6", features = ["oid"] }
+sha1 = { version = "0.10.6", features = ["oid"] }
+sha2 = { version = "0.10.9", features = ["oid"] }
 signature = "2.2"
 ssh-encoding = { version = "0.2", features = ["bytes"] }
-ssh-key = { version = "=0.6.16", features = [
+ssh-key = { version = "0.7.0-rc.8", features = [
     "ed25519",
     "p256",
     "p384",
     "p521",
     "encryption",
     "ppk",
-    "hazmat-allow-insecure-rsa-keys",
-], package = "internal-russh-forked-ssh-key" }
-thiserror = "1.0.30"
-tokio = { version = "1.17.0" }
-tokio-stream = { version = "0.1.3", features = ["net", "sync"] }
+    "sha1"
+] }
+thiserror = "2.0.18"
+tokio = { version = "1.49.0" }
+tokio-stream = { version = "0.1.18", features = ["net", "sync"] }

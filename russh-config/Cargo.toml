@@ -17,4 +17,4 @@ globset = "0.4"
 log.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["io-util", "net", "macros", "process"] }
-whoami = "1.2"
+whoami = "2.1"

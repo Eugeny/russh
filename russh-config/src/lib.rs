@@ -153,7 +153,7 @@ impl Config {
             .as_deref()
             .or(self.host_config.user.as_deref())
             .map(ToString::to_string)
-            .unwrap_or_else(whoami::username)
+            .unwrap_or_else(|| whoami::username().unwrap())
     }
 
     pub fn port(&self) -> u16 {
@@ -390,7 +390,7 @@ mod tests {
     #![allow(clippy::expect_used)]
     use std::path::{Path, PathBuf};
 
-    use crate::{AddKeysToAgent, Config, Error, SshConfigStrExt, parse};
+    use crate::{parse, AddKeysToAgent, Config, Error, SshConfigStrExt};
 
     #[test]
     fn strip_quotes() {
@@ -430,7 +430,7 @@ mod tests {
     #[test]
     fn default_config() {
         let config: Config = Config::default("some_host");
-        assert_eq!(whoami::username(), config.user());
+        assert_eq!(whoami::username().unwrap(), config.user());
         assert_eq!("some_host", config.host_name);
         assert_eq!(22, config.port());
         assert_eq!(None, config.host_config.identity_file);
