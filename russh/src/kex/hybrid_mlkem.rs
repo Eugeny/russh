@@ -29,6 +29,7 @@ impl KexType for MlKem768X25519KexType {
             x25519_secret: None,
             k_pq: None,
             k_cl: None,
+            k: None,
         }
         .into()
     }
@@ -40,6 +41,8 @@ pub struct MlKem768X25519Kex {
     x25519_secret: Option<Scalar>,
     k_pq: Option<[u8; SHARED_SECRET_SIZE]>,
     k_cl: Option<MontgomeryPoint>,
+    /// Derived hybrid shared secret K = SHA256(k_pq || k_cl)
+    k: Option<Vec<u8>>,
 }
 
 impl std::fmt::Debug for MlKem768X25519Kex {
@@ -106,6 +109,14 @@ impl KexAlgorithmImplementor for MlKem768X25519Kex {
         self.k_pq = Some(k_pq_shared_secret);
         self.k_cl = Some(k_cl);
 
+        // Cache the derived K used by this KEX.
+        let mut combined = Vec::new();
+        combined.extend_from_slice(self.k_pq.as_ref().unwrap());
+        combined.extend_from_slice(&self.k_cl.as_ref().unwrap().0);
+        let mut hasher = sha2::Sha256::new();
+        hasher.update(&combined);
+        self.k = Some(hasher.finalize().to_vec());
+
         Ok(())
     }
 
@@ -165,15 +176,25 @@ impl KexAlgorithmImplementor for MlKem768X25519Kex {
         self.k_pq = Some(k_pq_shared_secret);
         self.k_cl = Some(k_cl);
 
+        // Cache the derived K used by this KEX.
+        let mut combined = Vec::new();
+        combined.extend_from_slice(self.k_pq.as_ref().unwrap());
+        combined.extend_from_slice(&self.k_cl.as_ref().unwrap().0);
+        let mut hasher = sha2::Sha256::new();
+        hasher.update(&combined);
+        self.k = Some(hasher.finalize().to_vec());
+
         Ok(())
     }
 
     fn shared_secret_bytes(&self) -> Option<&[u8]> {
-        // For hybrid KEX, the shared secret is a combination of ML-KEM and X25519.
-        // The actual combined secret is computed during compute_keys.
-        // We return the X25519 portion as that's what's directly available.
-        // Users needing the full hybrid secret should use compute_keys.
-        self.k_cl.as_ref().map(|k| k.0.as_slice())
+        // For hybrid KEX, the shared secret is derived as:
+        //   K = SHA256( K_MLKEM || K_X25519 )
+        // (see compute_exchange_hash / compute_keys).
+        //
+        // Expose that derived K so callers can reliably derive additional keys.
+        // We store it in `self.k` when available.
+        self.k.as_deref()
     }
 
     fn compute_exchange_hash(
@@ -260,6 +281,7 @@ mod tests {
             x25519_secret: None,
             k_pq: None,
             k_cl: None,
+            k: None,
         };
 
         let mut server_kex = MlKem768X25519Kex {
@@ -267,6 +289,7 @@ mod tests {
             x25519_secret: None,
             k_pq: None,
             k_cl: None,
+            k: None,
         };
 
         let mut client_ephemeral = CryptoVec::new();
@@ -324,6 +347,7 @@ mod tests {
             x25519_secret: None,
             k_pq: None,
             k_cl: None,
+            k: None,
         };
 
         let mut server_kex = MlKem768X25519Kex {
@@ -331,6 +355,7 @@ mod tests {
             x25519_secret: None,
             k_pq: None,
             k_cl: None,
+            k: None,
         };
 
         let mut client_ephemeral = CryptoVec::new();
@@ -382,6 +407,7 @@ mod tests {
             x25519_secret: None,
             k_pq: None,
             k_cl: None,
+            k: None,
         };
 
         let mut client_ephemeral = CryptoVec::new();
@@ -403,6 +429,7 @@ mod tests {
             x25519_secret: None,
             k_pq: None,
             k_cl: None,
+            k: None,
         };
 
         let mut invalid_init = Vec::new();
@@ -423,6 +450,7 @@ mod tests {
             x25519_secret: None,
             k_pq: None,
             k_cl: None,
+            k: None,
         };
 
         let mut client_ephemeral = CryptoVec::new();

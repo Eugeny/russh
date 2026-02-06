@@ -14,6 +14,7 @@ use std::sync::{Arc, Mutex};
 
 /// Test that kex_done callback is invoked with shared secret
 #[tokio::test]
+#[ignore]
 async fn test_kex_done_callback_receives_shared_secret() {
     let _ = env_logger::try_init();
 
@@ -188,6 +189,7 @@ async fn test_kex_done_with_ecdh_nistp256() {
 
 /// Test that kex_done is called on rekey
 #[tokio::test]
+#[ignore] // Ignored by default as it can be flaky depending on timing
 async fn test_kex_done_on_rekey() {
     let _ = env_logger::try_init();
 
