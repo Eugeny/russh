@@ -9,8 +9,8 @@ use russh::server::*;
 use russh::{Channel, ChannelId, Pty};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::sync::Mutex;
+use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 
 type SshTerminal = Terminal<CrosstermBackend<TerminalHandle>>;
 

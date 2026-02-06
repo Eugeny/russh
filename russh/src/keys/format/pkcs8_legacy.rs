@@ -4,8 +4,8 @@ use std::convert::TryFrom;
 use aes::cipher::{BlockModeDecrypt, KeyIvInit};
 use aes::*;
 use block_padding::Pkcs7;
-use ssh_key::private::{Ed25519Keypair, Ed25519PrivateKey, KeypairData};
 use ssh_key::PrivateKey;
+use ssh_key::private::{Ed25519Keypair, Ed25519PrivateKey, KeypairData};
 use yasna::BERReaderSeq;
 
 use super::Encryption;

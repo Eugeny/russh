@@ -16,10 +16,10 @@
 //! # Writing servers
 //!
 //! There are two ways of accepting connections:
-//! * implement the [Server](server::Server) trait and let [run_on_socket](server::Server::run_on_socket)/[run_on_address](server::Server::run_on_address) handle everything
-//! * accept connections yourself and pass them to [run_stream](server::run_stream)
+//! * implement the [Server](Server) trait and let [run_on_socket](Server::run_on_socket)/[run_on_address](Server::run_on_address) handle everything
+//! * accept connections yourself and pass them to [run_stream](run_stream)
 //!
-//! In both cases, you'll first need to implement the [Handler](server::Handler) trait -
+//! In both cases, you'll first need to implement the [Handler](Handler) trait -
 //! this is where you'll handle various events.
 //!
 //! Check out the following examples:
@@ -48,13 +48,13 @@ use tokio::net::{TcpListener, ToSocketAddrs};
 use tokio::pin;
 use tokio::sync::{broadcast, mpsc};
 
-use crate::cipher::{clear, OpeningKey};
-use crate::kex::dh::groups::{DhGroup, BUILTIN_SAFE_DH_GROUPS, DH_GROUP14};
+use crate::cipher::{OpeningKey, clear};
+use crate::kex::dh::groups::{BUILTIN_SAFE_DH_GROUPS, DH_GROUP14, DhGroup};
 use crate::kex::{KexProgress, SessionKexState};
 use crate::session::*;
 use crate::ssh_read::*;
 use crate::sshbuffer::*;
-use crate::{*};
+use crate::*;
 
 mod kex;
 mod session;
@@ -66,7 +66,7 @@ pub struct Config {
     /// The server ID string sent at the beginning of the protocol.
     pub server_id: SshId,
     /// Authentication methods proposed to the client.
-    pub methods: auth::MethodSet,
+    pub methods: MethodSet,
     /// Authentication rejections must happen in constant time for
     /// security reasons. Russh does not handle this by default.
     pub auth_rejection_time: std::time::Duration,
@@ -107,7 +107,7 @@ impl Default for Config {
                 env!("CARGO_PKG_NAME"),
                 env!("CARGO_PKG_VERSION")
             )),
-            methods: auth::MethodSet::all(),
+            methods: MethodSet::all(),
             auth_rejection_time: std::time::Duration::from_secs(1),
             auth_rejection_time_initial: None,
             keys: Vec::new(),
@@ -127,7 +127,7 @@ impl Default for Config {
 }
 
 impl Debug for Config {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         // display everything except the private keys
         f.debug_struct("Config")
             .field("server_id", &self.server_id)
@@ -1015,8 +1015,8 @@ where
 
     // Reading SSH id and allocating a session.
     let mut stream = SshRead::new(stream);
-    let (sender, receiver) = tokio::sync::mpsc::channel(config.event_buffer_size);
-    let handle = server::session::Handle {
+    let (sender, receiver) = mpsc::channel(config.event_buffer_size);
+    let handle = Handle {
         sender,
         channel_buffer_size: config.channel_buffer_size,
     };

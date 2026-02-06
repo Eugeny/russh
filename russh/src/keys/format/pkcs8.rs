@@ -5,12 +5,12 @@ use p521::NistP521;
 use pkcs8::{AssociatedOid, EncodePrivateKey, SecretDocument};
 use rand::Rng;
 use spki::ObjectIdentifier;
-use ssh_key::private::{EcdsaKeypair, Ed25519Keypair, Ed25519PrivateKey, KeypairData};
 use ssh_key::PrivateKey;
+use ssh_key::private::{EcdsaKeypair, Ed25519Keypair, Ed25519PrivateKey, KeypairData};
 use std::convert::{TryFrom, TryInto};
 
-use crate::keys::key::safe_rng;
 use crate::keys::Error;
+use crate::keys::key::safe_rng;
 
 /// Decode a PKCS#8-encoded private key (ASN.1 or X9.62)
 pub fn decode_pkcs8(ciphertext: &[u8], password: Option<&[u8]>) -> Result<PrivateKey, Error> {

@@ -3,7 +3,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use log::{error, info, LevelFilter};
+use log::{LevelFilter, error, info};
 use rand::rng;
 use russh::server::{Auth, Msg, Server as _, Session};
 use russh::{Channel, ChannelId};

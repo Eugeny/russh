@@ -300,7 +300,7 @@ impl DH {
         };
         let mut rng = safe_rng();
         let bit_len = q.bits();
-        let byte_len = ((bit_len + 7) / 8) as usize;
+        let byte_len = bit_len.div_ceil(8) as usize;
         loop {
             let mut bytes = vec![0u8; byte_len];
             rng.fill_bytes(&mut bytes);

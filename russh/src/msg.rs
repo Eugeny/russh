@@ -17,7 +17,7 @@
 #[cfg(not(target_arch = "wasm32"))]
 pub use server::*;
 
-use crate::{strict_kex_violation, Error};
+use crate::{Error, strict_kex_violation};
 
 pub const DISCONNECT: u8 = 1;
 #[allow(dead_code)]

@@ -1,6 +1,8 @@
 //! Integration tests for ML-KEM hybrid key exchange
 //! https://datatracker.ietf.org/doc/draft-ietf-sshm-mlkem-hybrid-kex/
 
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use rand::rng;
 use russh::keys::PrivateKeyWithHashAlg;
 use russh::*;

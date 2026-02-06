@@ -14,11 +14,11 @@ use rand::rng;
 use sha2::{Digest, Sha256, Sha384, Sha512};
 use ssh_encoding::{Encode, Writer};
 
-use super::{encode_mpint, KexAlgorithm, SharedSecret as KexSharedSecret};
-use crate::kex::{compute_keys, KexAlgorithmImplementor, KexType};
+use super::{KexAlgorithm, SharedSecret as KexSharedSecret, encode_mpint};
+use crate::kex::{KexAlgorithmImplementor, KexType, compute_keys};
 use crate::mac::{self};
 use crate::session::Exchange;
-use crate::{cipher, msg, CryptoVec};
+use crate::{CryptoVec, cipher, msg};
 
 pub struct EcdhNistP256KexType {}
 

@@ -2,6 +2,8 @@
 //! kex.  This test ensures that strict_kex sequence number checking is
 //! only applied to the initial key exchange, not to rekey operations.
 
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use rand::rng;
 use russh::keys::PrivateKeyWithHashAlg;
 use russh::*;

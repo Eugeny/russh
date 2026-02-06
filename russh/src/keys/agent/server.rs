@@ -13,11 +13,11 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::time::sleep;
 use {std, tokio};
 
-use super::{msg, Constraint};
-use crate::helpers::{sign_with_hash_alg, EncodedExt};
-use crate::keys::key::PrivateKeyWithHashAlg;
-use crate::keys::Error;
+use super::{Constraint, msg};
 use crate::CryptoVec;
+use crate::helpers::{EncodedExt, sign_with_hash_alg};
+use crate::keys::Error;
+use crate::keys::key::PrivateKeyWithHashAlg;
 
 #[derive(Clone)]
 #[allow(clippy::type_complexity)]

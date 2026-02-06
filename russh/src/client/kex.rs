@@ -12,12 +12,12 @@ use ssh_key::{Mpint, PublicKey, Signature};
 use super::IncomingSshPacket;
 use crate::client::{Config, NewKeys};
 use crate::kex::dh::groups::DhGroup;
-use crate::kex::{KexAlgorithm, KexAlgorithmImplementor, KexCause, KexProgress, KEXES};
+use crate::kex::{KEXES, KexAlgorithm, KexAlgorithmImplementor, KexCause, KexProgress};
 use crate::keys::key::parse_public_key;
 use crate::negotiation::{Names, Select};
 use crate::session::Exchange;
 use crate::sshbuffer::PacketWriter;
-use crate::{msg, negotiation, strict_kex_violation, CryptoVec, Error, SshId};
+use crate::{CryptoVec, Error, SshId, msg, negotiation, strict_kex_violation};
 
 thread_local! {
     static HASH_BUFFER: RefCell<CryptoVec> = RefCell::new(CryptoVec::new());
@@ -136,7 +136,7 @@ impl ClientKex {
 
                 let mut kex = KEXES.get(&names.kex).ok_or(Error::UnknownAlgo)?.make();
 
-                if kex.skip_exchange() {
+                if KexAlgorithmImplementor::skip_exchange(&kex) {
                     // Non-standard no-kex exchange
                     let newkeys = compute_keys(
                         CryptoVec::new(),
@@ -157,16 +157,20 @@ impl ClientKex {
                     });
                 }
 
-                if kex.is_dh_gex() {
+                if KexAlgorithmImplementor::is_dh_gex(&kex) {
                     output.packet(|w| {
-                        kex.client_dh_gex_init(&self.config.gex, w)?;
+                        KexAlgorithmImplementor::client_dh_gex_init(&mut kex, &self.config.gex, w)?;
                         Ok(())
                     })?;
 
                     self.state = ClientKexState::WaitingForGexReply { names, kex };
                 } else {
                     output.packet(|w| {
-                        kex.client_dh(&mut self.exchange.client_ephemeral, w)?;
+                        KexAlgorithmImplementor::client_dh(
+                            &mut kex,
+                            &mut self.exchange.client_ephemeral,
+                            w,
+                        )?;
                         Ok(())
                     })?;
 
@@ -215,9 +219,13 @@ impl ClientKex {
 
                 let exchange = &mut self.exchange;
                 exchange.gex = Some((self.config.gex.clone(), group.clone()));
-                kex.dh_gex_set_group(group)?;
+                KexAlgorithmImplementor::dh_gex_set_group(&mut kex, group)?;
                 output.packet(|w| {
-                    kex.client_dh(&mut exchange.client_ephemeral, w)?;
+                    KexAlgorithmImplementor::client_dh(
+                        &mut kex,
+                        &mut exchange.client_ephemeral,
+                        w,
+                    )?;
                     Ok(())
                 })?;
                 self.state = ClientKexState::WaitingForDhReply { names, kex };
@@ -247,7 +255,7 @@ impl ClientKex {
                 }
 
                 if input.buffer.first()
-                    != Some(match kex.is_dh_gex() {
+                    != Some(match KexAlgorithmImplementor::is_dh_gex(&kex) {
                         true => &msg::KEX_DH_GEX_REPLY,
                         false => &msg::KEX_ECDH_REPLY,
                     })
@@ -271,7 +279,10 @@ impl ClientKex {
 
                 let server_ephemeral = Bytes::decode(r)?;
                 self.exchange.server_ephemeral.extend(&server_ephemeral);
-                kex.compute_shared_secret(&self.exchange.server_ephemeral)?;
+                KexAlgorithmImplementor::compute_shared_secret(
+                    &mut kex,
+                    &self.exchange.server_ephemeral,
+                )?;
 
                 let mut pubkey_vec = CryptoVec::new();
                 server_host_key.to_bytes()?.encode(&mut pubkey_vec)?;
@@ -281,7 +292,12 @@ impl ClientKex {
                     |buffer| {
                         let mut buffer = buffer.borrow_mut();
                         buffer.clear();
-                        kex.compute_exchange_hash(&pubkey_vec, exchange, &mut buffer)
+                        KexAlgorithmImplementor::compute_exchange_hash(
+                            &kex,
+                            &pubkey_vec,
+                            exchange,
+                            &mut buffer,
+                        )
                     }
                 })?;
 
@@ -357,8 +373,10 @@ fn compute_keys(
     } else {
         &hash
     };
+
     // Now computing keys.
-    let c = kex.compute_keys(
+    let c = KexAlgorithmImplementor::compute_keys(
+        &kex,
         session_id,
         &hash,
         names.cipher,

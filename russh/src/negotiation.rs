@@ -22,13 +22,13 @@ use ssh_key::{Algorithm, EcdsaCurve, HashAlg, PrivateKey};
 use crate::cipher::CIPHERS;
 use crate::helpers::NameList;
 use crate::kex::{
-    KexCause, EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT, EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER,
+    EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT, EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER, KexCause,
 };
 use crate::keys::key::safe_rng;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::server::Config;
 use crate::sshbuffer::PacketWriter;
-use crate::{cipher, compression, kex, mac, msg, AlgorithmKind, CryptoVec, Error};
+use crate::{AlgorithmKind, CryptoVec, Error, cipher, compression, kex, mac, msg};
 
 #[cfg(target_arch = "wasm32")]
 /// WASM-only stub

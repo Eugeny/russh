@@ -17,10 +17,7 @@ impl Reader for CryptoVec {
         F: FnOnce(&mut Self) -> std::result::Result<T, E>,
     {
         let mut slice = &self[..];
-        let len = match u32::decode(&mut slice) {
-            Ok(len) => len,
-            Err(e) => return Err(e.into()),
-        };
+        let len = u32::decode(&mut slice)?;
         if slice.len() < len as usize {
             return Err(Error::Length.into());
         }

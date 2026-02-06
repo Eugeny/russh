@@ -6,10 +6,10 @@ use hybrid_array::{Array, ArraySize};
 use super::crypto::{CryptoMac, CryptoMacAlgorithm};
 use super::{Mac, MacAlgorithm};
 
-pub struct CryptoEtmMacAlgorithm<
-    M: DigestMac + KeyInit + Send + 'static,
-    KL: ArraySize + 'static,
->(pub PhantomData<M>, pub PhantomData<KL>);
+pub struct CryptoEtmMacAlgorithm<M: DigestMac + KeyInit + Send + 'static, KL: ArraySize + 'static>(
+    pub PhantomData<M>,
+    pub PhantomData<KL>,
+);
 
 impl<M: DigestMac + KeyInit + Send + 'static, KL: ArraySize + 'static> MacAlgorithm
     for CryptoEtmMacAlgorithm<M, KL>
@@ -34,8 +34,7 @@ pub struct CryptoEtmMac<M: DigestMac + KeyInit + Send + 'static, KL: ArraySize +
     CryptoMac<M, KL>,
 );
 
-impl<M: DigestMac + KeyInit + Send + 'static, KL: ArraySize + 'static> Mac
-    for CryptoEtmMac<M, KL>
+impl<M: DigestMac + KeyInit + Send + 'static, KL: ArraySize + 'static> Mac for CryptoEtmMac<M, KL>
 where
     <M as OutputSizeUser>::OutputSize: ArraySize,
 {

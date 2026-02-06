@@ -3,18 +3,18 @@ use curve25519_dalek::constants::ED25519_BASEPOINT_TABLE;
 use curve25519_dalek::montgomery::MontgomeryPoint;
 use curve25519_dalek::scalar::Scalar;
 use libcrux_ml_kem::mlkem768::{
-    decapsulate, encapsulate, generate_key_pair, MlKem768Ciphertext, MlKem768PrivateKey,
-    MlKem768PublicKey,
+    MlKem768Ciphertext, MlKem768PrivateKey, MlKem768PublicKey, decapsulate, encapsulate,
+    generate_key_pair,
 };
 use libcrux_ml_kem::{KEY_GENERATION_SEED_SIZE, SHARED_SECRET_SIZE};
 use log::debug;
 use sha2::Digest;
 use ssh_encoding::{Encode, Writer};
 
-use super::{compute_keys, KexAlgorithm, KexAlgorithmImplementor, KexType, SharedSecret};
+use super::{KexAlgorithm, KexAlgorithmImplementor, KexType, SharedSecret, compute_keys};
 use crate::mac;
 use crate::session::Exchange;
-use crate::{cipher, msg, CryptoVec, Error};
+use crate::{CryptoVec, Error, cipher, msg};
 
 const MLKEM768_PUBLIC_KEY_SIZE: usize = 1184;
 const MLKEM768_CIPHERTEXT_SIZE: usize = 1088;

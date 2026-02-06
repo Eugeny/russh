@@ -15,8 +15,8 @@
 
 use std::convert::TryInto;
 
-use crate::mac::MacAlgorithm;
 use crate::Error;
+use crate::mac::MacAlgorithm;
 
 #[derive(Debug)]
 pub struct Key;

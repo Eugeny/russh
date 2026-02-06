@@ -9,7 +9,7 @@ mod tests {
     use tokio::net::TcpListener;
 
     // Import client types directly since we're in the client module
-    use crate::client::{connect, Config, Handler};
+    use crate::client::{Config, Handler, connect};
     use crate::keys::PrivateKeyWithHashAlg;
     use crate::server::{self, Auth, Handler as ServerHandler, Server, Session};
     use crate::{ChannelId, SshId};

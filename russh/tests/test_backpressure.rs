@@ -2,11 +2,11 @@ use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::Arc;
 
 use futures::FutureExt;
-use rand::{rng, Rng};
-use russh::keys::key::safe_rng;
+use rand::{Rng, rng};
 use russh::keys::PrivateKeyWithHashAlg;
+use russh::keys::key::safe_rng;
 use russh::server::{self, Auth, Msg, Server as _, Session};
-use russh::{client, Channel, ChannelMsg};
+use russh::{Channel, ChannelMsg, client};
 use ssh_key::PrivateKey;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::watch;

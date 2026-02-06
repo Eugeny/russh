@@ -20,8 +20,8 @@ use std::convert::TryInto;
 #[cfg(feature = "aws-lc-rs")]
 use aws_lc_rs::{
     aead::{
-        Aad, Algorithm, BoundKey, Nonce as AeadNonce, NonceSequence, OpeningKey as AeadOpeningKey,
-        SealingKey as AeadSealingKey, UnboundKey, NONCE_LEN,
+        Aad, Algorithm, BoundKey, NONCE_LEN, Nonce as AeadNonce, NonceSequence,
+        OpeningKey as AeadOpeningKey, SealingKey as AeadSealingKey, UnboundKey,
     },
     error::Unspecified,
 };
@@ -29,8 +29,8 @@ use rand::Rng;
 #[cfg(all(not(feature = "aws-lc-rs"), feature = "ring"))]
 use ring::{
     aead::{
-        Aad, Algorithm, BoundKey, Nonce as AeadNonce, NonceSequence, OpeningKey as AeadOpeningKey,
-        SealingKey as AeadSealingKey, UnboundKey, NONCE_LEN,
+        Aad, Algorithm, BoundKey, NONCE_LEN, Nonce as AeadNonce, NonceSequence,
+        OpeningKey as AeadOpeningKey, SealingKey as AeadSealingKey, UnboundKey,
     },
     error::Unspecified,
 };
