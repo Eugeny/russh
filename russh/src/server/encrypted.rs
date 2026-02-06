@@ -141,7 +141,7 @@ fn server_accept_service(
     banner: Option<String>,
     methods: MethodSet,
     buffer: &mut CryptoVec,
-) -> Result<AuthRequest, crate::Error> {
+) -> Result<AuthRequest, Error> {
     push_packet!(buffer, {
         buffer.push(msg::SERVICE_ACCEPT);
         "ssh-userauth".encode(buffer)?;
@@ -329,7 +329,9 @@ impl Encrypted {
                     PublicKeyOrCertificate::Certificate(ref cert) => {
                         // Validate certificate expiration
                         let now = SystemTime::now();
-                        if now < cert.valid_after_time() || now > cert.valid_before_time() {
+                        let valid_after_time = cert.valid_after_time().unwrap();
+                        let valid_before_time = cert.valid_before_time().unwrap();
+                        if now < valid_after_time || now > valid_before_time {
                             warn!("Certificate is expired or not yet valid");
                             reject_auth_request(until, &mut self.write, auth_request).await?;
                             return Ok(());
@@ -475,7 +477,7 @@ impl Encrypted {
                     reject_auth_request(until, &mut self.write, auth_request).await?;
                     Ok(())
                 }
-                e => Err(crate::Error::from(e).into()),
+                e => Err(Error::from(e).into()),
             },
         }
     }
@@ -1034,7 +1036,7 @@ impl Session {
                     channel_sender
                         .send(ChannelMsg::OpenFailure(reason))
                         .await
-                        .map_err(|_| crate::Error::SendError)?;
+                        .map_err(|_| Error::SendError)?;
                 }
 
                 Ok(())
@@ -1124,7 +1126,7 @@ impl Session {
             sender_maximum_packet_size: self.common.config.maximum_packet_size,
             confirmed: true,
             wants_reply: false,
-            pending_data: std::collections::VecDeque::new(),
+            pending_data: VecDeque::new(),
             pending_eof: false,
             pending_close: false,
         };
@@ -1207,7 +1209,7 @@ impl Session {
                 if let Some(ref mut enc) = self.common.encrypted {
                     msg.fail(
                         &mut enc.write,
-                        msg::SSH_OPEN_ADMINISTRATIVELY_PROHIBITED,
+                        SSH_OPEN_ADMINISTRATIVELY_PROHIBITED,
                         b"Unsupported channel type",
                     )?;
                 }
@@ -1217,7 +1219,7 @@ impl Session {
                 if let Some(ref mut enc) = self.common.encrypted {
                     msg.fail(
                         &mut enc.write,
-                        msg::SSH_OPEN_ADMINISTRATIVELY_PROHIBITED,
+                        SSH_OPEN_ADMINISTRATIVELY_PROHIBITED,
                         b"Unsupported channel type",
                     )?;
                 }

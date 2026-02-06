@@ -1,74 +1,12 @@
+use crate::parsing::ChannelOpenConfirmation;
+use futures::future::Either as EitherFuture;
+use log::{debug, warn};
+pub use russh_cryptovec::CryptoVec;
+use ssh_encoding::{Decode, Encode};
 use std::convert::TryFrom;
 use std::fmt::{Debug, Display, Formatter};
 use std::future::{Future, Pending};
-
-use futures::future::Either as EitherFuture;
-use log::{debug, warn};
-use parsing::ChannelOpenConfirmation;
-pub use russh_cryptovec::CryptoVec;
-use ssh_encoding::{Decode, Encode};
 use thiserror::Error;
-
-#[cfg(test)]
-mod tests;
-
-mod auth;
-
-mod cert;
-/// Cipher names
-pub mod cipher;
-/// Compression algorithm names
-pub mod compression;
-/// Key exchange algorithm names
-pub mod kex;
-/// MAC algorithm names
-pub mod mac;
-
-pub mod keys;
-
-mod msg;
-mod negotiation;
-mod ssh_read;
-mod sshbuffer;
-
-pub use negotiation::{Names, Preferred};
-
-mod pty;
-
-pub use pty::Pty;
-pub use sshbuffer::SshId;
-
-mod helpers;
-
-pub(crate) use helpers::map_err;
-
-macro_rules! push_packet {
-    ( $buffer:expr, $x:expr ) => {{
-        use byteorder::{BigEndian, ByteOrder};
-        let i0 = $buffer.len();
-        $buffer.extend(b"\0\0\0\0");
-        let x = $x;
-        let i1 = $buffer.len();
-        use std::ops::DerefMut;
-        let buf = $buffer.deref_mut();
-        #[allow(clippy::indexing_slicing)] // length checked
-        BigEndian::write_u32(&mut buf[i0..], (i1 - i0 - 4) as u32);
-        x
-    }};
-}
-
-mod channels;
-pub use channels::{Channel, ChannelMsg, ChannelReadHalf, ChannelStream, ChannelWriteHalf};
-
-mod parsing;
-mod session;
-
-/// Server side of this library.
-#[cfg(not(target_arch = "wasm32"))]
-pub mod server;
-
-/// Client side of this library.
-pub mod client;
 
 #[derive(Debug)]
 pub enum AlgorithmKind {
@@ -217,7 +155,9 @@ pub enum Error {
     #[error(transparent)]
     Elapsed(#[from] tokio::time::error::Elapsed),
 
-    #[error("Violation detected during strict key exchange, message {message_type} at seq no {sequence_number}")]
+    #[error(
+        "Violation detected during strict key exchange, message {message_type} at seq no {sequence_number}"
+    )]
     StrictKeyExchangeViolation {
         message_type: u8,
         sequence_number: usize,
@@ -245,7 +185,7 @@ pub(crate) fn strict_kex_violation(message_type: u8, sequence_number: usize) -> 
     warn!(
         "strict kex violated at sequence no. {sequence_number:?}, message type: {message_type:?}"
     );
-    crate::Error::StrictKeyExchangeViolation {
+    Error::StrictKeyExchangeViolation {
         message_type,
         sequence_number,
     }
@@ -334,7 +274,7 @@ impl TryFrom<u32> for Disconnect {
             13 => Self::AuthCancelledByUser,
             14 => Self::NoMoreAuthMethodsAvailable,
             15 => Self::IllegalUserName,
-            _ => return Err(crate::Error::Inconsistent),
+            _ => return Err(Error::Inconsistent),
         })
     }
 }

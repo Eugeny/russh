@@ -20,17 +20,17 @@ use std::convert::TryInto;
 #[cfg(feature = "aws-lc-rs")]
 use aws_lc_rs::{
     aead::{
-        Aad, Algorithm, BoundKey, NONCE_LEN, Nonce as AeadNonce, NonceSequence,
-        OpeningKey as AeadOpeningKey, SealingKey as AeadSealingKey, UnboundKey,
+        Aad, Algorithm, BoundKey, Nonce as AeadNonce, NonceSequence, OpeningKey as AeadOpeningKey,
+        SealingKey as AeadSealingKey, UnboundKey, NONCE_LEN,
     },
     error::Unspecified,
 };
-use rand::RngCore;
+use rand::Rng;
 #[cfg(all(not(feature = "aws-lc-rs"), feature = "ring"))]
 use ring::{
     aead::{
-        Aad, Algorithm, BoundKey, NONCE_LEN, Nonce as AeadNonce, NonceSequence,
-        OpeningKey as AeadOpeningKey, SealingKey as AeadSealingKey, UnboundKey,
+        Aad, Algorithm, BoundKey, Nonce as AeadNonce, NonceSequence, OpeningKey as AeadOpeningKey,
+        SealingKey as AeadSealingKey, UnboundKey, NONCE_LEN,
     },
     error::Unspecified,
 };
@@ -56,12 +56,12 @@ impl super::Cipher for GcmCipher {
         n: &[u8],
         _: &[u8],
         _: &dyn MacAlgorithm,
-    ) -> Box<dyn super::OpeningKey + Send> {
+    ) -> Result<Box<dyn super::OpeningKey + Send>, Error> {
         #[allow(clippy::unwrap_used)]
-        Box::new(OpeningKey(AeadOpeningKey::new(
-            UnboundKey::new(self.0, k).unwrap(),
-            Nonce(n.try_into().unwrap()),
-        )))
+        Ok(Box::new(OpeningKey(AeadOpeningKey::new(
+            UnboundKey::new(self.0, k).map_err(|_| Error::Inconsistent)?,
+            Nonce(n.try_into().map_err(|_| Error::Inconsistent)?),
+        ))))
     }
 
     fn make_sealing_key(
@@ -70,12 +70,12 @@ impl super::Cipher for GcmCipher {
         n: &[u8],
         _: &[u8],
         _: &dyn MacAlgorithm,
-    ) -> Box<dyn super::SealingKey + Send> {
+    ) -> Result<Box<dyn super::SealingKey + Send>, Error> {
         #[allow(clippy::unwrap_used)]
-        Box::new(SealingKey(AeadSealingKey::new(
-            UnboundKey::new(self.0, k).unwrap(),
-            Nonce(n.try_into().unwrap()),
-        )))
+        Ok(Box::new(SealingKey(AeadSealingKey::new(
+            UnboundKey::new(self.0, k).map_err(|_| Error::Inconsistent)?,
+            Nonce(n.try_into().map_err(|_| Error::Inconsistent)?),
+        ))))
     }
 }
 

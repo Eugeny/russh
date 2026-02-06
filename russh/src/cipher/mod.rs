@@ -64,14 +64,14 @@ pub(crate) trait Cipher {
         nonce: &[u8],
         mac_key: &[u8],
         mac: &dyn MacAlgorithm,
-    ) -> Box<dyn OpeningKey + Send>;
+    ) -> Result<Box<dyn OpeningKey + Send>, Error>;
     fn make_sealing_key(
         &self,
         key: &[u8],
         nonce: &[u8],
         mac_key: &[u8],
         mac: &dyn MacAlgorithm,
-    ) -> Box<dyn SealingKey + Send>;
+    ) -> Result<Box<dyn SealingKey + Send>, Error>;
 }
 
 /// `clear`

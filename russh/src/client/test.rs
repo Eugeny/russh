@@ -4,15 +4,16 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use log::debug;
+    use rand::rng;
     use ssh_key::PrivateKey;
     use tokio::net::TcpListener;
 
     // Import client types directly since we're in the client module
-    use crate::client::{Config, Handler, connect};
+    use crate::client::{connect, Config, Handler};
     use crate::keys::PrivateKeyWithHashAlg;
-    use crate::keys::ssh_key::rand_core::OsRng;
     use crate::server::{self, Auth, Handler as ServerHandler, Server, Session};
-    use crate::{ChannelId, SshId}; // Import directly from crate root
+    use crate::{ChannelId, SshId};
+    // Import directly from crate root
     use crate::{CryptoVec, Error};
 
     #[derive(Clone)]
@@ -21,7 +22,7 @@ mod tests {
         id: usize,
     }
 
-    impl server::Server for TestServer {
+    impl Server for TestServer {
         type Handler = Self;
 
         fn new_client(&mut self, _: Option<std::net::SocketAddr>) -> Self {
@@ -82,7 +83,7 @@ mod tests {
         let _ = env_logger::try_init();
 
         // Create a client key
-        let client_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap();
+        let client_key = PrivateKey::random(&mut rng(), ssh_key::Algorithm::Ed25519).unwrap();
 
         // Configure the server
         let mut config = server::Config::default();
@@ -91,7 +92,7 @@ mod tests {
         config.inactivity_timeout = None;
         config
             .keys
-            .push(PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap());
+            .push(PrivateKey::random(&mut rng(), ssh_key::Algorithm::Ed25519).unwrap());
         let config = Arc::new(config);
 
         // Create server struct

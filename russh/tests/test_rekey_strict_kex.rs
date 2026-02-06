@@ -1,23 +1,20 @@
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-
 //! Test that strict key exchange is works during initial kex and rekey
 //! kex.  This test ensures that strict_kex sequence number checking is
 //! only applied to the initial key exchange, not to rekey operations.
 
-use std::borrow::Cow;
-use std::sync::Arc;
-
+use rand::rng;
 use russh::keys::PrivateKeyWithHashAlg;
-use russh::keys::ssh_key::rand_core::OsRng;
 use russh::*;
 use ssh_key::PrivateKey;
+use std::borrow::Cow;
+use std::sync::Arc;
 
 #[tokio::test]
 async fn test_rekey_with_strict_kex() {
     let _ = env_logger::try_init();
 
     // Generate keys
-    let client_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap();
+    let client_key = PrivateKey::random(&mut rng(), ssh_key::Algorithm::Ed25519).unwrap();
 
     // Server config with strict kex enabled
     let mut server_config = server::Config::default();
@@ -25,7 +22,7 @@ async fn test_rekey_with_strict_kex() {
     server_config.auth_rejection_time = std::time::Duration::from_secs(3);
     server_config
         .keys
-        .push(PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap());
+        .push(PrivateKey::random(&mut rng(), ssh_key::Algorithm::Ed25519).unwrap());
 
     // Enable strict kex by including the strict kex extension
     server_config.preferred = {
@@ -116,7 +113,7 @@ struct TestServer {}
 
 // Insecure server that accepts any public key and echos back data it receives; ONLY FOR TESTS
 impl server::Handler for TestServer {
-    type Error = russh::Error;
+    type Error = Error;
 
     async fn auth_publickey(
         &mut self,
@@ -150,7 +147,7 @@ struct TestClient {}
 
 // Insecure client that accept any server key; ONLY FOR TEST
 impl client::Handler for TestClient {
-    type Error = russh::Error;
+    type Error = Error;
 
     async fn check_server_key(
         &mut self,

@@ -12,23 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
+use rand::Rng;
 use std::borrow::Cow;
 
 use log::debug;
-use rand::RngCore;
 use ssh_encoding::{Decode, Encode};
 use ssh_key::{Algorithm, EcdsaCurve, HashAlg, PrivateKey};
 
 use crate::cipher::CIPHERS;
 use crate::helpers::NameList;
 use crate::kex::{
-    EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT, EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER, KexCause,
+    KexCause, EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT, EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER,
 };
 use crate::keys::key::safe_rng;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::server::Config;
 use crate::sshbuffer::PacketWriter;
-use crate::{AlgorithmKind, CryptoVec, Error, cipher, compression, kex, mac, msg};
+use crate::{cipher, compression, kex, mac, msg, AlgorithmKind, CryptoVec, Error};
 
 #[cfg(target_arch = "wasm32")]
 /// WASM-only stub

@@ -11,8 +11,11 @@ pub fn decode_pkcs5(
     password: Option<&str>,
     enc: Encryption,
 ) -> Result<PrivateKey, Error> {
-    use aes::cipher::{BlockDecryptMut, KeyIvInit};
-    use block_padding::Pkcs7;
+    use aes::cipher::KeyIvInit;
+    use block_padding::{Error as UnpadError, Padding, Pkcs7};
+    use cbc::cipher::BlockModeDecrypt;
+    use hybrid_array::Array;
+    use hybrid_array::typenum::U16;
 
     if let Some(pass) = password {
         let sec = match enc {
@@ -20,12 +23,31 @@ pub fn decode_pkcs5(
                 let mut c = md5::Context::new();
                 c.consume(pass.as_bytes());
                 c.consume(&iv[..8]);
-                let md5 = c.compute();
+                let md5 = c.finalize();
 
                 #[allow(clippy::unwrap_used)] // AES parameters are static
-                let c = cbc::Decryptor::<Aes128>::new_from_slices(&md5.0, &iv[..]).unwrap();
+                let mut c = cbc::Decryptor::<Aes128>::new_from_slices(&md5.0, &iv[..]).unwrap();
                 let mut dec = secret.to_vec();
-                c.decrypt_padded_mut::<Pkcs7>(&mut dec)?.to_vec()
+
+                // Input must be full blocks.
+                if dec.is_empty() || dec.len() % 16 != 0 {
+                    return Err(Error::Unpad(UnpadError));
+                }
+
+                // Decrypt in-place, block by block.
+                for chunk in dec.chunks_exact_mut(16) {
+                    // Make the block size explicit to avoid `Array<u8, _>` inference failures.
+                    let block: &mut Block = chunk.try_into().expect("chunk is 16 bytes");
+                    c.decrypt_blocks(std::slice::from_mut(block));
+                }
+
+                // Unpad PKCS#7 based on the final plaintext block.
+                let last_block_start = dec.len() - 16;
+                let last_block: Array<u8, U16> =
+                    Array::try_from(&dec[last_block_start..]).expect("valid block size");
+                let unpadded = Pkcs7::unpad(&last_block).map_err(Error::Unpad)?;
+                dec.truncate(last_block_start + unpadded.len());
+                dec
             }
             Encryption::Aes256Cbc(_) => unimplemented!(),
         };

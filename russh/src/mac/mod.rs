@@ -35,7 +35,7 @@ mod none;
 
 pub(crate) trait MacAlgorithm {
     fn key_len(&self) -> usize;
-    fn make_mac(&self, key: &[u8]) -> Box<dyn Mac + Send>;
+    fn make_mac(&self, key: &[u8]) -> Result<Box<dyn Mac + Send>, crate::Error>;
 }
 
 pub(crate) trait Mac {

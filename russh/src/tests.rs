@@ -5,30 +5,28 @@ use futures::Future;
 use super::*;
 
 mod compress {
-    use std::collections::HashMap;
-    use std::sync::{Arc, Mutex};
-
-    use crate::keys::ssh_key::rand_core::OsRng;
-    use keys::PrivateKeyWithHashAlg;
-    use log::debug;
-    use ssh_key::PrivateKey;
-
     use super::server::{Server as _, Session};
     use super::*;
     use crate::server::Msg;
+    use keys::PrivateKeyWithHashAlg;
+    use log::debug;
+    use rand::rng;
+    use ssh_key::PrivateKey;
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
 
     #[tokio::test]
     async fn compress_local_test() {
         let _ = env_logger::try_init();
 
-        let client_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap();
+        let client_key = PrivateKey::random(&mut rng(), ssh_key::Algorithm::Ed25519).unwrap();
         let mut config = server::Config::default();
         config.preferred = Preferred::COMPRESSED;
         config.inactivity_timeout = None; // Some(std::time::Duration::from_secs(3));
         config.auth_rejection_time = std::time::Duration::from_secs(3);
         config
             .keys
-            .push(PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap());
+            .push(PrivateKey::random(&mut rng(), ssh_key::Algorithm::Ed25519).unwrap());
         let config = Arc::new(config);
         let mut sh = Server {
             clients: Arc::new(Mutex::new(HashMap::new())),
@@ -76,7 +74,7 @@ mod compress {
 
     #[derive(Clone)]
     struct Server {
-        clients: Arc<Mutex<HashMap<(usize, ChannelId), super::server::Handle>>>,
+        clients: Arc<Mutex<HashMap<(usize, ChannelId), server::Handle>>>,
         id: usize,
     }
 
@@ -92,6 +90,14 @@ mod compress {
     impl server::Handler for Server {
         type Error = super::Error;
 
+        async fn auth_publickey(
+            &mut self,
+            _: &str,
+            _: &ssh_key::PublicKey,
+        ) -> Result<server::Auth, Self::Error> {
+            debug!("auth_publickey");
+            Ok(server::Auth::Accept)
+        }
         async fn channel_open_session(
             &mut self,
             channel: Channel<Msg>,
@@ -102,14 +108,6 @@ mod compress {
                 clients.insert((self.id, channel.id()), session.handle());
             }
             Ok(true)
-        }
-        async fn auth_publickey(
-            &mut self,
-            _: &str,
-            _: &crate::keys::ssh_key::PublicKey,
-        ) -> Result<server::Auth, Self::Error> {
-            debug!("auth_publickey");
-            Ok(server::Auth::Accept)
         }
         async fn data(
             &mut self,
@@ -130,7 +128,7 @@ mod compress {
 
         async fn check_server_key(
             &mut self,
-            _server_public_key: &crate::keys::ssh_key::PublicKey,
+            _server_public_key: &ssh_key::PublicKey,
         ) -> Result<bool, Self::Error> {
             // println!("check_server_key: {:?}", server_public_key);
             Ok(true)
@@ -139,8 +137,8 @@ mod compress {
 }
 
 mod channels {
-    use elliptic_curve::rand_core::OsRng;
     use keys::PrivateKeyWithHashAlg;
+    use rand::rng;
     use server::Session;
     use ssh_key::PrivateKey;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -154,12 +152,12 @@ mod channels {
         run_client: RC,
         run_server: RS,
     ) where
-        RC: FnOnce(crate::client::Handle<CH>) -> F1 + Send + Sync + 'static,
-        RS: FnOnce(crate::server::Handle) -> F2 + Send + Sync + 'static,
-        F1: Future<Output = crate::client::Handle<CH>> + Send + Sync + 'static,
-        F2: Future<Output = crate::server::Handle> + Send + Sync + 'static,
-        CH: crate::client::Handler + Send + Sync + 'static,
-        SH: crate::server::Handler + Send + Sync + 'static,
+        RC: FnOnce(client::Handle<CH>) -> F1 + Send + Sync + 'static,
+        RS: FnOnce(server::Handle) -> F2 + Send + Sync + 'static,
+        F1: Future<Output = client::Handle<CH>> + Send + Sync + 'static,
+        F2: Future<Output = server::Handle> + Send + Sync + 'static,
+        CH: client::Handler + Send + Sync + 'static,
+        SH: server::Handler + Send + Sync + 'static,
     {
         use std::sync::Arc;
 
@@ -167,13 +165,13 @@ mod channels {
 
         let _ = env_logger::try_init();
 
-        let client_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap();
+        let client_key = PrivateKey::random(&mut rng(), ssh_key::Algorithm::Ed25519).unwrap();
         let mut config = server::Config::default();
         config.inactivity_timeout = None;
         config.auth_rejection_time = std::time::Duration::from_secs(3);
         config
             .keys
-            .push(PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap());
+            .push(PrivateKey::random(&mut rng(), ssh_key::Algorithm::Ed25519).unwrap());
         let config = Arc::new(config);
         let socket = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = socket.local_addr().unwrap();
@@ -225,7 +223,7 @@ mod channels {
 
             async fn check_server_key(
                 &mut self,
-                _server_public_key: &crate::keys::ssh_key::PublicKey,
+                _server_public_key: &ssh_key::PublicKey,
             ) -> Result<bool, Self::Error> {
                 Ok(true)
             }
@@ -260,7 +258,7 @@ mod channels {
             async fn auth_publickey(
                 &mut self,
                 _: &str,
-                _: &crate::keys::ssh_key::PublicKey,
+                _: &ssh_key::PublicKey,
             ) -> Result<server::Auth, Self::Error> {
                 Ok(server::Auth::Accept)
             }
@@ -305,7 +303,7 @@ mod channels {
 
             async fn check_server_key(
                 &mut self,
-                _server_public_key: &crate::keys::ssh_key::PublicKey,
+                _server_public_key: &ssh_key::PublicKey,
             ) -> Result<bool, Self::Error> {
                 Ok(true)
             }
@@ -331,7 +329,7 @@ mod channels {
             async fn auth_publickey(
                 &mut self,
                 _: &str,
-                _: &crate::keys::ssh_key::PublicKey,
+                _: &ssh_key::PublicKey,
             ) -> Result<server::Auth, Self::Error> {
                 Ok(server::Auth::Accept)
             }
@@ -339,7 +337,7 @@ mod channels {
             async fn channel_open_session(
                 &mut self,
                 channel: Channel<server::Msg>,
-                _session: &mut server::Session,
+                _session: &mut Session,
             ) -> Result<bool, Self::Error> {
                 if let Some(a) = self.channel.take() {
                     println!("channel open session {a:?}");
@@ -399,7 +397,7 @@ mod channels {
 
             async fn check_server_key(
                 &mut self,
-                _server_public_key: &crate::keys::ssh_key::PublicKey,
+                _server_public_key: &ssh_key::PublicKey,
             ) -> Result<bool, Self::Error> {
                 Ok(true)
             }
@@ -415,7 +413,7 @@ mod channels {
             async fn auth_publickey(
                 &mut self,
                 _: &str,
-                _: &crate::keys::ssh_key::PublicKey,
+                _: &ssh_key::PublicKey,
             ) -> Result<server::Auth, Self::Error> {
                 Ok(server::Auth::Accept)
             }
@@ -474,7 +472,7 @@ mod channels {
 
             async fn check_server_key(
                 &mut self,
-                _server_public_key: &crate::keys::ssh_key::PublicKey,
+                _server_public_key: &ssh_key::PublicKey,
             ) -> Result<bool, Self::Error> {
                 Ok(true)
             }
@@ -500,7 +498,7 @@ mod channels {
             async fn auth_publickey(
                 &mut self,
                 _: &str,
-                _: &crate::keys::ssh_key::PublicKey,
+                _: &ssh_key::PublicKey,
             ) -> Result<server::Auth, Self::Error> {
                 Ok(server::Auth::Accept)
             }
@@ -508,7 +506,7 @@ mod channels {
             async fn channel_open_session(
                 &mut self,
                 channel: Channel<server::Msg>,
-                _session: &mut server::Session,
+                _session: &mut Session,
             ) -> Result<bool, Self::Error> {
                 if let Some(a) = self.channel.take() {
                     println!("channel open session {a:?}");

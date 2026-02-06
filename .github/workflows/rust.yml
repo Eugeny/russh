@@ -14,101 +14,101 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-    - uses: actions/checkout@v2
+      - uses: actions/checkout@v6
 
-    - name: Build (no features enabled)
-      run: cargo build --verbose
+      - name: Build (no features enabled)
+        run: cargo build --verbose
 
-    - name: Build (all features enabled)
-      run: cargo build --verbose --all-features
+      - name: Build (all features enabled)
+        run: cargo build --verbose --all-features
 
   Build-Windows:
     runs-on: windows-latest
 
     steps:
-    - uses: actions/checkout@v2
+      - uses: actions/checkout@v6
 
-    - name: install nasm
-      run: |
-        choco install nasm
-        echo "C:\Program Files\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: install nasm
+        run: |
+          choco install nasm
+          echo "C:\Program Files\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-    - name: Build (no features enabled)
-      run: cargo build --verbose
+      - name: Build (no features enabled)
+        run: cargo build --verbose
 
-    - name: Build (all features enabled)
-      run: cargo build --verbose --all-features
+      - name: Build (all features enabled)
+        run: cargo build --verbose --all-features
 
   Build-WASM:
     runs-on: ubuntu-24.04
 
     steps:
-    - uses: actions/checkout@v2
+      - uses: actions/checkout@v6
 
-    - name: Install target
-      run: |
-        rustup toolchain add 1.88.0
-        rustup target add --toolchain 1.88.0 wasm32-wasip1
+      - name: Install target
+        run: |
+          rustup toolchain add 1.88.0
+          rustup target add --toolchain 1.88.0 wasm32-wasip1
 
-    - name: Build (WASM-compatible features)
-      run: cargo +1.88.0 build --verbose --target wasm32-wasip1 --no-default-features --features flate2,ring -p russh
+      - name: Build (WASM-compatible features)
+        run: cargo +1.88.0 build --verbose --target wasm32-wasip1 --no-default-features --features flate2,ring -p russh
 
   Formatting:
     runs-on: ubuntu-24.04
 
     steps:
-    - uses: actions/checkout@v2
+      - uses: actions/checkout@v6
 
-    - name: Install rustfmt
-      run: rustup component add rustfmt
+      - name: Install rustfmt
+        run: rustup component add rustfmt
 
-    - name: rustfmt
-      run: cargo fmt --check
+      - name: rustfmt
+        run: cargo fmt --check
 
   Clippy:
     runs-on: ubuntu-24.04
 
     steps:
-    - uses: actions/checkout@v2
+      - uses: actions/checkout@v6
 
-    - name: Install Clippy
-      run: rustup component add clippy
+      - name: Install Clippy
+        run: rustup component add clippy
 
-    - name: Clippy (no features enabled)
-      run: cargo clippy -- -D warnings
+      - name: Clippy (no features enabled)
+        run: cargo clippy -- -D warnings
 
-    - name: Clippy (all features enabled)
-      run: cargo clippy --all-features -- -D warnings
+      - name: Clippy (all features enabled)
+        run: cargo clippy --all-features -- -D warnings
 
   Test:
     runs-on: ubuntu-24.04
 
     steps:
-    - uses: actions/checkout@v2
+      - uses: actions/checkout@v6
 
-    - name: Test (no features enabled)
-      run: |
-        eval `ssh-agent`
-        cargo test --verbose
-      env:
-        RUST_BACKTRACE: 1
+      - name: Test (no features enabled)
+        run: |
+          eval `ssh-agent`
+          cargo test --verbose
+        env:
+          RUST_BACKTRACE: 1
 
-    - name: Test (all features enabled)
-      run: |
-        eval `ssh-agent`
-        cargo test --verbose --all-features
-      env:
-        RUST_BACKTRACE: 1
+      - name: Test (all features enabled)
+        run: |
+          eval `ssh-agent`
+          cargo test --verbose --all-features
+        env:
+          RUST_BACKTRACE: 1
 
   Minimal-versions:
     runs-on: ubuntu-24.04
 
     steps:
-    - uses: actions/checkout@v2
-    - uses: dtolnay/rust-toolchain@nightly
-    - uses: taiki-e/install-action@cargo-hack
-    - uses: taiki-e/install-action@cargo-minimal-versions
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: taiki-e/install-action@cargo-hack
+      - uses: taiki-e/install-action@cargo-minimal-versions
 
-    - name: Check with minimal dependency versions
-      run: |
-        cargo minimal-versions check --all-features --no-dev-deps
+      - name: Check with minimal dependency versions
+        run: |
+          cargo minimal-versions check --all-features --no-dev-deps

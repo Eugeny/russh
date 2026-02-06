@@ -1,10 +1,9 @@
-use std::collections::HashMap;
-use std::sync::Arc;
-
-use russh::keys::ssh_key::rand_core::OsRng;
+use rand::rng;
 use russh::keys::{Certificate, *};
 use russh::server::{Msg, Server as _, Session};
 use russh::*;
+use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 
@@ -14,13 +13,11 @@ async fn main() {
         .filter_level(log::LevelFilter::Debug)
         .init();
 
-    let config = russh::server::Config {
+    let config = server::Config {
         inactivity_timeout: Some(std::time::Duration::from_secs(3600)),
         auth_rejection_time: std::time::Duration::from_secs(3),
         auth_rejection_time_initial: Some(std::time::Duration::from_secs(0)),
-        keys: vec![
-            russh::keys::PrivateKey::random(&mut OsRng, russh::keys::Algorithm::Ed25519).unwrap(),
-        ],
+        keys: vec![PrivateKey::random(&mut rng(), Algorithm::Ed25519).unwrap()],
         preferred: Preferred {
             // kex: std::borrow::Cow::Owned(vec![russh::kex::DH_GEX_SHA256]),
             ..Preferred::default()
@@ -47,7 +44,7 @@ async fn main() {
 
 #[derive(Clone)]
 struct Server {
-    clients: Arc<Mutex<HashMap<usize, (ChannelId, russh::server::Handle)>>>,
+    clients: Arc<Mutex<HashMap<usize, (ChannelId, server::Handle)>>>,
     id: usize,
 }
 
@@ -69,7 +66,7 @@ impl server::Server for Server {
         self.id += 1;
         s
     }
-    fn handle_session_error(&mut self, _error: <Self::Handler as russh::server::Handler>::Error) {
+    fn handle_session_error(&mut self, _error: <Self::Handler as server::Handler>::Error) {
         eprintln!("Session error: {_error:#?}");
     }
 }
@@ -92,7 +89,7 @@ impl server::Handler for Server {
     async fn auth_publickey(
         &mut self,
         _: &str,
-        _key: &ssh_key::PublicKey,
+        _key: &PublicKey,
     ) -> Result<server::Auth, Self::Error> {
         Ok(server::Auth::Accept)
     }

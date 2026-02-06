@@ -63,7 +63,7 @@ impl client::Handler for Client {
 
     async fn check_server_key(
         &mut self,
-        _server_public_key: &ssh_key::PublicKey,
+        _server_public_key: &PublicKey,
     ) -> Result<bool, Self::Error> {
         Ok(true)
     }
@@ -94,8 +94,8 @@ impl Session {
             inactivity_timeout: Some(Duration::from_secs(5)),
             preferred: Preferred {
                 kex: Cow::Owned(vec![
-                    russh::kex::CURVE25519_PRE_RFC_8731,
-                    russh::kex::EXTENSION_SUPPORT_AS_CLIENT,
+                    kex::CURVE25519_PRE_RFC_8731,
+                    kex::EXTENSION_SUPPORT_AS_CLIENT,
                 ]),
                 ..Default::default()
             },
@@ -189,6 +189,6 @@ pub struct Cli {
     #[clap(long, short = 'o')]
     openssh_certificate: Option<PathBuf>,
 
-    #[clap(multiple = true, index = 2, required = true)]
+    #[clap(index = 2, required = true, num_args = 1..)]
     command: Vec<String>,
 }

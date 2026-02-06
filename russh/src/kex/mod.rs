@@ -30,9 +30,9 @@ use curve25519::Curve25519KexType;
 use delegate::delegate;
 use dh::groups::DhGroup;
 use dh::{
-    DhGexSha1KexType, DhGexSha256KexType, DhGroup1Sha1KexType, DhGroup14Sha1KexType,
-    DhGroup14Sha256KexType, DhGroup15Sha512KexType, DhGroup16Sha512KexType, DhGroup17Sha512KexType,
-    DhGroup18Sha512KexType,
+    DhGexSha1KexType, DhGexSha256KexType, DhGroup14Sha1KexType, DhGroup14Sha256KexType,
+    DhGroup15Sha512KexType, DhGroup16Sha512KexType, DhGroup17Sha512KexType, DhGroup18Sha512KexType,
+    DhGroup1Sha1KexType,
 };
 use digest::Digest;
 use ecdh_nistp::{EcdhNistP256KexType, EcdhNistP384KexType, EcdhNistP521KexType};
@@ -50,7 +50,7 @@ use crate::cipher::CIPHERS;
 use crate::client::GexParams;
 use crate::mac::{self, MACS};
 use crate::session::{Exchange, NewKeys};
-use crate::{CryptoVec, Error, cipher};
+use crate::{cipher, CryptoVec, Error};
 
 #[derive(Debug)]
 pub(crate) enum SessionKexState<K> {
@@ -203,7 +203,7 @@ pub(crate) trait KexAlgorithmImplementor {
         remote_to_local_mac: mac::Name,
         local_to_remote_mac: mac::Name,
         is_server: bool,
-    ) -> Result<super::cipher::CipherPair, Error>;
+    ) -> Result<cipher::CipherPair, Error>;
 }
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone, Hash)]
@@ -217,7 +217,7 @@ impl AsRef<str> for Name {
 impl Encode for Name {
     delegate! { to self.as_ref() {
         fn encoded_len(&self) -> Result<usize, ssh_encoding::Error>;
-        fn encode(&self, writer: &mut impl ssh_encoding::Writer) -> Result<(), ssh_encoding::Error>;
+        fn encode(&self, writer: &mut impl Writer) -> Result<(), ssh_encoding::Error>;
     }}
 }
 
@@ -367,7 +367,7 @@ pub(crate) fn compute_keys<D: Digest>(
     remote_to_local_mac: mac::Name,
     local_to_remote_mac: mac::Name,
     is_server: bool,
-) -> Result<super::cipher::CipherPair, Error> {
+) -> Result<cipher::CipherPair, Error> {
     let cipher = CIPHERS.get(&cipher).ok_or(Error::UnknownAlgo)?;
     let remote_to_local_mac = MACS.get(&remote_to_local_mac).ok_or(Error::UnknownAlgo)?;
     let local_to_remote_mac = MACS.get(&local_to_remote_mac).ok_or(Error::UnknownAlgo)?;
@@ -447,7 +447,7 @@ pub(crate) fn compute_keys<D: Digest>(
                     )?;
 
                     let local_to_remote =
-                        cipher.make_sealing_key(&key, &nonce, &mac, *local_to_remote_mac);
+                        cipher.make_sealing_key(&key, &nonce, &mac, *local_to_remote_mac)?;
 
                     compute_key(remote_to_local, &mut key, cipher.key_len())?;
                     compute_key(remote_to_local_nonce, &mut nonce, cipher.nonce_len())?;
@@ -457,9 +457,9 @@ pub(crate) fn compute_keys<D: Digest>(
                         remote_to_local_mac.key_len(),
                     )?;
                     let remote_to_local =
-                        cipher.make_opening_key(&key, &nonce, &mac, *remote_to_local_mac);
+                        cipher.make_opening_key(&key, &nonce, &mac, *remote_to_local_mac)?;
 
-                    Ok(super::cipher::CipherPair {
+                    Ok(cipher::CipherPair {
                         local_to_remote,
                         remote_to_local,
                     })

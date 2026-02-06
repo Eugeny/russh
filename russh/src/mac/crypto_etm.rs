@@ -1,43 +1,43 @@
 use std::marker::PhantomData;
 
-use digest::{KeyInit, OutputSizeUser};
-use generic_array::{ArrayLength, GenericArray};
+use digest::{KeyInit, Mac as DigestMac, OutputSizeUser};
+use hybrid_array::{Array, ArraySize};
 
 use super::crypto::{CryptoMac, CryptoMacAlgorithm};
 use super::{Mac, MacAlgorithm};
 
 pub struct CryptoEtmMacAlgorithm<
-    M: digest::Mac + KeyInit + Send + 'static,
-    KL: ArrayLength + 'static,
+    M: DigestMac + KeyInit + Send + 'static,
+    KL: ArraySize + 'static,
 >(pub PhantomData<M>, pub PhantomData<KL>);
 
-impl<M: digest::Mac + KeyInit + Send + 'static, KL: ArrayLength + 'static> MacAlgorithm
+impl<M: DigestMac + KeyInit + Send + 'static, KL: ArraySize + 'static> MacAlgorithm
     for CryptoEtmMacAlgorithm<M, KL>
 where
-    <M as OutputSizeUser>::OutputSize: ArrayLength,
+    <M as OutputSizeUser>::OutputSize: ArraySize,
 {
     fn key_len(&self) -> usize {
         CryptoMacAlgorithm::<M, KL>(self.0, self.1).key_len()
     }
 
-    fn make_mac(&self, mac_key: &[u8]) -> Box<dyn Mac + Send> {
-        let mut key = GenericArray::<u8, KL>::default();
+    fn make_mac(&self, mac_key: &[u8]) -> Result<Box<dyn Mac + Send>, crate::Error> {
+        let mut key = Array::<u8, KL>::default();
         key.copy_from_slice(mac_key);
-        Box::new(CryptoEtmMac::<M, KL>(CryptoMac::<M, KL> {
+        Ok(Box::new(CryptoEtmMac::<M, KL>(CryptoMac::<M, KL> {
             key,
             p: PhantomData,
-        })) as Box<dyn Mac + Send>
+        })) as Box<dyn Mac + Send>)
     }
 }
 
-pub struct CryptoEtmMac<M: digest::Mac + KeyInit + Send + 'static, KL: ArrayLength + 'static>(
+pub struct CryptoEtmMac<M: DigestMac + KeyInit + Send + 'static, KL: ArraySize + 'static>(
     CryptoMac<M, KL>,
 );
 
-impl<M: digest::Mac + KeyInit + Send + 'static, KL: ArrayLength + 'static> Mac
+impl<M: DigestMac + KeyInit + Send + 'static, KL: ArraySize + 'static> Mac
     for CryptoEtmMac<M, KL>
 where
-    <M as OutputSizeUser>::OutputSize: ArrayLength,
+    <M as OutputSizeUser>::OutputSize: ArraySize,
 {
     fn is_etm(&self) -> bool {
         true
