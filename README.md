@@ -117,6 +117,8 @@ This is a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Éti
   * Uses `russh::server` as the base for its own [SSH Server](https://github.com/moturus/motor-os/tree/main/src/bin/russhd). 
 * [Cubic VM](https://github.com/cubic-vm/cubic) - A lightweight command-line manager for virtual machines.
   * Uses `russh::client` and `russh_sftp::client` to access the virtual machine instances.
+* [ferrissh](https://crates.io/crates/ferrissh) - An async SSH CLI scraper library for network device automation in Rust.
+  * Uses russh::client for SSH transport, authentication, and interactive PTY sessions.
 
 ## Contributors ✨
 
