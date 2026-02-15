@@ -25,7 +25,7 @@ use aws_lc_rs::{
     },
     error::Unspecified,
 };
-use rand::RngCore;
+use rand_core::Rng;
 #[cfg(all(not(feature = "aws-lc-rs"), feature = "ring"))]
 use ring::{
     aead::{

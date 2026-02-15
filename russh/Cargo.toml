@@ -66,7 +66,7 @@ pbkdf2 = "0.12"
 pkcs1 = { version = "0.8.0-rc.4", optional = true }
 pkcs5 = "0.7"
 pkcs8 = { version = "0.10", features = ["pkcs5", "encryption", "std"] }
-rand_core = { version = "=0.10.0-rc-3" }
+rand_core = { version = "0.10.0" }
 rand.workspace = true
 ring = { version = "0.17.14", optional = true }
 rsa = { version = "0.10.0-rc.10", optional = true }

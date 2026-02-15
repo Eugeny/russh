@@ -13,7 +13,7 @@ env_logger = "0.6"
 futures = "0.3"
 hmac = "0.12"
 log = "0.4.11"
-rand = { version = "0.9", features = ["thread_rng"] }
+rand = { version = "0.10", features = ["thread_rng"] }
 sha1 = { version = "0.10.5", features = ["oid"] }
 sha2 = { version = "0.10.6", features = ["oid"] }
 signature = "2.2"
