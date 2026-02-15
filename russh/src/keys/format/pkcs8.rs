@@ -118,7 +118,7 @@ pub fn encode_pkcs8_encrypted(
     let pvi_bytes = encode_pkcs8(key)?;
     let pvi = PrivateKeyInfo::try_from(pvi_bytes.as_slice())?;
 
-    use rand::RngCore;
+    use rand_core::Rng;
     let mut rng = safe_rng();
     let mut salt = [0; 64];
     rng.fill_bytes(&mut salt);

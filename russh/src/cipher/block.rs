@@ -17,7 +17,7 @@ use std::marker::PhantomData;
 use aes::cipher::{IvSizeUser, KeyIvInit, KeySizeUser, StreamCipher};
 #[allow(deprecated)]
 use digest::generic_array::GenericArray as GenericArray_0_14;
-use rand::RngCore;
+use rand_core::Rng;
 
 use super::super::Error;
 use super::PACKET_LENGTH_LEN;
