@@ -119,6 +119,8 @@ This is a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Éti
   * Uses `russh::client` and `russh_sftp::client` to access the virtual machine instances.
 * [ferrissh](https://crates.io/crates/ferrissh) - An async SSH CLI scraper library for network device automation in Rust.
   * Uses russh::client for SSH transport, authentication, and interactive PTY sessions.
+* [Yazi](https://github.com/sxyazi/yazi) - Blazing fast terminal file manager written in Rust, based on async I/O.
+  * Uses `russh::client` to implement an async SFTP provider for remote file management.
 
 ## Contributors ✨
 
