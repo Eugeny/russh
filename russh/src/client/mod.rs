@@ -1140,6 +1140,7 @@ impl Session {
                 () = &mut keepalive_timer => {
                     if let Some(ref mut enc) = self.common.encrypted {
                         if matches!(enc.state, EncryptedState::Authenticated) {
+                            trace!("sending keep alive packet...");
                             self.common.alive_timeouts = self.common.alive_timeouts.saturating_add(1);
                             if self.common.config.keepalive_max != 0 && self.common.alive_timeouts > self.common.config.keepalive_max {
                                 debug!("Timeout, server not responding to keepalives");
