@@ -11,12 +11,12 @@ use sha2::{Sha256, Sha512};
 use ssh_encoding::{Decode, Encode, Reader, Writer};
 
 use self::groups::{
-    DhGroup, DH_GROUP1, DH_GROUP14, DH_GROUP15, DH_GROUP16, DH_GROUP17, DH_GROUP18,
+    DH_GROUP1, DH_GROUP14, DH_GROUP15, DH_GROUP16, DH_GROUP17, DH_GROUP18, DhGroup,
 };
-use super::{compute_keys, KexAlgorithm, KexAlgorithmImplementor, KexType, SharedSecret};
+use super::{KexAlgorithm, KexAlgorithmImplementor, KexType, SharedSecret, compute_keys};
 use crate::client::GexParams;
 use crate::session::Exchange;
-use crate::{cipher, mac, msg, CryptoVec, Error};
+use crate::{CryptoVec, Error, cipher, mac, msg};
 
 pub(crate) struct DhGroup15Sha512KexType {}
 

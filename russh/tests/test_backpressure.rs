@@ -2,10 +2,9 @@ use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::Arc;
 
 use futures::FutureExt;
-use rand::RngCore;
+use rand::{Rng, rng};
 use russh::keys::PrivateKeyWithHashAlg;
 use russh::keys::key::safe_rng;
-use russh::keys::ssh_key::rand_core::OsRng;
 use russh::server::{self, Auth, Msg, Server as _, Session};
 use russh::{Channel, ChannelMsg, client};
 use ssh_key::PrivateKey;
@@ -38,7 +37,7 @@ async fn test_backpressure() -> Result<(), anyhow::Error> {
 
 async fn stream(addr: SocketAddr, data: &[u8], tx: watch::Sender<()>) -> Result<(), anyhow::Error> {
     let config = Arc::new(client::Config::default());
-    let key = Arc::new(PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap());
+    let key = Arc::new(PrivateKey::random(&mut rng(), ssh_key::Algorithm::Ed25519).unwrap());
 
     let mut session = russh::client::connect(config, addr, Client).await?;
     let channel = match session
@@ -95,7 +94,7 @@ struct Server {
 impl Server {
     async fn run(addr: SocketAddr, rx: watch::Receiver<()>) {
         let config = Arc::new(server::Config {
-            keys: vec![PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap()],
+            keys: vec![PrivateKey::random(&mut rng(), ssh_key::Algorithm::Ed25519).unwrap()],
             window_size: WINDOW_SIZE as u32,
             channel_buffer_size: CHANNEL_BUFFER_SIZE,
             ..Default::default()

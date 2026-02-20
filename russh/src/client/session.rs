@@ -4,7 +4,7 @@ use tokio::sync::oneshot;
 
 use crate::client::Session;
 use crate::session::EncryptedState;
-use crate::{map_err, msg, ChannelId, CryptoVec, Disconnect, Pty, Sig};
+use crate::{ChannelId, CryptoVec, Disconnect, Pty, Sig, map_err, msg};
 
 impl Session {
     fn channel_open_generic<F>(

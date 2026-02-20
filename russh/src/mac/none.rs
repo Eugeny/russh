@@ -9,8 +9,8 @@ impl MacAlgorithm for NoMacAlgorithm {
         0
     }
 
-    fn make_mac(&self, _: &[u8]) -> Box<dyn Mac + Send> {
-        Box::new(NoMac {})
+    fn make_mac(&self, _: &[u8]) -> Result<Box<dyn Mac + Send>, crate::Error> {
+        Ok(Box::new(NoMac {}))
     }
 }
 

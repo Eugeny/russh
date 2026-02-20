@@ -7,13 +7,13 @@ use kex::ServerKex;
 use log::debug;
 use negotiation::parse_kex_algo_list;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
-use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::mpsc::{Receiver, Sender, channel};
 use tokio::sync::oneshot;
 
 use super::*;
 use crate::channels::{Channel, ChannelMsg, ChannelReadHalf, ChannelRef, ChannelWriteHalf};
 use crate::helpers::NameList;
-use crate::kex::{KexCause, SessionKexState, EXTENSION_SUPPORT_AS_CLIENT};
+use crate::kex::{EXTENSION_SUPPORT_AS_CLIENT, KexCause, SessionKexState};
 use crate::{map_err, msg};
 
 /// A connected server session. This type is unique to a client.
@@ -78,7 +78,7 @@ pub enum Msg {
         port: u32,
     },
     Disconnect {
-        reason: crate::Disconnect,
+        reason: Disconnect,
         description: String,
         language_tag: String,
     },
@@ -396,7 +396,7 @@ impl Handle {
                     });
                 }
                 Some(ChannelMsg::OpenFailure(reason)) => {
-                    return Err(Error::ChannelOpenFailure(reason))
+                    return Err(Error::ChannelOpenFailure(reason));
                 }
                 None => {
                     return Err(Error::Disconnect);
@@ -521,7 +521,7 @@ impl Session {
 
                     match pkt.buffer.first() {
                         None => (),
-                        Some(&crate::msg::DISCONNECT) => {
+                        Some(&msg::DISCONNECT) => {
                             debug!("break");
                             is_reading = Some((stream_read, buffer, opening_cipher));
                             break;
@@ -546,14 +546,14 @@ impl Session {
                     self.common.alive_timeouts = self.common.alive_timeouts.saturating_add(1);
                     if self.common.config.keepalive_max != 0 && self.common.alive_timeouts > self.common.config.keepalive_max {
                         debug!("Timeout, client not responding to keepalives");
-                        return Err(crate::Error::KeepaliveTimeout.into());
+                        return Err(Error::KeepaliveTimeout.into());
                     }
                     sent_keepalive = true;
                     self.keepalive_request()?;
                 }
                 () = &mut inactivity_timer => {
                     debug!("timeout");
-                    return Err(crate::Error::InactivityTimeout.into());
+                    return Err(Error::InactivityTimeout.into());
                 }
                 msg = self.receiver.recv(), if !self.kex.active() => {
                     match msg {
@@ -831,7 +831,7 @@ impl Session {
     /// Send a "success" reply to a channel request. Always call this
     /// function if the request was successful (it checks whether the
     /// client expects an answer).
-    pub fn channel_success(&mut self, channel: ChannelId) -> Result<(), crate::Error> {
+    pub fn channel_success(&mut self, channel: ChannelId) -> Result<(), Error> {
         if let Some(ref mut enc) = self.common.encrypted {
             if let Some(channel) = enc.channels.get_mut(&channel) {
                 assert!(channel.confirmed);
@@ -849,7 +849,7 @@ impl Session {
     }
 
     /// Send a "failure" reply to a global request.
-    pub fn channel_failure(&mut self, channel: ChannelId) -> Result<(), crate::Error> {
+    pub fn channel_failure(&mut self, channel: ChannelId) -> Result<(), Error> {
         if let Some(ref mut enc) = self.common.encrypted {
             if let Some(channel) = enc.channels.get_mut(&channel) {
                 assert!(channel.confirmed);
@@ -872,7 +872,7 @@ impl Session {
         reason: ChannelOpenFailure,
         description: &str,
         language: &str,
-    ) -> Result<(), crate::Error> {
+    ) -> Result<(), Error> {
         if let Some(ref mut enc) = self.common.encrypted {
             push_packet!(enc.write, {
                 enc.write.push(msg::CHANNEL_OPEN_FAILURE);
@@ -1185,9 +1185,8 @@ impl Session {
         if let Some(ref mut enc) = self.common.encrypted {
             let want_reply = reply_channel.is_some();
             if let Some(reply_channel) = reply_channel {
-                self.open_global_requests.push_back(
-                    crate::session::GlobalRequestResponse::TcpIpForward(reply_channel),
-                );
+                self.open_global_requests
+                    .push_back(GlobalRequestResponse::TcpIpForward(reply_channel));
             }
             push_packet!(enc.write, {
                 enc.write.push(msg::GLOBAL_REQUEST);
@@ -1210,9 +1209,8 @@ impl Session {
         if let Some(ref mut enc) = self.common.encrypted {
             let want_reply = reply_channel.is_some();
             if let Some(reply_channel) = reply_channel {
-                self.open_global_requests.push_back(
-                    crate::session::GlobalRequestResponse::CancelTcpIpForward(reply_channel),
-                );
+                self.open_global_requests
+                    .push_back(GlobalRequestResponse::CancelTcpIpForward(reply_channel));
             }
             push_packet!(enc.write, {
                 msg::GLOBAL_REQUEST.encode(&mut enc.write)?;
@@ -1248,7 +1246,7 @@ impl Session {
                 };
                 if let Ok(kex_string) = String::decode(&mut r) {
                     use super::negotiation::Select;
-                    key_extension_client = super::negotiation::Server::select(
+                    key_extension_client = negotiation::Server::select(
                         &[EXTENSION_SUPPORT_AS_CLIENT],
                         &parse_kex_algo_list(&kex_string),
                         AlgorithmKind::Kex,

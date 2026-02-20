@@ -6,11 +6,11 @@ use log::debug;
 use ssh_encoding::{Encode, Writer};
 
 use super::{
-    compute_keys, encode_mpint, KexAlgorithm, KexAlgorithmImplementor, KexType, SharedSecret,
+    KexAlgorithm, KexAlgorithmImplementor, KexType, SharedSecret, compute_keys, encode_mpint,
 };
 use crate::mac::{self};
 use crate::session::Exchange;
-use crate::{cipher, msg, CryptoVec};
+use crate::{CryptoVec, cipher, msg};
 
 pub struct Curve25519KexType {}
 

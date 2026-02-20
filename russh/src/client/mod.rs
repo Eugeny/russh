@@ -56,14 +56,15 @@ use tokio::sync::mpsc::{
 };
 use tokio::sync::oneshot;
 
+use crate::Error::{InactivityTimeout, KeepaliveTimeout};
 pub use crate::auth::AuthResult;
 use crate::channels::{
     Channel, ChannelMsg, ChannelReadHalf, ChannelRef, ChannelWriteHalf, WindowSizeRef,
 };
 use crate::cipher::{self, OpeningKey, clear};
-use crate::kex::{KexAlgorithmImplementor, KexCause, KexProgress, SessionKexState};
+use crate::kex::{KexCause, KexProgress, SessionKexState};
 use crate::keys::PrivateKeyWithHashAlg;
-use crate::msg::{is_kex_msg, validate_server_msg_strict_kex};
+use crate::msg::{DISCONNECT, is_kex_msg, validate_server_msg_strict_kex};
 use crate::session::{CommonSession, EncryptedState, GlobalRequestResponse, NewKeys};
 use crate::ssh_read::SshRead;
 use crate::sshbuffer::{IncomingSshPacket, PacketWriter, SSHBuffer, SshId};
@@ -116,7 +117,7 @@ enum Reply {
     },
     ChannelOpenFailure,
     SignRequest {
-        key: ssh_key::PublicKey,
+        key: PublicKey,
         data: CryptoVec,
     },
     AuthInfoRequest {
@@ -240,13 +241,13 @@ pub struct Prompt {
 
 #[derive(Debug)]
 pub struct RemoteDisconnectInfo {
-    pub reason_code: crate::Disconnect,
+    pub reason_code: Disconnect,
     pub message: String,
     pub lang_tag: String,
 }
 
 #[derive(Debug)]
-pub enum DisconnectReason<E: From<crate::Error> + Send> {
+pub enum DisconnectReason<E: From<Error> + Send> {
     ReceivedDisconnect(RemoteDisconnectInfo),
     Error(E),
 }
@@ -276,7 +277,7 @@ impl<H: Handler> Handle<H> {
     pub async fn authenticate_none<U: Into<String>>(
         &mut self,
         user: U,
-    ) -> Result<AuthResult, crate::Error> {
+    ) -> Result<AuthResult, Error> {
         let user = user.into();
         self.sender
             .send(Msg::Authenticate {
@@ -284,7 +285,7 @@ impl<H: Handler> Handle<H> {
                 method: auth::Method::None,
             })
             .await
-            .map_err(|_| crate::Error::SendError)?;
+            .map_err(|_| Error::SendError)?;
         self.wait_recv_reply().await
     }
 
@@ -293,7 +294,7 @@ impl<H: Handler> Handle<H> {
         &mut self,
         user: U,
         password: P,
-    ) -> Result<AuthResult, crate::Error> {
+    ) -> Result<AuthResult, Error> {
         let user = user.into();
         self.sender
             .send(Msg::Authenticate {
@@ -303,7 +304,7 @@ impl<H: Handler> Handle<H> {
                 },
             })
             .await
-            .map_err(|_| crate::Error::SendError)?;
+            .map_err(|_| Error::SendError)?;
         self.wait_recv_reply().await
     }
 
@@ -317,7 +318,7 @@ impl<H: Handler> Handle<H> {
         &mut self,
         user: U,
         submethods: S,
-    ) -> Result<KeyboardInteractiveAuthResponse, crate::Error> {
+    ) -> Result<KeyboardInteractiveAuthResponse, Error> {
         self.sender
             .send(Msg::Authenticate {
                 user: user.into(),
@@ -326,7 +327,7 @@ impl<H: Handler> Handle<H> {
                 },
             })
             .await
-            .map_err(|_| crate::Error::SendError)?;
+            .map_err(|_| Error::SendError)?;
         self.wait_recv_keyboard_interactive_reply().await
     }
 
@@ -339,17 +340,17 @@ impl<H: Handler> Handle<H> {
     pub async fn authenticate_keyboard_interactive_respond(
         &mut self,
         responses: Vec<String>,
-    ) -> Result<KeyboardInteractiveAuthResponse, crate::Error> {
+    ) -> Result<KeyboardInteractiveAuthResponse, Error> {
         self.sender
             .send(Msg::AuthInfoResponse { responses })
             .await
-            .map_err(|_| crate::Error::SendError)?;
+            .map_err(|_| Error::SendError)?;
         self.wait_recv_keyboard_interactive_reply().await
     }
 
     async fn wait_recv_keyboard_interactive_reply(
         &mut self,
-    ) -> Result<KeyboardInteractiveAuthResponse, crate::Error> {
+    ) -> Result<KeyboardInteractiveAuthResponse, Error> {
         loop {
             match self.receiver.recv().await {
                 Some(Reply::AuthSuccess) => return Ok(KeyboardInteractiveAuthResponse::Success),
@@ -373,13 +374,13 @@ impl<H: Handler> Handle<H> {
                         prompts,
                     });
                 }
-                None => return Err(crate::Error::RecvError),
+                None => return Err(Error::RecvError),
                 _ => {}
             }
         }
     }
 
-    async fn wait_recv_reply(&mut self) -> Result<AuthResult, crate::Error> {
+    async fn wait_recv_reply(&mut self) -> Result<AuthResult, Error> {
         loop {
             match self.receiver.recv().await {
                 Some(Reply::AuthSuccess) => return Ok(AuthResult::Success),
@@ -414,7 +415,7 @@ impl<H: Handler> Handle<H> {
         &mut self,
         user: U,
         key: PrivateKeyWithHashAlg,
-    ) -> Result<AuthResult, crate::Error> {
+    ) -> Result<AuthResult, Error> {
         let user = user.into();
         self.sender
             .send(Msg::Authenticate {
@@ -422,7 +423,7 @@ impl<H: Handler> Handle<H> {
                 method: auth::Method::PublicKey { key },
             })
             .await
-            .map_err(|_| crate::Error::SendError)?;
+            .map_err(|_| Error::SendError)?;
         self.wait_recv_reply().await
     }
 
@@ -432,7 +433,7 @@ impl<H: Handler> Handle<H> {
         user: U,
         key: Arc<PrivateKey>,
         cert: Certificate,
-    ) -> Result<AuthResult, crate::Error> {
+    ) -> Result<AuthResult, Error> {
         let user = user.into();
         self.sender
             .send(Msg::Authenticate {
@@ -440,7 +441,7 @@ impl<H: Handler> Handle<H> {
                 method: auth::Method::OpenSshCertificate { key, cert },
             })
             .await
-            .map_err(|_| crate::Error::SendError)?;
+            .map_err(|_| Error::SendError)?;
         self.wait_recv_reply().await
     }
 
@@ -450,7 +451,7 @@ impl<H: Handler> Handle<H> {
     pub async fn authenticate_publickey_with<U: Into<String>, S: auth::Signer>(
         &mut self,
         user: U,
-        key: ssh_key::PublicKey,
+        key: PublicKey,
         hash_alg: Option<HashAlg>,
         signer: &mut S,
     ) -> Result<AuthResult, S::Error> {
@@ -505,7 +506,7 @@ impl<H: Handler> Handle<H> {
         &self,
         mut receiver: Receiver<ChannelMsg>,
         window_size_ref: WindowSizeRef,
-    ) -> Result<Channel<Msg>, crate::Error> {
+    ) -> Result<Channel<Msg>, Error> {
         loop {
             match receiver.recv().await {
                 Some(ChannelMsg::Open {
@@ -526,11 +527,11 @@ impl<H: Handler> Handle<H> {
                     });
                 }
                 Some(ChannelMsg::OpenFailure(reason)) => {
-                    return Err(crate::Error::ChannelOpenFailure(reason));
+                    return Err(Error::ChannelOpenFailure(reason));
                 }
                 None => {
                     debug!("channel confirmation sender was dropped");
-                    return Err(crate::Error::Disconnect);
+                    return Err(Error::Disconnect);
                 }
                 msg => {
                     debug!("msg = {msg:?}");
@@ -541,7 +542,7 @@ impl<H: Handler> Handle<H> {
 
     /// See [`Handle::best_supported_rsa_hash`].
     #[cfg(not(target_arch = "wasm32"))]
-    async fn await_extension_info(&self, extension_name: String) -> Result<(), crate::Error> {
+    async fn await_extension_info(&self, extension_name: String) -> Result<(), Error> {
         let (sender, receiver) = oneshot::channel();
         self.sender
             .send(Msg::AwaitExtensionInfo {
@@ -549,7 +550,7 @@ impl<H: Handler> Handle<H> {
                 reply_channel: sender,
             })
             .await
-            .map_err(|_| crate::Error::SendError)?;
+            .map_err(|_| Error::SendError)?;
         let _ = tokio::time::timeout(Duration::from_secs(1), receiver).await;
         Ok(())
     }
@@ -581,14 +582,10 @@ impl<H: Handler> Handle<H> {
                 reply_channel: sender,
             })
             .await
-            .map_err(|_| crate::Error::SendError)?;
+            .map_err(|_| Error::SendError)?;
 
         if let Some(ssa) = receiver.await.map_err(|_| Error::Inconsistent)? {
-            let possible_algs = [
-                Some(ssh_key::HashAlg::Sha512),
-                Some(ssh_key::HashAlg::Sha256),
-                None,
-            ];
+            let possible_algs = [Some(HashAlg::Sha512), Some(HashAlg::Sha256), None];
             for alg in possible_algs.into_iter() {
                 if ssa.contains(&Algorithm::Rsa { hash: alg }) {
                     return Ok(Some(alg));
@@ -604,7 +601,7 @@ impl<H: Handler> Handle<H> {
     /// connection is authenticated, but the channel only becomes
     /// usable when it's confirmed by the server, as indicated by the
     /// `confirmed` field of the corresponding `Channel`.
-    pub async fn channel_open_session(&self) -> Result<Channel<Msg>, crate::Error> {
+    pub async fn channel_open_session(&self) -> Result<Channel<Msg>, Error> {
         let (sender, receiver) = channel(self.channel_buffer_size);
         let channel_ref = ChannelRef::new(sender);
         let window_size_ref = channel_ref.window_size().clone();
@@ -612,7 +609,7 @@ impl<H: Handler> Handle<H> {
         self.sender
             .send(Msg::ChannelOpenSession { channel_ref })
             .await
-            .map_err(|_| crate::Error::SendError)?;
+            .map_err(|_| Error::SendError)?;
         self.wait_channel_confirmation(receiver, window_size_ref)
             .await
     }
@@ -622,7 +619,7 @@ impl<H: Handler> Handle<H> {
         &self,
         originator_address: A,
         originator_port: u32,
-    ) -> Result<Channel<Msg>, crate::Error> {
+    ) -> Result<Channel<Msg>, Error> {
         let (sender, receiver) = channel(self.channel_buffer_size);
         let channel_ref = ChannelRef::new(sender);
         let window_size_ref = channel_ref.window_size().clone();
@@ -634,7 +631,7 @@ impl<H: Handler> Handle<H> {
                 channel_ref,
             })
             .await
-            .map_err(|_| crate::Error::SendError)?;
+            .map_err(|_| Error::SendError)?;
         self.wait_channel_confirmation(receiver, window_size_ref)
             .await
     }
@@ -653,7 +650,7 @@ impl<H: Handler> Handle<H> {
         port_to_connect: u32,
         originator_address: B,
         originator_port: u32,
-    ) -> Result<Channel<Msg>, crate::Error> {
+    ) -> Result<Channel<Msg>, Error> {
         let (sender, receiver) = channel(self.channel_buffer_size);
         let channel_ref = ChannelRef::new(sender);
         let window_size_ref = channel_ref.window_size().clone();
@@ -667,7 +664,7 @@ impl<H: Handler> Handle<H> {
                 channel_ref,
             })
             .await
-            .map_err(|_| crate::Error::SendError)?;
+            .map_err(|_| Error::SendError)?;
         self.wait_channel_confirmation(receiver, window_size_ref)
             .await
     }
@@ -675,7 +672,7 @@ impl<H: Handler> Handle<H> {
     pub async fn channel_open_direct_streamlocal<S: Into<String>>(
         &self,
         socket_path: S,
-    ) -> Result<Channel<Msg>, crate::Error> {
+    ) -> Result<Channel<Msg>, Error> {
         let (sender, receiver) = channel(self.channel_buffer_size);
         let channel_ref = ChannelRef::new(sender);
         let window_size_ref = channel_ref.window_size().clone();
@@ -686,7 +683,7 @@ impl<H: Handler> Handle<H> {
                 channel_ref,
             })
             .await
-            .map_err(|_| crate::Error::SendError)?;
+            .map_err(|_| Error::SendError)?;
         self.wait_channel_confirmation(receiver, window_size_ref)
             .await
     }
@@ -698,7 +695,7 @@ impl<H: Handler> Handle<H> {
         &mut self,
         address: A,
         port: u32,
-    ) -> Result<u32, crate::Error> {
+    ) -> Result<u32, Error> {
         let (reply_send, reply_recv) = oneshot::channel();
         self.sender
             .send(Msg::TcpIpForward {
@@ -707,14 +704,14 @@ impl<H: Handler> Handle<H> {
                 port,
             })
             .await
-            .map_err(|_| crate::Error::SendError)?;
+            .map_err(|_| Error::SendError)?;
 
         match reply_recv.await {
             Ok(Some(port)) => Ok(port),
-            Ok(None) => Err(crate::Error::RequestDenied),
+            Ok(None) => Err(Error::RequestDenied),
             Err(e) => {
                 error!("Unable to receive TcpIpForward result: {e:?}");
-                Err(crate::Error::Disconnect)
+                Err(Error::Disconnect)
             }
         }
     }
@@ -724,7 +721,7 @@ impl<H: Handler> Handle<H> {
         &self,
         address: A,
         port: u32,
-    ) -> Result<(), crate::Error> {
+    ) -> Result<(), Error> {
         let (reply_send, reply_recv) = oneshot::channel();
         self.sender
             .send(Msg::CancelTcpIpForward {
@@ -733,14 +730,14 @@ impl<H: Handler> Handle<H> {
                 port,
             })
             .await
-            .map_err(|_| crate::Error::SendError)?;
+            .map_err(|_| Error::SendError)?;
 
         match reply_recv.await {
             Ok(true) => Ok(()),
-            Ok(false) => Err(crate::Error::RequestDenied),
+            Ok(false) => Err(Error::RequestDenied),
             Err(e) => {
                 error!("Unable to receive CancelTcpIpForward result: {e:?}");
-                Err(crate::Error::Disconnect)
+                Err(Error::Disconnect)
             }
         }
     }
@@ -749,7 +746,7 @@ impl<H: Handler> Handle<H> {
     pub async fn streamlocal_forward<A: Into<String>>(
         &mut self,
         socket_path: A,
-    ) -> Result<(), crate::Error> {
+    ) -> Result<(), Error> {
         let (reply_send, reply_recv) = oneshot::channel();
         self.sender
             .send(Msg::StreamLocalForward {
@@ -757,14 +754,14 @@ impl<H: Handler> Handle<H> {
                 socket_path: socket_path.into(),
             })
             .await
-            .map_err(|_| crate::Error::SendError)?;
+            .map_err(|_| Error::SendError)?;
 
         match reply_recv.await {
             Ok(true) => Ok(()),
-            Ok(false) => Err(crate::Error::RequestDenied),
+            Ok(false) => Err(Error::RequestDenied),
             Err(e) => {
                 error!("Unable to receive StreamLocalForward result: {e:?}");
-                Err(crate::Error::Disconnect)
+                Err(Error::Disconnect)
             }
         }
     }
@@ -773,7 +770,7 @@ impl<H: Handler> Handle<H> {
     pub async fn cancel_streamlocal_forward<A: Into<String>>(
         &self,
         socket_path: A,
-    ) -> Result<(), crate::Error> {
+    ) -> Result<(), Error> {
         let (reply_send, reply_recv) = oneshot::channel();
         self.sender
             .send(Msg::CancelStreamLocalForward {
@@ -781,14 +778,14 @@ impl<H: Handler> Handle<H> {
                 socket_path: socket_path.into(),
             })
             .await
-            .map_err(|_| crate::Error::SendError)?;
+            .map_err(|_| Error::SendError)?;
 
         match reply_recv.await {
             Ok(true) => Ok(()),
-            Ok(false) => Err(crate::Error::RequestDenied),
+            Ok(false) => Err(Error::RequestDenied),
             Err(e) => {
                 error!("Unable to receive CancelStreamLocalForward result: {e:?}");
-                Err(crate::Error::Disconnect)
+                Err(Error::Disconnect)
             }
         }
     }
@@ -799,7 +796,7 @@ impl<H: Handler> Handle<H> {
         reason: Disconnect,
         description: &str,
         language_tag: &str,
-    ) -> Result<(), crate::Error> {
+    ) -> Result<(), Error> {
         self.sender
             .send(Msg::Disconnect {
                 reason,
@@ -807,7 +804,7 @@ impl<H: Handler> Handle<H> {
                 language_tag: language_tag.into(),
             })
             .await
-            .map_err(|_| crate::Error::SendError)?;
+            .map_err(|_| Error::SendError)?;
         Ok(())
     }
 
@@ -871,7 +868,7 @@ impl<H: Handler> Future for Handle<H> {
         match Future::poll(Pin::new(&mut self.join), cx) {
             Poll::Ready(r) => Poll::Ready(match r {
                 Ok(Ok(x)) => Ok(x),
-                Err(e) => Err(crate::Error::from(e).into()),
+                Err(e) => Err(Error::from(e).into()),
                 Ok(Err(e)) => Err(e),
             }),
             Poll::Pending => Poll::Pending,
@@ -903,7 +900,7 @@ pub async fn connect<H: Handler + Send + 'static, A: tokio::net::ToSocketAddrs>(
 }
 
 /// Connect a stream to a server. This stream must implement
-/// [`tokio::io::AsyncRead`] and [`tokio::io::AsyncWrite`], as well as [`Unpin`]
+/// [`AsyncRead`] and [`AsyncWrite`], as well as [`Unpin`]
 /// and [`Send`]. Typically, you may prefer to use [`connect`], which uses a
 /// [`tokio::net::TcpStream`] and then calls this function under the hood.
 pub async fn connect_stream<H, R>(
@@ -965,8 +962,8 @@ where
         // kex_done_signal Sender is dropped when the session
         // fails before a succesful key exchange
         debug!("kex_done_signal sender was dropped {err:?}");
-        join.await.map_err(crate::Error::Join)??;
-        return Err(H::Error::from(crate::Error::Disconnect));
+        join.await.map_err(Error::Join)??;
+        return Err(H::Error::from(Error::Disconnect));
     }
 
     Ok(Handle {
@@ -981,7 +978,7 @@ async fn start_reading<R: AsyncRead + Unpin>(
     mut stream_read: R,
     mut buffer: SSHBuffer,
     mut cipher: Box<dyn OpeningKey + Send>,
-) -> Result<(usize, R, SSHBuffer, Box<dyn OpeningKey + Send>), crate::Error> {
+) -> Result<(usize, R, SSHBuffer, Box<dyn OpeningKey + Send>), Error> {
     buffer.buffer.clear();
     let n = cipher::read(&mut stream_read, &mut buffer, &mut *cipher).await?;
     Ok((n, stream_read, buffer, cipher))
@@ -1069,7 +1066,7 @@ impl Session {
                     // We're better off passing the error into the Handler
                     debug!("disconnected {e:?}");
                     handler.disconnected(DisconnectReason::Error(e)).await?;
-                    Err(H::Error::from(crate::Error::Disconnect))
+                    Err(H::Error::from(Error::Disconnect))
                 }
             }
         }
@@ -1080,7 +1077,7 @@ impl Session {
         stream_read: SshRead<ReadHalf<R>>,
         stream_write: &mut WriteHalf<R>,
         handler: &mut H,
-        kex_done_signal: &mut Option<tokio::sync::oneshot::Sender<()>>,
+        kex_done_signal: &mut Option<oneshot::Sender<()>>,
     ) -> Result<RemoteDisconnectInfo, H::Error> {
         let mut result: Result<RemoteDisconnectInfo, H::Error> = Err(Error::Disconnect.into());
         self.flush()?;
@@ -1124,7 +1121,7 @@ impl Session {
                     let mut pkt = self.maybe_decompress(&buffer)?;
                     if !pkt.buffer.is_empty() {
                         #[allow(clippy::indexing_slicing)] // length checked
-                        if pkt.buffer[0] == crate::msg::DISCONNECT {
+                        if pkt.buffer[0] == DISCONNECT {
                             debug!("received disconnect");
                             result = self.process_disconnect(&pkt).map_err(H::Error::from);
                         } else {
@@ -1141,14 +1138,14 @@ impl Session {
                     self.common.alive_timeouts = self.common.alive_timeouts.saturating_add(1);
                     if self.common.config.keepalive_max != 0 && self.common.alive_timeouts > self.common.config.keepalive_max {
                         debug!("Timeout, server not responding to keepalives");
-                        return Err(crate::Error::KeepaliveTimeout.into());
+                        return Err(KeepaliveTimeout.into());
                     }
                     sent_keepalive = true;
                     self.send_keepalive(true)?;
                 }
                 () = &mut inactivity_timer => {
                     debug!("timeout");
-                    return Err(crate::Error::InactivityTimeout.into());
+                    return Err(InactivityTimeout.into());
                 }
                 msg = self.receiver.recv(), if !self.kex.active() => {
                     match msg {
@@ -1181,7 +1178,7 @@ impl Session {
                         }
                     }
                 }
-            };
+            }
 
             self.flush()?;
             map_err!(self.common.packet_writer.flush_into(stream_write).await)?;
@@ -1242,7 +1239,7 @@ impl Session {
         })
     }
 
-    fn handle_msg(&mut self, msg: Msg) -> Result<(), crate::Error> {
+    fn handle_msg(&mut self, msg: Msg) -> Result<(), Error> {
         match msg {
             Msg::Authenticate { user, method } => {
                 self.write_auth_request_if_needed(&user, method)?;
@@ -1426,7 +1423,7 @@ impl Session {
         Ok(())
     }
 
-    fn begin_rekey(&mut self) -> Result<(), crate::Error> {
+    fn begin_rekey(&mut self) -> Result<(), Error> {
         debug!("beginning re-key");
         let mut kex = ClientKex::new(
             self.common.config.clone(),
@@ -1448,7 +1445,7 @@ impl Session {
 
     /// Flush the temporary cleartext buffer into the encryption
     /// buffer. This does *not* flush to the socket.
-    fn flush(&mut self) -> Result<(), crate::Error> {
+    fn flush(&mut self) -> Result<(), Error> {
         if let Some(ref mut enc) = self.common.encrypted {
             if enc.flush(
                 &self.common.config.as_ref().limits,
@@ -1474,7 +1471,7 @@ impl Session {
 async fn reply<H: Handler>(
     session: &mut Session,
     handler: &mut H,
-    kex_done_signal: &mut Option<tokio::sync::oneshot::Sender<()>>,
+    kex_done_signal: &mut Option<oneshot::Sender<()>>,
     pkt: &mut IncomingSshPacket,
 ) -> Result<(), H::Error> {
     if let Some(message_type) = pkt.buffer.first() {
@@ -1523,10 +1520,17 @@ async fn reply<H: Handler>(
                     session.common.strict_kex =
                         session.common.strict_kex || newkeys.names.strict_kex();
 
-                    // Call the kex_done handler before consuming newkeys
-                    let shared_secret = newkeys.kex.shared_secret_bytes();
+                    // Call the kex_done handler before consuming newkeys.
+                    //
+                    // We must *own* the shared secret bytes for the duration of the async
+                    // callback, since `shared_secret_bytes()` returns a reference into `kex`.
+                    let shared_secret_owned: Option<Vec<u8>> =
+                        crate::kex::KexAlgorithmImplementor::shared_secret_bytes(&newkeys.kex)
+                            .map(|s| s.to_vec());
+                    let shared_secret_ref = shared_secret_owned.as_deref();
+
                     handler
-                        .kex_done(shared_secret, &newkeys.names, session)
+                        .kex_done(shared_secret_ref, &newkeys.names, session)
                         .await?;
 
                     if let Some(ref mut enc) = session.common.encrypted {
@@ -1546,7 +1550,7 @@ async fn reply<H: Handler>(
                         if let Some(server_host_key) = &server_host_key {
                             let check = handler.check_server_key(server_host_key).await?;
                             if !check {
-                                return Err(crate::Error::UnknownKey.into());
+                                return Err(Error::UnknownKey.into());
                             }
                         }
 
@@ -1676,9 +1680,9 @@ pub struct Config {
     /// Lists of preferred algorithms.
     pub preferred: negotiation::Preferred,
     /// Time after which the connection is garbage-collected.
-    pub inactivity_timeout: Option<std::time::Duration>,
+    pub inactivity_timeout: Option<Duration>,
     /// If nothing is received from the server for this amount of time, send a keepalive message.
-    pub keepalive_interval: Option<std::time::Duration>,
+    pub keepalive_interval: Option<Duration>,
     /// If this many keepalives have been sent without reply, close the connection.
     pub keepalive_max: usize,
     /// Whether to expect and wait for an authentication call.
@@ -1722,12 +1726,10 @@ impl Default for Config {
 /// and you can simply define them as `async fn` instead.
 #[cfg_attr(feature = "async-trait", async_trait::async_trait)]
 pub trait Handler: Sized + Send {
-    type Error: From<crate::Error> + Send + core::fmt::Debug;
+    type Error: From<Error> + Send + core::fmt::Debug;
 
-    /// Called when the server sends us an authentication banner. This
-    /// is usually meant to be shown to the user, see
-    /// [RFC4252](https://tools.ietf.org/html/rfc4252#section-5.4) for
-    /// more details.
+    /// Called when the server sends us an authentication banner. This is usually meant to be shown to the user, see
+    /// [RFC4252](https://tools.ietf.org/html/rfc4252#section-5.4) for more details.
     #[allow(unused_variables)]
     fn auth_banner(
         &mut self,
@@ -1743,7 +1745,7 @@ pub trait Handler: Sized + Send {
     #[allow(unused_variables)]
     fn check_server_key(
         &mut self,
-        server_public_key: &ssh_key::PublicKey,
+        server_public_key: &PublicKey,
     ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
         async { Ok(false) }
     }

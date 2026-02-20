@@ -14,21 +14,14 @@ ssh-encoding = { workspace = true, optional = true }
 log.workspace = true
 
 [target.'cfg(unix)'.dependencies]
-nix = { version = "0.29", features = ["mman"] }
+nix.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
-winapi = { version = "0.3", features = [
-    "basetsd",
-    "minwindef",
-    "memoryapi",
-    "errhandlingapi",
-    "sysinfoapi",
-    "impl-default",
-] }
-libc = "0.2"
+winapi.workspace = true
+libc.workspace = true
 
 [dev-dependencies]
-wasm-bindgen-test = "0.3.46"
+wasm-bindgen-test.workspace = true
 
 [features]
 ssh-encoding = ["dep:ssh-encoding"]

@@ -14,13 +14,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v2
+      - uses: actions/checkout@v6
 
-    - name: Build (no features enabled)
-      run: cargo build --verbose
+      - name: Build (no features enabled)
+        run: cargo build --verbose
 
-    - name: Check semver compatibility (russh)
-      uses: obi1kenobi/cargo-semver-checks-action@v2
-      continue-on-error: true
-      with:
-        package: russh
+      - name: Check semver compatibility (russh)
+        uses: obi1kenobi/cargo-semver-checks-action@v2
+        continue-on-error: true
+        with:
+          package: russh

@@ -3,31 +3,97 @@ members = ["russh", "russh-config", "cryptovec", "pageant", "russh-util"]
 resolver = "2"
 
 [workspace.dependencies]
-aes = "0.8"
-async-trait = "0.1.50"
-byteorder = "1.4"
-bytes = "1.7"
-digest = "0.10"
-delegate = "0.13"
-env_logger = "0.6"
+# Workspace Members
+pageant = { version = "0.2.0", path = "pageant" }
+russh-config = { version = "0.57.0", path = "russh-config" }
+russh-cryptovec = { version = "0.52.0", path = "cryptovec" }
+russh-util = { version = "0.52.0", path = "russh-util" }
+
+# Async & Runtime
+async-trait = "0.1.89"
 futures = "0.3"
+tokio = { version = "1.49.0" }
+tokio-fd = "0.3"
+tokio-stream = { version = "0.1.18", features = ["net", "sync"] }
+wasm-bindgen-futures = "0.4.58"
+
+# Cryptography & SSH
+aes = "0.9.0-rc.4"
+aws-lc-rs = "1.15.4"
+block-padding = "0.4.2"
+cbc = "0.2.0-rc.3"
+ctr = "0.10.0-rc.3"
+curve25519-dalek = "5.0.0-pre.6"
+der = "0.8.0-rc.10"
+des = "0.9.0-rc.3"
+digest = "0.11.0-rc.11"
+ed25519-dalek = { version = "3.0.0-pre.6", features = ["rand_core", "pkcs8"] }
+elliptic-curve = { version = "0.14.0-rc.28", features = ["ecdh"] }
+hybrid-array = "0.4.7"
+hmac = "0.13.0-rc.5"
+libcrux-ml-kem = "0.0.6"
+md5 = "0.8"
+num-bigint = { version = "0.4.6", features = ["rand"] }
+p256 = { version = "0.14.0-rc.7", features = ["ecdh"] }
+p384 = { version = "0.14.0-rc.7", features = ["ecdh"] }
+p521 = { version = "0.14.0-rc.7", features = ["ecdh"] }
+pbkdf2 = "0.13.0-rc.9"
+pkcs1 = "0.8.0-rc.4"
+pkcs5 = "0.8.0-rc.13"
+pkcs8 = { version = "0.11.0-rc.10", features = ["pkcs5", "encryption", "std"] }
+ring = "0.17.14"
+rsa = "0.10.0-rc.15"
+sec1 = { version = "0.8.0-rc.13", features = ["der"] }
+sha1 = { version = "0.11.0-rc.5", features = ["oid"] }
+sha2 = { version = "0.11.0-rc.5", features = ["oid"] }
+signature = "3.0.0-rc.10"
+spki = "0.8.0-rc.4"
+ssh-encoding = { version = "0.3.0-rc.7", features = ["bytes"] }
+ssh-key = { version = "0.7.0-rc.8", features = ["ed25519", "p256", "p384", "p521", "encryption", "ppk", "sha1"] }
+subtle = "2.6"
+yasna = { version = "0.5.2", features = ["bit-vec", "num-bigint"] }
+
+# System & OS
+getrandom = { version = "0.4.1", features = ["std", "wasm_js"] }
 home = "0.5"
-hmac = "0.12"
-log = "0.4.11"
-rand = { version = "0.9", features = ["thread_rng"] }
-sha1 = { version = "0.10.5", features = ["oid"] }
-sha2 = { version = "0.10.6", features = ["oid"] }
-signature = "2.2"
-ssh-encoding = { version = "0.2", features = ["bytes"] }
-ssh-key = { version = "=0.6.16", features = [
-    "ed25519",
-    "p256",
-    "p384",
-    "p521",
-    "encryption",
-    "ppk",
-    "hazmat-allow-insecure-rsa-keys",
-], package = "internal-russh-forked-ssh-key" }
-thiserror = "1.0.30"
-tokio = { version = "1.17.0" }
-tokio-stream = { version = "0.1.3", features = ["net", "sync"] }
+libc = "0.2"
+nix = { version = "0.31", features = ["mman"] }
+shell-escape = "0.1"
+whoami = "2.1"
+winapi = { version = "0.3", features = ["basetsd", "minwindef", "memoryapi", "errhandlingapi", "sysinfoapi", "impl-default"] }
+windows = { version = "0.62", features = ["Win32_Security"] }
+windows-strings = "0.5"
+
+# Encoding & Serialization
+byteorder = "1.5"
+bytes = "1.11"
+data-encoding = "2.10"
+flate2 = "1.1.9"
+hex-literal = "1.1.0"
+
+# Logging & Error Handling
+anyhow = "1.0.101"
+env_logger = "0.11"
+log = "0.4.29"
+thiserror = "2.0.18"
+
+# CLI & TUI
+clap = { version = "4.5.57", features = ["derive"] }
+ratatui = "0.30.0"
+termion = "4.0.6"
+
+# Utilities
+chrono = "0.4.43"
+delegate = "0.13.5"
+enum_dispatch = "0.3.13"
+globset = "0.4"
+rand = { version = "0.10.0-rc.9", features = ["thread_rng"] }
+tempfile = "3.24.0"
+
+# Testing & Benchmarking
+criterion = { version = "0.8.2", features = ["html_reports"] }
+wasm-bindgen-test = "0.3.58"
+serial_test = "3.3.1"
+
+# External Russh Ecosystem
+russh-sftp = "2.1.1"

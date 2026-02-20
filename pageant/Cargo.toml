@@ -13,7 +13,6 @@ rust-version = "1.85"
 thiserror.workspace = true
 
 [target.'cfg(windows)'.dependencies]
-futures.workspace = true
 rand.workspace = true
 byteorder.workspace = true
 log.workspace = true
@@ -21,8 +20,8 @@ tokio = { workspace = true }
 bytes.workspace = true
 delegate.workspace = true
 sha2 = { workspace = true, optional = true }
-windows = { version = "0.62", features = ["Win32_Security"] }
-windows-strings = { version = "0.5", optional = true }
+windows.workspace = true
+windows-strings = { workspace = true, optional = true }
 
 [features]
 default = ["wmmessage", "namedpipes"]

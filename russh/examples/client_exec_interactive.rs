@@ -69,7 +69,7 @@ impl client::Handler for Client {
 
     async fn check_server_key(
         &mut self,
-        _server_public_key: &ssh_key::PublicKey,
+        _server_public_key: &PublicKey,
     ) -> Result<bool, Self::Error> {
         Ok(true)
     }
@@ -226,6 +226,6 @@ pub struct Cli {
     #[clap(long, short = 'o')]
     openssh_certificate: Option<PathBuf>,
 
-    #[clap(multiple = true, index = 2, required = true)]
+    #[clap(index = 2, required = true, num_args = 1..)]
     command: Vec<String>,
 }

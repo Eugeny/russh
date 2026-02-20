@@ -1,4 +1,3 @@
-use rand::rng;
 // Copyright 2016 Pierre-Étienne Meunier
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,11 +12,10 @@ use rand::rng;
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
+use crate::keys::Error;
 use ssh_encoding::Decode;
 use ssh_key::public::KeyData;
 use ssh_key::{Algorithm, EcdsaCurve, PublicKey};
-
-use crate::keys::Error;
 
 pub trait PublicKeyExt {
     fn decode(bytes: &[u8]) -> Result<PublicKey, Error>;
@@ -38,12 +36,12 @@ pub trait Verify {
 
 /// Parse a public key from a byte slice.
 pub fn parse_public_key(mut p: &[u8]) -> Result<PublicKey, Error> {
-    Ok(ssh_key::public::KeyData::decode(&mut p)?.into())
+    Ok(KeyData::decode(&mut p)?.into())
 }
 
 /// Obtain a cryptographic-safe random number generator.
-pub fn safe_rng() -> impl rand::CryptoRng {
-    rng()
+pub fn safe_rng() -> rand::rngs::ThreadRng {
+    rand::rng()
 }
 
 mod private_key_with_hash_alg {

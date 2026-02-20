@@ -4,7 +4,7 @@ use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use data_encoding::BASE64_MIME;
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use log::debug;
 use sha1::Sha1;
 

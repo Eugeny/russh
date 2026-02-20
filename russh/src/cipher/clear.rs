@@ -15,8 +15,8 @@
 
 use std::convert::TryInto;
 
-use crate::mac::MacAlgorithm;
 use crate::Error;
+use crate::mac::MacAlgorithm;
 
 #[derive(Debug)]
 pub struct Key;
@@ -34,8 +34,8 @@ impl super::Cipher for Clear {
         _: &[u8],
         _: &[u8],
         _: &dyn MacAlgorithm,
-    ) -> Box<dyn super::OpeningKey + Send> {
-        Box::new(Key {})
+    ) -> Result<Box<dyn super::OpeningKey + Send>, Error> {
+        Ok(Box::new(Key {}))
     }
 
     fn make_sealing_key(
@@ -44,8 +44,8 @@ impl super::Cipher for Clear {
         _: &[u8],
         _: &[u8],
         _: &dyn MacAlgorithm,
-    ) -> Box<dyn super::SealingKey + Send> {
-        Box::new(Key {})
+    ) -> Result<Box<dyn super::SealingKey + Send>, Error> {
+        Ok(Box::new(Key {}))
     }
 }
 

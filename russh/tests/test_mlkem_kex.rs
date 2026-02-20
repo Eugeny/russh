@@ -1,28 +1,27 @@
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-
 //! Integration tests for ML-KEM hybrid key exchange
 //! https://datatracker.ietf.org/doc/draft-ietf-sshm-mlkem-hybrid-kex/
 
-use std::borrow::Cow;
-use std::sync::Arc;
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+use rand::rng;
 use russh::keys::PrivateKeyWithHashAlg;
-use russh::keys::ssh_key::rand_core::OsRng;
 use russh::*;
 use ssh_key::PrivateKey;
+use std::borrow::Cow;
+use std::sync::Arc;
 
 #[tokio::test]
 async fn test_mlkem768x25519_handshake() {
     let _ = env_logger::try_init();
 
-    let client_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap();
+    let client_key = PrivateKey::random(&mut rng(), ssh_key::Algorithm::Ed25519).unwrap();
 
     let mut server_config = server::Config::default();
     server_config.inactivity_timeout = None;
     server_config.auth_rejection_time = std::time::Duration::from_secs(3);
     server_config
         .keys
-        .push(PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap());
+        .push(PrivateKey::random(&mut rng(), ssh_key::Algorithm::Ed25519).unwrap());
 
     server_config.preferred = {
         let mut p = Preferred::default();
@@ -89,14 +88,14 @@ async fn test_mlkem768x25519_handshake() {
 async fn test_mlkem768x25519_with_fallback() {
     let _ = env_logger::try_init();
 
-    let client_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap();
+    let client_key = PrivateKey::random(&mut rng(), ssh_key::Algorithm::Ed25519).unwrap();
 
     let mut server_config = server::Config::default();
     server_config.inactivity_timeout = None;
     server_config.auth_rejection_time = std::time::Duration::from_secs(3);
     server_config
         .keys
-        .push(PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap());
+        .push(PrivateKey::random(&mut rng(), ssh_key::Algorithm::Ed25519).unwrap());
 
     server_config.preferred = {
         let mut p = Preferred::default();
@@ -163,14 +162,14 @@ async fn test_mlkem768x25519_with_fallback() {
 async fn test_mlkem768x25519_rekey() {
     let _ = env_logger::try_init();
 
-    let client_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap();
+    let client_key = PrivateKey::random(&mut rng(), ssh_key::Algorithm::Ed25519).unwrap();
 
     let mut server_config = server::Config::default();
     server_config.inactivity_timeout = None;
     server_config.auth_rejection_time = std::time::Duration::from_secs(3);
     server_config
         .keys
-        .push(PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap());
+        .push(PrivateKey::random(&mut rng(), ssh_key::Algorithm::Ed25519).unwrap());
 
     server_config.preferred = {
         let mut p = Preferred::default();
@@ -247,14 +246,14 @@ async fn test_mlkem768x25519_rekey() {
 async fn test_mlkem768x25519_multiple_channels() {
     let _ = env_logger::try_init();
 
-    let client_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap();
+    let client_key = PrivateKey::random(&mut rng(), ssh_key::Algorithm::Ed25519).unwrap();
 
     let mut server_config = server::Config::default();
     server_config.inactivity_timeout = None;
     server_config.auth_rejection_time = std::time::Duration::from_secs(3);
     server_config
         .keys
-        .push(PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap());
+        .push(PrivateKey::random(&mut rng(), ssh_key::Algorithm::Ed25519).unwrap());
 
     server_config.preferred = {
         let mut p = Preferred::default();
@@ -330,7 +329,7 @@ async fn test_mlkem768x25519_multiple_channels() {
 struct TestServer {}
 
 impl server::Handler for TestServer {
-    type Error = russh::Error;
+    type Error = Error;
 
     async fn auth_publickey(
         &mut self,
@@ -362,7 +361,7 @@ impl server::Handler for TestServer {
 struct TestClient {}
 
 impl client::Handler for TestClient {
-    type Error = russh::Error;
+    type Error = Error;
 
     async fn check_server_key(
         &mut self,

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use log::{LevelFilter, error, info};
-use russh::keys::ssh_key::rand_core::OsRng;
+use rand::rng;
 use russh::server::{Auth, Msg, Server as _, Session};
 use russh::{Channel, ChannelId};
 use russh_sftp::protocol::{File, FileAttributes, Handle, Name, Status, StatusCode, Version};
@@ -51,7 +51,7 @@ impl russh::server::Handler for SshSession {
     async fn auth_publickey(
         &mut self,
         user: &str,
-        public_key: &russh::keys::ssh_key::PublicKey,
+        public_key: &ssh_key::PublicKey,
     ) -> Result<Auth, Self::Error> {
         info!("credentials: {user}, {public_key:?}");
         Ok(Auth::Accept)
@@ -179,7 +179,7 @@ async fn main() {
         auth_rejection_time: Duration::from_secs(3),
         auth_rejection_time_initial: Some(Duration::from_secs(0)),
         keys: vec![
-            russh::keys::PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap(),
+            russh::keys::PrivateKey::random(&mut rng(), ssh_key::Algorithm::Ed25519).unwrap(),
         ],
         ..Default::default()
     };

@@ -6,7 +6,6 @@
 )]
 #![allow(clippy::single_match, clippy::upper_case_acronyms)]
 #![allow(macro_expanded_macro_exports_accessed_by_absolute_paths)]
-// length checked
 // Copyright 2016 Pierre-Étienne Meunier
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -60,7 +59,7 @@
 //!
 //! # Design principles
 //!
-//! The main goal of this library is conciseness, and reduced size and
+//! The main goal of this library is conciseness, reduced size, and
 //! readability of the library's code.
 //!
 //! One non-goal is to implement all possible cryptographic algorithms
@@ -73,11 +72,11 @@
 //!
 //! # Internal details of the event loop
 //!
-//! It might seem a little odd that the read/write methods for server
-//! or client sessions often return neither `Result` nor
-//! `Future`. This is because the data sent to the remote side is
-//! buffered, because it needs to be encrypted first, and encryption
-//! works on buffers, and for many algorithms, not in place.
+//! The read/write methods for server or client sessions often queue data
+//! to be sent, rather than sending it immediately. This is because the
+//! data sent to the remote side is buffered, because it needs to be
+//! encrypted first, and encryption works on buffers, and for many
+//! algorithms, not in place.
 //!
 //! Hence, the event loop keeps waiting for incoming packets, reacts
 //! to them by calling the provided `Handler`, which fills some
@@ -94,3 +93,64 @@ compile_error!(
 
 #[cfg(any(feature = "ring", feature = "aws-lc-rs"))]
 include!("lib_inner.rs");
+
+#[cfg(test)]
+mod tests;
+
+mod auth;
+
+mod cert;
+/// Cipher names
+pub mod cipher;
+/// Compression algorithm names
+pub mod compression;
+/// Key exchange algorithm names
+pub mod kex;
+/// MAC algorithm names
+pub mod mac;
+
+pub mod keys;
+
+mod msg;
+mod negotiation;
+mod ssh_read;
+mod sshbuffer;
+
+pub use negotiation::{Names, Preferred};
+
+mod pty;
+
+pub use pty::Pty;
+pub use sshbuffer::SshId;
+
+mod helpers;
+
+pub(crate) use helpers::map_err;
+
+macro_rules! push_packet {
+    ( $buffer:expr, $x:expr ) => {{
+        use byteorder::{BigEndian, ByteOrder};
+        let i0 = $buffer.len();
+        $buffer.extend(b"\0\0\0\0");
+        let x = $x;
+        let i1 = $buffer.len();
+        use std::ops::DerefMut;
+        let buf = $buffer.deref_mut();
+        #[allow(clippy::indexing_slicing)] // length checked
+        BigEndian::write_u32(&mut buf[i0..], (i1 - i0 - 4) as u32);
+        x
+    }};
+}
+
+mod channels;
+pub use channels::{Channel, ChannelMsg, ChannelReadHalf, ChannelStream, ChannelWriteHalf};
+
+mod parsing;
+mod session;
+
+/// Server side of this library.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod server;
+
+/// Client side of this library.
+pub mod client;

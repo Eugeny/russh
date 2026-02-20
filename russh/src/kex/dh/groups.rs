@@ -1,9 +1,10 @@
 use std::fmt::Debug;
 use std::ops::Deref;
 
-use crate::keys::ssh_key::rand_core::OsRng;
+use crate::keys::key::safe_rng;
 use hex_literal::hex;
-use num_bigint::{BigUint, RandBigInt};
+use num_bigint::BigUint;
+use rand::Rng;
 
 #[derive(Clone)]
 pub enum DhGroupUInt {
@@ -197,8 +198,18 @@ pub const DH_GROUP17: DhGroup = DhGroup {
     CC8F6D7E BF48E1D8 14CC5ED2 0F8037E0 A79715EE F29BE328 06A1D58B
     B7C5DA76 F550AA3D 8A1FBFF0 EB19CCB1 A313D55C DA56C9EC 2EF29632
     387FE8D7 6E3C0468 043E8F66 3F4860EE 12BF2D5B 0B7474D6 E694F91E
-    6DCC4024 FFFFFFFF FFFFFFFF
-    "
+    6DBE1159 74A3926F 12FEE5E4 38777CB6 A932DF8C D8BEC4D0 73B931BA
+    3BC832B6 8D9DD300 741FA7BF 8AFC47ED 2576F693 6BA42466 3AAB639C
+    5AE4F568 3423B474 2BF1C978 238F16CB E39D652D E3FDB8BE FC848AD9
+    22222E04 A4037C07 13EB57A8 1A23F0C7 3473FC64 6CEA306B
+    4BCBC886 2F8385DD FA9D4B7F A2C087E8 79683303 ED5BDD3A
+    062B3CF5 B3A278A6 6D2A13F8 3F44F82D DF310EE0 74AB6A36
+    4597E899 A0255DC1 64F31CC5 0846851D F9AB4819 5DED7EA1
+    B1D510BD 7EE74D73 FAF36BC3 1ECFA268 359046F4 EB879F92
+    4009438B 481C6CD7 889A002E D5EE382B C9190DA6 FC026E47
+    9558E447 5677E9AA 9E3050E2 765694DF C81F56E8 80B96E71
+    60C980DD 98EDD3DF FFFFFFFF FFFFFFFF
+            "
         )
         .as_slice(),
     ),
@@ -282,9 +293,23 @@ impl DH {
 
     pub fn generate_private_key(&mut self, is_server: bool) -> BigUint {
         let q = (&self.prime_num - &BigUint::from(1u8)) / &BigUint::from(2u8);
-        let mut rng = OsRng;
-        self.private_key =
-            rng.gen_biguint_range(&if is_server { 1u8.into() } else { 2u8.into() }, &q);
+        let low = if is_server {
+            BigUint::from(1u8)
+        } else {
+            BigUint::from(2u8)
+        };
+        let mut rng = safe_rng();
+        let bit_len = q.bits();
+        let byte_len = bit_len.div_ceil(8) as usize;
+        loop {
+            let mut bytes = vec![0u8; byte_len];
+            rng.fill_bytes(&mut bytes);
+            let num = BigUint::from_bytes_be(&bytes) % &q;
+            if num >= low {
+                self.private_key = num.clone();
+                break;
+            }
+        }
         self.private_key.clone()
     }
 

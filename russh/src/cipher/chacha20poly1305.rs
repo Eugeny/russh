@@ -36,10 +36,12 @@ impl super::Cipher for SshChacha20Poly1305Cipher {
         _: &[u8],
         _: &[u8],
         _: &dyn MacAlgorithm,
-    ) -> Box<dyn super::OpeningKey + Send> {
-        Box::new(OpeningKey(chacha20_poly1305_openssh::OpeningKey::new(
-            #[allow(clippy::unwrap_used)]
-            k.try_into().unwrap(),
+    ) -> Result<Box<dyn super::OpeningKey + Send>, Error> {
+        Ok(Box::new(OpeningKey(
+            chacha20_poly1305_openssh::OpeningKey::new(
+                #[allow(clippy::unwrap_used)]
+                k.try_into().map_err(|_| Error::Inconsistent)?,
+            ),
         )))
     }
 
@@ -49,10 +51,12 @@ impl super::Cipher for SshChacha20Poly1305Cipher {
         _: &[u8],
         _: &[u8],
         _: &dyn MacAlgorithm,
-    ) -> Box<dyn super::SealingKey + Send> {
-        Box::new(SealingKey(chacha20_poly1305_openssh::SealingKey::new(
-            #[allow(clippy::unwrap_used)]
-            k.try_into().unwrap(),
+    ) -> Result<Box<dyn super::SealingKey + Send>, Error> {
+        Ok(Box::new(SealingKey(
+            chacha20_poly1305_openssh::SealingKey::new(
+                #[allow(clippy::unwrap_used)]
+                k.try_into().map_err(|_| Error::Inconsistent)?,
+            ),
         )))
     }
 }

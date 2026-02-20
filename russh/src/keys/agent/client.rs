@@ -8,10 +8,10 @@ use ssh_key::{Algorithm, HashAlg, PrivateKey, PublicKey, Signature};
 use tokio;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-use super::{msg, Constraint};
-use crate::helpers::EncodedExt;
-use crate::keys::{key, Error};
+use super::{Constraint, msg};
 use crate::CryptoVec;
+use crate::helpers::EncodedExt;
+use crate::keys::{Error, key};
 
 pub trait AgentStream: AsyncRead + AsyncWrite {}
 

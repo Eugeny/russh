@@ -1,6 +1,6 @@
 use ssh_encoding::{Decode, Encode, Reader};
 
-use crate::{msg, CryptoVec};
+use crate::{CryptoVec, msg};
 
 use crate::map_err;
 

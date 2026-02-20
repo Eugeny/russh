@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use log::debug;
-use russh::keys::ssh_key::rand_core::OsRng;
+use rand::rng;
 use russh::keys::*;
 use russh::server::{Auth, Msg, Server as _, Session};
 use russh::*;
@@ -10,11 +10,11 @@ use russh::*;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     env_logger::init();
-    let mut config = russh::server::Config::default();
+    let mut config = server::Config::default();
     config.auth_rejection_time = std::time::Duration::from_secs(3);
     config
         .keys
-        .push(russh::keys::PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap());
+        .push(PrivateKey::random(&mut rng(), Algorithm::Ed25519)?);
     let config = Arc::new(config);
     let mut sh = Server {
         clients: Arc::new(Mutex::new(HashMap::new())),
@@ -73,12 +73,8 @@ impl server::Handler for Server {
         Ok(())
     }
 
-    async fn auth_publickey(
-        &mut self,
-        _: &str,
-        _: &ssh_key::PublicKey,
-    ) -> Result<Auth, Self::Error> {
-        Ok(server::Auth::Accept)
+    async fn auth_publickey(&mut self, _: &str, _: &PublicKey) -> Result<Auth, Self::Error> {
+        Ok(Auth::Accept)
     }
     async fn data(
         &mut self,

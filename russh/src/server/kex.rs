@@ -10,9 +10,9 @@ use ssh_key::Algorithm;
 use super::*;
 use crate::helpers::sign_with_hash_alg;
 use crate::kex::dh::biguint_to_mpint;
-use crate::kex::{KexAlgorithm, KexAlgorithmImplementor, KexCause, KEXES};
+use crate::kex::{KEXES, KexAlgorithm, KexAlgorithmImplementor, KexCause};
 use crate::keys::key::PrivateKeyWithHashAlg;
-use crate::negotiation::{is_key_compatible_with_algo, Names, Select};
+use crate::negotiation::{Names, Select, is_key_compatible_with_algo};
 use crate::{msg, negotiation};
 
 thread_local! {
@@ -129,7 +129,7 @@ impl ServerKex {
 
                 let kex = KEXES.get(&names.kex).ok_or(Error::UnknownAlgo)?.make();
 
-                if kex.skip_exchange() {
+                if KexAlgorithmImplementor::skip_exchange(&kex) {
                     let newkeys = compute_keys(
                         CryptoVec::new(),
                         kex,
@@ -149,7 +149,7 @@ impl ServerKex {
                     });
                 }
 
-                if kex.is_dh_gex() {
+                if KexAlgorithmImplementor::is_dh_gex(&kex) {
                     self.state = ServerKexState::WaitingForGexRequest { names, kex };
                 } else {
                     self.state = ServerKexState::WaitingForDhInit { names, kex };
@@ -177,7 +177,9 @@ impl ServerKex {
                 debug!("client requests a gex group: {gex_params:?}");
 
                 let Some(dh_group) = handler.lookup_dh_gex_group(&gex_params).await? else {
-                    debug!("server::Handler impl did not find a matching DH group (is lookup_dh_gex_group implemented?)");
+                    debug!(
+                        "server::Handler impl did not find a matching DH group (is lookup_dh_gex_group implemented?)"
+                    );
                     return Err(Error::Kex)?;
                 };
 
@@ -185,7 +187,7 @@ impl ServerKex {
                 let generator = biguint_to_mpint(&BigUint::from_bytes_be(&dh_group.generator));
 
                 self.exchange.gex = Some((gex_params, dh_group.clone()));
-                kex.dh_gex_set_group(dh_group)?;
+                KexAlgorithmImplementor::dh_gex_set_group(&mut kex, dh_group)?;
 
                 output.packet(|w| {
                     msg::KEX_DH_GEX_GROUP.encode(w)?;
@@ -218,7 +220,7 @@ impl ServerKex {
                 }
 
                 if input.buffer.first()
-                    != Some(match kex.is_dh_gex() {
+                    != Some(match KexAlgorithmImplementor::is_dh_gex(&kex) {
                         true => &msg::KEX_DH_GEX_INIT,
                         false => &msg::KEX_ECDH_INIT,
                     })
@@ -238,7 +240,7 @@ impl ServerKex {
                     .extend(&Bytes::decode(&mut r).map_err(Into::into)?);
 
                 let exchange = &mut self.exchange;
-                kex.server_dh(exchange, &input.buffer)?;
+                KexAlgorithmImplementor::server_dh(&mut kex, exchange, &input.buffer)?;
 
                 let Some(matching_key_index) = self
                     .config
@@ -265,7 +267,12 @@ impl ServerKex {
                     let mut pubkey_vec = CryptoVec::new();
                     key.public_key().to_bytes()?.encode(&mut pubkey_vec)?;
 
-                    let hash = kex.compute_exchange_hash(&pubkey_vec, exchange, &mut buffer)?;
+                    let hash = KexAlgorithmImplementor::compute_exchange_hash(
+                        &kex,
+                        &pubkey_vec,
+                        exchange,
+                        &mut buffer,
+                    )?;
 
                     Ok::<_, Error>(hash)
                 })?;
@@ -279,7 +286,7 @@ impl ServerKex {
                 .map_err(Into::into)?;
 
                 output.packet(|w| {
-                    match kex.is_dh_gex() {
+                    match KexAlgorithmImplementor::is_dh_gex(&kex) {
                         true => &msg::KEX_DH_GEX_REPLY,
                         false => &msg::KEX_ECDH_REPLY,
                     }
@@ -348,7 +355,8 @@ fn compute_keys(
         &hash
     };
     // Now computing keys.
-    let c = kex.compute_keys(
+    let c = KexAlgorithmImplementor::compute_keys(
+        &kex,
         session_id,
         &hash,
         names.cipher,

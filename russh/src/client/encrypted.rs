@@ -26,13 +26,13 @@ use super::IncomingSshPacket;
 use crate::auth::AuthRequest;
 use crate::cert::PublicKeyOrCertificate;
 use crate::client::{Handler, Msg, Prompt, Reply, Session};
-use crate::helpers::{sign_with_hash_alg, AlgorithmExt, EncodedExt, NameList};
+use crate::helpers::{AlgorithmExt, EncodedExt, NameList, sign_with_hash_alg};
 use crate::keys::key::parse_public_key;
 use crate::parsing::{ChannelOpenConfirmation, ChannelType, OpenChannelMessage};
 use crate::session::{Encrypted, EncryptedState, GlobalRequestResponse};
 use crate::{
-    auth, map_err, msg, Channel, ChannelId, ChannelMsg, ChannelOpenFailure, ChannelParams, CryptoVec, Error,
-    MethodSet, Sig,
+    Channel, ChannelId, ChannelMsg, ChannelOpenFailure, ChannelParams, CryptoVec, Error, MethodSet,
+    Sig, auth, map_err, msg,
 };
 
 thread_local! {
@@ -96,7 +96,7 @@ impl Session {
                         }
                         other => {
                             debug!("unknown message: {other:?}");
-                            return Err(crate::Error::Inconsistent.into());
+                            return Err(Error::Inconsistent.into());
                         }
                     }
                 }
@@ -107,7 +107,7 @@ impl Session {
                             debug!("userauth_success");
                             self.sender
                                 .send(Reply::AuthSuccess)
-                                .map_err(|_| crate::Error::SendError)?;
+                                .map_err(|_| Error::SendError)?;
                             enc.state = EncryptedState::InitCompression;
                             enc.server_compression.init_decompress(&mut enc.decompress);
                             return Ok(());
@@ -123,7 +123,9 @@ impl Session {
                             let remaining_methods: MethodSet =
                                 (&map_err!(NameList::decode(&mut r))?).into();
                             let partial_success = map_err!(u8::decode(&mut r))? != 0;
-                            debug!("remaining methods {remaining_methods:?}, partial success {partial_success:?}");
+                            debug!(
+                                "remaining methods {remaining_methods:?}, partial success {partial_success:?}"
+                            );
                             auth_request.methods = remaining_methods.clone();
 
                             let no_more_methods = auth_request.methods.is_empty();
@@ -133,11 +135,11 @@ impl Session {
                                     proceed_with_methods: remaining_methods,
                                     partial_success,
                                 })
-                                .map_err(|_| crate::Error::SendError)?;
+                                .map_err(|_| Error::SendError)?;
 
                             // If no other authentication method is allowed by the server, give up.
                             if no_more_methods {
-                                return Err(crate::Error::NoAuthMethod.into());
+                                return Err(Error::NoAuthMethod.into());
                             }
                         }
                         Some((&msg::USERAUTH_INFO_REQUEST_OR_USERAUTH_PK_OK, mut r)) => {
@@ -182,15 +184,15 @@ impl Session {
                                         instructions,
                                         prompts,
                                     })
-                                    .map_err(|_| crate::Error::SendError)?;
+                                    .map_err(|_| Error::SendError)?;
 
                                 // wait for response from handler
                                 let responses = loop {
                                     match self.receiver.recv().await {
                                         Some(Msg::AuthInfoResponse { responses }) => {
-                                            break responses
+                                            break responses;
                                         }
-                                        None => return Err(crate::Error::RecvError.into()),
+                                        None => return Err(Error::RecvError.into()),
                                         _ => {}
                                     }
                                 };
@@ -236,11 +238,11 @@ impl Session {
 
                                     self.sender
                                         .send(Reply::SignRequest { key, data: buf })
-                                        .map_err(|_| crate::Error::SendError)?;
+                                        .map_err(|_| Error::SendError)?;
                                     self.common.buffer = loop {
                                         match self.receiver.recv().await {
                                             Some(Msg::Signed { data }) => break data,
-                                            None => return Err(crate::Error::RecvError.into()),
+                                            None => return Err(Error::RecvError.into()),
                                             _ => {}
                                         }
                                     };
@@ -260,7 +262,7 @@ impl Session {
                         }
                         other => {
                             debug!("unknown message: {other:?}");
-                            return Err(crate::Error::Inconsistent.into());
+                            return Err(Error::Inconsistent.into());
                         }
                     }
                 }
@@ -329,10 +331,10 @@ impl Session {
                         parameters.confirm(&msg);
                     } else {
                         // We've not requested this channel, close connection.
-                        return Err(crate::Error::Inconsistent.into());
+                        return Err(Error::Inconsistent.into());
                     }
                 } else {
-                    return Err(crate::Error::Inconsistent.into());
+                    return Err(Error::Inconsistent.into());
                 };
 
                 if let Some(channel) = self.channels.get(&local_id) {
@@ -737,7 +739,7 @@ impl Session {
                     };
                     Ok(())
                 } else {
-                    Err(crate::Error::Inconsistent.into())
+                    Err(Error::Inconsistent.into())
                 }
             }
             Some((&msg::REQUEST_SUCCESS, mut r)) => {
@@ -841,7 +843,7 @@ impl Session {
         &mut self,
         user: &str,
         meth: auth::Method,
-    ) -> Result<bool, crate::Error> {
+    ) -> Result<bool, Error> {
         let mut is_waiting = false;
         if let Some(ref mut enc) = self.common.encrypted {
             is_waiting = match enc.state {
@@ -863,9 +865,7 @@ impl Session {
                 }
                 EncryptedState::InitCompression | EncryptedState::Authenticated => false,
             };
-            debug!(
-                "write_auth_request_if_needed: is_waiting = {is_waiting:?}"
-            );
+            debug!("write_auth_request_if_needed: is_waiting = {is_waiting:?}");
             if is_waiting {
                 enc.write_auth_request(user, &meth)?;
                 let auth_request = AuthRequest::new(&meth);
@@ -884,7 +884,7 @@ impl Encrypted {
         &mut self,
         user: &str,
         auth_method: &auth::Method,
-    ) -> Result<bool, crate::Error> {
+    ) -> Result<bool, Error> {
         // The server is waiting for our USERAUTH_REQUEST.
         Ok(push_packet!(self.write, {
             self.write.push(msg::USERAUTH_REQUEST);
@@ -960,7 +960,7 @@ impl Encrypted {
         user: &str,
         key: &PublicKeyOrCertificate,
         buffer: &mut CryptoVec,
-    ) -> Result<usize, crate::Error> {
+    ) -> Result<usize, Error> {
         buffer.clear();
         self.session_id.as_ref().encode(buffer)?;
 
@@ -989,7 +989,7 @@ impl Encrypted {
         user: &str,
         method: &auth::Method,
         buffer: &mut CryptoVec,
-    ) -> Result<(), crate::Error> {
+    ) -> Result<(), Error> {
         match method {
             auth::Method::PublicKey { key } => {
                 let i0 =
@@ -1025,7 +1025,7 @@ impl Encrypted {
         Ok(())
     }
 
-    fn client_send_auth_response(&mut self, responses: &[String]) -> Result<(), crate::Error> {
+    fn client_send_auth_response(&mut self, responses: &[String]) -> Result<(), Error> {
         push_packet!(self.write, {
             msg::USERAUTH_INFO_RESPONSE.encode(&mut self.write)?;
             (responses.len().try_into().unwrap_or(0) as u32).encode(&mut self.write)?; // number of responses
