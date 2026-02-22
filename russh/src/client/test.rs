@@ -89,9 +89,11 @@ mod tests {
         config.auth_rejection_time = std::time::Duration::from_secs(1);
         config.server_id = SshId::Standard("SSH-1.99-CustomServer_1.0".to_string());
         config.inactivity_timeout = None;
-        config
-            .keys
-            .push(PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap());
+        config.keys.push(
+            PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519)
+                .unwrap()
+                .into(),
+        );
         let config = Arc::new(config);
 
         // Create server struct

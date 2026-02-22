@@ -165,7 +165,11 @@ struct Server;
 impl Server {
     async fn run(addr: SocketAddr) {
         let config = Arc::new(server::Config {
-            keys: vec![PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap()],
+            keys: vec![
+                PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519)
+                    .unwrap()
+                    .into(),
+            ],
             window_size: WINDOW_SIZE,
             ..Default::default()
         });

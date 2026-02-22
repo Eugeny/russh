@@ -23,9 +23,11 @@ async fn test_rekey_with_strict_kex() {
     let mut server_config = server::Config::default();
     server_config.inactivity_timeout = None;
     server_config.auth_rejection_time = std::time::Duration::from_secs(3);
-    server_config
-        .keys
-        .push(PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap());
+    server_config.keys.push(
+        PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519)
+            .unwrap()
+            .into(),
+    );
 
     // Enable strict kex by including the strict kex extension
     server_config.preferred = {

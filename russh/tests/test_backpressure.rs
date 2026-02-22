@@ -95,7 +95,11 @@ struct Server {
 impl Server {
     async fn run(addr: SocketAddr, rx: watch::Receiver<()>) {
         let config = Arc::new(server::Config {
-            keys: vec![PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap()],
+            keys: vec![
+                PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519)
+                    .unwrap()
+                    .into(),
+            ],
             window_size: WINDOW_SIZE as u32,
             channel_buffer_size: CHANNEL_BUFFER_SIZE,
             ..Default::default()

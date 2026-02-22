@@ -17,7 +17,9 @@ use std::borrow::Cow;
 use log::debug;
 use rand::RngCore;
 use ssh_encoding::{Decode, Encode};
-use ssh_key::{Algorithm, EcdsaCurve, HashAlg, PrivateKey};
+use ssh_key::{Algorithm, EcdsaCurve, HashAlg};
+
+use crate::keys::KeyPair;
 
 use crate::cipher::CIPHERS;
 use crate::helpers::NameList;
@@ -33,7 +35,7 @@ use crate::{AlgorithmKind, CryptoVec, Error, cipher, compression, kex, mac, msg}
 #[cfg(target_arch = "wasm32")]
 /// WASM-only stub
 pub struct Config {
-    keys: Vec<PrivateKey>,
+    keys: Vec<KeyPair>,
 }
 
 #[derive(Debug, Clone)]
@@ -74,19 +76,19 @@ pub struct Preferred {
     pub compression: Cow<'static, [compression::Name]>,
 }
 
-pub(crate) fn is_key_compatible_with_algo(key: &PrivateKey, algo: &Algorithm) -> bool {
+pub(crate) fn is_key_compatible_with_algo(key: &KeyPair, algo: &Algorithm) -> bool {
     match algo {
         // All RSA keys are compatible with all RSA based algos.
-        Algorithm::Rsa { .. } => key.algorithm().is_rsa(),
+        Algorithm::Rsa { .. } => key.is_rsa(),
         // Other keys have to match exactly
-        a => key.algorithm() == *a,
+        a => key.base_algorithm() == *a,
     }
 }
 
 impl Preferred {
     pub(crate) fn possible_host_key_algos_for_keys(
         &self,
-        available_host_keys: &[PrivateKey],
+        available_host_keys: &[KeyPair],
     ) -> Vec<Algorithm> {
         self.key
             .iter()
@@ -207,7 +209,7 @@ pub(crate) trait Select {
     fn read_kex(
         buffer: &[u8],
         pref: &Preferred,
-        available_host_keys: Option<&[PrivateKey]>,
+        available_host_keys: Option<&[KeyPair]>,
         cause: &KexCause,
     ) -> Result<Names, Error> {
         let &Some(mut r) = &buffer.get(17..) else {
