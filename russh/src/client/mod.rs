@@ -1188,8 +1188,10 @@ impl Session {
 
             if let Some(ref mut enc) = self.common.encrypted {
                 if let EncryptedState::InitCompression = enc.state {
-                    enc.client_compression
-                        .init_compress(self.common.packet_writer.compress());
+                    if enc.client_compression.is_deferred() {
+                        enc.client_compression
+                            .init_compress(self.common.packet_writer.compress());
+                    }
                     enc.state = EncryptedState::Authenticated;
                 }
             }

@@ -109,7 +109,9 @@ impl Session {
                                 .send(Reply::AuthSuccess)
                                 .map_err(|_| crate::Error::SendError)?;
                             enc.state = EncryptedState::InitCompression;
-                            enc.server_compression.init_decompress(&mut enc.decompress);
+                            if enc.server_compression.is_deferred() {
+                                enc.server_compression.init_decompress(&mut enc.decompress);
+                            }
                             return Ok(());
                         }
                         Some((&msg::USERAUTH_BANNER, mut r)) => {

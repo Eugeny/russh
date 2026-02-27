@@ -166,6 +166,20 @@ impl<C> CommonSession<C> {
         self.packet_writer
             .set_cipher(newkeys.cipher.local_to_remote);
         self.strict_kex = strict_kex;
+
+        // For non-deferred compression (RFC 4253 "zlib"), activate immediately
+        // after initial key exchange. Deferred compression ("zlib@openssh.com")
+        // will be activated later, after authentication succeeds.
+        if let Some(ref mut enc) = self.encrypted {
+            if !enc.client_compression.is_deferred() {
+                enc.client_compression
+                    .init_compress(self.packet_writer.compress());
+            }
+            if !enc.server_compression.is_deferred() {
+                enc.server_compression
+                    .init_decompress(&mut enc.decompress);
+            }
+        }
     }
 
     /// Send a disconnect message.
