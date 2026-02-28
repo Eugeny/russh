@@ -661,6 +661,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "gui-wf",
+      "name": "Guilherme Fontes",
+      "avatar_url": "https://avatars.githubusercontent.com/u/48162143?v=4",
+      "profile": "https://gui.wf",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,
