@@ -1138,13 +1138,17 @@ impl Session {
                     reading.set(start_reading(stream_read, buffer, opening_cipher));
                 }
                 () = &mut keepalive_timer => {
-                    self.common.alive_timeouts = self.common.alive_timeouts.saturating_add(1);
-                    if self.common.config.keepalive_max != 0 && self.common.alive_timeouts > self.common.config.keepalive_max {
-                        debug!("Timeout, server not responding to keepalives");
-                        return Err(crate::Error::KeepaliveTimeout.into());
+                    if let Some(ref mut enc) = self.common.encrypted {
+                        if matches!(enc.state, EncryptedState::Authenticated) {
+                            self.common.alive_timeouts = self.common.alive_timeouts.saturating_add(1);
+                            if self.common.config.keepalive_max != 0 && self.common.alive_timeouts > self.common.config.keepalive_max {
+                                debug!("Timeout, server not responding to keepalives");
+                                return Err(crate::Error::KeepaliveTimeout.into());
+                            }
+                            sent_keepalive = true;
+                            self.send_keepalive(true)?;
+                        }
                     }
-                    sent_keepalive = true;
-                    self.send_keepalive(true)?;
                 }
                 () = &mut inactivity_timer => {
                     debug!("timeout");
