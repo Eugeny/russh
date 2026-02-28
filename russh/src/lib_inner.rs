@@ -224,7 +224,7 @@ pub enum Error {
     },
 
     #[error("Signature: {0}")]
-    Signature(#[from] signature::Error),
+    Signature(#[from] signature_next::Error),
 
     #[error("SshKey: {0}")]
     SshKey(#[from] ssh_key::Error),

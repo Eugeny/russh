@@ -288,7 +288,7 @@ impl ClientKex {
                 let signature = Bytes::decode(r)?;
                 let signature = Signature::decode(&mut &signature[..])?;
 
-                if let Err(e) = Verifier::verify(&server_host_key, hash.as_ref(), &signature) {
+                if let Err(e) = signature_next::Verifier::verify(&server_host_key, hash.as_ref(), &signature) {
                     debug!("wrong server sig: {e:?}");
                     return Err(Error::WrongServerSig);
                 }
