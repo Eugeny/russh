@@ -8,6 +8,8 @@ pub enum Compression {
     None,
     #[cfg(feature = "flate2")]
     Zlib,
+    #[cfg(feature = "flate2")]
+    ZlibOpenSSH,
 }
 
 #[derive(Debug)]
@@ -67,34 +69,55 @@ pub const ALL_COMPRESSION_ALGORITHMS: &[&Name] = &[
 #[cfg(feature = "flate2")]
 impl Compression {
     pub fn new(name: &Name) -> Self {
-        if name == &ZLIB || name == &ZLIB_LEGACY {
+        if name == &ZLIB {
             Compression::Zlib
+        } else if name == &ZLIB_LEGACY {
+            Compression::ZlibOpenSSH
         } else {
             Compression::None
         }
     }
 
     pub fn init_compress(&self, comp: &mut Compress) {
-        if let Compression::Zlib = *self {
-            if let Compress::Zlib(ref mut c) = *comp {
-                c.reset()
-            } else {
-                *comp = Compress::Zlib(flate2::Compress::new(flate2::Compression::fast(), true))
+        match *self {
+            Compression::Zlib | Compression::ZlibOpenSSH => {
+                if let Compress::Zlib(ref mut c) = *comp {
+                    c.reset()
+                } else {
+                    *comp =
+                        Compress::Zlib(flate2::Compress::new(flate2::Compression::fast(), true))
+                }
             }
-        } else {
-            *comp = Compress::None
+            Compression::None => {
+                *comp = Compress::None;
+            }
         }
     }
 
     pub fn init_decompress(&self, comp: &mut Decompress) {
-        if let Compression::Zlib = *self {
-            if let Decompress::Zlib(ref mut c) = *comp {
-                c.reset(true)
-            } else {
-                *comp = Decompress::Zlib(flate2::Decompress::new(true))
+        match *self {
+            Compression::Zlib | Compression::ZlibOpenSSH => {
+                if let Decompress::Zlib(ref mut c) = *comp {
+                    c.reset(true)
+                } else {
+                    *comp = Decompress::Zlib(flate2::Decompress::new(true))
+                }
             }
-        } else {
-            *comp = Decompress::None
+            Compression::None => {
+                *comp = Decompress::None;
+            }
+        }
+    }
+}
+
+impl Compression {
+    /// Returns true if compression should be deferred until after authentication.
+    /// "zlib@openssh.com" defers; RFC 4253 "zlib" does not.
+    pub fn is_deferred(&self) -> bool {
+        match self {
+            #[cfg(feature = "flate2")]
+            Compression::ZlibOpenSSH => true,
+            _ => false,
         }
     }
 }

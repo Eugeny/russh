@@ -97,7 +97,9 @@ impl Session {
                 .await?;
                 self.common.auth_attempts += 1;
                 if let EncryptedState::InitCompression = enc.state {
-                    enc.client_compression.init_decompress(&mut enc.decompress);
+                    if enc.client_compression.is_deferred() {
+                        enc.client_compression.init_decompress(&mut enc.decompress);
+                    }
                     handler.auth_succeeded(self).await?;
                 }
                 Ok(())
@@ -117,15 +119,19 @@ impl Session {
                 .await?;
                 if resp {
                     enc.state = EncryptedState::InitCompression;
-                    enc.client_compression.init_decompress(&mut enc.decompress);
+                    if enc.client_compression.is_deferred() {
+                        enc.client_compression.init_decompress(&mut enc.decompress);
+                    }
                     handler.auth_succeeded(self).await
                 } else {
                     Ok(())
                 }
             }
             (EncryptedState::InitCompression, Some((msg, mut r))) => {
-                enc.server_compression
-                    .init_compress(self.common.packet_writer.compress());
+                if enc.server_compression.is_deferred() {
+                    enc.server_compression
+                        .init_compress(self.common.packet_writer.compress());
+                }
                 enc.state = EncryptedState::Authenticated;
                 self.server_read_authenticated(handler, *msg, &mut r).await
             }
