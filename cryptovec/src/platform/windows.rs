@@ -87,12 +87,6 @@ fn lock_page(page_idx: usize) -> Result<(), MemoryLockError> {
     Ok(())
 }
 
-pub fn memset(ptr: *mut u8, value: i32, size: usize) {
-    unsafe {
-        libc::memset(ptr as *mut c_void, value, size);
-    }
-}
-
 fn get_page_size() -> usize {
     *PAGE_SIZE.get_or_init(|| {
         let mut sys_info = SYSTEM_INFO::default();
