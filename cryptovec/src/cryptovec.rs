@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 use std::ops::{Deref, DerefMut, Index, IndexMut, Range, RangeFrom, RangeFull, RangeTo};
 
-use crate::platform::{self, mlock, munlock};
+use crate::platform::{mlock, munlock};
 
 /// A buffer which zeroes its memory on `.clear()`, `.resize()`, and
 /// reallocations, to avoid copying secrets around.
@@ -208,10 +208,11 @@ impl CryptoVec {
     /// version with zeros.
     pub fn resize(&mut self, size: usize) {
         if size <= self.capacity && size > self.size {
-            // If this is an expansion, just resize.
+            // If this is an expansion within capacity, the memory is already zeroed.
             self.size = size
         } else if size <= self.size {
-            // If this is a truncation, resize and erase the extra memory.
+            // If this is a truncation, securely erase the extra memory.
+            // Uses zeroize (optimization_barrier) to prevent dead-store elimination.
             unsafe {
                 zeroize(self.p.add(size), self.size - size);
             }
@@ -365,7 +366,7 @@ impl Drop for CryptoVec {
         if self.capacity > 0 {
             unsafe {
                 zeroize(self.p, self.size);
-                let _ = platform::munlock(self.p, self.capacity);
+                let _ = munlock(self.p, self.capacity);
                 let layout = std::alloc::Layout::from_size_align_unchecked(self.capacity, 1);
                 std::alloc::dealloc(self.p, layout);
             }
