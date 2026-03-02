@@ -20,7 +20,7 @@ use ssh_encoding::{Decode, Encode};
 use ssh_key::{Algorithm, EcdsaCurve, HashAlg, PrivateKey};
 
 use crate::cipher::CIPHERS;
-use crate::helpers::NameList;
+use crate::helpers::{AlgorithmExt, NameList};
 use crate::kex::{
     EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT, EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER, KexCause,
 };
@@ -194,6 +194,15 @@ pub(crate) fn parse_kex_algo_list(list: &str) -> Vec<&str> {
     list.split(',').collect()
 }
 
+fn host_key_algorithm_names(algo: &Algorithm) -> Vec<String> {
+    let mut names = vec![algo.to_string()];
+    let cert_name = algo.to_certificate_type();
+    if cert_name != algo.as_ref() {
+        names.push(cert_name);
+    }
+    names
+}
+
 pub(crate) trait Select {
     fn is_server() -> bool;
 
@@ -269,11 +278,34 @@ pub(crate) trait Select {
             None => pref.key.iter().map(ToOwned::to_owned).collect::<Vec<_>>(),
         };
 
-        let (key_both_first, key_algorithm) = Self::select(
-            &possible_host_key_algos[..],
-            &parse_kex_algo_list(&key_string),
-            AlgorithmKind::Key,
-        )?;
+        let (key_both_first, key_algorithm) = if Self::is_server() {
+            Self::select(
+                &possible_host_key_algos[..],
+                &parse_kex_algo_list(&key_string),
+                AlgorithmKind::Key,
+            )?
+        } else {
+            // For client-side matching, extend preferred host key names with their
+            // OpenSSH certificate variants (e.g. "*-cert-v01@openssh.com").
+            let possible_host_key_algo_names = possible_host_key_algos
+                .iter()
+                .flat_map(host_key_algorithm_names)
+                .collect::<Vec<_>>();
+
+            let (key_both_first, key_algorithm_name) = Self::select(
+                &possible_host_key_algo_names[..],
+                &parse_kex_algo_list(&key_string),
+                AlgorithmKind::Key,
+            )?;
+
+            let key_algorithm = if key_algorithm_name.ends_with("-cert-v01@openssh.com") {
+                Algorithm::new_certificate_ext(&key_algorithm_name)?
+            } else {
+                Algorithm::new(&key_algorithm_name)?
+            };
+
+            (key_both_first, key_algorithm)
+        };
 
         // Cipher
 
@@ -470,7 +502,8 @@ pub(crate) fn write_kex(
             )
             .encode(w)?;
         } else {
-            NameList(prefs.key.iter().map(ToString::to_string).collect()).encode(w)?;
+            // Support for host cert is added, so post the OpenSSH certificate variants of algorithms to server as well.
+            NameList(prefs.key.iter().flat_map(host_key_algorithm_names).collect()).encode(w)?;
         }
 
         // cipher client to server

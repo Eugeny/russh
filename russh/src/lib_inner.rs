@@ -14,7 +14,7 @@ mod tests;
 
 mod auth;
 
-mod cert;
+pub mod cert;
 /// Cipher names
 pub mod cipher;
 /// Compression algorithm names
