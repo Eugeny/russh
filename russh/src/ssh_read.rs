@@ -4,12 +4,12 @@ use futures::task::*;
 use log::trace;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, ReadBuf};
 
-use crate::{CryptoVec, Error};
+use crate::Error;
 
 /// The buffer to read the identification string (first line in the
-/// protocol).
+/// protocol).  Not sensitive data — just protocol version exchange.
 struct ReadSshIdBuffer {
-    pub buf: CryptoVec,
+    pub buf: Vec<u8>,
     pub total: usize,
     pub bytes_read: usize,
     pub sshid_len: usize,
@@ -22,8 +22,8 @@ impl ReadSshIdBuffer {
     }
 
     pub fn new() -> ReadSshIdBuffer {
-        let mut buf = CryptoVec::new();
-        buf.resize(256);
+        let mut buf = Vec::new();
+        buf.resize(256, 0);
         ReadSshIdBuffer {
             buf,
             sshid_len: 0,

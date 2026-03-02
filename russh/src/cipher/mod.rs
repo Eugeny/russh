@@ -230,9 +230,12 @@ pub(crate) trait SealingKey {
 
         assert!(padding_length <= u8::MAX as usize);
         buffer.buffer.push(padding_length as u8);
-        buffer.buffer.extend(payload);
-        self.fill_padding(buffer.buffer.resize_mut(padding_length));
-        buffer.buffer.resize_mut(self.tag_len());
+        buffer.buffer.extend_from_slice(payload);
+        let pad_offset = buffer.buffer.len();
+        buffer.buffer.resize(pad_offset + padding_length, 0);
+        self.fill_padding(&mut buffer.buffer[pad_offset..]);
+        let tag_offset = buffer.buffer.len();
+        buffer.buffer.resize(tag_offset + self.tag_len(), 0);
 
         #[allow(clippy::indexing_slicing)] // length checked
         let (plaintext, tag) =
@@ -260,7 +263,7 @@ pub(crate) async fn read<R: AsyncRead + Unpin>(
         {
             let seqn = buffer.seqn.0;
             buffer.buffer.clear();
-            buffer.buffer.extend(&len);
+            buffer.buffer.extend_from_slice(&len);
             trace!("reading, seqn = {seqn:?}");
             let len = cipher.decrypt_packet_length(seqn, &len);
             let len = BigEndian::read_u32(&len) as usize;
@@ -274,7 +277,7 @@ pub(crate) async fn read<R: AsyncRead + Unpin>(
         }
     }
 
-    buffer.buffer.resize(buffer.len + 4);
+    buffer.buffer.resize(buffer.len + 4, 0);
     trace!("read_exact {:?}", buffer.len + 4);
 
     let l = cipher.packet_length_to_read_for_block_length();
@@ -299,7 +302,7 @@ pub(crate) async fn read<R: AsyncRead + Unpin>(
     buffer.len = 0;
 
     // Remove the padding
-    buffer.buffer.resize(plaintext_end + 4);
+    buffer.buffer.resize(plaintext_end + 4, 0);
 
     Ok(plaintext_end + 4)
 }

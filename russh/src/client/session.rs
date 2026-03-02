@@ -13,7 +13,7 @@ impl Session {
         write_suffix: F,
     ) -> Result<ChannelId, crate::Error>
     where
-        F: FnOnce(&mut CryptoVec) -> Result<(), crate::Error>,
+        F: FnOnce(&mut Vec<u8>) -> Result<(), crate::Error>,
     {
         let result = if let Some(ref mut enc) = self.common.encrypted {
             match enc.state {

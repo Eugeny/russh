@@ -174,7 +174,7 @@ pub(crate) trait KexAlgorithmImplementor {
 
     fn client_dh(
         &mut self,
-        client_ephemeral: &mut CryptoVec,
+        client_ephemeral: &mut Vec<u8>,
         writer: &mut impl Writer,
     ) -> Result<(), Error>;
 
@@ -190,15 +190,15 @@ pub(crate) trait KexAlgorithmImplementor {
 
     fn compute_exchange_hash(
         &self,
-        key: &CryptoVec,
+        key: &[u8],
         exchange: &Exchange,
         buffer: &mut CryptoVec,
-    ) -> Result<CryptoVec, Error>;
+    ) -> Result<Vec<u8>, Error>;
 
     fn compute_keys(
         &self,
-        session_id: &CryptoVec,
-        exchange_hash: &CryptoVec,
+        session_id: &[u8],
+        exchange_hash: &[u8],
         cipher: cipher::Name,
         remote_to_local_mac: mac::Name,
         local_to_remote_mac: mac::Name,
@@ -361,8 +361,8 @@ impl SharedSecret {
 
 pub(crate) fn compute_keys<D: Digest>(
     shared_secret: Option<&SharedSecret>,
-    session_id: &CryptoVec,
-    exchange_hash: &CryptoVec,
+    session_id: &[u8],
+    exchange_hash: &[u8],
     cipher: cipher::Name,
     remote_to_local_mac: mac::Name,
     local_to_remote_mac: mac::Name,

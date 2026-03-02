@@ -195,7 +195,7 @@ impl<D: Digest> KexAlgorithmImplementor for DhGroupKex<D> {
 
         // fill exchange.
         exchange.server_ephemeral.clear();
-        exchange.server_ephemeral.extend(&encoded_server_pubkey);
+        exchange.server_ephemeral.extend_from_slice(&encoded_server_pubkey);
 
         let decoded_client_pubkey = DH::decode_public_key(client_pubkey);
         if !dh.validate_public_key(&decoded_client_pubkey) {
@@ -213,7 +213,7 @@ impl<D: Digest> KexAlgorithmImplementor for DhGroupKex<D> {
     #[doc(hidden)]
     fn client_dh(
         &mut self,
-        client_ephemeral: &mut CryptoVec,
+        client_ephemeral: &mut Vec<u8>,
         writer: &mut impl Writer,
     ) -> Result<(), Error> {
         let Some(dh) = self.dh.as_mut() else {
@@ -231,7 +231,7 @@ impl<D: Digest> KexAlgorithmImplementor for DhGroupKex<D> {
         // fill exchange.
         let encoded_pubkey = biguint_to_mpint(client_pubkey);
         client_ephemeral.clear();
-        client_ephemeral.extend(&encoded_pubkey);
+        client_ephemeral.extend_from_slice(&encoded_pubkey);
 
         if self.is_dh_gex {
             msg::KEX_DH_GEX_INIT.encode(writer)?;
@@ -270,10 +270,10 @@ impl<D: Digest> KexAlgorithmImplementor for DhGroupKex<D> {
 
     fn compute_exchange_hash(
         &self,
-        key: &CryptoVec,
+        key: &[u8],
         exchange: &Exchange,
         buffer: &mut CryptoVec,
-    ) -> Result<CryptoVec, Error> {
+    ) -> Result<Vec<u8>, Error> {
         // Computing the exchange hash, see page 7 of RFC 5656.
         buffer.clear();
         exchange.client_id.encode(buffer)?;
@@ -299,15 +299,13 @@ impl<D: Digest> KexAlgorithmImplementor for DhGroupKex<D> {
         let mut hasher = D::new();
         hasher.update(&buffer);
 
-        let mut res = CryptoVec::new();
-        res.extend(&hasher.finalize());
-        Ok(res)
+        Ok(hasher.finalize().to_vec())
     }
 
     fn compute_keys(
         &self,
-        session_id: &CryptoVec,
-        exchange_hash: &CryptoVec,
+        session_id: &[u8],
+        exchange_hash: &[u8],
         cipher: cipher::Name,
         remote_to_local_mac: mac::Name,
         local_to_remote_mac: mac::Name,

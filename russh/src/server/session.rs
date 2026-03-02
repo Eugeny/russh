@@ -23,7 +23,7 @@ pub struct Session {
     pub(crate) sender: Handle,
     pub(crate) receiver: Receiver<Msg>,
     pub(crate) target_window_size: u32,
-    pub(crate) pending_reads: Vec<CryptoVec>,
+    pub(crate) pending_reads: Vec<Vec<u8>>,
     pub(crate) pending_len: u32,
     pub(crate) channels: HashMap<ChannelId, ChannelRef>,
     pub(crate) open_global_requests: VecDeque<GlobalRequestResponse>,
@@ -452,7 +452,7 @@ impl Handle {
 impl Session {
     fn maybe_decompress(&mut self, buffer: &SSHBuffer) -> Result<IncomingSshPacket, Error> {
         if let Some(ref mut enc) = self.common.encrypted {
-            let mut decomp = CryptoVec::new();
+            let mut decomp = Vec::new();
             Ok(IncomingSshPacket {
                 #[allow(clippy::indexing_slicing)] // length checked
                 buffer: enc.decompress.decompress(
@@ -1129,7 +1129,7 @@ impl Session {
 
     fn channel_open_generic<F>(&mut self, kind: &[u8], write_suffix: F) -> Result<ChannelId, Error>
     where
-        F: FnOnce(&mut CryptoVec) -> Result<(), Error>,
+        F: FnOnce(&mut Vec<u8>) -> Result<(), Error>,
     {
         let result = if let Some(ref mut enc) = self.common.encrypted {
             if !matches!(
@@ -1243,7 +1243,7 @@ impl Session {
             // If client sent a ext-info-c message in the kex list, it supports RFC 8308 extension negotiation.
             let mut key_extension_client = false;
             if let Some(e) = &enc.exchange {
-                let &Some(mut r) = &e.client_kex_init.as_ref().get(17..) else {
+                let &Some(mut r) = &e.client_kex_init.as_slice().get(17..) else {
                     return Ok(());
                 };
                 if let Ok(kex_string) = String::decode(&mut r) {
