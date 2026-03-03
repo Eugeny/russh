@@ -817,10 +817,12 @@ impl<H: Handler> Handle<H> {
     /// the client, prefer to use the Channel returned from the `open_*` methods.
     pub async fn data(&self, id: ChannelId, data: Vec<u8>) -> Result<(), Vec<u8>> {
         self.sender
-            .send(Msg::Channel(id, ChannelMsg::Data { data }))
+            .send(Msg::Channel(id, ChannelMsg::Data {
+                data: bytes::Bytes::from(data),
+            }))
             .await
             .map_err(|e| match e.0 {
-                Msg::Channel(_, ChannelMsg::Data { data, .. }) => data,
+                Msg::Channel(_, ChannelMsg::Data { data, .. }) => data.to_vec(),
                 _ => unreachable!(),
             })
     }

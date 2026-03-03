@@ -13,6 +13,8 @@ use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{self, OwnedPermit};
 use tokio::sync::{Mutex, Notify, OwnedMutexGuard};
 
+use bytes::Bytes;
+
 use super::ChannelMsg;
 use crate::ChannelId;
 
@@ -113,7 +115,7 @@ where
         let writable = ready!(self.poll_writable(cx, buf.len()));
 
         #[allow(clippy::indexing_slicing)] // Clamped to maximum `buf.len()` with `.poll_writable`
-        let data = buf[..writable.into()].to_vec();
+        let data = Bytes::copy_from_slice(&buf[..writable.into()]);
 
         let msg = match self.ext {
             None => ChannelMsg::Data { data },

@@ -103,10 +103,12 @@ impl Handle {
     /// Send data to the session referenced by this handler.
     pub async fn data(&self, id: ChannelId, data: Vec<u8>) -> Result<(), Vec<u8>> {
         self.sender
-            .send(Msg::Channel(id, ChannelMsg::Data { data }))
+            .send(Msg::Channel(id, ChannelMsg::Data {
+                data: bytes::Bytes::from(data),
+            }))
             .await
             .map_err(|e| match e.0 {
-                Msg::Channel(_, ChannelMsg::Data { data }) => data,
+                Msg::Channel(_, ChannelMsg::Data { data }) => data.to_vec(),
                 _ => unreachable!(),
             })
     }
@@ -119,10 +121,13 @@ impl Handle {
         data: Vec<u8>,
     ) -> Result<(), Vec<u8>> {
         self.sender
-            .send(Msg::Channel(id, ChannelMsg::ExtendedData { ext, data }))
+            .send(Msg::Channel(id, ChannelMsg::ExtendedData {
+                ext,
+                data: bytes::Bytes::from(data),
+            }))
             .await
             .map_err(|e| match e.0 {
-                Msg::Channel(_, ChannelMsg::ExtendedData { data, .. }) => data,
+                Msg::Channel(_, ChannelMsg::ExtendedData { data, .. }) => data.to_vec(),
                 _ => unreachable!(),
             })
     }
@@ -909,7 +914,7 @@ impl Session {
     ///
     /// The number of bytes added to the "sending pipeline" (to be
     /// processed by the event loop) is returned.
-    pub fn data(&mut self, channel: ChannelId, data: Vec<u8>) -> Result<(), Error> {
+    pub fn data(&mut self, channel: ChannelId, data: impl Into<bytes::Bytes>) -> Result<(), Error> {
         if let Some(ref mut enc) = self.common.encrypted {
             enc.data(channel, data, self.kex.active())
         } else {
@@ -927,7 +932,7 @@ impl Session {
         &mut self,
         channel: ChannelId,
         extended: u32,
-        data: Vec<u8>,
+        data: impl Into<bytes::Bytes>,
     ) -> Result<(), Error> {
         if let Some(ref mut enc) = self.common.encrypted {
             enc.extended_data(channel, extended, data, self.kex.active())

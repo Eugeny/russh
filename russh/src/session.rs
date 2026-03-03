@@ -445,9 +445,10 @@ impl Encrypted {
     pub fn data(
         &mut self,
         channel: ChannelId,
-        buf0: Vec<u8>,
+        buf0: impl Into<bytes::Bytes>,
         is_rekeying: bool,
     ) -> Result<(), crate::Error> {
+        let buf0 = buf0.into();
         if let Some(channel) = self.channels.get_mut(&channel) {
             assert!(channel.confirmed);
             if !channel.pending_data.is_empty() && is_rekeying {
@@ -468,9 +469,10 @@ impl Encrypted {
         &mut self,
         channel: ChannelId,
         ext: u32,
-        buf0: Vec<u8>,
+        buf0: impl Into<bytes::Bytes>,
         is_rekeying: bool,
     ) -> Result<(), crate::Error> {
+        let buf0 = buf0.into();
         if let Some(channel) = self.channels.get_mut(&channel) {
             assert!(channel.confirmed);
             if !channel.pending_data.is_empty() && is_rekeying {

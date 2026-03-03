@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use bytes::Bytes;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::{Mutex, Notify};
@@ -24,10 +25,10 @@ pub enum ChannelMsg {
         window_size: u32,
     },
     Data {
-        data: Vec<u8>,
+        data: Bytes,
     },
     ExtendedData {
-        data: Vec<u8>,
+        data: Bytes,
         ext: u32,
     },
     Eof,

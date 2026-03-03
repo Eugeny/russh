@@ -442,7 +442,7 @@ impl Session {
         Ok(())
     }
 
-    pub fn data(&mut self, channel: ChannelId, data: Vec<u8>) -> Result<(), crate::Error> {
+    pub fn data(&mut self, channel: ChannelId, data: impl Into<bytes::Bytes>) -> Result<(), crate::Error> {
         if let Some(ref mut enc) = self.common.encrypted {
             enc.data(channel, data, self.kex.active())
         } else {
@@ -470,7 +470,7 @@ impl Session {
         &mut self,
         channel: ChannelId,
         ext: u32,
-        data: Vec<u8>,
+        data: impl Into<bytes::Bytes>,
     ) -> Result<(), crate::Error> {
         if let Some(ref mut enc) = self.common.encrypted {
             enc.extended_data(channel, ext, data, self.kex.active())
