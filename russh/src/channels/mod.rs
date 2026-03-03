@@ -4,7 +4,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::{Mutex, Notify};
 
-use crate::{ChannelId, ChannelOpenFailure, CryptoVec, Error, Pty, Sig};
+use crate::{ChannelId, ChannelOpenFailure, Error, Pty, Sig};
 
 pub mod io;
 
@@ -24,10 +24,10 @@ pub enum ChannelMsg {
         window_size: u32,
     },
     Data {
-        data: CryptoVec,
+        data: Vec<u8>,
     },
     ExtendedData {
-        data: CryptoVec,
+        data: Vec<u8>,
         ext: u32,
     },
     Eof,

@@ -4,7 +4,7 @@ use tokio::sync::oneshot;
 
 use crate::client::Session;
 use crate::session::EncryptedState;
-use crate::{map_err, msg, ChannelId, CryptoVec, Disconnect, Pty, Sig};
+use crate::{map_err, msg, ChannelId, Disconnect, Pty, Sig};
 
 impl Session {
     fn channel_open_generic<F>(
@@ -442,7 +442,7 @@ impl Session {
         Ok(())
     }
 
-    pub fn data(&mut self, channel: ChannelId, data: CryptoVec) -> Result<(), crate::Error> {
+    pub fn data(&mut self, channel: ChannelId, data: Vec<u8>) -> Result<(), crate::Error> {
         if let Some(ref mut enc) = self.common.encrypted {
             enc.data(channel, data, self.kex.active())
         } else {
@@ -470,7 +470,7 @@ impl Session {
         &mut self,
         channel: ChannelId,
         ext: u32,
-        data: CryptoVec,
+        data: Vec<u8>,
     ) -> Result<(), crate::Error> {
         if let Some(ref mut enc) = self.common.encrypted {
             enc.extended_data(channel, ext, data, self.kex.active())

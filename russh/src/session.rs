@@ -445,7 +445,7 @@ impl Encrypted {
     pub fn data(
         &mut self,
         channel: ChannelId,
-        buf0: CryptoVec,
+        buf0: Vec<u8>,
         is_rekeying: bool,
     ) -> Result<(), crate::Error> {
         if let Some(channel) = self.channels.get_mut(&channel) {
@@ -468,7 +468,7 @@ impl Encrypted {
         &mut self,
         channel: ChannelId,
         ext: u32,
-        buf0: CryptoVec,
+        buf0: Vec<u8>,
         is_rekeying: bool,
     ) -> Result<(), crate::Error> {
         if let Some(channel) = self.channels.get_mut(&channel) {

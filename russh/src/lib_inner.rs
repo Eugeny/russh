@@ -470,7 +470,7 @@ pub(crate) struct ChannelParams {
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     wants_reply: bool,
     /// (buffer, extended stream #, data offset in buffer)
-    pending_data: std::collections::VecDeque<(CryptoVec, Option<u32>, usize)>,
+    pending_data: std::collections::VecDeque<(Vec<u8>, Option<u32>, usize)>,
     pending_eof: bool,
     pending_close: bool,
 }

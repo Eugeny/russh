@@ -639,7 +639,7 @@ impl Session {
                     if let Some(chan) = self.channels.get(&channel_num) {
                         chan.send(ChannelMsg::ExtendedData {
                             ext,
-                            data: CryptoVec::from_slice(&data),
+                            data: data.to_vec(),
                         })
                         .await
                         .unwrap_or(())
@@ -648,7 +648,7 @@ impl Session {
                 } else {
                     if let Some(chan) = self.channels.get(&channel_num) {
                         chan.send(ChannelMsg::Data {
-                            data: CryptoVec::from_slice(&data),
+                            data: data.to_vec(),
                         })
                         .await
                         .unwrap_or(())

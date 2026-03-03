@@ -101,7 +101,7 @@ pub struct Handle {
 
 impl Handle {
     /// Send data to the session referenced by this handler.
-    pub async fn data(&self, id: ChannelId, data: CryptoVec) -> Result<(), CryptoVec> {
+    pub async fn data(&self, id: ChannelId, data: Vec<u8>) -> Result<(), Vec<u8>> {
         self.sender
             .send(Msg::Channel(id, ChannelMsg::Data { data }))
             .await
@@ -116,8 +116,8 @@ impl Handle {
         &self,
         id: ChannelId,
         ext: u32,
-        data: CryptoVec,
-    ) -> Result<(), CryptoVec> {
+        data: Vec<u8>,
+    ) -> Result<(), Vec<u8>> {
         self.sender
             .send(Msg::Channel(id, ChannelMsg::ExtendedData { ext, data }))
             .await
@@ -909,7 +909,7 @@ impl Session {
     ///
     /// The number of bytes added to the "sending pipeline" (to be
     /// processed by the event loop) is returned.
-    pub fn data(&mut self, channel: ChannelId, data: CryptoVec) -> Result<(), Error> {
+    pub fn data(&mut self, channel: ChannelId, data: Vec<u8>) -> Result<(), Error> {
         if let Some(ref mut enc) = self.common.encrypted {
             enc.data(channel, data, self.kex.active())
         } else {
@@ -927,7 +927,7 @@ impl Session {
         &mut self,
         channel: ChannelId,
         extended: u32,
-        data: CryptoVec,
+        data: Vec<u8>,
     ) -> Result<(), Error> {
         if let Some(ref mut enc) = self.common.encrypted {
             enc.extended_data(channel, extended, data, self.kex.active())

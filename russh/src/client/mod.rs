@@ -815,7 +815,7 @@ impl<H: Handler> Handle<H> {
     ///
     /// This is useful for server-initiated channels; for channels created by
     /// the client, prefer to use the Channel returned from the `open_*` methods.
-    pub async fn data(&self, id: ChannelId, data: CryptoVec) -> Result<(), CryptoVec> {
+    pub async fn data(&self, id: ChannelId, data: Vec<u8>) -> Result<(), Vec<u8>> {
         self.sender
             .send(Msg::Channel(id, ChannelMsg::Data { data }))
             .await

@@ -418,7 +418,7 @@ impl Session {
                 if let Some(chan) = self.channels.get(&channel_num) {
                     let _ = chan
                         .send(ChannelMsg::Data {
-                            data: CryptoVec::from_slice(&data),
+                            data: data.to_vec(),
                         })
                         .await;
                 }
@@ -445,7 +445,7 @@ impl Session {
                     let _ = chan
                         .send(ChannelMsg::ExtendedData {
                             ext: extended_code,
-                            data: CryptoVec::from_slice(&data),
+                            data: data.to_vec(),
                         })
                         .await;
                 }
