@@ -815,14 +815,15 @@ impl<H: Handler> Handle<H> {
     ///
     /// This is useful for server-initiated channels; for channels created by
     /// the client, prefer to use the Channel returned from the `open_*` methods.
-    pub async fn data(&self, id: ChannelId, data: Vec<u8>) -> Result<(), Vec<u8>> {
+    pub async fn data(&self, id: ChannelId, data: impl Into<bytes::Bytes>) -> Result<(), bytes::Bytes> {
+        let data = data.into();
         self.sender
             .send(Msg::Channel(id, ChannelMsg::Data {
-                data: bytes::Bytes::from(data),
+                data: data.clone(),
             }))
             .await
             .map_err(|e| match e.0 {
-                Msg::Channel(_, ChannelMsg::Data { data, .. }) => data.to_vec(),
+                Msg::Channel(_, ChannelMsg::Data { data, .. }) => data,
                 _ => unreachable!(),
             })
     }

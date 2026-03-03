@@ -118,7 +118,7 @@ impl server::Handler for Server {
 
         let data = format!("Got data: {}\r\n", String::from_utf8_lossy(data)).into_bytes();
         self.post(data.clone()).await;
-        session.data(channel, data)?;;
+        session.data(channel, data)?;
         Ok(())
     }
 

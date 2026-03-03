@@ -101,14 +101,15 @@ pub struct Handle {
 
 impl Handle {
     /// Send data to the session referenced by this handler.
-    pub async fn data(&self, id: ChannelId, data: Vec<u8>) -> Result<(), Vec<u8>> {
+    pub async fn data(&self, id: ChannelId, data: impl Into<bytes::Bytes>) -> Result<(), bytes::Bytes> {
+        let data = data.into();
         self.sender
             .send(Msg::Channel(id, ChannelMsg::Data {
-                data: bytes::Bytes::from(data),
+                data: data.clone(),
             }))
             .await
             .map_err(|e| match e.0 {
-                Msg::Channel(_, ChannelMsg::Data { data }) => data.to_vec(),
+                Msg::Channel(_, ChannelMsg::Data { data }) => data,
                 _ => unreachable!(),
             })
     }
@@ -118,16 +119,17 @@ impl Handle {
         &self,
         id: ChannelId,
         ext: u32,
-        data: Vec<u8>,
-    ) -> Result<(), Vec<u8>> {
+        data: impl Into<bytes::Bytes>,
+    ) -> Result<(), bytes::Bytes> {
+        let data = data.into();
         self.sender
             .send(Msg::Channel(id, ChannelMsg::ExtendedData {
                 ext,
-                data: bytes::Bytes::from(data),
+                data: data.clone(),
             }))
             .await
             .map_err(|e| match e.0 {
-                Msg::Channel(_, ChannelMsg::ExtendedData { data, .. }) => data.to_vec(),
+                Msg::Channel(_, ChannelMsg::ExtendedData { data, .. }) => data,
                 _ => unreachable!(),
             })
     }
@@ -1248,7 +1250,7 @@ impl Session {
             // If client sent a ext-info-c message in the kex list, it supports RFC 8308 extension negotiation.
             let mut key_extension_client = false;
             if let Some(e) = &enc.exchange {
-                let &Some(mut r) = &e.client_kex_init.as_slice().get(17..) else {
+                let Some(mut r) = e.client_kex_init.get(17..) else {
                     return Ok(());
                 };
                 if let Ok(kex_string) = String::decode(&mut r) {
