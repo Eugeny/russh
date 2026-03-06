@@ -24,6 +24,7 @@ des = ["dep:des"]
 dsa = ["ssh-key/dsa"]
 ring = ["dep:ring"] # Alternative crypto backend.
 rsa = ["dep:rsa", "dep:pkcs1", "ssh-key/rsa", "ssh-key/rsa-sha1"]
+serde = ["ssh-key/serde"]
 _bench = ["dep:criterion"]
 
 [dependencies]
