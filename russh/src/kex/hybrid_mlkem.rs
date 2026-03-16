@@ -2,16 +2,19 @@ use byteorder::{BigEndian, ByteOrder};
 use curve25519_dalek::constants::ED25519_BASEPOINT_TABLE;
 use curve25519_dalek::montgomery::MontgomeryPoint;
 use curve25519_dalek::scalar::Scalar;
-use libcrux_ml_kem::mlkem768::{
-    decapsulate, encapsulate, generate_key_pair, MlKem768Ciphertext, MlKem768PrivateKey,
-    MlKem768PublicKey,
+use ml_kem::{
+    EncodedSizeUser,
+    KemCore,
+    MlKem768,
+    MlKem768Params,
+    kem::{Decapsulate, DecapsulationKey, Encapsulate, EncapsulationKey},
 };
-use libcrux_ml_kem::{KEY_GENERATION_SEED_SIZE, SHARED_SECRET_SIZE};
 use log::debug;
 use sha2::Digest;
 use ssh_encoding::{Encode, Writer};
 
 use super::{compute_keys, KexAlgorithm, KexAlgorithmImplementor, KexType, SharedSecret};
+use crate::keys::ssh_key::rand_core::OsRng;
 use crate::mac;
 use crate::session::Exchange;
 use crate::{cipher, msg, CryptoVec, Error};
@@ -19,6 +22,10 @@ use crate::{cipher, msg, CryptoVec, Error};
 const MLKEM768_PUBLIC_KEY_SIZE: usize = 1184;
 const MLKEM768_CIPHERTEXT_SIZE: usize = 1088;
 const X25519_PUBLIC_KEY_SIZE: usize = 32;
+
+type MlKem768PublicKey = EncapsulationKey<MlKem768Params>;
+type MlKem768PrivateKey = DecapsulationKey<MlKem768Params>;
+type MlKem768Ciphertext = ml_kem::Ciphertext<MlKem768>;
 
 pub struct MlKem768X25519KexType {}
 
@@ -38,7 +45,7 @@ impl KexType for MlKem768X25519KexType {
 pub struct MlKem768X25519Kex {
     mlkem_secret: Option<Box<MlKem768PrivateKey>>,
     x25519_secret: Option<Scalar>,
-    k_pq: Option<[u8; SHARED_SECRET_SIZE]>,
+    k_pq: Option<ml_kem::SharedKey<MlKem768>>,
     k_cl: Option<MontgomeryPoint>,
 }
 
@@ -82,17 +89,15 @@ impl KexAlgorithmImplementor for MlKem768X25519Kex {
         #[allow(clippy::indexing_slicing)]
         let c_pk1_bytes = &c_init[MLKEM768_PUBLIC_KEY_SIZE..];
 
-        let mut c_pk2_array = [0u8; MLKEM768_PUBLIC_KEY_SIZE];
-        c_pk2_array.copy_from_slice(c_pk2_bytes);
-        let c_pk2 = MlKem768PublicKey::from(c_pk2_array);
+        let c_pk2_array = ml_kem::Encoded::<MlKem768PublicKey>::try_from(c_pk2_bytes)
+            .map_err(|_| Error::Kex)?;
+        let c_pk2 = MlKem768PublicKey::from_bytes(&c_pk2_array);
 
         let mut c_pk1 = MontgomeryPoint([0; 32]);
         c_pk1.0.copy_from_slice(c_pk1_bytes);
 
-        let mut randomness = [0u8; SHARED_SECRET_SIZE];
-        getrandom::getrandom(&mut randomness).map_err(|_| Error::KexInit)?;
-
-        let (s_ct2, k_pq_shared_secret) = encapsulate(&c_pk2, randomness);
+        let (s_ct2, k_pq_shared_secret) = c_pk2.encapsulate(&mut OsRng)
+            .map_err(|_| Error::KexInit)?;
 
         let s_secret = Scalar::from_bytes_mod_order(rand::random::<[u8; 32]>());
         let s_pk1 = (ED25519_BASEPOINT_TABLE * &s_secret).to_montgomery();
@@ -114,22 +119,18 @@ impl KexAlgorithmImplementor for MlKem768X25519Kex {
         client_ephemeral: &mut CryptoVec,
         writer: &mut impl Writer,
     ) -> Result<(), Error> {
-        let mut randomness = [0u8; KEY_GENERATION_SEED_SIZE];
-        getrandom::getrandom(&mut randomness).map_err(|_| Error::KexInit)?;
-
-        let keypair = generate_key_pair(randomness);
-        let (mlkem_sk, mlkem_pk) = keypair.into_parts();
+        let (mlkem_sk, mlkem_pk) = MlKem768::generate(&mut OsRng);
 
         let x25519_secret = Scalar::from_bytes_mod_order(rand::random::<[u8; 32]>());
         let x25519_pk = (ED25519_BASEPOINT_TABLE * &x25519_secret).to_montgomery();
 
         client_ephemeral.clear();
-        client_ephemeral.extend(mlkem_pk.as_slice());
+        client_ephemeral.extend(&mlkem_pk.as_bytes());
         client_ephemeral.extend(&x25519_pk.0);
 
         msg::KEX_HYBRID_INIT.encode(writer)?;
         let mut c_init = Vec::<u8>::new();
-        c_init.extend(mlkem_pk.as_slice());
+        c_init.extend(mlkem_pk.as_bytes());
         c_init.extend(&x25519_pk.0);
         c_init.as_slice().encode(writer)?;
 
@@ -149,12 +150,12 @@ impl KexAlgorithmImplementor for MlKem768X25519Kex {
         #[allow(clippy::indexing_slicing)]
         let s_pk1_bytes = &remote_pubkey_[MLKEM768_CIPHERTEXT_SIZE..];
 
-        let mut s_ct2_array = [0u8; MLKEM768_CIPHERTEXT_SIZE];
-        s_ct2_array.copy_from_slice(s_ct2_bytes);
-        let s_ct2 = MlKem768Ciphertext::from(s_ct2_array);
+        let s_ct2 = MlKem768Ciphertext::try_from(s_ct2_bytes)
+            .map_err(|_| Error::KexInit)?;
 
         let mlkem_secret = self.mlkem_secret.take().ok_or(Error::KexInit)?;
-        let k_pq_shared_secret = decapsulate(&mlkem_secret, &s_ct2);
+        let k_pq_shared_secret = mlkem_secret.decapsulate(&s_ct2)
+            .map_err(|_| Error::KexInit)?;
 
         let mut s_pk1 = MontgomeryPoint([0; 32]);
         s_pk1.0.copy_from_slice(s_pk1_bytes);
@@ -340,8 +341,8 @@ mod tests {
             .unwrap();
 
         let mut exchange = Exchange {
-            client_id: b"SSH-2.0-Test_Client".as_ref().into(),
-            server_id: b"SSH-2.0-Test_Server".as_ref().into(),
+            client_id: CryptoVec::from_slice(b"SSH-2.0-Test_Client"),
+            server_id: CryptoVec::from_slice(b"SSH-2.0-Test_Server"),
             client_kex_init: CryptoVec::from_slice(b"client_kex_init"),
             server_kex_init: CryptoVec::from_slice(b"server_kex_init"),
             client_ephemeral: client_ephemeral.clone(),
