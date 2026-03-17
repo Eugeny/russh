@@ -148,6 +148,7 @@ impl Preferred {
             }
         }
 
+
         for algo in self.key.iter() {
             if available_host_keys
                 .iter()
