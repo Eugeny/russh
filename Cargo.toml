@@ -11,7 +11,6 @@ digest = "0.10"
 delegate = "0.13"
 env_logger = "0.6"
 futures = "0.3"
-home = "0.5"
 hmac = "0.12"
 log = "0.4.11"
 rand = { version = "0.9", features = ["thread_rng"] }
