@@ -34,6 +34,7 @@
 //!
 //! [Session]: client::Session
 
+use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
 use std::convert::TryInto;
 use std::num::Wrapping;
@@ -1701,11 +1702,12 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Config {
         Config {
-            client_id: SshId::Standard(format!(
-                "SSH-2.0-{}_{}",
+            client_id: SshId::Standard(Cow::Borrowed(concat!(
+                "SSH-2.0-",
                 env!("CARGO_PKG_NAME"),
+                "_",
                 env!("CARGO_PKG_VERSION")
-            )),
+            ))),
             limits: Limits::default(),
             window_size: 2097152,
             maximum_packet_size: 32768,

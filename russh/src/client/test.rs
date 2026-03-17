@@ -87,7 +87,7 @@ mod tests {
         // Configure the server
         let mut config = server::Config::default();
         config.auth_rejection_time = std::time::Duration::from_secs(1);
-        config.server_id = SshId::Standard("SSH-1.99-CustomServer_1.0".to_string());
+        config.server_id = SshId::Standard("SSH-1.99-CustomServer_1.0".into());
         config.inactivity_timeout = None;
         config
             .keys
