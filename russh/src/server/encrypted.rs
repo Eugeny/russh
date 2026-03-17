@@ -299,7 +299,7 @@ impl Encrypted {
 }
 
 thread_local! {
-    static SIGNATURE_BUFFER: RefCell<Vec<u8>> = RefCell::new(Vec::new());
+    static SIGNATURE_BUFFER: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
 }
 
 impl Encrypted {

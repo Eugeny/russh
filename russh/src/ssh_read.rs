@@ -22,8 +22,7 @@ impl ReadSshIdBuffer {
     }
 
     pub fn new() -> ReadSshIdBuffer {
-        let mut buf = Vec::new();
-        buf.resize(256, 0);
+        let buf = vec![0; 256];
         ReadSshIdBuffer {
             buf,
             sshid_len: 0,

@@ -226,10 +226,7 @@ impl Session {
                                         &mut self.common.buffer,
                                     )?;
                                     let len = self.common.buffer.len();
-                                    let buf = std::mem::replace(
-                                        &mut self.common.buffer,
-                                        Vec::new(),
-                                    );
+                                    let buf = std::mem::take(&mut self.common.buffer);
                                     // Convert Vec<u8>→CryptoVec at the Signer
                                     // trait boundary (public API uses CryptoVec).
                                     let mut cv = CryptoVec::new();
