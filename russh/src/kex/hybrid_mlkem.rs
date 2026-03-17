@@ -100,8 +100,8 @@ impl KexAlgorithmImplementor for MlKem768X25519Kex {
         let k_cl = s_secret * c_pk1;
 
         exchange.server_ephemeral.clear();
-        exchange.server_ephemeral.extend(s_ct2.as_slice());
-        exchange.server_ephemeral.extend(&s_pk1.0);
+        exchange.server_ephemeral.extend_from_slice(s_ct2.as_slice());
+        exchange.server_ephemeral.extend_from_slice(&s_pk1.0);
 
         self.k_pq = Some(k_pq_shared_secret);
         self.k_cl = Some(k_cl);
@@ -111,7 +111,7 @@ impl KexAlgorithmImplementor for MlKem768X25519Kex {
 
     fn client_dh(
         &mut self,
-        client_ephemeral: &mut CryptoVec,
+        client_ephemeral: &mut Vec<u8>,
         writer: &mut impl Writer,
     ) -> Result<(), Error> {
         let mut randomness = [0u8; KEY_GENERATION_SEED_SIZE];
@@ -124,8 +124,8 @@ impl KexAlgorithmImplementor for MlKem768X25519Kex {
         let x25519_pk = (ED25519_BASEPOINT_TABLE * &x25519_secret).to_montgomery();
 
         client_ephemeral.clear();
-        client_ephemeral.extend(mlkem_pk.as_slice());
-        client_ephemeral.extend(&x25519_pk.0);
+        client_ephemeral.extend_from_slice(mlkem_pk.as_slice());
+        client_ephemeral.extend_from_slice(&x25519_pk.0);
 
         msg::KEX_HYBRID_INIT.encode(writer)?;
         let mut c_init = Vec::<u8>::new();
@@ -178,10 +178,10 @@ impl KexAlgorithmImplementor for MlKem768X25519Kex {
 
     fn compute_exchange_hash(
         &self,
-        key: &CryptoVec,
+        key: &[u8],
         exchange: &Exchange,
         buffer: &mut CryptoVec,
-    ) -> Result<CryptoVec, Error> {
+    ) -> Result<Vec<u8>, Error> {
         buffer.clear();
         exchange.client_id.encode(buffer)?;
         exchange.server_id.encode(buffer)?;
@@ -209,15 +209,13 @@ impl KexAlgorithmImplementor for MlKem768X25519Kex {
         let mut hasher = sha2::Sha256::new();
         hasher.update(&buffer);
 
-        let mut res = CryptoVec::new();
-        res.extend(&hasher.finalize());
-        Ok(res)
+        Ok(hasher.finalize().to_vec())
     }
 
     fn compute_keys(
         &self,
-        session_id: &CryptoVec,
-        exchange_hash: &CryptoVec,
+        session_id: &[u8],
+        exchange_hash: &[u8],
         cipher: cipher::Name,
         remote_to_local_mac: mac::Name,
         local_to_remote_mac: mac::Name,
@@ -269,8 +267,8 @@ mod tests {
             k_cl: None,
         };
 
-        let mut client_ephemeral = CryptoVec::new();
-        let mut client_init_msg = CryptoVec::new();
+        let mut client_ephemeral = Vec::new();
+        let mut client_init_msg = Vec::new();
 
         client_kex
             .client_dh(&mut client_ephemeral, &mut client_init_msg)
@@ -333,19 +331,19 @@ mod tests {
             k_cl: None,
         };
 
-        let mut client_ephemeral = CryptoVec::new();
-        let mut client_init_msg = CryptoVec::new();
+        let mut client_ephemeral = Vec::new();
+        let mut client_init_msg = Vec::new();
         client_kex
             .client_dh(&mut client_ephemeral, &mut client_init_msg)
             .unwrap();
 
         let mut exchange = Exchange {
-            client_id: b"SSH-2.0-Test_Client".as_ref().into(),
-            server_id: b"SSH-2.0-Test_Server".as_ref().into(),
-            client_kex_init: CryptoVec::from_slice(b"client_kex_init"),
-            server_kex_init: CryptoVec::from_slice(b"server_kex_init"),
+            client_id: b"SSH-2.0-Test_Client".to_vec(),
+            server_id: b"SSH-2.0-Test_Server".to_vec(),
+            client_kex_init: b"client_kex_init".to_vec(),
+            server_kex_init: b"server_kex_init".to_vec(),
             client_ephemeral: client_ephemeral.clone(),
-            server_ephemeral: CryptoVec::new(),
+            server_ephemeral: Vec::new(),
             gex: None,
         };
 
@@ -356,20 +354,20 @@ mod tests {
             .compute_shared_secret(&exchange.server_ephemeral)
             .unwrap();
 
-        let key = CryptoVec::from_slice(b"test_host_key");
+        let key = b"test_host_key";
         let mut buffer = CryptoVec::new();
 
         let client_hash = client_kex
-            .compute_exchange_hash(&key, &exchange, &mut buffer)
+            .compute_exchange_hash(key, &exchange, &mut buffer)
             .unwrap();
 
         let server_hash = server_kex
-            .compute_exchange_hash(&key, &exchange, &mut buffer)
+            .compute_exchange_hash(key, &exchange, &mut buffer)
             .unwrap();
 
         assert_eq!(
-            client_hash.as_ref(),
-            server_hash.as_ref(),
+            client_hash,
+            server_hash,
             "Exchange hashes should match between client and server"
         );
         assert_eq!(client_hash.len(), 32, "SHA-256 hash should be 32 bytes");
@@ -384,8 +382,8 @@ mod tests {
             k_cl: None,
         };
 
-        let mut client_ephemeral = CryptoVec::new();
-        let mut client_init_msg = CryptoVec::new();
+        let mut client_ephemeral = Vec::new();
+        let mut client_init_msg = Vec::new();
         client_kex
             .client_dh(&mut client_ephemeral, &mut client_init_msg)
             .unwrap();
@@ -425,8 +423,8 @@ mod tests {
             k_cl: None,
         };
 
-        let mut client_ephemeral = CryptoVec::new();
-        let mut client_init_msg = CryptoVec::new();
+        let mut client_ephemeral = Vec::new();
+        let mut client_init_msg = Vec::new();
         client_kex
             .client_dh(&mut client_ephemeral, &mut client_init_msg)
             .unwrap();

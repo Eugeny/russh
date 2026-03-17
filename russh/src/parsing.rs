@@ -1,6 +1,6 @@
 use ssh_encoding::{Decode, Encode, Reader};
 
-use crate::{msg, CryptoVec};
+use crate::msg;
 
 use crate::map_err;
 
@@ -53,7 +53,7 @@ impl OpenChannelMessage {
     /// Pushes a confirmation that this channel was opened to the vec.
     pub fn confirm(
         &self,
-        buffer: &mut CryptoVec,
+        buffer: &mut Vec<u8>,
         sender_channel: u32,
         window_size: u32,
         packet_size: u32,
@@ -71,7 +71,7 @@ impl OpenChannelMessage {
     /// Pushes a failure message to the vec.
     pub fn fail(
         &self,
-        buffer: &mut CryptoVec,
+        buffer: &mut Vec<u8>,
         reason: u8,
         message: &[u8],
     ) -> Result<(), crate::Error> {
@@ -86,7 +86,7 @@ impl OpenChannelMessage {
     }
 
     /// Pushes an unknown type error to the vec.
-    pub fn unknown_type(&self, buffer: &mut CryptoVec) -> Result<(), crate::Error> {
+    pub fn unknown_type(&self, buffer: &mut Vec<u8>) -> Result<(), crate::Error> {
         self.fail(
             buffer,
             msg::SSH_OPEN_UNKNOWN_CHANNEL_TYPE,

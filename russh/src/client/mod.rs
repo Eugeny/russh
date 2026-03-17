@@ -92,7 +92,7 @@ pub struct Session {
     sender: UnboundedSender<Reply>,
     channels: HashMap<ChannelId, ChannelRef>,
     target_window_size: u32,
-    pending_reads: Vec<CryptoVec>,
+    pending_reads: Vec<Vec<u8>>,
     pending_len: u32,
     inbound_channel_sender: Sender<Msg>,
     inbound_channel_receiver: Receiver<Msg>,
@@ -815,9 +815,12 @@ impl<H: Handler> Handle<H> {
     ///
     /// This is useful for server-initiated channels; for channels created by
     /// the client, prefer to use the Channel returned from the `open_*` methods.
-    pub async fn data(&self, id: ChannelId, data: CryptoVec) -> Result<(), CryptoVec> {
+    pub async fn data(&self, id: ChannelId, data: impl Into<bytes::Bytes>) -> Result<(), bytes::Bytes> {
+        let data = data.into();
         self.sender
-            .send(Msg::Channel(id, ChannelMsg::Data { data }))
+            .send(Msg::Channel(id, ChannelMsg::Data {
+                data: data.clone(),
+            }))
             .await
             .map_err(|e| match e.0 {
                 Msg::Channel(_, ChannelMsg::Data { data, .. }) => data,
@@ -948,7 +951,7 @@ where
             config,
             wants_reply: false,
             disconnected: false,
-            buffer: CryptoVec::new(),
+            buffer: Vec::new(),
             strict_kex: false,
             alive_timeouts: 0,
             received_data: false,
@@ -990,7 +993,7 @@ async fn start_reading<R: AsyncRead + Unpin>(
 impl Session {
     fn maybe_decompress(&mut self, buffer: &SSHBuffer) -> Result<IncomingSshPacket, Error> {
         if let Some(ref mut enc) = self.common.encrypted {
-            let mut decomp = CryptoVec::new();
+            let mut decomp = Vec::new();
             Ok(IncomingSshPacket {
                 #[allow(clippy::indexing_slicing)] // length checked
                 buffer: enc.decompress.decompress(

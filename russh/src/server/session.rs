@@ -23,7 +23,7 @@ pub struct Session {
     pub(crate) sender: Handle,
     pub(crate) receiver: Receiver<Msg>,
     pub(crate) target_window_size: u32,
-    pub(crate) pending_reads: Vec<CryptoVec>,
+    pub(crate) pending_reads: Vec<Vec<u8>>,
     pub(crate) pending_len: u32,
     pub(crate) channels: HashMap<ChannelId, ChannelRef>,
     pub(crate) open_global_requests: VecDeque<GlobalRequestResponse>,
@@ -101,9 +101,12 @@ pub struct Handle {
 
 impl Handle {
     /// Send data to the session referenced by this handler.
-    pub async fn data(&self, id: ChannelId, data: CryptoVec) -> Result<(), CryptoVec> {
+    pub async fn data(&self, id: ChannelId, data: impl Into<bytes::Bytes>) -> Result<(), bytes::Bytes> {
+        let data = data.into();
         self.sender
-            .send(Msg::Channel(id, ChannelMsg::Data { data }))
+            .send(Msg::Channel(id, ChannelMsg::Data {
+                data: data.clone(),
+            }))
             .await
             .map_err(|e| match e.0 {
                 Msg::Channel(_, ChannelMsg::Data { data }) => data,
@@ -116,10 +119,14 @@ impl Handle {
         &self,
         id: ChannelId,
         ext: u32,
-        data: CryptoVec,
-    ) -> Result<(), CryptoVec> {
+        data: impl Into<bytes::Bytes>,
+    ) -> Result<(), bytes::Bytes> {
+        let data = data.into();
         self.sender
-            .send(Msg::Channel(id, ChannelMsg::ExtendedData { ext, data }))
+            .send(Msg::Channel(id, ChannelMsg::ExtendedData {
+                ext,
+                data: data.clone(),
+            }))
             .await
             .map_err(|e| match e.0 {
                 Msg::Channel(_, ChannelMsg::ExtendedData { data, .. }) => data,
@@ -452,7 +459,7 @@ impl Handle {
 impl Session {
     fn maybe_decompress(&mut self, buffer: &SSHBuffer) -> Result<IncomingSshPacket, Error> {
         if let Some(ref mut enc) = self.common.encrypted {
-            let mut decomp = CryptoVec::new();
+            let mut decomp = Vec::new();
             Ok(IncomingSshPacket {
                 #[allow(clippy::indexing_slicing)] // length checked
                 buffer: enc.decompress.decompress(
@@ -909,7 +916,7 @@ impl Session {
     ///
     /// The number of bytes added to the "sending pipeline" (to be
     /// processed by the event loop) is returned.
-    pub fn data(&mut self, channel: ChannelId, data: CryptoVec) -> Result<(), Error> {
+    pub fn data(&mut self, channel: ChannelId, data: impl Into<bytes::Bytes>) -> Result<(), Error> {
         if let Some(ref mut enc) = self.common.encrypted {
             enc.data(channel, data, self.kex.active())
         } else {
@@ -927,7 +934,7 @@ impl Session {
         &mut self,
         channel: ChannelId,
         extended: u32,
-        data: CryptoVec,
+        data: impl Into<bytes::Bytes>,
     ) -> Result<(), Error> {
         if let Some(ref mut enc) = self.common.encrypted {
             enc.extended_data(channel, extended, data, self.kex.active())
@@ -1129,7 +1136,7 @@ impl Session {
 
     fn channel_open_generic<F>(&mut self, kind: &[u8], write_suffix: F) -> Result<ChannelId, Error>
     where
-        F: FnOnce(&mut CryptoVec) -> Result<(), Error>,
+        F: FnOnce(&mut Vec<u8>) -> Result<(), Error>,
     {
         let result = if let Some(ref mut enc) = self.common.encrypted {
             if !matches!(
@@ -1243,7 +1250,7 @@ impl Session {
             // If client sent a ext-info-c message in the kex list, it supports RFC 8308 extension negotiation.
             let mut key_extension_client = false;
             if let Some(e) = &enc.exchange {
-                let &Some(mut r) = &e.client_kex_init.as_ref().get(17..) else {
+                let Some(mut r) = e.client_kex_init.get(17..) else {
                     return Ok(());
                 };
                 if let Ok(kex_string) = String::decode(&mut r) {

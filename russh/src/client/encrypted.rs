@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-use std::cell::RefCell;
 use std::convert::TryInto;
 use std::ops::Deref;
 use std::str::FromStr;
@@ -34,10 +33,6 @@ use crate::{
     auth, map_err, msg, Channel, ChannelId, ChannelMsg, ChannelOpenFailure, ChannelParams, CryptoVec, Error,
     MethodSet, Sig,
 };
-
-thread_local! {
-    static SIGNATURE_BUFFER: RefCell<CryptoVec> = RefCell::new(CryptoVec::new());
-}
 
 impl Session {
     pub(crate) async fn client_read_encrypted<H: Handler>(
@@ -231,17 +226,20 @@ impl Session {
                                         &mut self.common.buffer,
                                     )?;
                                     let len = self.common.buffer.len();
-                                    let buf = std::mem::replace(
-                                        &mut self.common.buffer,
-                                        CryptoVec::new(),
-                                    );
+                                    let buf = std::mem::take(&mut self.common.buffer);
+                                    // Convert Vec<u8>→CryptoVec at the Signer
+                                    // trait boundary (public API uses CryptoVec).
+                                    let mut cv = CryptoVec::new();
+                                    cv.extend(&buf);
 
                                     self.sender
-                                        .send(Reply::SignRequest { key, data: buf })
+                                        .send(Reply::SignRequest { key, data: cv })
                                         .map_err(|_| crate::Error::SendError)?;
                                     self.common.buffer = loop {
                                         match self.receiver.recv().await {
-                                            Some(Msg::Signed { data }) => break data,
+                                            Some(Msg::Signed { data }) => {
+                                                break data[..].to_vec()
+                                            }
                                             None => return Err(crate::Error::RecvError.into()),
                                             _ => {}
                                         }
@@ -250,7 +248,7 @@ impl Session {
                                         // The buffer was modified.
                                         push_packet!(enc.write, {
                                             #[allow(clippy::indexing_slicing)] // length checked
-                                            enc.write.extend(&self.common.buffer[i..]);
+                                            enc.write.extend_from_slice(&self.common.buffer[i..]);
                                         })
                                     }
                                 }
@@ -417,7 +415,7 @@ impl Session {
                 if let Some(chan) = self.channels.get(&channel_num) {
                     let _ = chan
                         .send(ChannelMsg::Data {
-                            data: CryptoVec::from_slice(&data),
+                            data: data.clone(),
                         })
                         .await;
                 }
@@ -444,7 +442,7 @@ impl Session {
                     let _ = chan
                         .send(ChannelMsg::ExtendedData {
                             ext: extended_code,
-                            data: CryptoVec::from_slice(&data),
+                            data: data.clone(),
                         })
                         .await;
                 }
@@ -961,7 +959,7 @@ impl Encrypted {
         &mut self,
         user: &str,
         key: &PublicKeyOrCertificate,
-        buffer: &mut CryptoVec,
+        buffer: &mut Vec<u8>,
     ) -> Result<usize, crate::Error> {
         buffer.clear();
         self.session_id.as_ref().encode(buffer)?;
@@ -990,7 +988,7 @@ impl Encrypted {
         &mut self,
         user: &str,
         method: &auth::Method,
-        buffer: &mut CryptoVec,
+        buffer: &mut Vec<u8>,
     ) -> Result<(), crate::Error> {
         match method {
             auth::Method::PublicKey { key } => {
@@ -1002,7 +1000,7 @@ impl Encrypted {
 
                 push_packet!(self.write, {
                     #[allow(clippy::indexing_slicing)] // length checked
-                    self.write.extend(&buffer[i0..]);
+                    self.write.extend_from_slice(&buffer[i0..]);
                 })
             }
             auth::Method::OpenSshCertificate { key, cert } => {
@@ -1019,7 +1017,7 @@ impl Encrypted {
 
                 push_packet!(self.write, {
                     #[allow(clippy::indexing_slicing)] // length checked
-                    self.write.extend(&buffer[i0..]);
+                    self.write.extend_from_slice(&buffer[i0..]);
                 })
             }
             _ => {}

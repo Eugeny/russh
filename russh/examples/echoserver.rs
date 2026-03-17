@@ -52,7 +52,7 @@ struct Server {
 }
 
 impl Server {
-    async fn post(&mut self, data: CryptoVec) {
+    async fn post(&mut self, data: Vec<u8>) {
         let mut clients = self.clients.lock().await;
         for (id, (channel, s)) in clients.iter_mut() {
             if *id != self.id {
@@ -116,7 +116,7 @@ impl server::Handler for Server {
             return Err(russh::Error::Disconnect);
         }
 
-        let data = CryptoVec::from(format!("Got data: {}\r\n", String::from_utf8_lossy(data)));
+        let data = format!("Got data: {}\r\n", String::from_utf8_lossy(data)).into_bytes();
         self.post(data.clone()).await;
         session.data(channel, data)?;
         Ok(())

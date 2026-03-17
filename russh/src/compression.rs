@@ -138,7 +138,7 @@ impl Compress {
     pub fn compress<'a>(
         &mut self,
         input: &'a [u8],
-        _: &'a mut russh_cryptovec::CryptoVec,
+        _: &'a mut Vec<u8>,
     ) -> Result<&'a [u8], crate::Error> {
         Ok(input)
     }
@@ -149,7 +149,7 @@ impl Decompress {
     pub fn decompress<'a>(
         &mut self,
         input: &'a [u8],
-        _: &'a mut russh_cryptovec::CryptoVec,
+        _: &'a mut Vec<u8>,
     ) -> Result<&'a [u8], crate::Error> {
         Ok(input)
     }
@@ -160,7 +160,7 @@ impl Compress {
     pub fn compress<'a>(
         &mut self,
         input: &'a [u8],
-        output: &'a mut russh_cryptovec::CryptoVec,
+        output: &'a mut Vec<u8>,
     ) -> Result<&'a [u8], crate::Error> {
         match *self {
             Compress::None => Ok(input),
@@ -168,7 +168,7 @@ impl Compress {
                 output.clear();
                 let n_in = z.total_in() as usize;
                 let n_out = z.total_out() as usize;
-                output.resize(input.len() + 10);
+                output.resize(input.len() + 10, 0);
                 let flush = flate2::FlushCompress::Partial;
                 loop {
                     let n_in_ = z.total_in() as usize - n_in;
@@ -177,7 +177,7 @@ impl Compress {
                     let c = z.compress(&input[n_in_..], &mut output[n_out_..], flush)?;
                     match c {
                         flate2::Status::BufError => {
-                            output.resize(output.len() * 2);
+                            output.resize(output.len() * 2, 0);
                         }
                         _ => break,
                     }
@@ -195,7 +195,7 @@ impl Decompress {
     pub fn decompress<'a>(
         &mut self,
         input: &'a [u8],
-        output: &'a mut russh_cryptovec::CryptoVec,
+        output: &'a mut Vec<u8>,
     ) -> Result<&'a [u8], crate::Error> {
         match *self {
             Decompress::None => Ok(input),
@@ -203,7 +203,7 @@ impl Decompress {
                 output.clear();
                 let n_in = z.total_in() as usize;
                 let n_out = z.total_out() as usize;
-                output.resize(input.len());
+                output.resize(input.len(), 0);
                 let flush = flate2::FlushDecompress::None;
                 loop {
                     let n_in_ = z.total_in() as usize - n_in;
@@ -212,7 +212,7 @@ impl Decompress {
                     let d = z.decompress(&input[n_in_..], &mut output[n_out_..], flush);
                     match d? {
                         flate2::Status::Ok => {
-                            output.resize(output.len() * 2);
+                            output.resize(output.len() * 2, 0);
                         }
                         _ => break,
                     }
