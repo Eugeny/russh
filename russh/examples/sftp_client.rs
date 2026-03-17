@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use log::{LevelFilter, error, info};
-use russh::keys::*;
 use russh::*;
 use russh_sftp::client::SftpSession;
 use russh_sftp::protocol::OpenFlags;
@@ -14,7 +13,7 @@ impl client::Handler for Client {
 
     async fn check_server_key(
         &mut self,
-        server_public_key: &ssh_key::PublicKey,
+        server_public_key: &cert::PublicKeyOrCertificate,
     ) -> Result<bool, Self::Error> {
         info!("check_server_key: {server_public_key:?}");
         Ok(true)

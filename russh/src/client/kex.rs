@@ -6,11 +6,13 @@ use std::sync::Arc;
 use bytes::Bytes;
 use log::{debug, error, warn};
 use signature::Verifier;
-use ssh_encoding::{Decode, Encode};
-use ssh_key::{Mpint, PublicKey, Signature};
+use ssh_encoding::{Decode, Encode };
+use ssh_key::{Algorithm, Certificate, Mpint, Signature};
 
 use super::IncomingSshPacket;
+use crate::cert::PublicKeyOrCertificate;
 use crate::client::{Config, NewKeys};
+use crate::helpers::AlgorithmExt;
 use crate::kex::dh::groups::DhGroup;
 use crate::kex::{KexAlgorithm, KexAlgorithmImplementor, KexCause, KexProgress, KEXES};
 use crate::keys::key::parse_public_key;
@@ -37,7 +39,7 @@ enum ClientKexState {
         kex: KexAlgorithm,
     },
     WaitingForNewKeys {
-        server_host_key: PublicKey,
+        server_host_key: PublicKeyOrCertificate,
         newkeys: NewKeys,
     },
 }
@@ -262,19 +264,40 @@ impl ClientKex {
                 #[allow(clippy::indexing_slicing)] // length checked
                 let r = &mut &input.buffer[1..];
 
-                let server_host_key = Bytes::decode(r)?; // server public key.
-                let server_host_key = parse_public_key(&server_host_key)?;
-                debug!(
-                    "received server host key: {:?}",
-                    server_host_key.to_openssh()
-                );
+                let mut pubkey_vec = CryptoVec::new();
+                let server_host_key_bytes = Bytes::decode(r)?;
+                let algo = String::decode(&mut &server_host_key_bytes[..])?;
 
+                // SSH supports two modes for server authentication during the handshake:
+                // In normal mode, the server sends a raw public key during the SSH handshake:
+                //   host_key = raw public key (e.g. "ssh-rsa <publickey>")
+                //
+                // In host certificate mode, the server sends a certificate instead:
+                //   host_key = certificate (e.g. "ssh-rsa-cert-v01@openssh.com <cert_blob>")
+                //
+                // The cert blob contains the public key itself, the CA signature, and metadata
+                // such as principals and validity period. The server's private key remains the
+                // same — the cert is essentially a CA-endorsed wrapper around the public key.
+                let server_host_key = if Algorithm::new_certificate(&algo).is_ok() {
+                    let cert = Certificate::from_bytes(&server_host_key_bytes)?;
+                    server_host_key_bytes.as_ref().encode(&mut pubkey_vec)?;
+                    PublicKeyOrCertificate::Certificate(cert)
+                } else {
+                    let public_key = parse_public_key(&server_host_key_bytes)?;
+                    debug!(
+                        "received server host key: {:?}", 
+                        public_key.to_openssh()
+                    );
+                    public_key.to_bytes()?.encode(&mut pubkey_vec)?;
+                    let hash_alg = Algorithm::new(&algo)
+                        .ok()
+                        .and_then(|algorithm| algorithm.hash_alg());
+                    PublicKeyOrCertificate::PublicKey { key: public_key, hash_alg }
+                };
+                
                 let server_ephemeral = Bytes::decode(r)?;
                 self.exchange.server_ephemeral.extend(&server_ephemeral);
                 kex.compute_shared_secret(&self.exchange.server_ephemeral)?;
-
-                let mut pubkey_vec = CryptoVec::new();
-                server_host_key.to_bytes()?.encode(&mut pubkey_vec)?;
 
                 let exchange = &self.exchange;
                 let hash = HASH_BUFFER.with({
@@ -287,8 +310,12 @@ impl ClientKex {
 
                 let signature = Bytes::decode(r)?;
                 let signature = Signature::decode(&mut &signature[..])?;
+                let public_key = match &server_host_key {
+                    PublicKeyOrCertificate::PublicKey { key, .. } => key.clone(),
+                    PublicKeyOrCertificate::Certificate(cert) => cert.public_key().clone().into(),
+                };
 
-                if let Err(e) = Verifier::verify(&server_host_key, hash.as_ref(), &signature) {
+                if let Err(e) = Verifier::verify(&public_key, hash.as_ref(), &signature) {
                     debug!("wrong server sig: {e:?}");
                     return Err(Error::WrongServerSig);
                 }

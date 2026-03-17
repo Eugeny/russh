@@ -61,6 +61,7 @@ use crate::channels::{
     Channel, ChannelMsg, ChannelReadHalf, ChannelRef, ChannelWriteHalf, WindowSizeRef,
 };
 use crate::cipher::{self, OpeningKey, clear};
+use crate::cert::PublicKeyOrCertificate;
 use crate::kex::{KexAlgorithmImplementor, KexCause, KexProgress, SessionKexState};
 use crate::keys::PrivateKeyWithHashAlg;
 use crate::msg::{is_kex_msg, validate_server_msg_strict_kex};
@@ -1749,7 +1750,7 @@ pub trait Handler: Sized + Send {
     #[allow(unused_variables)]
     fn check_server_key(
         &mut self,
-        server_public_key: &ssh_key::PublicKey,
+        server_public_key: &PublicKeyOrCertificate,
     ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
         async { Ok(false) }
     }

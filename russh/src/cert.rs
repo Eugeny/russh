@@ -9,7 +9,7 @@ use crate::keys::key::PrivateKeyWithHashAlg;
 
 #[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
-pub(crate) enum PublicKeyOrCertificate {
+pub enum PublicKeyOrCertificate {
     PublicKey {
         key: PublicKey,
         hash_alg: Option<HashAlg>,
