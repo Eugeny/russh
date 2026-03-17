@@ -18,6 +18,7 @@ use std::fmt::{Debug, Formatter};
 use std::mem::replace;
 use std::num::Wrapping;
 
+use bytes::Bytes;
 use byteorder::{BigEndian, ByteOrder};
 use log::{debug, trace};
 use ssh_encoding::Encode;
@@ -443,7 +444,7 @@ impl Encrypted {
     pub fn data(
         &mut self,
         channel: ChannelId,
-        buf0: impl Into<bytes::Bytes>,
+        buf0: impl Into<Bytes>,
         is_rekeying: bool,
     ) -> Result<(), crate::Error> {
         let buf0 = buf0.into();
@@ -467,7 +468,7 @@ impl Encrypted {
         &mut self,
         channel: ChannelId,
         ext: u32,
-        buf0: impl Into<bytes::Bytes>,
+        buf0: impl Into<Bytes>,
         is_rekeying: bool,
     ) -> Result<(), crate::Error> {
         let buf0 = buf0.into();
@@ -571,8 +572,8 @@ pub struct Exchange {
     // They carry no secret material and do not require mlock.
     pub client_id: Vec<u8>,
     pub server_id: Vec<u8>,
-    pub client_kex_init: Vec<u8>,
-    pub server_kex_init: Vec<u8>,
+    pub client_kex_init: Bytes,
+    pub server_kex_init: Bytes,
     pub client_ephemeral: Vec<u8>,
     pub server_ephemeral: Vec<u8>,
     pub gex: Option<(GexParams, DhGroup)>,
