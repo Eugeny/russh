@@ -228,6 +228,7 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
       <td align="center" valign="top" width="14.28%"><a href="https://gui.wf"><img src="https://avatars.githubusercontent.com/u/48162143?v=4?s=100" width="100px;" alt="Guilherme Fontes"/><br /><sub><b>Guilherme Fontes</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=gui-wf" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/zeroleo12345"><img src="https://avatars.githubusercontent.com/u/13072815?v=4?s=100" width="100px;" alt="Lyn"/><br /><sub><b>Lyn</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=zeroleo12345" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/Mota-Link"><img src="https://avatars.githubusercontent.com/u/83714159?v=4?s=100" width="100px;" alt="Mota-Link"/><br /><sub><b>Mota-Link</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=Mota-Link" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/mjc"><img src="https://avatars.githubusercontent.com/u/1977?v=4?s=100" width="100px;" alt="Mika Cohen"/><br /><sub><b>Mika Cohen</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=mjc" title="Code">💻</a></td>
     </tr>
   </tbody>
 </table>
