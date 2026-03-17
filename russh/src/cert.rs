@@ -7,14 +7,26 @@ use {
 
 use crate::keys::key::PrivateKeyWithHashAlg;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[allow(clippy::large_enum_variant)]
-pub(crate) enum PublicKeyOrCertificate {
+pub enum PublicKeyOrCertificate {
     PublicKey {
         key: PublicKey,
         hash_alg: Option<HashAlg>,
     },
     Certificate(Certificate),
+}
+
+impl PublicKeyOrCertificate {
+    /// Returns the public key, extracting it from the certificate if necessary.
+    pub fn public_key(&self) -> PublicKey {
+        match self {
+            PublicKeyOrCertificate::PublicKey { key, .. } => key.clone(),
+            PublicKeyOrCertificate::Certificate(cert) => {
+                PublicKey::new(cert.public_key().clone(), "")
+            }
+        }
+    }
 }
 
 impl From<&PrivateKeyWithHashAlg> for PublicKeyOrCertificate {
