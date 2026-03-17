@@ -26,25 +26,25 @@ mod proxy;
 pub use proxy::*;
 
 #[derive(Clone, Debug, Default)]
-struct HostConfig {
+pub struct HostConfig {
     /// http://man.openbsd.org/OpenBSD-current/man5/ssh_config.5#User
-    user: Option<String>,
+    pub user: Option<String>,
     /// http://man.openbsd.org/OpenBSD-current/man5/ssh_config.5#Hostname
-    hostname: Option<String>,
+    pub hostname: Option<String>,
     /// http://man.openbsd.org/OpenBSD-current/man5/ssh_config.5#Port
-    port: Option<u16>,
+    pub port: Option<u16>,
     /// http://man.openbsd.org/OpenBSD-current/man5/ssh_config.5#IdentityFile
-    identity_file: Option<Vec<PathBuf>>,
+    pub identity_file: Option<Vec<PathBuf>>,
     /// http://man.openbsd.org/OpenBSD-current/man5/ssh_config.5#ProxyCommand
-    proxy_command: Option<String>,
+    pub proxy_command: Option<String>,
     /// http://man.openbsd.org/OpenBSD-current/man5/ssh_config.5#ProxyJump
-    proxy_jump: Option<String>,
+    pub proxy_jump: Option<String>,
     /// http://man.openbsd.org/OpenBSD-current/man5/ssh_config.5#AddKeysToAgent
-    add_keys_to_agent: Option<AddKeysToAgent>,
+    pub add_keys_to_agent: Option<AddKeysToAgent>,
     /// http://man.openbsd.org/OpenBSD-current/man5/ssh_config.5#UserKnownHostsFile
-    user_known_hosts_file: Option<PathBuf>,
+    pub user_known_hosts_file: Option<PathBuf>,
     /// http://man.openbsd.org/OpenBSD-current/man5/ssh_config.5#StrictHostKeyChecking
-    strict_host_key_checking: Option<bool>,
+    pub strict_host_key_checking: Option<bool>,
 }
 
 impl HostConfig {
@@ -132,10 +132,10 @@ impl SshConfig {
 
 #[derive(Clone, Debug)]
 pub struct Config {
-    host_name: String,
-    user: Option<String>,
-    port: Option<u16>,
-    host_config: HostConfig,
+    pub host_name: String,
+    pub user: Option<String>,
+    pub port: Option<u16>,
+    pub host_config: HostConfig,
 }
 
 impl Config {

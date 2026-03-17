@@ -102,11 +102,12 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Config {
         Config {
-            server_id: SshId::Standard(format!(
-                "SSH-2.0-{}_{}",
+            server_id: SshId::Standard(Cow::Borrowed(concat!(
+                "SSH-2.0-",
                 env!("CARGO_PKG_NAME"),
+                "_",
                 env!("CARGO_PKG_VERSION")
-            )),
+            ))),
             methods: auth::MethodSet::all(),
             auth_rejection_time: std::time::Duration::from_secs(1),
             auth_rejection_time_initial: None,

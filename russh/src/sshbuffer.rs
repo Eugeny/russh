@@ -14,6 +14,7 @@
 //
 
 use core::fmt;
+use std::borrow::Cow;
 use std::num::Wrapping;
 
 use cipher::SealingKey;
@@ -26,9 +27,9 @@ use super::*;
 #[derive(Debug)]
 pub enum SshId {
     /// When sending the id, append RFC standard `\r\n`. Example: `SshId::Standard("SSH-2.0-acme")`
-    Standard(String),
+    Standard(Cow<'static, str>),
     /// When sending the id, use this buffer as it is and do not append additional line terminators.
-    Raw(String),
+    Raw(Cow<'static, str>),
 }
 
 impl SshId {
@@ -52,19 +53,19 @@ impl SshId {
 #[test]
 fn test_ssh_id() {
     let mut buffer = Vec::new();
-    SshId::Standard("SSH-2.0-acme".to_string()).write(&mut buffer);
+    SshId::Standard("SSH-2.0-acme".into()).write(&mut buffer);
     assert_eq!(&buffer[..], b"SSH-2.0-acme\r\n");
 
     let mut buffer = Vec::new();
-    SshId::Raw("SSH-2.0-raw\n".to_string()).write(&mut buffer);
+    SshId::Raw("SSH-2.0-raw\n".into()).write(&mut buffer);
     assert_eq!(&buffer[..], b"SSH-2.0-raw\n");
 
     assert_eq!(
-        SshId::Standard("SSH-2.0-acme".to_string()).as_kex_hash_bytes(),
+        SshId::Standard("SSH-2.0-acme".into()).as_kex_hash_bytes(),
         b"SSH-2.0-acme"
     );
     assert_eq!(
-        SshId::Raw("SSH-2.0-raw\n".to_string()).as_kex_hash_bytes(),
+        SshId::Raw("SSH-2.0-raw\n".into()).as_kex_hash_bytes(),
         b"SSH-2.0-raw"
     );
 }
