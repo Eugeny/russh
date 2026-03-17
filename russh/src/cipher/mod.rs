@@ -311,7 +311,7 @@ pub(crate) async fn read<R: AsyncRead + Unpin>(
 pub(crate) const PACKET_LENGTH_LEN: usize = 4;
 
 const MINIMUM_PACKET_LEN: usize = 16;
-const MAXIMUM_PACKET_LEN: usize = 256 * 1024;
+const MAXIMUM_PACKET_LEN: usize = 256 * 1024 + 36;
 
 const PADDING_LENGTH_LEN: usize = 1;
 
