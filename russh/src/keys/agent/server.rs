@@ -66,15 +66,13 @@ where
     let keys = KeyStore(Arc::new(RwLock::new(HashMap::new())));
     let lock = Lock(Arc::new(RwLock::new(CryptoVec::new())));
     while let Some(Ok(stream)) = listener.next().await {
-        let mut buf = CryptoVec::new();
-        buf.resize(4);
         russh_util::runtime::spawn(
             (Connection {
                 lock: lock.clone(),
                 keys: keys.clone(),
                 agent: Some(agent.clone()),
                 s: stream,
-                buf: CryptoVec::new(),
+                buf: Vec::new(),
             })
             .run(),
         );
@@ -93,23 +91,23 @@ struct Connection<S: AsyncRead + AsyncWrite + Send + 'static, A: Agent> {
     keys: KeyStore,
     agent: Option<A>,
     s: S,
-    buf: CryptoVec,
+    buf: Vec<u8>,
 }
 
 impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync + 'static>
     Connection<S, A>
 {
     async fn run(mut self) -> Result<(), Error> {
-        let mut writebuf = CryptoVec::new();
+        let mut writebuf = Vec::new();
         loop {
             // Reading the length
             self.buf.clear();
-            self.buf.resize(4);
+            self.buf.resize(4, 0);
             self.s.read_exact(&mut self.buf).await?;
             // Reading the rest of the buffer
             let len = BigEndian::read_u32(&self.buf) as usize;
             self.buf.clear();
-            self.buf.resize(len);
+            self.buf.resize(len, 0);
             self.s.read_exact(&mut self.buf).await?;
             // respond
             writebuf.clear();
@@ -119,7 +117,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
         }
     }
 
-    async fn respond(&mut self, writebuf: &mut CryptoVec) -> Result<(), Error> {
+    async fn respond(&mut self, writebuf: &mut Vec<u8>) -> Result<(), Error> {
         let is_locked = {
             if let Ok(password) = self.lock.0.read() {
                 !password.is_empty()
@@ -127,7 +125,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
                 true
             }
         };
-        writebuf.extend(&[0, 0, 0, 0]);
+        writebuf.extend_from_slice(&[0, 0, 0, 0]);
         let agentref = self.agent.as_ref().ok_or(Error::AgentFailure)?;
 
         match self.buf.split_first() {
@@ -156,7 +154,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
                 if signed {
                     return Ok(());
                 } else {
-                    writebuf.resize(4);
+                    writebuf.resize(4, 0);
                     writebuf.push(msg::FAILURE)
                 }
             }
@@ -263,7 +261,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
         &self,
         r: &mut R,
         constrained: bool,
-        writebuf: &mut CryptoVec,
+        writebuf: &mut Vec<u8>,
     ) -> Result<bool, Error> {
         let (blob, key_pair) = {
             let private_key =
@@ -313,7 +311,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
         &self,
         agent: A,
         r: &mut R,
-        writebuf: &mut CryptoVec,
+        writebuf: &mut Vec<u8>,
     ) -> Result<(A, bool), Error> {
         let mut needs_confirm = false;
         let key = {

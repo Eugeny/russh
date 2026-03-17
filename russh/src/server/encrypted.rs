@@ -146,7 +146,7 @@ impl Session {
 fn server_accept_service(
     banner: Option<String>,
     methods: MethodSet,
-    buffer: &mut CryptoVec,
+    buffer: &mut Vec<u8>,
 ) -> Result<AuthRequest, crate::Error> {
     push_packet!(buffer, {
         buffer.push(msg::SERVICE_ACCEPT);
@@ -299,7 +299,7 @@ impl Encrypted {
 }
 
 thread_local! {
-    static SIGNATURE_BUFFER: RefCell<CryptoVec> = RefCell::new(CryptoVec::new());
+    static SIGNATURE_BUFFER: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
 }
 
 impl Encrypted {
@@ -394,7 +394,7 @@ impl Encrypted {
                             let mut buf = buf.borrow_mut();
                             buf.clear();
                             map_err!(session_id.encode(&mut *buf))?;
-                            buf.extend(sig_init_buffer);
+                            buf.extend_from_slice(sig_init_buffer);
 
                             Ok(Verifier::verify(&pubkey, &buf, &sig).is_ok())
                         })? {
@@ -438,11 +438,11 @@ impl Encrypted {
                     let auth = handler.auth_publickey_offered(user, &pubkey).await?;
                     match auth {
                         Auth::Accept => {
-                            let mut public_key = CryptoVec::new();
-                            public_key.extend(&pubkey_key);
+                            let mut public_key = Vec::new();
+                            public_key.extend_from_slice(&pubkey_key);
 
-                            let mut algo = CryptoVec::new();
-                            algo.extend(pubkey_algo.as_bytes());
+                            let mut algo = Vec::new();
+                            algo.extend_from_slice(pubkey_algo.as_bytes());
                             debug!("pubkey_key: {pubkey_key:?}");
                             push_packet!(self.write, {
                                 self.write.push(msg::USERAUTH_PK_OK);
@@ -489,7 +489,7 @@ impl Encrypted {
 
 async fn reject_auth_request(
     until: Instant,
-    write: &mut CryptoVec,
+    write: &mut Vec<u8>,
     auth_request: &mut AuthRequest,
 ) -> Result<(), Error> {
     debug!("rejecting {auth_request:?}");
@@ -505,7 +505,7 @@ async fn reject_auth_request(
     Ok(())
 }
 
-fn server_auth_request_success(buffer: &mut CryptoVec) {
+fn server_auth_request_success(buffer: &mut Vec<u8>) {
     push_packet!(buffer, {
         buffer.push(msg::USERAUTH_SUCCESS);
     })
@@ -514,7 +514,7 @@ fn server_auth_request_success(buffer: &mut CryptoVec) {
 async fn read_userauth_info_response<H: Handler + Send, R: Reader>(
     until: Instant,
     handler: &mut H,
-    write: &mut CryptoVec,
+    write: &mut Vec<u8>,
     auth_request: &mut AuthRequest,
     user: &str,
     r: &mut R,
@@ -543,7 +543,7 @@ async fn read_userauth_info_response<H: Handler + Send, R: Reader>(
 async fn reply_userauth_info_response(
     until: Instant,
     auth_request: &mut AuthRequest,
-    write: &mut CryptoVec,
+    write: &mut Vec<u8>,
     auth: Auth,
 ) -> Result<bool, Error> {
     match auth {
@@ -639,7 +639,7 @@ impl Session {
                     if let Some(chan) = self.channels.get(&channel_num) {
                         chan.send(ChannelMsg::ExtendedData {
                             ext,
-                            data: CryptoVec::from_slice(&data),
+                            data: data.clone(),
                         })
                         .await
                         .unwrap_or(())
@@ -648,7 +648,7 @@ impl Session {
                 } else {
                     if let Some(chan) = self.channels.get(&channel_num) {
                         chan.send(ChannelMsg::Data {
-                            data: CryptoVec::from_slice(&data),
+                            data: data.clone(),
                         })
                         .await
                         .unwrap_or(())

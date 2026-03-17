@@ -1,7 +1,6 @@
 use ssh_encoding::Writer;
 
 use super::{KexAlgorithm, KexAlgorithmImplementor, KexType};
-use crate::CryptoVec;
 
 pub struct NoneKexType {}
 
@@ -29,7 +28,7 @@ impl KexAlgorithmImplementor for NoneKexAlgorithm {
 
     fn client_dh(
         &mut self,
-        _client_ephemeral: &mut russh_cryptovec::CryptoVec,
+        _client_ephemeral: &mut Vec<u8>,
         _buf: &mut impl Writer,
     ) -> Result<(), crate::Error> {
         Ok(())
@@ -45,17 +44,17 @@ impl KexAlgorithmImplementor for NoneKexAlgorithm {
 
     fn compute_exchange_hash(
         &self,
-        _key: &russh_cryptovec::CryptoVec,
+        _key: &[u8],
         _exchange: &crate::session::Exchange,
         _buffer: &mut russh_cryptovec::CryptoVec,
-    ) -> Result<russh_cryptovec::CryptoVec, crate::Error> {
-        Ok(CryptoVec::new())
+    ) -> Result<Vec<u8>, crate::Error> {
+        Ok(Vec::new())
     }
 
     fn compute_keys(
         &self,
-        session_id: &russh_cryptovec::CryptoVec,
-        exchange_hash: &russh_cryptovec::CryptoVec,
+        session_id: &[u8],
+        exchange_hash: &[u8],
         cipher: crate::cipher::Name,
         remote_to_local_mac: crate::mac::Name,
         local_to_remote_mac: crate::mac::Name,

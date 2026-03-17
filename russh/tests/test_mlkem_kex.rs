@@ -354,7 +354,7 @@ impl server::Handler for TestServer {
         data: &[u8],
         session: &mut server::Session,
     ) -> Result<(), Self::Error> {
-        session.data(channel, CryptoVec::from_slice(data))?;
+        session.data(channel, data.to_vec())?;
         Ok(())
     }
 }

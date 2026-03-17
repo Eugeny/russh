@@ -3,6 +3,7 @@ use curve25519_dalek::constants::ED25519_BASEPOINT_TABLE;
 use curve25519_dalek::montgomery::MontgomeryPoint;
 use curve25519_dalek::scalar::Scalar;
 use log::debug;
+use sha2::Digest;
 use ssh_encoding::{Encode, Writer};
 
 use super::{
@@ -78,7 +79,7 @@ impl KexAlgorithmImplementor for Curve25519Kex {
 
         // fill exchange.
         exchange.server_ephemeral.clear();
-        exchange.server_ephemeral.extend(&server_pubkey.0);
+        exchange.server_ephemeral.extend_from_slice(&server_pubkey.0);
         let shared = server_secret * client_pubkey;
         self.shared_secret = Some(shared);
         Ok(())
@@ -87,7 +88,7 @@ impl KexAlgorithmImplementor for Curve25519Kex {
     #[doc(hidden)]
     fn client_dh(
         &mut self,
-        client_ephemeral: &mut CryptoVec,
+        client_ephemeral: &mut Vec<u8>,
         writer: &mut impl Writer,
     ) -> Result<(), crate::Error> {
         let client_secret = Scalar::from_bytes_mod_order(rand::random::<[u8; 32]>());
@@ -95,7 +96,7 @@ impl KexAlgorithmImplementor for Curve25519Kex {
 
         // fill exchange.
         client_ephemeral.clear();
-        client_ephemeral.extend(&client_pubkey.0);
+        client_ephemeral.extend_from_slice(&client_pubkey.0);
 
         msg::KEX_ECDH_INIT.encode(writer)?;
         client_pubkey.0.encode(writer)?;
@@ -119,10 +120,10 @@ impl KexAlgorithmImplementor for Curve25519Kex {
 
     fn compute_exchange_hash(
         &self,
-        key: &CryptoVec,
+        key: &[u8],
         exchange: &Exchange,
         buffer: &mut CryptoVec,
-    ) -> Result<CryptoVec, crate::Error> {
+    ) -> Result<Vec<u8>, crate::Error> {
         // Computing the exchange hash, see page 7 of RFC 5656.
         buffer.clear();
         exchange.client_id.encode(buffer)?;
@@ -138,19 +139,16 @@ impl KexAlgorithmImplementor for Curve25519Kex {
             encode_mpint(&shared.0, buffer)?;
         }
 
-        use sha2::Digest;
         let mut hasher = sha2::Sha256::new();
         hasher.update(&buffer);
 
-        let mut res = CryptoVec::new();
-        res.extend(&hasher.finalize());
-        Ok(res)
+        Ok(hasher.finalize().to_vec())
     }
 
     fn compute_keys(
         &self,
-        session_id: &CryptoVec,
-        exchange_hash: &CryptoVec,
+        session_id: &[u8],
+        exchange_hash: &[u8],
         cipher: cipher::Name,
         remote_to_local_mac: mac::Name,
         local_to_remote_mac: mac::Name,
