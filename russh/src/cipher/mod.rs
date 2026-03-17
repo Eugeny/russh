@@ -311,10 +311,13 @@ pub(crate) async fn read<R: AsyncRead + Unpin>(
 pub(crate) const PACKET_LENGTH_LEN: usize = 4;
 
 const MINIMUM_PACKET_LEN: usize = 16;
+// Keep the transport limit aligned with the 256 KiB channel packet baseline.
 const MAXIMUM_PACKET_LEN_BASELINE: usize = 256 * 1024;
 const CHANNEL_DATA_PACKET_OVERHEAD: usize = 1 + 4 + 4;
 const CHANNEL_EXTENDED_DATA_PACKET_OVERHEAD: usize = CHANNEL_DATA_PACKET_OVERHEAD + 4;
 const PADDING_LENGTH_LEN: usize = 1;
+// SSH requires at least four bytes of padding; with 16-byte blocks, that means
+// a full-size channel packet can need up to 19 bytes of transport padding.
 const MAXIMUM_PADDING_LEN: usize = 19;
 const MAXIMUM_PACKET_LEN_HEADROOM: usize =
     PADDING_LENGTH_LEN + CHANNEL_EXTENDED_DATA_PACKET_OVERHEAD + MAXIMUM_PADDING_LEN;
