@@ -506,10 +506,12 @@ impl Session {
                             if let Some(ref mut enc) = self.common.encrypted {
                                 trace!("Received channel keep alive message: {req:?}",);
                                 self.common.wants_reply = false;
-                                push_packet!(enc.write, {
-                                    map_err!(msg::CHANNEL_SUCCESS.encode(&mut enc.write))?;
-                                    map_err!(channel_num.encode(&mut enc.write))?;
-                                });
+                                if let Some(ch) = enc.channels.get(&channel_num) {
+                                    push_packet!(enc.write, {
+                                        map_err!(msg::CHANNEL_SUCCESS.encode(&mut enc.write))?;
+                                        map_err!(ch.recipient_channel.encode(&mut enc.write))?;
+                                    });
+                                }
                             }
                         } else {
                             warn!("Received keepalive without reply request!");
@@ -521,10 +523,12 @@ impl Session {
                         if wants_reply == 1 {
                             if let Some(ref mut enc) = self.common.encrypted {
                                 self.common.wants_reply = false;
-                                push_packet!(enc.write, {
-                                    map_err!(msg::CHANNEL_FAILURE.encode(&mut enc.write))?;
-                                    map_err!(channel_num.encode(&mut enc.write))?;
-                                })
+                                if let Some(ch) = enc.channels.get(&channel_num) {
+                                    push_packet!(enc.write, {
+                                        map_err!(msg::CHANNEL_FAILURE.encode(&mut enc.write))?;
+                                        map_err!(ch.recipient_channel.encode(&mut enc.write))?;
+                                    })
+                                }
                             }
                         }
                         info!("Unknown channel request {req:?} {wants_reply:?}",);
