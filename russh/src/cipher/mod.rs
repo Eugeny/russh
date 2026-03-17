@@ -233,6 +233,7 @@ pub(crate) trait SealingKey {
         buffer.buffer.extend_from_slice(payload);
         let pad_offset = buffer.buffer.len();
         buffer.buffer.resize(pad_offset + padding_length, 0);
+        #[allow(clippy::indexing_slicing)] // length checked
         self.fill_padding(&mut buffer.buffer[pad_offset..]);
         let tag_offset = buffer.buffer.len();
         buffer.buffer.resize(tag_offset + self.tag_len(), 0);
