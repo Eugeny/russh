@@ -57,6 +57,7 @@ This is a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Éti
   * `ecdsa-sha2-nistp256` ✨
   * `ecdsa-sha2-nistp384` ✨
   * `ecdsa-sha2-nistp521` ✨
+  * OpenSSH certificates ✨
 * Authentication methods:
   * `password`
   * `publickey`
