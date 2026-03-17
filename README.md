@@ -231,6 +231,7 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/mjc"><img src="https://avatars.githubusercontent.com/u/1977?v=4?s=100" width="100px;" alt="Mika Cohen"/><br /><sub><b>Mika Cohen</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=mjc" title="Code">💻</a></td>
     </tr>
     <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://fbernier.me"><img src="https://avatars.githubusercontent.com/u/147585?v=4?s=100" width="100px;" alt="François Bernier"/><br /><sub><b>François Bernier</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=fbernier" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://vulns.xyz"><img src="https://avatars.githubusercontent.com/u/7763184?v=4?s=100" width="100px;" alt="kpcyrd"/><br /><sub><b>kpcyrd</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=kpcyrd" title="Code">💻</a></td>
     </tr>
   </tbody>
