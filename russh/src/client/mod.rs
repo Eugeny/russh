@@ -1748,13 +1748,21 @@ pub trait Handler: Sized + Send {
         async { Ok(()) }
     }
 
-    /// Called to check the server's public key. This is a very important
+    /// Called to check the server's public key or certificate. This is a very important
     /// step to help prevent man-in-the-middle attacks. The default
     /// implementation rejects all keys.
+    ///
+    /// When the server presents an OpenSSH certificate, the argument will be
+    /// [`PublicKeyOrCertificate::Certificate`], allowing you to validate the CA
+    /// signature, validity period, and principals. For plain host keys it will
+    /// be [`PublicKeyOrCertificate::PublicKey`].
+    ///
+    /// Use [`PublicKeyOrCertificate::public_key()`] to obtain the inner public
+    /// key in either case.
     #[allow(unused_variables)]
     fn check_server_key(
         &mut self,
-        server_public_key: &ssh_key::PublicKey,
+        server_public_key: &crate::cert::PublicKeyOrCertificate,
     ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
         async { Ok(false) }
     }
