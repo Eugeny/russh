@@ -697,6 +697,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "fbernier",
+      "name": "François Bernier",
+      "avatar_url": "https://avatars.githubusercontent.com/u/147585?v=4",
+      "profile": "https://fbernier.me",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,
