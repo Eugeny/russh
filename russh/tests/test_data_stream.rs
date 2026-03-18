@@ -72,7 +72,7 @@ impl ChannelDataCopy for ChannelHalves {
                     match msg {
                         ChannelMsg::WindowAdjusted { .. } => {}
                         ChannelMsg::Data { data } => buf.extend(&*data),
-                        ChannelMsg::Eof => break,
+                        ChannelMsg::Eof | ChannelMsg::Close => break,
                         msg => panic!("Got unexpected message: {msg:?}"),
                     }
                 }

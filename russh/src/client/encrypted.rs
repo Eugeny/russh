@@ -365,6 +365,12 @@ impl Session {
                     // will not be released.
                     enc.close(channel_num)?;
                 }
+                // Forward the close to the channel before removing it, so that
+                // consumers waiting on `Channel::wait()` receive an explicit
+                // `ChannelMsg::Close` instead of just seeing `None`.
+                if let Some(chan) = self.channels.get(&channel_num) {
+                    let _ = chan.send(ChannelMsg::Close).await;
+                }
                 self.channels.remove(&channel_num);
                 client.channel_close(channel_num, self).await
             }

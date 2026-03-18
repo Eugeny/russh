@@ -602,6 +602,12 @@ impl Session {
                 if let Some(ref mut enc) = self.common.encrypted {
                     enc.channels.remove(&channel_num);
                 }
+                // Forward the close to the channel before removing it, so that
+                // consumers waiting on `Channel::wait()` receive an explicit
+                // `ChannelMsg::Close` instead of just seeing `None`.
+                if let Some(chan) = self.channels.get(&channel_num) {
+                    chan.send(ChannelMsg::Close).await.unwrap_or(())
+                }
                 self.channels.remove(&channel_num);
                 debug!("handler.channel_close {channel_num:?}");
                 handler.channel_close(channel_num, self).await
