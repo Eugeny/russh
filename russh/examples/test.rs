@@ -11,9 +11,9 @@ async fn main() -> anyhow::Result<()> {
     env_logger::init();
     let mut config = russh::server::Config::default();
     config.auth_rejection_time = std::time::Duration::from_secs(3);
-    config
-        .keys
-        .push(russh::keys::PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap());
+    config.keys.push(
+        russh::keys::PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap(),
+    );
     let config = Arc::new(config);
     let mut sh = Server {
         clients: Arc::new(Mutex::new(HashMap::new())),
