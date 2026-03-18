@@ -6,10 +6,12 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, ReadBuf};
 
 use crate::Error;
 
+const SSH_ID_BUF_SIZE: usize = 256;
+
 /// The buffer to read the identification string (first line in the
 /// protocol).  Not sensitive data — just protocol version exchange.
 struct ReadSshIdBuffer {
-    pub buf: Vec<u8>,
+    pub buf: Box<[u8; SSH_ID_BUF_SIZE]>,
     pub total: usize,
     pub bytes_read: usize,
     pub sshid_len: usize,
@@ -22,9 +24,8 @@ impl ReadSshIdBuffer {
     }
 
     pub fn new() -> ReadSshIdBuffer {
-        let buf = vec![0; 256];
         ReadSshIdBuffer {
-            buf,
+            buf: Box::new([0; SSH_ID_BUF_SIZE]),
             sshid_len: 0,
             bytes_read: 0,
             total: 0,
@@ -170,5 +171,115 @@ impl<R: AsyncRead + Unpin> SshRead<R> {
             }
             trace!("bytes_read: {:?}", ssh_id.bytes_read);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::iter;
+
+    #[tokio::test]
+    async fn test_ssh_id_openssh() {
+        let data = "SSH-2.0-OpenSSH_10.2\r\n";
+        let mut read = SshRead::new(data.as_bytes());
+
+        let received = read.read_ssh_id().await.unwrap();
+        assert_eq!(received, b"SSH-2.0-OpenSSH_10.2");
+    }
+
+    #[tokio::test]
+    async fn test_ssh_id_openssh_7_4() {
+        let data = "SSH-2.0-OpenSSH_7.4\n";
+        let mut read = SshRead::new(data.as_bytes());
+
+        let received = read.read_ssh_id().await.unwrap();
+        assert_eq!(received, b"SSH-2.0-OpenSSH_7.4");
+    }
+
+    #[tokio::test]
+    async fn test_ssh_id_too_long() {
+        let data = String::from_iter(iter::once("SSH-2.0-").chain(
+            iter::repeat("A").take(500)));
+        let mut read = SshRead::new(data.as_bytes());
+
+        let received = read.read_ssh_id().await;
+        assert!(matches!(received.err(), Some(Error::Disconnect)));
+    }
+
+    #[tokio::test]
+    async fn test_ssh_id_empty() {
+        let data = "";
+        let mut read = SshRead::new(data.as_bytes());
+
+        let received = read.read_ssh_id().await;
+        assert!(matches!(received.err(), Some(Error::Disconnect)));
+    }
+
+    #[tokio::test]
+    async fn test_ssh_id_almost_empty_cr_nl() {
+        let data = "SSH-2.0-\n";
+        let mut read = SshRead::new(data.as_bytes());
+
+        let received = read.read_ssh_id().await.unwrap();
+        assert_eq!(received, b"SSH-2.0-");
+    }
+
+    #[tokio::test]
+    async fn test_ssh_id_almost_empty_nl() {
+        let data = "SSH-2.0-\n";
+        let mut read = SshRead::new(data.as_bytes());
+
+        let received = read.read_ssh_id().await.unwrap();
+        assert_eq!(received, b"SSH-2.0-");
+    }
+
+    #[tokio::test]
+    async fn test_ssh_id_newline() {
+        let data = "\n";
+        let mut read = SshRead::new(data.as_bytes());
+
+        let received = read.read_ssh_id().await;
+        assert!(matches!(received.err(), Some(Error::Disconnect)));
+    }
+
+    #[tokio::test]
+    async fn test_ssh_id_contains_cr() {
+        // A \r that isn't followed by \n has no special meaning
+        let data = "SSH-2.0-OpenSSH\r10.2\n";
+        let mut read = SshRead::new(data.as_bytes());
+
+        let received = read.read_ssh_id().await.unwrap();
+        assert_eq!(received, b"SSH-2.0-OpenSSH\r10.2");
+    }
+
+    #[tokio::test]
+    async fn test_ssh_id_trailing_cr() {
+        // Verify this doesn't cause an out-of-bounds access when testing for \r\n
+        let data = "SSH-2.0-OpenSSH_10.2\r";
+        let mut read = SshRead::new(data.as_bytes());
+
+        let received = read.read_ssh_id().await;
+        assert!(matches!(received.err(), Some(Error::Disconnect)));
+    }
+
+    #[tokio::test]
+    async fn test_ssh_id_nl_cr() {
+        // Like \r\n but backwards
+        let data = "SSH-2.0-OpenSSH_10.2\n\r";
+        let mut read = SshRead::new(data.as_bytes());
+
+        let received = read.read_ssh_id().await.unwrap();
+        assert_eq!(received, b"SSH-2.0-OpenSSH_10.2");
+    }
+
+    #[tokio::test]
+    async fn test_ssh_id_nl_cr_nl() {
+        // Like \r\n but backwards, but also part of \r\n
+        let data = "SSH-2.0-OpenSSH_10.2\n\r\n";
+        let mut read = SshRead::new(data.as_bytes());
+
+        let received = read.read_ssh_id().await.unwrap();
+        assert_eq!(received, b"SSH-2.0-OpenSSH_10.2");
     }
 }
