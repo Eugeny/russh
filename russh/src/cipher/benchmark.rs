@@ -3,7 +3,7 @@ use criterion::*;
 use rand::TryRngCore;
 
 pub fn bench(c: &mut Criterion) {
-    let mut rand_generator = black_box(rand::rngs::OsRng {});
+    let mut rand_generator = black_box(rand::rng());
 
     let mut packet_length = black_box(vec![0u8; 4]);
 

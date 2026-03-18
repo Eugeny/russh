@@ -4,7 +4,6 @@ use std::borrow::Cow;
 use std::sync::Arc;
 
 use russh::keys::PrivateKeyWithHashAlg;
-use russh::keys::ssh_key::rand_core::OsRng;
 use russh::*;
 use ssh_key::PrivateKey;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
@@ -17,7 +16,7 @@ const STDERR_EXTENDED_DATA_TYPE: u32 = 1;
 async fn test_aes256_gcm_allows_full_256k_channel_packet() {
     let _ = env_logger::try_init();
 
-    let client_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap();
+    let client_key = PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap();
 
     let mut server_config = server::Config::default();
     server_config.inactivity_timeout = None;
@@ -26,7 +25,7 @@ async fn test_aes256_gcm_allows_full_256k_channel_packet() {
     server_config.window_size = MAX_CHANNEL_PACKET_SIZE * 4;
     server_config
         .keys
-        .push(PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap());
+        .push(PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap());
     server_config.preferred = {
         let mut preferred = Preferred::default();
         preferred.cipher = Cow::Borrowed(&[cipher::AES_256_GCM]);

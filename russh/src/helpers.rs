@@ -74,9 +74,9 @@ pub fn sign_with_hash_alg(key: &PrivateKeyWithHashAlg, data: &[u8]) -> ssh_key::
             let ssh_key::Algorithm::Rsa { hash } = key.algorithm() else {
                 unreachable!();
             };
-            signature_next::Signer::try_sign(&(rsa_keypair, hash), data)?.encoded()?
+            signature::Signer::try_sign(&(rsa_keypair, hash), data)?.encoded()?
         }
-        keypair => signature_next::Signer::try_sign(keypair, data)?.encoded()?,
+        keypair => signature::Signer::try_sign(keypair, data)?.encoded()?,
     })
 }
 

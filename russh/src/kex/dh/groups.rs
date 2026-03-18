@@ -1,22 +1,51 @@
 use std::fmt::Debug;
 use std::ops::Deref;
 
-use crypto_bigint::{Odd, U64, U2048, U4096, U8192};
 use hex_literal::hex;
-use num_bigint::RandBigInt;
-use rand::rng;
-use rsa::BoxedUint;
+use num_bigint::{BigRng010, BigUint};
+
+#[derive(Clone)]
+pub enum DhGroupUInt {
+    Static(&'static [u8]),
+    Owned(Vec<u8>),
+}
+
+impl From<Vec<u8>> for DhGroupUInt {
+    fn from(x: Vec<u8>) -> Self {
+        Self::Owned(x)
+    }
+}
+
+impl DhGroupUInt {
+    pub const fn new(x: &'static [u8]) -> Self {
+        Self::Static(x)
+    }
+}
+
+impl Deref for DhGroupUInt {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::Static(x) => x,
+            Self::Owned(x) => x,
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct DhGroup {
-    pub(crate) prime: Odd<U2048>,
-    pub(crate) generator: u64,
+    pub(crate) prime: DhGroupUInt,
+    pub(crate) generator: DhGroupUInt,
     // pub(crate) exp_size: u64,
 }
 
 impl DhGroup {
     pub fn bit_size(&self) -> usize {
-        self.prime.deref().bits() as usize
+        let Some(fsb_idx) = self.prime.deref().iter().position(|&x| x != 0) else {
+            return 0;
+        };
+        (self.prime.deref().len() - fsb_idx) * 8
     }
 }
 
@@ -33,16 +62,27 @@ impl Debug for DhGroup {
 }
 
 pub const DH_GROUP1: DhGroup = DhGroup {
-    prime: Odd::from_be_hex(
-        "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000FFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7EDEE386BFB5A899FA5AE9F24117C4B1FE649286651ECE65381FFFFFFFFFFFFFFFF",
+    prime: DhGroupUInt::new(
+        hex!(
+            "
+        FFFFFFFF FFFFFFFF C90FDAA2 2168C234 C4C6628B 80DC1CD1
+         29024E08 8A67CC74 020BBEA6 3B139B22 514A0879 8E3404DD
+         EF9519B3 CD3A431B 302B0A6D F25F1437 4FE1356D 6D51C245
+         E485B576 625E7EC6 F44C42E9 A637ED6B 0BFF5CB6 F406B7ED
+         EE386BFB 5A899FA5 AE9F2411 7C4B1FE6 49286651 ECE65381
+         FFFFFFFF FFFFFFFF
+        "
+        )
+        .as_slice(),
     ),
-    generator: 2,
+    generator: DhGroupUInt::new(&[2]),
     // exp_size: 256,
 };
 
 pub const DH_GROUP14: DhGroup = DhGroup {
-    prime: Odd::from_be_hex(
-        "
+    prime: DhGroupUInt::new(
+        hex!(
+            "
         FFFFFFFF FFFFFFFF C90FDAA2 2168C234 C4C6628B 80DC1CD1
         29024E08 8A67CC74 020BBEA6 3B139B22 514A0879 8E3404DD
         EF9519B3 CD3A431B 302B0A6D F25F1437 4FE1356D 6D51C245
@@ -54,15 +94,19 @@ pub const DH_GROUP14: DhGroup = DhGroup {
         E39E772C 180E8603 9B2783A2 EC07A28F B5C55DF0 6F4C52C9
         DE2BCBF6 95581718 3995497C EA956AE5 15D22618 98FA0510
         15728E5A 8AACAA68 FFFFFFFF FFFFFFFF
-        ",
+        "
+        )
+        .as_slice(),
     ),
-    generator: 2, // exp_size: 256,
+    generator: DhGroupUInt::new(&[2]),
+    // exp_size: 256,
 };
 
 /// https://www.ietf.org/rfc/rfc3526.txt
 pub const DH_GROUP15: DhGroup = DhGroup {
-    prime: Odd::from_be_hex(
-        "
+    prime: DhGroupUInt::new(
+        hex!(
+            "
         FFFFFFFF FFFFFFFF C90FDAA2 2168C234 C4C6628B 80DC1CD1
         29024E08 8A67CC74 020BBEA6 3B139B22 514A0879 8E3404DD
         EF9519B3 CD3A431B 302B0A6D F25F1437 4FE1356D 6D51C245
@@ -79,14 +123,17 @@ pub const DH_GROUP15: DhGroup = DhGroup {
         F12FFA06 D98A0864 D8760273 3EC86A64 521F2B18 177B200C
         BBE11757 7A615D6C 770988C0 BAD946E2 08E24FA0 74E5AB31
         43DB5BFC E0FD108E 4B82D120 A93AD2CA FFFFFFFF FFFFFFFF
-            ",
+            "
+        )
+        .as_slice(),
     ),
-    generator: 2,
+    generator: DhGroupUInt::new(&[2]),
 };
 
 pub const DH_GROUP16: DhGroup = DhGroup {
-    prime: Odd::from_be_hex(
-        "
+    prime: DhGroupUInt::new(
+        hex!(
+            "
         FFFFFFFF FFFFFFFF C90FDAA2 2168C234 C4C6628B 80DC1CD1
         29024E08 8A67CC74 020BBEA6 3B139B22 514A0879 8E3404DD
         EF9519B3 CD3A431B 302B0A6D F25F1437 4FE1356D 6D51C245
@@ -109,16 +156,19 @@ pub const DH_GROUP16: DhGroup = DhGroup {
         1F612970 CEE2D7AF B81BDD76 2170481C D0069127 D5B05AA9
         93B4EA98 8D8FDDC1 86FFB7DC 90A6C08F 4DF435C9 34063199
         FFFFFFFF FFFFFFFF
-        ",
+        "
+        )
+        .as_slice(),
     ),
-    generator: 2,
+    generator: DhGroupUInt::new(&[2]),
     // exp_size: 512,
 };
 
 /// https://www.ietf.org/rfc/rfc3526.txt
 pub const DH_GROUP17: DhGroup = DhGroup {
-    prime: Odd::from_be_hex(
-        "
+    prime: DhGroupUInt::new(
+        hex!(
+            "
     FFFFFFFF FFFFFFFF C90FDAA2 2168C234 C4C6628B 80DC1CD1 29024E08
     8A67CC74 020BBEA6 3B139B22 514A0879 8E3404DD EF9519B3 CD3A431B
     302B0A6D F25F1437 4FE1356D 6D51C245 E485B576 625E7EC6 F44C42E9
@@ -147,15 +197,18 @@ pub const DH_GROUP17: DhGroup = DhGroup {
     B7C5DA76 F550AA3D 8A1FBFF0 EB19CCB1 A313D55C DA56C9EC 2EF29632
     387FE8D7 6E3C0468 043E8F66 3F4860EE 12BF2D5B 0B7474D6 E694F91E
     6DCC4024 FFFFFFFF FFFFFFFF
-    ",
+    "
+        )
+        .as_slice(),
     ),
-    generator: 2,
+    generator: DhGroupUInt::new(&[2]),
 };
 
 /// https://www.ietf.org/rfc/rfc3526.txt
 pub const DH_GROUP18: DhGroup = DhGroup {
-    prime: Odd::from_be_hex(
-        "
+    prime: DhGroupUInt::new(
+        hex!(
+            "
       FFFFFFFF FFFFFFFF C90FDAA2 2168C234 C4C6628B 80DC1CD1
       29024E08 8A67CC74 020BBEA6 3B139B22 514A0879 8E3404DD
       EF9519B3 CD3A431B 302B0A6D F25F1437 4FE1356D 6D51C245
@@ -199,61 +252,64 @@ pub const DH_GROUP18: DhGroup = DhGroup {
       4009438B 481C6CD7 889A002E D5EE382B C9190DA6 FC026E47
       9558E447 5677E9AA 9E3050E2 765694DF C81F56E8 80B96E71
       60C980DD 98EDD3DF FFFFFFFF FFFFFFFF
-            ",
+            "
+        )
+        .as_slice(),
     ),
-    generator: U64::new(limbs) 2,
+    generator: DhGroupUInt::new(&[2]),
 };
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub(crate) struct DH {
-    prime_num: Odd<BoxedUint>,
-    generator: BoxedUint,
-    private_key: BoxedUint,
-    public_key: BoxedUint,
-    shared_secret: BoxedUint,
+    prime_num: BigUint,
+    generator: BigUint,
+    private_key: BigUint,
+    public_key: BigUint,
+    shared_secret: BigUint,
 }
 
 impl DH {
     pub fn new(group: &DhGroup) -> Self {
         Self {
-            prime_num: group.prime.into(),
-            generator: group.generator.into(),
-            private_key: BoxedUint::default(),
-            public_key: BoxedUint::default(),
-            shared_secret: BoxedUint::default(),
+            prime_num: BigUint::from_bytes_be(&group.prime),
+            generator: BigUint::from_bytes_be(&group.generator),
+            private_key: BigUint::default(),
+            public_key: BigUint::default(),
+            shared_secret: BigUint::default(),
         }
     }
 
-    pub fn generate_private_key(&mut self, is_server: bool) -> BoxedUint {
-        let q = (&self.prime_num - &BoxedUint::from(1u8)) / &BoxedUint::from(2u8);
+    pub fn generate_private_key(&mut self, is_server: bool) -> BigUint {
+        let q = (&self.prime_num - &BigUint::from(1u8)) / &BigUint::from(2u8);
+        let mut rng = rand::rng();
         self.private_key =
-            BoxedUint::gen_biguint_range(&if is_server { 1u8.into() } else { 2u8.into() }, &q);
+            rng.random_biguint_range(&if is_server { 1u8.into() } else { 2u8.into() }, &q);
         self.private_key.clone()
     }
 
-    pub fn generate_public_key(&mut self) -> BoxedUint {
-        self.public_key = self.generator.pow_mod(&self.private_key, &self.prime_num);
+    pub fn generate_public_key(&mut self) -> BigUint {
+        self.public_key = self.generator.modpow(&self.private_key, &self.prime_num);
         self.public_key.clone()
     }
 
-    pub fn compute_shared_secret(&mut self, other_public_key: BoxedUint) -> BoxedUint {
-        self.shared_secret = other_public_key.pow_mod(&self.private_key, &self.prime_num);
+    pub fn compute_shared_secret(&mut self, other_public_key: BigUint) -> BigUint {
+        self.shared_secret = other_public_key.modpow(&self.private_key, &self.prime_num);
         self.shared_secret.clone()
     }
 
-    pub fn validate_shared_secret(&self, shared_secret: &BoxedUint) -> bool {
-        let one = BoxedUint::from(1u8);
+    pub fn validate_shared_secret(&self, shared_secret: &BigUint) -> bool {
+        let one = BigUint::from(1u8);
         let prime_minus_one = &self.prime_num - &one;
 
         shared_secret > &one && shared_secret < &prime_minus_one
     }
 
-    pub fn decode_public_key(buffer: &[u8]) -> BoxedUint {
-        BoxedUint::from_bytes_be(buffer)
+    pub fn decode_public_key(buffer: &[u8]) -> BigUint {
+        BigUint::from_bytes_be(buffer)
     }
 
-    pub fn validate_public_key(&self, public_key: &BoxedUint) -> bool {
-        let one = BoxedUint::from(1u8);
+    pub fn validate_public_key(&self, public_key: &BigUint) -> bool {
+        let one = BigUint::from(1u8);
         let prime_minus_one = &self.prime_num - &one;
 
         public_key > &one && public_key < &prime_minus_one

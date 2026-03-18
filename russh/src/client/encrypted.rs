@@ -1015,7 +1015,7 @@ impl Encrypted {
                 )?;
 
                 // Extend with self-signature.
-                signature_next::Signer::try_sign(key.deref(), buffer)?
+                signature::Signer::try_sign(key.deref(), buffer)?
                     .encoded()?
                     .encode(&mut *buffer)?;
 

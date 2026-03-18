@@ -22,7 +22,7 @@ use bytes::Bytes;
 use cert::PublicKeyOrCertificate;
 use log::{debug, error, info, trace, warn};
 use msg;
-use signature_next::Verifier;
+use signature::Verifier;
 use ssh_encoding::{Decode, Encode, Reader};
 use ssh_key::{PublicKey, Signature};
 use tokio::time::Instant;
