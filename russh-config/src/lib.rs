@@ -4,6 +4,7 @@
     clippy::indexing_slicing,
     clippy::panic
 )]
+use std::env;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
@@ -320,7 +321,7 @@ pub fn parse(file: &str, host: &str) -> Result<Config, Error> {
 }
 
 pub fn parse_home(host: &str) -> Result<Config, Error> {
-    let mut home = if let Some(home) = home::home_dir() {
+    let mut home = if let Some(home) = env::home_dir() {
         home
     } else {
         return Err(Error::NoHome);
@@ -373,7 +374,7 @@ impl SshConfigStrExt for &str {
 
     fn expand_home(&self) -> Result<PathBuf, Error> {
         if self.starts_with("~/") {
-            if let Some(mut home) = home::home_dir() {
+            if let Some(mut home) = env::home_dir() {
                 home.push(self.split_at(2).1);
                 Ok(home)
             } else {
@@ -388,6 +389,7 @@ impl SshConfigStrExt for &str {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used)]
+    use std::env;
     use std::path::{Path, PathBuf};
 
     use crate::{AddKeysToAgent, Config, Error, SshConfigStrExt, parse};
@@ -420,7 +422,7 @@ mod tests {
         assert_eq!(
             format!(
                 "{}{}",
-                home::home_dir().expect("homedir").to_str().expect("to_str"),
+                env::home_dir().expect("homedir").to_str().expect("to_str"),
                 "/some/folder"
             ),
             value.to_str().unwrap()
@@ -455,7 +457,7 @@ Host test_host
 #";
         let identity_file = PathBuf::from(format!(
             "{}{}",
-            home::home_dir().expect("homedir").to_str().expect("to_str"),
+            env::home_dir().expect("homedir").to_str().expect("to_str"),
             "/.ssh/id_ed25519"
         ));
         let config = parse(value, "test_host").expect("parse");

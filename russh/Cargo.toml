@@ -99,7 +99,6 @@ tokio = { workspace = true, features = [
   "time",
   "net",
 ] }
-home.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 pageant = { version = "0.2", path = "../pageant" }
