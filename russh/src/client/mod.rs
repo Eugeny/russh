@@ -696,7 +696,7 @@ impl<H: Handler> Handle<H> {
     ///
     /// If port == 0 the server will choose a port that will be returned, returns 0 otherwise
     pub async fn tcpip_forward<A: Into<String>>(
-        &mut self,
+        &self,
         address: A,
         port: u32,
     ) -> Result<u32, crate::Error> {
@@ -748,7 +748,7 @@ impl<H: Handler> Handle<H> {
 
     // Requests the server to open a UDS forward channel
     pub async fn streamlocal_forward<A: Into<String>>(
-        &mut self,
+        &self,
         socket_path: A,
     ) -> Result<(), crate::Error> {
         let (reply_send, reply_recv) = oneshot::channel();
