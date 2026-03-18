@@ -97,6 +97,7 @@ impl<C> Debug for CommonSession<C> {
     }
 }
 
+#[must_use]
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum ChannelFlushResult {
     Incomplete {
@@ -115,11 +116,11 @@ impl ChannelFlushResult {
             ChannelFlushResult::Complete { wrote, .. } => *wrote,
         }
     }
-    pub(crate) fn complete(wrote: usize, channel: &ChannelParams) -> Self {
+    pub(crate) fn complete(wrote: usize, channel: &mut ChannelParams) -> Self {
         ChannelFlushResult::Complete {
             wrote,
-            pending_eof: channel.pending_eof,
-            pending_close: channel.pending_close,
+            pending_eof: std::mem::take(&mut channel.pending_eof),
+            pending_close: std::mem::take(&mut channel.pending_close),
         }
     }
 }
@@ -367,8 +368,15 @@ impl Encrypted {
     }
 
     pub fn flush_all_pending(&mut self) -> Result<(), crate::Error> {
-        for channel in self.channels.values_mut() {
-            Self::flush_channel(&mut self.write, channel)?;
+        let mut completed_channels = Vec::new();
+        for (&channel_id, channel) in self.channels.iter_mut() {
+            let flush_result = Self::flush_channel(&mut self.write, channel)?;
+            if matches!(flush_result, ChannelFlushResult::Complete { .. }) {
+                completed_channels.push((channel_id, flush_result));
+            }
+        }
+        for (channel_id, flush_result) in completed_channels {
+            self.handle_flushed_channel(channel_id, flush_result)?;
         }
         Ok(())
     }
