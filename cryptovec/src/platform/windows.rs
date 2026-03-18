@@ -8,8 +8,8 @@
 //! working set is too small), the process working set is grown incrementally
 //! and the lock is retried.
 
-use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
+use std::collections::btree_map::Entry;
 use std::sync::{Mutex, OnceLock};
 
 use windows_sys::Win32::System::Memory::{
@@ -136,9 +136,10 @@ fn lock_page(
         )));
     }
 
-    let addr = page_idx.checked_mul(page_size).ok_or_else(|| {
-        MemoryLockError::new("VirtualLock: page address overflow".into())
-    })? as *mut std::ffi::c_void;
+    let addr = page_idx
+        .checked_mul(page_size)
+        .ok_or_else(|| MemoryLockError::new("VirtualLock: page address overflow".into()))?
+        as *mut std::ffi::c_void;
 
     // First attempt.
     if unsafe { VirtualLock(addr, page_size) } != 0 {
@@ -172,9 +173,10 @@ fn lock_page(
 
 /// Unlock a single page.
 fn unlock_page(page_idx: usize, page_size: usize) -> Result<(), MemoryLockError> {
-    let addr = page_idx.checked_mul(page_size).ok_or_else(|| {
-        MemoryLockError::new("VirtualUnlock: page address overflow".into())
-    })? as *mut std::ffi::c_void;
+    let addr = page_idx
+        .checked_mul(page_size)
+        .ok_or_else(|| MemoryLockError::new("VirtualUnlock: page address overflow".into()))?
+        as *mut std::ffi::c_void;
     if unsafe { VirtualUnlock(addr, page_size) } == 0 {
         let err = unsafe { windows_sys::Win32::Foundation::GetLastError() };
         return Err(MemoryLockError::new(format!(
