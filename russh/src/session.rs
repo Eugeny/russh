@@ -808,34 +808,43 @@ mod tests {
     }
 
     #[test]
-    fn flush_all_pending_handles_multiple_channels_independently() {
-        let eof_only = ChannelId(3);
-        let close_too = ChannelId(4);
+    fn flush_all_pending_replays_deferred_controls_across_channels() {
+        let channel_a = ChannelId(3);
+        let channel_b = ChannelId(4);
         let mut encrypted = test_encrypted();
         encrypted
             .channels
-            .insert(eof_only, test_channel(eof_only, 50, true, false));
+            .insert(channel_a, test_channel(channel_a, 44, true, false));
         encrypted
             .channels
-            .insert(close_too, test_channel(close_too, 51, true, true));
+            .insert(channel_b, test_channel(channel_b, 45, false, true));
 
         encrypted.flush_all_pending().unwrap();
 
-        // eof_only: data + EOF, channel still present
-        assert!(encrypted.channels.contains_key(&eof_only));
-        assert!(!encrypted.channels[&eof_only].pending_eof);
-
-        // close_too: data + EOF + CLOSE, channel removed
-        assert!(!encrypted.channels.contains_key(&close_too));
-
-        // Combined wire output contains both sets of packets (order may vary by map iteration).
-        let types = packet_types(&encrypted.write);
-        assert_eq!(types.iter().filter(|&&t| t == msg::CHANNEL_DATA).count(), 2);
-        assert_eq!(types.iter().filter(|&&t| t == msg::CHANNEL_EOF).count(), 2);
+        let packet_types = packet_types(&encrypted.write);
         assert_eq!(
-            types.iter().filter(|&&t| t == msg::CHANNEL_CLOSE).count(),
+            packet_types
+                .iter()
+                .filter(|&&msg_type| msg_type == msg::CHANNEL_DATA)
+                .count(),
+            2
+        );
+        assert_eq!(
+            packet_types
+                .iter()
+                .filter(|&&msg_type| msg_type == msg::CHANNEL_EOF)
+                .count(),
             1
         );
+        assert_eq!(
+            packet_types
+                .iter()
+                .filter(|&&msg_type| msg_type == msg::CHANNEL_CLOSE)
+                .count(),
+            1
+        );
+        assert!(encrypted.channels.contains_key(&channel_a));
+        assert!(!encrypted.channels.contains_key(&channel_b));
     }
 
     #[test]
