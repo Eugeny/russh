@@ -117,10 +117,11 @@ impl ChannelFlushResult {
         }
     }
     pub(crate) fn complete(wrote: usize, channel: &mut ChannelParams) -> Self {
+        let (pending_eof, pending_close) = channel.take_pending_controls();
         ChannelFlushResult::Complete {
             wrote,
-            pending_eof: std::mem::take(&mut channel.pending_eof),
-            pending_close: std::mem::take(&mut channel.pending_close),
+            pending_eof,
+            pending_close,
         }
     }
 }
