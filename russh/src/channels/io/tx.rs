@@ -13,8 +13,10 @@ use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{self, OwnedPermit};
 use tokio::sync::{Mutex, Notify, OwnedMutexGuard};
 
+use bytes::Bytes;
+
 use super::ChannelMsg;
-use crate::{ChannelId, CryptoVec};
+use crate::ChannelId;
 
 type BoxedThreadsafeFuture<T> = Pin<Box<dyn Sync + Send + std::future::Future<Output = T>>>;
 type OwnedPermitFuture<S> =
@@ -112,10 +114,8 @@ where
     ) -> Poll<(ChannelMsg, NonZeroUsize)> {
         let writable = ready!(self.poll_writable(cx, buf.len()));
 
-        let mut data = CryptoVec::new_zeroed(writable.into());
         #[allow(clippy::indexing_slicing)] // Clamped to maximum `buf.len()` with `.poll_writable`
-        data.copy_from_slice(&buf[..writable.into()]);
-        data.resize(writable.into());
+        let data = Bytes::copy_from_slice(&buf[..writable.into()]);
 
         let msg = match self.ext {
             None => ChannelMsg::Data { data },

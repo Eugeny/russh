@@ -109,7 +109,7 @@ impl ServerKex {
                 }
 
                 let names = {
-                    self.exchange.client_kex_init.extend(&input.buffer);
+                    self.exchange.client_kex_init.extend_from_slice(&input.buffer);
                     negotiation::Server::read_kex(
                         &input.buffer,
                         &self.config.preferred,
@@ -131,7 +131,7 @@ impl ServerKex {
 
                 if kex.skip_exchange() {
                     let newkeys = compute_keys(
-                        CryptoVec::new(),
+                        Vec::new(),
                         kex,
                         names.clone(),
                         self.exchange.clone(),
@@ -235,7 +235,7 @@ impl ServerKex {
 
                 self.exchange
                     .client_ephemeral
-                    .extend(&Bytes::decode(&mut r).map_err(Into::into)?);
+                    .extend_from_slice(&Bytes::decode(&mut r).map_err(Into::into)?);
 
                 let exchange = &mut self.exchange;
                 kex.server_dh(exchange, &input.buffer)?;
@@ -262,7 +262,7 @@ impl ServerKex {
                     let mut buffer = buffer.borrow_mut();
                     buffer.clear();
 
-                    let mut pubkey_vec = CryptoVec::new();
+                    let mut pubkey_vec = Vec::new();
                     key.public_key().to_bytes()?.encode(&mut pubkey_vec)?;
 
                     let hash = kex.compute_exchange_hash(&pubkey_vec, exchange, &mut buffer)?;
@@ -336,32 +336,39 @@ impl ServerKex {
 }
 
 fn compute_keys(
-    hash: CryptoVec,
+    hash: Vec<u8>,
     kex: KexAlgorithm,
     names: Names,
     exchange: Exchange,
     session_id: Option<&CryptoVec>,
 ) -> Result<NewKeys, Error> {
-    let session_id = if let Some(session_id) = session_id {
-        session_id
-    } else {
-        &hash
+    let session_id_ref: &[u8] = match session_id {
+        Some(sid) => sid,
+        None => &hash,
     };
     // Now computing keys.
     let c = kex.compute_keys(
-        session_id,
+        session_id_ref,
         &hash,
         names.cipher,
         names.client_mac,
         names.server_mac,
         true,
     )?;
+    let session_id_cv = match session_id {
+        Some(s) => s.clone(),
+        None => {
+            let mut cv = CryptoVec::new();
+            cv.extend(&hash);
+            cv
+        }
+    };
     Ok(NewKeys {
         exchange,
         names,
         kex,
         key: 0,
         cipher: c,
-        session_id: session_id.clone(),
+        session_id: session_id_cv,
     })
 }

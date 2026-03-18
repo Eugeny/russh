@@ -45,7 +45,10 @@ pub(crate) struct Encrypted {
     pub session_id: CryptoVec,
     pub channels: HashMap<ChannelId, ChannelParams>,
     pub last_channel_id: Wrapping<u32>,
-    pub write: CryptoVec,
+    // Non-sensitive packet assembly buffer, analogous to
+    // OpenSSH sshbuf (output side).  Not mlocked because it
+    // holds only protocol framing and ciphertext.
+    pub write: Vec<u8>,
     pub write_cursor: usize,
     pub last_rekey: russh_util::time::Instant,
     pub server_compression: crate::compression::Compression,
@@ -68,7 +71,8 @@ pub(crate) struct CommonSession<Config> {
     pub remote_to_local: Box<dyn OpeningKey + Send>,
     pub wants_reply: bool,
     pub disconnected: bool,
-    pub buffer: CryptoVec,
+    // Non-sensitive incoming-packet scratch buffer.
+    pub buffer: Vec<u8>,
     pub strict_kex: bool,
     pub alive_timeouts: usize,
     pub received_data: bool,
@@ -152,7 +156,7 @@ impl<C> CommonSession<C> {
             state,
             channels: HashMap::new(),
             last_channel_id: Wrapping(1),
-            write: CryptoVec::new(),
+            write: Vec::new(),
             write_cursor: 0,
             last_rekey: russh_util::time::Instant::now(),
             server_compression: newkeys.names.server_compression,
@@ -189,7 +193,7 @@ impl<C> CommonSession<C> {
         description: &str,
         language_tag: &str,
     ) -> Result<(), crate::Error> {
-        let disconnect = |buf: &mut CryptoVec| {
+        let disconnect = |buf: &mut Vec<u8>| {
             push_packet!(buf, {
                 msg::DISCONNECT.encode(buf)?;
                 (reason as u32).encode(buf)?;
@@ -216,7 +220,7 @@ impl<C> CommonSession<C> {
         message: &str,
         language_tag: &str,
     ) -> Result<(), crate::Error> {
-        let debug = |buf: &mut CryptoVec| {
+        let debug = |buf: &mut Vec<u8>| {
             push_packet!(buf, {
                 msg::DEBUG.encode(buf)?;
                 (always_display as u8).encode(buf)?;
@@ -309,7 +313,7 @@ impl Encrypted {
     }
 
     fn flush_channel(
-        write: &mut CryptoVec,
+        write: &mut Vec<u8>,
         channel: &mut ChannelParams,
     ) -> Result<ChannelFlushResult, crate::Error> {
         let mut pending_size = 0;
@@ -387,7 +391,7 @@ impl Encrypted {
     /// the window, dividing it into packets if it is too large, and
     /// return the length that was written.
     fn data_noqueue(
-        write: &mut CryptoVec,
+        write: &mut Vec<u8>,
         channel: &mut ChannelParams,
         buf0: &[u8],
         a: Option<u32>,
@@ -441,9 +445,10 @@ impl Encrypted {
     pub fn data(
         &mut self,
         channel: ChannelId,
-        buf0: CryptoVec,
+        buf0: impl Into<bytes::Bytes>,
         is_rekeying: bool,
     ) -> Result<(), crate::Error> {
+        let buf0 = buf0.into();
         if let Some(channel) = self.channels.get_mut(&channel) {
             assert!(channel.confirmed);
             if !channel.pending_data.is_empty() && is_rekeying {
@@ -464,9 +469,10 @@ impl Encrypted {
         &mut self,
         channel: ChannelId,
         ext: u32,
-        buf0: CryptoVec,
+        buf0: impl Into<bytes::Bytes>,
         is_rekeying: bool,
     ) -> Result<(), crate::Error> {
+        let buf0 = buf0.into();
         if let Some(channel) = self.channels.get_mut(&channel) {
             assert!(channel.confirmed);
             if !channel.pending_data.is_empty() && is_rekeying {
@@ -562,12 +568,15 @@ pub enum EncryptedState {
 
 #[derive(Debug, Default, Clone)]
 pub struct Exchange {
-    pub client_id: CryptoVec,
-    pub server_id: CryptoVec,
-    pub client_kex_init: CryptoVec,
-    pub server_kex_init: CryptoVec,
-    pub client_ephemeral: CryptoVec,
-    pub server_ephemeral: CryptoVec,
+    // All Exchange fields are public protocol values (identifiers,
+    // kex init payloads, ephemeral public keys) visible on the wire.
+    // They carry no secret material and do not require mlock.
+    pub client_id: Vec<u8>,
+    pub server_id: Vec<u8>,
+    pub client_kex_init: Vec<u8>,
+    pub server_kex_init: Vec<u8>,
+    pub client_ephemeral: Vec<u8>,
+    pub server_ephemeral: Vec<u8>,
     pub gex: Option<(GexParams, DhGroup)>,
 }
 

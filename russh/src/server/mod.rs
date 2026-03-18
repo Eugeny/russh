@@ -953,12 +953,6 @@ pub trait Server {
     }
 }
 
-use std::cell::RefCell;
-thread_local! {
-    static B1: RefCell<CryptoVec> = RefCell::new(CryptoVec::new());
-    static B2: RefCell<CryptoVec> = RefCell::new(CryptoVec::new());
-}
-
 async fn start_reading<R: AsyncRead + Unpin>(
     mut stream_read: R,
     mut buffer: SSHBuffer,
@@ -1062,7 +1056,7 @@ async fn read_ssh_id<R: AsyncRead + Unpin>(
         config,
         wants_reply: false,
         disconnected: false,
-        buffer: CryptoVec::new(),
+        buffer: Vec::new(),
         strict_kex: false,
         alive_timeouts: 0,
         received_data: false,

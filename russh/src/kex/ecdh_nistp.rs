@@ -113,7 +113,7 @@ where
         exchange.server_ephemeral.clear();
         exchange
             .server_ephemeral
-            .extend(&server_pubkey.to_sec1_bytes());
+            .extend_from_slice(&server_pubkey.to_sec1_bytes());
         let shared = server_secret.diffie_hellman(&client_pubkey);
         self.shared_secret = Some(shared);
         Ok(())
@@ -122,7 +122,7 @@ where
     #[doc(hidden)]
     fn client_dh(
         &mut self,
-        client_ephemeral: &mut CryptoVec,
+        client_ephemeral: &mut Vec<u8>,
         writer: &mut impl Writer,
     ) -> Result<(), crate::Error> {
         let client_secret = elliptic_curve::ecdh::EphemeralSecret::<C>::random(&mut OsRng);
@@ -130,7 +130,7 @@ where
 
         // fill exchange.
         client_ephemeral.clear();
-        client_ephemeral.extend(&client_pubkey.to_sec1_bytes());
+        client_ephemeral.extend_from_slice(&client_pubkey.to_sec1_bytes());
 
         msg::KEX_ECDH_INIT.encode(writer)?;
         client_pubkey.to_sec1_bytes().encode(writer)?;
@@ -155,10 +155,10 @@ where
 
     fn compute_exchange_hash(
         &self,
-        key: &CryptoVec,
+        key: &[u8],
         exchange: &Exchange,
         buffer: &mut CryptoVec,
-    ) -> Result<CryptoVec, crate::Error> {
+    ) -> Result<Vec<u8>, crate::Error> {
         // Computing the exchange hash, see page 7 of RFC 5656.
         buffer.clear();
         exchange.client_id.deref().encode(buffer)?;
@@ -177,15 +177,13 @@ where
         let mut hasher = D::new();
         hasher.update(&buffer);
 
-        let mut res = CryptoVec::new();
-        res.extend(&hasher.finalize());
-        Ok(res)
+        Ok(hasher.finalize().to_vec())
     }
 
     fn compute_keys(
         &self,
-        session_id: &CryptoVec,
-        exchange_hash: &CryptoVec,
+        session_id: &[u8],
+        exchange_hash: &[u8],
         cipher: cipher::Name,
         remote_to_local_mac: mac::Name,
         local_to_remote_mac: mac::Name,
