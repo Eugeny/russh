@@ -71,6 +71,30 @@ fn test_ssh_id() {
     );
 }
 
+#[test]
+fn test_packet_retains_reusable_buffer_for_cold_path_packets() {
+    let mut writer = PacketWriter::clear();
+    let large_len = 128 * 1024;
+
+    writer
+        .write_packet(|buf| {
+            buf.resize(large_len, 0x5a);
+            Ok(())
+        })
+        .unwrap();
+    assert!(writer.packet_buffer.capacity() >= large_len);
+
+    let retained = writer
+        .packet(|buf| {
+            buf.extend_from_slice(b"abc");
+            Ok(())
+        })
+        .unwrap();
+
+    assert_eq!(&retained[..], b"abc");
+    assert!(writer.packet_buffer.capacity() >= large_len);
+}
+
 /// SSH packet read/write buffer. Uses Vec<u8> (not CryptoVec/mlocked) because
 /// packet data is not secret material.
 #[derive(Debug, Default)]
