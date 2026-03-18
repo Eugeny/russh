@@ -1697,6 +1697,14 @@ pub struct Config {
     pub gex: GexParams,
     /// If active, invoke `set_nodelay(true)` on the ssh socket; disabled by default (i.e. Nagle's algorithm is active).
     pub nodelay: bool,
+    /// Trusted CA public keys for validating server certificates.
+    /// When provided, the corresponding certificate algorithm types will be
+    /// automatically added to the preferred host key algorithms.
+    pub ca_public_keys: Option<Vec<ssh_key::PublicKey>>,
+    /// Client certificates used for hostkey-based authentication.
+    /// When provided, the corresponding certificate algorithm types will be
+    /// advertised to the server during key exchange.
+    pub certificates: Vec<Certificate>,
 }
 
 impl Default for Config {
@@ -1719,6 +1727,8 @@ impl Default for Config {
             anonymous: false,
             gex: Default::default(),
             nodelay: false,
+            ca_public_keys: None,
+            certificates: Vec::new(),
         }
     }
 }

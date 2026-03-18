@@ -3,7 +3,6 @@ use russh::keys::ssh_key::certificate::{Builder, CertType};
 use russh::keys::ssh_key::rand_core::OsRng;
 use russh::keys::ssh_key::{self, Algorithm, HashAlg, PrivateKey};
 use russh::*;
-use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::net::TcpListener;
@@ -60,16 +59,9 @@ async fn test_server_certificate_auth() {
     // Configure Client
     let mut client_config = client::Config::default();
 
-    // Add certificate algorithm to preferred keys
-    let mut preferred_keys = client_config.preferred.key.into_owned();
-    preferred_keys.insert(
-        0,
-        Algorithm::from_str(&Algorithm::Ed25519.to_certificate_type()).unwrap(),
-    );
+    // Set CA public key - this will automatically add cert algorithms to preferred
+    client_config.ca_public_keys = Some(vec![ca_public_key.clone()]);
 
-    client_config.preferred.key = std::borrow::Cow::Owned(preferred_keys);
-    client_config.preferred.kex =
-        std::borrow::Cow::Owned(vec![russh::kex::CURVE25519, russh::kex::ECDH_SHA2_NISTP256]);
     let client_config = Arc::new(client_config);
 
     let client = TestClient {
@@ -143,16 +135,9 @@ async fn test_server_wrong_ca_certificate_auth() {
     // Configure Client
     let mut client_config = client::Config::default();
 
-    // Add certificate algorithm to preferred keys
-    let mut preferred_keys = client_config.preferred.key.into_owned();
-    preferred_keys.insert(
-        0,
-        Algorithm::from_str(&Algorithm::Ed25519.to_certificate_type()).unwrap(),
-    );
+    // Set CA public key - this will automatically add cert algorithms to preferred
+    client_config.ca_public_keys = Some(vec![ca_public_key.clone()]);
 
-    client_config.preferred.key = std::borrow::Cow::Owned(preferred_keys);
-    client_config.preferred.kex =
-        std::borrow::Cow::Owned(vec![russh::kex::CURVE25519, russh::kex::ECDH_SHA2_NISTP256]);
     let client_config = Arc::new(client_config);
 
     let client = TestClient {
@@ -234,17 +219,9 @@ async fn test_server_rsa_sha2_512_certificate_auth() {
     // Configure Client
     let mut client_config = client::Config::default();
 
-    // Advertise rsa-sha2-512-cert-v01@openssh.com as first preferred host key algorithm
-    let cert_algo_str = Algorithm::Rsa {
-        hash: Some(HashAlg::Sha512),
-    }
-    .to_certificate_type();
-    let mut preferred_keys = client_config.preferred.key.into_owned();
-    preferred_keys.insert(0, Algorithm::from_str(&cert_algo_str).unwrap());
+    // Set CA public key - this will automatically add cert algorithms to preferred
+    client_config.ca_public_keys = Some(vec![ca_public_key.clone()]);
 
-    client_config.preferred.key = std::borrow::Cow::Owned(preferred_keys);
-    client_config.preferred.kex =
-        std::borrow::Cow::Owned(vec![russh::kex::CURVE25519, russh::kex::ECDH_SHA2_NISTP256]);
     let client_config = Arc::new(client_config);
 
     let client = TestClient {
@@ -286,7 +263,6 @@ impl client::Handler for TestClient {
         &mut self,
         server_public_key: &russh::cert::PublicKeyOrCertificate,
     ) -> Result<bool, Self::Error> {
-        println!("check_server_key: {server_public_key:?}");
         match server_public_key {
             russh::cert::PublicKeyOrCertificate::Certificate(cert) => {
                 // Perform the signature verification using your trusted CA public key.
@@ -323,7 +299,6 @@ impl client::Handler for TestClient {
                 }
 
                 // If all checks pass, the certificate is valid.
-                println!("Host certificate successfully validated.");
                 Ok(true)
             }
             russh::cert::PublicKeyOrCertificate::PublicKey { .. } => {

@@ -7,11 +7,12 @@ use bytes::Bytes;
 use log::{debug, error, warn};
 use signature::Verifier;
 use ssh_encoding::{Decode, Encode};
-use ssh_key::{Certificate, Mpint, PublicKey, Signature};
+use ssh_key::{Certificate, Mpint, Signature};
 
 use super::IncomingSshPacket;
 use crate::cert::PublicKeyOrCertificate;
 use crate::client::{Config, NewKeys};
+use crate::helpers::EncodedExt;
 use crate::kex::dh::groups::DhGroup;
 use crate::kex::{KEXES, KexAlgorithm, KexAlgorithmImplementor, KexCause, KexProgress};
 use crate::keys::key::parse_public_key;
@@ -89,8 +90,17 @@ impl ClientKex {
     }
 
     pub fn kexinit(&mut self, output: &mut PacketWriter) -> Result<(), Error> {
-        self.exchange.client_kex_init =
-            negotiation::write_kex(&self.config.preferred, output, None)?;
+        let certificates = if self.config.certificates.is_empty() {
+            None
+        } else {
+            Some(self.config.certificates.as_slice())
+        };
+        self.exchange.client_kex_init = negotiation::write_client_kex(
+            &self.config.preferred,
+            output,
+            certificates,
+            self.config.ca_public_keys.as_deref(),
+        )?;
 
         Ok(())
     }
@@ -120,11 +130,13 @@ impl ClientKex {
                     self.exchange
                         .server_kex_init
                         .extend_from_slice(&input.buffer);
+                    let ca_keys = self.config.ca_public_keys.as_deref();
                     negotiation::Client::read_kex(
                         &input.buffer,
                         &self.config.preferred,
                         None,
                         None,
+                        ca_keys,
                         &self.cause,
                     )?
                 };
@@ -297,8 +309,9 @@ impl ClientKex {
                             server_certificate.to_openssh()
                         );
                         debug!("Parsed server host key as Certificate");
-                        let inner_key_data = server_certificate.public_key().clone();
-                        let inner_public_key = PublicKey::new(inner_key_data, "");
+                        let inner_key_data = server_certificate.public_key();
+                        let inner_key_bytes = inner_key_data.encoded()?;
+                        let inner_public_key = parse_public_key(&inner_key_bytes)?;
 
                         if let Err(e) =
                             Verifier::verify(&inner_public_key, hash.as_ref(), &signature)

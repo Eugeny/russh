@@ -117,6 +117,7 @@ impl ServerKex {
                         &self.config.preferred,
                         Some(&self.config.keys),
                         Some(&self.config.certificates),
+                        None,
                         &self.cause,
                     )?
                 };
