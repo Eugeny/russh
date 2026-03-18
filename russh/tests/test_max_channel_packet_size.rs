@@ -143,6 +143,7 @@ struct EchoServer {}
 
 impl server::Handler for EchoServer {
     type Error = russh::Error;
+    type Data = ();
 
     async fn auth_publickey(
         &mut self,
