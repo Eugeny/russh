@@ -120,6 +120,11 @@ enum Reply {
         key: ssh_key::PublicKey,
         data: CryptoVec,
     },
+    SignRequestCert {
+        cert: ssh_key::Certificate,
+        hash_alg: Option<HashAlg>,
+        data: CryptoVec,
+    },
     AuthInfoRequest {
         name: String,
         instructions: String,
@@ -443,6 +448,59 @@ impl<H: Handler> Handle<H> {
             .await
             .map_err(|_| crate::Error::SendError)?;
         self.wait_recv_reply().await
+    }
+
+    pub async fn authenticate_openssh_cert_with<U: Into<String>, S: auth::Signer>(
+        &mut self,
+        user: U,
+        cert: ssh_key::Certificate,
+        hash_alg: Option<HashAlg>,
+        signer: &mut S,
+    ) -> Result<AuthResult, S::Error> {
+        let user = user.into();
+        if self
+            .sender
+            .send(Msg::Authenticate {
+                user,
+                method: auth::Method::FutureOpenSshCertificate { cert: cert.clone(), hash_alg },
+            })
+            .await
+            .is_err()
+        {
+            return Err((crate::SendError {}).into());
+        }
+        loop {
+            let reply = self.receiver.recv().await;
+            match reply {
+                Some(Reply::AuthSuccess) => return Ok(AuthResult::Success),
+                Some(Reply::AuthFailure {
+                    proceed_with_methods: remaining_methods,
+                    partial_success,
+                }) => {
+                    return Ok(AuthResult::Failure {
+                        remaining_methods,
+                        partial_success,
+                    })
+                }
+                Some(Reply::SignRequestCert { cert, hash_alg, data }) => {
+                    let data = signer.auth_certificate_sign(&cert, hash_alg, data).await;
+                    let data = match data {
+                        Ok(data) => data,
+                        Err(e) => return Err(e),
+                    };
+                    if self.sender.send(Msg::Signed { data }).await.is_err() {
+                        return Err((crate::SendError {}).into());
+                    }
+                }
+                None => {
+                    return Ok(AuthResult::Failure {
+                        remaining_methods: MethodSet::empty(),
+                        partial_success: false,
+                    })
+                }
+                _ => {}
+            }
+        }
     }
 
     /// Authenticate using a custom method that implements the

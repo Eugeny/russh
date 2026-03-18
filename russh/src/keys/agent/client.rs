@@ -10,6 +10,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use super::{msg, Constraint};
 use crate::helpers::EncodedExt;
+use crate::keys::key::PublicKeyOrCert;
 use crate::keys::{key, Error};
 use crate::CryptoVec;
 
@@ -256,7 +257,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
 
     /// Ask the agent for a list of the currently registered secret
     /// keys.
-    pub async fn request_identities(&mut self) -> Result<Vec<PublicKey>, Error> {
+    pub async fn request_identities(&mut self) -> Result<Vec<PublicKeyOrCert>, Error> {
         self.buf.clear();
         self.buf.resize(4, 0);
         msg::REQUEST_IDENTITIES.encode(&mut self.buf)?;
@@ -273,8 +274,10 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
             for _ in 0..n {
                 let key_blob = Bytes::decode(&mut r)?;
                 let comment = String::decode(&mut r)?;
-                let mut key = key::parse_public_key(&key_blob)?;
-                key.set_comment(comment);
+                let mut key = key::parse_public_key_or_cert(&key_blob)?;
+                if let PublicKeyOrCert::PublicKey(k) = &mut key {
+                    k.set_comment(comment);
+                }
                 keys.push(key);
             }
         }
@@ -307,6 +310,24 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
         }
     }
 
+    pub async fn sign_request_cert(
+        &mut self,
+        cert: &ssh_key::Certificate,
+        hash_alg: Option<HashAlg>,
+        mut data: CryptoVec,
+    ) -> Result<CryptoVec, Error> {
+        let hash = self.prepare_sign_request_cert(cert, hash_alg, &data)?;
+        self.read_response().await?;
+        match self.buf.split_first() {
+            Some((&msg::SIGN_RESPONSE, mut r)) => {
+                self.write_signature(&mut r, hash, &mut data)?;
+                Ok(data)
+            }
+            Some((&msg::FAILURE, _)) => Err(Error::AgentFailure),
+            _ => Err(Error::AgentProtocolError),
+        }
+    }
+
     fn prepare_sign_request(
         &mut self,
         public: &ssh_key::PublicKey,
@@ -329,6 +350,32 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
             _ => 0,
         };
 
+        hash.encode(&mut self.buf)?;
+        let len = self.buf.len() - 4;
+        BigEndian::write_u32(&mut self.buf[..], len as u32);
+        Ok(hash)
+    }
+
+    fn prepare_sign_request_cert(
+        &mut self,
+        cert: &ssh_key::Certificate,
+        hash_alg: Option<HashAlg>,
+        data: &[u8],
+    ) -> Result<u32, Error> {
+        self.buf.clear();
+        self.buf.resize(4);
+        msg::SIGN_REQUEST.encode(&mut self.buf)?;
+        cert.to_bytes()?.encode(&mut self.buf)?;
+        data.encode(&mut self.buf)?;
+        let alg = cert.public_key().algorithm();
+        let hash = match alg {
+            Algorithm::Rsa { .. } => match hash_alg {
+                Some(HashAlg::Sha256) => 2,
+                Some(HashAlg::Sha512) => 4,
+                _ => 0,
+            },
+            _ => 0,
+        };
         hash.encode(&mut self.buf)?;
         let len = self.buf.len() - 4;
         BigEndian::write_u32(&mut self.buf[..], len as u32);

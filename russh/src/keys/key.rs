@@ -15,7 +15,7 @@ use rand::rng;
 //
 use ssh_encoding::Decode;
 use ssh_key::public::KeyData;
-use ssh_key::{Algorithm, EcdsaCurve, PublicKey};
+use ssh_key::{Algorithm, Certificate, EcdsaCurve, PublicKey};
 
 use crate::keys::Error;
 
@@ -36,6 +36,19 @@ pub trait Verify {
     fn verify_server_auth(&self, buffer: &[u8], sig: &[u8]) -> bool;
 }
 
+pub enum PublicKeyOrCert {
+    PublicKey(PublicKey),
+    Cert(Box<Certificate>),
+}
+
+pub fn parse_public_key_or_cert(mut p: &[u8]) -> Result<PublicKeyOrCert, Error> {
+    match ssh_key::certificate::Certificate::from_bytes(p) {
+        Ok(cert) => Ok(PublicKeyOrCert::Cert(Box::new(cert))),
+        Err(_e) => Ok(PublicKeyOrCert::PublicKey(
+            ssh_key::public::KeyData::decode(&mut p)?.into(),
+        )),
+    }
+}
 /// Parse a public key from a byte slice.
 pub fn parse_public_key(mut p: &[u8]) -> Result<PublicKey, Error> {
     Ok(ssh_key::public::KeyData::decode(&mut p)?.into())

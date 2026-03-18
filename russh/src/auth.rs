@@ -163,6 +163,12 @@ pub trait Signer: Sized {
         hash_alg: Option<HashAlg>,
         to_sign: CryptoVec,
     ) -> impl Future<Output = Result<CryptoVec, Self::Error>> + Send;
+    fn auth_certificate_sign(
+        &mut self,
+        cert: &ssh_key::Certificate,
+        hash_alg: Option<HashAlg>,
+        to_sign: CryptoVec,
+    ) -> impl Future<Output = Result<CryptoVec, Self::Error>> + Send;
 }
 
 #[derive(Debug, Error)]
@@ -192,6 +198,19 @@ impl<R: AsyncRead + AsyncWrite + Unpin + Send + 'static> Signer
                 .map_err(Into::into)
         }
     }
+    #[allow(clippy::manual_async_fn)]
+    fn auth_certificate_sign(
+        &mut self,
+        cert: &ssh_key::Certificate,
+        hash_alg: Option<HashAlg>,
+        to_sign: CryptoVec,
+    ) -> impl Future<Output = Result<CryptoVec, Self::Error>> + Send {
+        async move {
+            self.sign_request_cert(cert, hash_alg, to_sign)
+                .await
+                .map_err(Into::into)
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -210,6 +229,10 @@ pub enum Method {
     },
     FuturePublicKey {
         key: ssh_key::PublicKey,
+        hash_alg: Option<HashAlg>,
+    },
+    FutureOpenSshCertificate {
+        cert: Certificate,
         hash_alg: Option<HashAlg>,
     },
     KeyboardInteractive {
