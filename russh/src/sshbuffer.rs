@@ -78,7 +78,7 @@ fn test_packet_retains_reusable_buffer_for_cold_path_packets() {
 
     writer
         .write_packet(|buf| {
-            buf.resize(large_len, 0x5a);
+            buf.resize(buf.len() + large_len, 0x5a);
             Ok(())
         })
         .unwrap();
@@ -93,6 +93,95 @@ fn test_packet_retains_reusable_buffer_for_cold_path_packets() {
 
     assert_eq!(&retained[..], b"abc");
     assert!(writer.packet_buffer.capacity() >= large_len);
+}
+
+#[test]
+fn test_write_packet_matches_clear_cipher_write_output() {
+    let payload = b"abcdefghijklmno".to_vec();
+
+    let mut expected = SSHBuffer::new();
+    let mut clear = cipher::clear::Key {};
+    clear.write(&payload, &mut expected);
+
+    let mut writer = PacketWriter::clear();
+    writer
+        .write_packet(|buf| {
+            buf.extend_from_slice(&payload);
+            Ok(())
+        })
+        .unwrap();
+
+    assert_eq!(writer.buffer().buffer, expected.buffer);
+    assert_eq!(writer.buffer().bytes, payload.len());
+    assert_eq!(writer.buffer().seqn, Wrapping(1));
+}
+
+#[test]
+fn test_write_packet_restores_output_buffer_on_error() {
+    let mut writer = PacketWriter::clear();
+    writer
+        .write_packet(|buf| {
+            buf.extend_from_slice(b"ok");
+            Ok(())
+        })
+        .unwrap();
+    let before = writer.buffer().buffer.clone();
+
+    let err = writer.write_packet(|buf| {
+        buf.extend_from_slice(b"partial");
+        Err(Error::Inconsistent)
+    });
+
+    assert!(matches!(err, Err(Error::Inconsistent)));
+    assert_eq!(writer.buffer().buffer, before);
+}
+
+#[cfg(all(test, feature = "flate2"))]
+fn zlib_compress() -> Compress {
+    let mut compress = Compress::None;
+    compression::Compression::Zlib.init_compress(&mut compress);
+    compress
+}
+
+#[cfg(feature = "flate2")]
+#[test]
+fn test_write_packet_compressed_matches_clear_cipher_output() {
+    let payload = b"abcdefghijklmnoabcdefghijklmno".to_vec();
+
+    let mut expected = SSHBuffer::new();
+    let mut clear = cipher::clear::Key {};
+    let mut compress = zlib_compress();
+    let mut compressed = Vec::new();
+    let packet = compress.compress(&payload, &mut compressed).unwrap();
+    clear.write(packet, &mut expected);
+
+    let mut writer = PacketWriter::new(Box::new(cipher::clear::Key {}), zlib_compress());
+    writer
+        .write_packet(|buf| {
+            buf.extend_from_slice(&payload);
+            Ok(())
+        })
+        .unwrap();
+
+    assert_eq!(writer.buffer().buffer, expected.buffer);
+    assert_eq!(writer.buffer().bytes, packet.len());
+    assert_eq!(writer.buffer().seqn, Wrapping(1));
+}
+
+#[cfg(feature = "flate2")]
+#[test]
+fn test_packet_retains_plaintext_for_compressed_packets() {
+    let payload = b"abcdefghijklmnoabcdefghijklmno".to_vec();
+
+    let mut writer = PacketWriter::new(Box::new(cipher::clear::Key {}), zlib_compress());
+    let retained = writer
+        .packet(|buf| {
+            buf.extend_from_slice(&payload);
+            Ok(())
+        })
+        .unwrap();
+
+    assert_eq!(&retained[..], &payload);
 }
 
 /// SSH packet read/write buffer. Uses Vec<u8> (not CryptoVec/mlocked) because
@@ -135,7 +224,6 @@ pub(crate) struct PacketWriter {
     cipher: Box<dyn SealingKey + Send>,
     compress: Compress,
     packet_buffer: Vec<u8>,
-    compress_buffer: Vec<u8>,
     write_buffer: SSHBuffer,
 }
 
@@ -146,6 +234,8 @@ impl Debug for PacketWriter {
 }
 
 impl PacketWriter {
+    const PACKET_PREFIX_LEN: usize = cipher::PACKET_LENGTH_LEN + 1;
+
     pub fn clear() -> Self {
         Self::new(Box::new(cipher::clear::Key {}), Compress::None)
     }
@@ -155,7 +245,6 @@ impl PacketWriter {
             cipher,
             compress,
             packet_buffer: Vec::new(),
-            compress_buffer: Vec::new(),
             write_buffer: SSHBuffer::new(),
         }
     }
@@ -175,11 +264,81 @@ impl PacketWriter {
         }
     }
 
+    fn write_packet_in_place<F: FnOnce(&mut Vec<u8>) -> Result<(), Error>>(
+        &mut self,
+        f: F,
+    ) -> Result<(), Error> {
+        self.write_payload_into_output(|buffer, payload_start| {
+            f(buffer)?;
+            Ok(buffer.len() - payload_start)
+        })
+    }
+
+    fn write_payload_into_output<F>(&mut self, f: F) -> Result<(), Error>
+    where
+        F: FnOnce(&mut Vec<u8>, usize) -> Result<usize, Error>,
+    {
+        let offset = self.write_buffer.buffer.len();
+        let payload_start = offset + Self::PACKET_PREFIX_LEN;
+
+        self.write_buffer.buffer.resize(payload_start, 0);
+        match f(&mut self.write_buffer.buffer, payload_start) {
+            Ok(payload_len) => {
+                if payload_len == 0 {
+                    self.write_buffer.buffer.truncate(offset);
+                    return Ok(());
+                }
+
+                if let Some(message_type) = self.write_buffer.buffer.get(payload_start) {
+                    debug!("> msg type {message_type:?}, len {payload_len}");
+                }
+
+                self.packet_buffer.reserve(payload_len);
+                self.cipher
+                    .finish_packet(offset, payload_len, &mut self.write_buffer);
+                Ok(())
+            }
+            Err(err) => {
+                self.write_buffer.buffer.truncate(offset);
+                Err(err)
+            }
+        }
+    }
+
+    fn write_compressed_payload_into_output(&mut self, buf: &[u8]) -> Result<(), Error> {
+        let offset = self.write_buffer.buffer.len();
+        let payload_start = offset + Self::PACKET_PREFIX_LEN;
+
+        self.write_buffer.buffer.resize(payload_start, 0);
+        match self
+            .compress
+            .compress_into(buf, &mut self.write_buffer.buffer, payload_start)
+        {
+            Ok(payload_len) => {
+                if payload_len == 0 {
+                    self.write_buffer.buffer.truncate(offset);
+                    return Ok(());
+                }
+
+                self.cipher
+                    .finish_packet(offset, payload_len, &mut self.write_buffer);
+                Ok(())
+            }
+            Err(err) => {
+                self.write_buffer.buffer.truncate(offset);
+                Err(err)
+            }
+        }
+    }
+
     pub fn packet_raw(&mut self, buf: &[u8]) -> Result<(), Error> {
         if let Some(message_type) = buf.first() {
             debug!("> msg type {message_type:?}, len {}", buf.len());
-            let packet = self.compress.compress(buf, &mut self.compress_buffer)?;
-            self.cipher.write(packet, &mut self.write_buffer);
+            if matches!(&self.compress, Compress::None) {
+                self.cipher.write(buf, &mut self.write_buffer);
+            } else {
+                self.write_compressed_payload_into_output(buf)?;
+            }
         }
         Ok(())
     }
@@ -189,6 +348,9 @@ impl PacketWriter {
         &mut self,
         f: F,
     ) -> Result<(), Error> {
+        if matches!(&self.compress, Compress::None) {
+            return self.write_packet_in_place(f);
+        }
         let buf = self.prepare_packet(f)?;
         let result = self.packet_raw(&buf);
         self.packet_buffer = buf;
