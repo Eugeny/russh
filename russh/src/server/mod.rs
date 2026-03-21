@@ -102,11 +102,12 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Config {
         Config {
-            server_id: SshId::Standard(format!(
-                "SSH-2.0-{}_{}",
+            server_id: SshId::Standard(Cow::Borrowed(concat!(
+                "SSH-2.0-",
                 env!("CARGO_PKG_NAME"),
+                "_",
                 env!("CARGO_PKG_VERSION")
-            )),
+            ))),
             methods: auth::MethodSet::all(),
             auth_rejection_time: std::time::Duration::from_secs(1),
             auth_rejection_time_initial: None,
@@ -953,12 +954,6 @@ pub trait Server {
     }
 }
 
-use std::cell::RefCell;
-thread_local! {
-    static B1: RefCell<CryptoVec> = RefCell::new(CryptoVec::new());
-    static B2: RefCell<CryptoVec> = RefCell::new(CryptoVec::new());
-}
-
 async fn start_reading<R: AsyncRead + Unpin>(
     mut stream_read: R,
     mut buffer: SSHBuffer,
@@ -1062,7 +1057,7 @@ async fn read_ssh_id<R: AsyncRead + Unpin>(
         config,
         wants_reply: false,
         disconnected: false,
-        buffer: CryptoVec::new(),
+        buffer: Vec::new(),
         strict_kex: false,
         alive_timeouts: 0,
         received_data: false,

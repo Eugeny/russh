@@ -242,9 +242,9 @@ pub enum CurrentRequest {
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     PublicKey {
         #[allow(dead_code)]
-        key: CryptoVec,
+        key: Vec<u8>,
         #[allow(dead_code)]
-        algo: CryptoVec,
+        algo: Vec<u8>,
         sent_pk_ok: bool,
     },
     KeyboardInteractive {

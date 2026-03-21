@@ -13,7 +13,7 @@ mod tests {
     use crate::keys::ssh_key::rand_core::OsRng;
     use crate::server::{self, Auth, Handler as ServerHandler, Server, Session};
     use crate::{ChannelId, SshId}; // Import directly from crate root
-    use crate::{CryptoVec, Error};
+    use crate::Error;
 
     #[derive(Clone)]
     struct TestServer {
@@ -62,7 +62,7 @@ mod tests {
             session: &mut Session,
         ) -> Result<(), Self::Error> {
             debug!("server received data: {:?}", std::str::from_utf8(data));
-            session.data(channel, CryptoVec::from_slice(data))?;
+            session.data(channel, data.to_vec())?;
             Ok(())
         }
     }
@@ -87,7 +87,7 @@ mod tests {
         // Configure the server
         let mut config = server::Config::default();
         config.auth_rejection_time = std::time::Duration::from_secs(1);
-        config.server_id = SshId::Standard("SSH-1.99-CustomServer_1.0".to_string());
+        config.server_id = SshId::Standard("SSH-1.99-CustomServer_1.0".into());
         config.inactivity_timeout = None;
         config
             .keys

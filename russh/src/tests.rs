@@ -118,7 +118,7 @@ mod compress {
             session: &mut Session,
         ) -> Result<(), Self::Error> {
             debug!("server data = {:?}", std::str::from_utf8(data));
-            session.data(channel, CryptoVec::from_slice(data))?;
+            session.data(channel, data.to_vec())?;
             Ok(())
         }
     }
@@ -146,7 +146,6 @@ mod channels {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     use super::*;
-    use crate::CryptoVec;
 
     async fn test_session<RC, RS, CH, SH, F1, F2>(
         client_handler: CH,
@@ -237,7 +236,7 @@ mod channels {
                 session: &mut client::Session,
             ) -> Result<(), Self::Error> {
                 assert_eq!(data, &b"hello world!"[..]);
-                session.data(channel, CryptoVec::from_slice(&b"hey there!"[..]))?;
+                session.data(channel, b"hey there!".to_vec())?;
                 Ok(())
             }
         }
@@ -285,7 +284,7 @@ mod channels {
 
                 let msg = ch.wait().await.unwrap();
                 if let ChannelMsg::Data { data } = msg {
-                    assert_eq!(data.as_ref(), &b"hey there!"[..]);
+                    assert_eq!(&data[..], &b"hey there!"[..]);
                 } else {
                     panic!("Unexpected message {msg:?}");
                 }
@@ -451,7 +450,7 @@ mod channels {
 
                 let msg = ch.wait().await.unwrap();
                 if let ChannelMsg::Data { data } = msg {
-                    assert_eq!(data.as_ref(), &b"hello world!"[..]);
+                    assert_eq!(&data[..], &b"hello world!"[..]);
                 } else {
                     panic!("Unexpected message {msg:?}");
                 }

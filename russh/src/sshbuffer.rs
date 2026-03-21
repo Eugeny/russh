@@ -14,6 +14,7 @@
 //
 
 use core::fmt;
+use std::borrow::Cow;
 use std::num::Wrapping;
 
 use cipher::SealingKey;
@@ -26,9 +27,9 @@ use super::*;
 #[derive(Debug)]
 pub enum SshId {
     /// When sending the id, append RFC standard `\r\n`. Example: `SshId::Standard("SSH-2.0-acme")`
-    Standard(String),
+    Standard(Cow<'static, str>),
     /// When sending the id, use this buffer as it is and do not append additional line terminators.
-    Raw(String),
+    Raw(Cow<'static, str>),
 }
 
 impl SshId {
@@ -39,37 +40,41 @@ impl SshId {
         }
     }
 
-    pub(crate) fn write(&self, buffer: &mut CryptoVec) {
+    /// Write the SSH identification string to a buffer.
+    /// Buffer is not sensitive - SSH identification strings are public protocol data.
+    pub(crate) fn write(&self, buffer: &mut Vec<u8>) {
         match self {
-            Self::Standard(s) => buffer.extend(format!("{s}\r\n").as_bytes()),
-            Self::Raw(s) => buffer.extend(s.as_bytes()),
+            Self::Standard(s) => buffer.extend_from_slice(format!("{s}\r\n").as_bytes()),
+            Self::Raw(s) => buffer.extend_from_slice(s.as_bytes()),
         }
     }
 }
 
 #[test]
 fn test_ssh_id() {
-    let mut buffer = CryptoVec::new();
-    SshId::Standard("SSH-2.0-acme".to_string()).write(&mut buffer);
+    let mut buffer = Vec::new();
+    SshId::Standard("SSH-2.0-acme".into()).write(&mut buffer);
     assert_eq!(&buffer[..], b"SSH-2.0-acme\r\n");
 
-    let mut buffer = CryptoVec::new();
-    SshId::Raw("SSH-2.0-raw\n".to_string()).write(&mut buffer);
+    let mut buffer = Vec::new();
+    SshId::Raw("SSH-2.0-raw\n".into()).write(&mut buffer);
     assert_eq!(&buffer[..], b"SSH-2.0-raw\n");
 
     assert_eq!(
-        SshId::Standard("SSH-2.0-acme".to_string()).as_kex_hash_bytes(),
+        SshId::Standard("SSH-2.0-acme".into()).as_kex_hash_bytes(),
         b"SSH-2.0-acme"
     );
     assert_eq!(
-        SshId::Raw("SSH-2.0-raw\n".to_string()).as_kex_hash_bytes(),
+        SshId::Raw("SSH-2.0-raw\n".into()).as_kex_hash_bytes(),
         b"SSH-2.0-raw"
     );
 }
 
+/// SSH packet read/write buffer. Uses Vec<u8> (not CryptoVec/mlocked) because
+/// packet data is not secret material.
 #[derive(Debug, Default)]
 pub struct SSHBuffer {
-    pub buffer: CryptoVec,
+    pub buffer: Vec<u8>,
     pub len: usize,   // next packet length.
     pub bytes: usize, // total bytes written since the last rekey
     // Sequence numbers are on 32 bits and wrap.
@@ -80,7 +85,7 @@ pub struct SSHBuffer {
 impl SSHBuffer {
     pub fn new() -> Self {
         SSHBuffer {
-            buffer: CryptoVec::new(),
+            buffer: Vec::new(),
             len: 0,
             bytes: 0,
             seqn: Wrapping(0),
@@ -92,16 +97,19 @@ impl SSHBuffer {
     }
 }
 
+/// Incoming SSH packet after decryption and optional decompression.
+/// Uses Vec<u8> (not CryptoVec/mlocked) because incoming network data is not secret.
 #[derive(Debug)]
 pub(crate) struct IncomingSshPacket {
-    pub buffer: CryptoVec,
+    pub buffer: Vec<u8>,
     pub seqn: Wrapping<u32>,
 }
 
+/// Packet writer for constructing and encrypting outgoing SSH packets.
 pub(crate) struct PacketWriter {
     cipher: Box<dyn SealingKey + Send>,
     compress: Compress,
-    compress_buffer: CryptoVec,
+    compress_buffer: Vec<u8>,
     write_buffer: SSHBuffer,
 }
 
@@ -120,7 +128,7 @@ impl PacketWriter {
         Self {
             cipher,
             compress,
-            compress_buffer: CryptoVec::new(),
+            compress_buffer: Vec::new(),
             write_buffer: SSHBuffer::new(),
         }
     }
@@ -134,12 +142,13 @@ impl PacketWriter {
         Ok(())
     }
 
-    /// Sends and returns the packet contents
-    pub fn packet<F: FnOnce(&mut CryptoVec) -> Result<(), Error>>(
+    /// Sends and returns the packet contents.
+    /// Packet buffer is not secret — use Vec<u8> for performance.
+    pub fn packet<F: FnOnce(&mut Vec<u8>) -> Result<(), Error>>(
         &mut self,
         f: F,
-    ) -> Result<CryptoVec, Error> {
-        let mut buf = CryptoVec::new();
+    ) -> Result<Vec<u8>, Error> {
+        let mut buf = Vec::new();
         f(&mut buf)?;
         self.packet_raw(&buf)?;
         Ok(buf)

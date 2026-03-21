@@ -8,6 +8,8 @@ pub enum Compression {
     None,
     #[cfg(feature = "flate2")]
     Zlib,
+    #[cfg(feature = "flate2")]
+    ZlibOpenSSH,
 }
 
 #[derive(Debug)]
@@ -67,34 +69,55 @@ pub const ALL_COMPRESSION_ALGORITHMS: &[&Name] = &[
 #[cfg(feature = "flate2")]
 impl Compression {
     pub fn new(name: &Name) -> Self {
-        if name == &ZLIB || name == &ZLIB_LEGACY {
+        if name == &ZLIB {
             Compression::Zlib
+        } else if name == &ZLIB_LEGACY {
+            Compression::ZlibOpenSSH
         } else {
             Compression::None
         }
     }
 
     pub fn init_compress(&self, comp: &mut Compress) {
-        if let Compression::Zlib = *self {
-            if let Compress::Zlib(ref mut c) = *comp {
-                c.reset()
-            } else {
-                *comp = Compress::Zlib(flate2::Compress::new(flate2::Compression::fast(), true))
+        match *self {
+            Compression::Zlib | Compression::ZlibOpenSSH => {
+                if let Compress::Zlib(ref mut c) = *comp {
+                    c.reset()
+                } else {
+                    *comp =
+                        Compress::Zlib(flate2::Compress::new(flate2::Compression::fast(), true))
+                }
             }
-        } else {
-            *comp = Compress::None
+            Compression::None => {
+                *comp = Compress::None;
+            }
         }
     }
 
     pub fn init_decompress(&self, comp: &mut Decompress) {
-        if let Compression::Zlib = *self {
-            if let Decompress::Zlib(ref mut c) = *comp {
-                c.reset(true)
-            } else {
-                *comp = Decompress::Zlib(flate2::Decompress::new(true))
+        match *self {
+            Compression::Zlib | Compression::ZlibOpenSSH => {
+                if let Decompress::Zlib(ref mut c) = *comp {
+                    c.reset(true)
+                } else {
+                    *comp = Decompress::Zlib(flate2::Decompress::new(true))
+                }
             }
-        } else {
-            *comp = Decompress::None
+            Compression::None => {
+                *comp = Decompress::None;
+            }
+        }
+    }
+}
+
+impl Compression {
+    /// Returns true if compression should be deferred until after authentication.
+    /// "zlib@openssh.com" defers; RFC 4253 "zlib" does not.
+    pub fn is_deferred(&self) -> bool {
+        match self {
+            #[cfg(feature = "flate2")]
+            Compression::ZlibOpenSSH => true,
+            _ => false,
         }
     }
 }
@@ -115,7 +138,7 @@ impl Compress {
     pub fn compress<'a>(
         &mut self,
         input: &'a [u8],
-        _: &'a mut russh_cryptovec::CryptoVec,
+        _: &'a mut Vec<u8>,
     ) -> Result<&'a [u8], crate::Error> {
         Ok(input)
     }
@@ -126,7 +149,7 @@ impl Decompress {
     pub fn decompress<'a>(
         &mut self,
         input: &'a [u8],
-        _: &'a mut russh_cryptovec::CryptoVec,
+        _: &'a mut Vec<u8>,
     ) -> Result<&'a [u8], crate::Error> {
         Ok(input)
     }
@@ -137,7 +160,7 @@ impl Compress {
     pub fn compress<'a>(
         &mut self,
         input: &'a [u8],
-        output: &'a mut russh_cryptovec::CryptoVec,
+        output: &'a mut Vec<u8>,
     ) -> Result<&'a [u8], crate::Error> {
         match *self {
             Compress::None => Ok(input),
@@ -145,7 +168,7 @@ impl Compress {
                 output.clear();
                 let n_in = z.total_in() as usize;
                 let n_out = z.total_out() as usize;
-                output.resize(input.len() + 10);
+                output.resize(input.len() + 10, 0);
                 let flush = flate2::FlushCompress::Partial;
                 loop {
                     let n_in_ = z.total_in() as usize - n_in;
@@ -154,7 +177,7 @@ impl Compress {
                     let c = z.compress(&input[n_in_..], &mut output[n_out_..], flush)?;
                     match c {
                         flate2::Status::BufError => {
-                            output.resize(output.len() * 2);
+                            output.resize(output.len() * 2, 0);
                         }
                         _ => break,
                     }
@@ -172,7 +195,7 @@ impl Decompress {
     pub fn decompress<'a>(
         &mut self,
         input: &'a [u8],
-        output: &'a mut russh_cryptovec::CryptoVec,
+        output: &'a mut Vec<u8>,
     ) -> Result<&'a [u8], crate::Error> {
         match *self {
             Decompress::None => Ok(input),
@@ -180,7 +203,7 @@ impl Decompress {
                 output.clear();
                 let n_in = z.total_in() as usize;
                 let n_out = z.total_out() as usize;
-                output.resize(input.len());
+                output.resize(input.len(), 0);
                 let flush = flate2::FlushDecompress::None;
                 loop {
                     let n_in_ = z.total_in() as usize - n_in;
@@ -189,7 +212,7 @@ impl Decompress {
                     let d = z.decompress(&input[n_in_..], &mut output[n_out_..], flush);
                     match d? {
                         flate2::Status::Ok => {
-                            output.resize(output.len() * 2);
+                            output.resize(output.len() * 2, 0);
                         }
                         _ => break,
                     }

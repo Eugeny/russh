@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-use std::cell::RefCell;
 use std::convert::TryInto;
 use std::ops::Deref;
 use std::str::FromStr;
@@ -34,10 +33,6 @@ use crate::{
     auth, map_err, msg, Channel, ChannelId, ChannelMsg, ChannelOpenFailure, ChannelParams, CryptoVec, Error,
     MethodSet, Sig,
 };
-
-thread_local! {
-    static SIGNATURE_BUFFER: RefCell<CryptoVec> = RefCell::new(CryptoVec::new());
-}
 
 impl Session {
     pub(crate) async fn client_read_encrypted<H: Handler>(
@@ -109,7 +104,9 @@ impl Session {
                                 .send(Reply::AuthSuccess)
                                 .map_err(|_| crate::Error::SendError)?;
                             enc.state = EncryptedState::InitCompression;
-                            enc.server_compression.init_decompress(&mut enc.decompress);
+                            if enc.server_compression.is_deferred() {
+                                enc.server_compression.init_decompress(&mut enc.decompress);
+                            }
                             return Ok(());
                         }
                         Some((&msg::USERAUTH_BANNER, mut r)) => {
@@ -229,17 +226,20 @@ impl Session {
                                         &mut self.common.buffer,
                                     )?;
                                     let len = self.common.buffer.len();
-                                    let buf = std::mem::replace(
-                                        &mut self.common.buffer,
-                                        CryptoVec::new(),
-                                    );
+                                    let buf = std::mem::take(&mut self.common.buffer);
+                                    // Convert Vec<u8>→CryptoVec at the Signer
+                                    // trait boundary (public API uses CryptoVec).
+                                    let mut cv = CryptoVec::new();
+                                    cv.extend(&buf);
 
                                     self.sender
-                                        .send(Reply::SignRequest { key, data: buf })
+                                        .send(Reply::SignRequest { key, data: cv })
                                         .map_err(|_| crate::Error::SendError)?;
                                     self.common.buffer = loop {
                                         match self.receiver.recv().await {
-                                            Some(Msg::Signed { data }) => break data,
+                                            Some(Msg::Signed { data }) => {
+                                                break data[..].to_vec()
+                                            }
                                             None => return Err(crate::Error::RecvError.into()),
                                             _ => {}
                                         }
@@ -248,7 +248,7 @@ impl Session {
                                         // The buffer was modified.
                                         push_packet!(enc.write, {
                                             #[allow(clippy::indexing_slicing)] // length checked
-                                            enc.write.extend(&self.common.buffer[i..]);
+                                            enc.write.extend_from_slice(&self.common.buffer[i..]);
                                         })
                                     }
                                 }
@@ -447,7 +447,7 @@ impl Session {
                 if let Some(chan) = self.channels.get(&channel_num) {
                     let _ = chan
                         .send(ChannelMsg::Data {
-                            data: CryptoVec::from_slice(&data),
+                            data: data.clone(),
                         })
                         .await;
                 }
@@ -474,7 +474,7 @@ impl Session {
                     let _ = chan
                         .send(ChannelMsg::ExtendedData {
                             ext: extended_code,
-                            data: CryptoVec::from_slice(&data),
+                            data: data.clone(),
                         })
                         .await;
                 }
@@ -538,10 +538,12 @@ impl Session {
                             if let Some(ref mut enc) = self.common.encrypted {
                                 trace!("Received channel keep alive message: {req:?}",);
                                 self.common.wants_reply = false;
-                                push_packet!(enc.write, {
-                                    map_err!(msg::CHANNEL_SUCCESS.encode(&mut enc.write))?;
-                                    map_err!(channel_num.encode(&mut enc.write))?;
-                                });
+                                if let Some(ch) = enc.channels.get(&channel_num) {
+                                    push_packet!(enc.write, {
+                                        map_err!(msg::CHANNEL_SUCCESS.encode(&mut enc.write))?;
+                                        map_err!(ch.recipient_channel.encode(&mut enc.write))?;
+                                    });
+                                }
                             }
                         } else {
                             warn!("Received keepalive without reply request!");
@@ -553,10 +555,12 @@ impl Session {
                         if wants_reply == 1 {
                             if let Some(ref mut enc) = self.common.encrypted {
                                 self.common.wants_reply = false;
-                                push_packet!(enc.write, {
-                                    map_err!(msg::CHANNEL_FAILURE.encode(&mut enc.write))?;
-                                    map_err!(channel_num.encode(&mut enc.write))?;
-                                })
+                                if let Some(ch) = enc.channels.get(&channel_num) {
+                                    push_packet!(enc.write, {
+                                        map_err!(msg::CHANNEL_FAILURE.encode(&mut enc.write))?;
+                                        map_err!(ch.recipient_channel.encode(&mut enc.write))?;
+                                    })
+                                }
                             }
                         }
                         info!("Unknown channel request {req:?} {wants_reply:?}",);
@@ -583,8 +587,10 @@ impl Session {
                 }
                 if let Some(chan) = self.channels.get(&channel_num) {
                     chan.window_size().update(new_size).await;
-
-                    let _ = chan.send(ChannelMsg::WindowAdjusted { new_size }).await;
+                    // Use try_send to avoid blocking the session loop when channel buffer is full.
+                    // WindowAdjusted is informational - the critical side effect (updating
+                    // WindowSizeRef and notifying ChannelTx) already happens in update().
+                    let _ = chan.try_send(ChannelMsg::WindowAdjusted { new_size });
                 }
                 client.window_adjusted(channel_num, new_size, self).await
             }
@@ -1001,7 +1007,7 @@ impl Encrypted {
         &mut self,
         user: &str,
         key: &PublicKeyOrCertificate,
-        buffer: &mut CryptoVec,
+        buffer: &mut Vec<u8>,
     ) -> Result<usize, crate::Error> {
         buffer.clear();
         self.session_id.as_ref().encode(buffer)?;
@@ -1030,7 +1036,7 @@ impl Encrypted {
         &mut self,
         user: &str,
         method: &auth::Method,
-        buffer: &mut CryptoVec,
+        buffer: &mut Vec<u8>,
     ) -> Result<(), crate::Error> {
         match method {
             auth::Method::PublicKey { key } => {
@@ -1042,7 +1048,7 @@ impl Encrypted {
 
                 push_packet!(self.write, {
                     #[allow(clippy::indexing_slicing)] // length checked
-                    self.write.extend(&buffer[i0..]);
+                    self.write.extend_from_slice(&buffer[i0..]);
                 })
             }
             auth::Method::OpenSshCertificate { key, cert } => {
@@ -1059,7 +1065,7 @@ impl Encrypted {
 
                 push_packet!(self.write, {
                     #[allow(clippy::indexing_slicing)] // length checked
-                    self.write.extend(&buffer[i0..]);
+                    self.write.extend_from_slice(&buffer[i0..]);
                 })
             }
             _ => {}

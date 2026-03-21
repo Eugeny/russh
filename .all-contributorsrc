@@ -661,6 +661,69 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "gui-wf",
+      "name": "Guilherme Fontes",
+      "avatar_url": "https://avatars.githubusercontent.com/u/48162143?v=4",
+      "profile": "https://gui.wf",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "zeroleo12345",
+      "name": "Lyn",
+      "avatar_url": "https://avatars.githubusercontent.com/u/13072815?v=4",
+      "profile": "https://github.com/zeroleo12345",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "Mota-Link",
+      "name": "Mota-Link",
+      "avatar_url": "https://avatars.githubusercontent.com/u/83714159?v=4",
+      "profile": "https://github.com/Mota-Link",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "mjc",
+      "name": "Mika Cohen",
+      "avatar_url": "https://avatars.githubusercontent.com/u/1977?v=4",
+      "profile": "https://github.com/mjc",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "fbernier",
+      "name": "François Bernier",
+      "avatar_url": "https://avatars.githubusercontent.com/u/147585?v=4",
+      "profile": "https://fbernier.me",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "kpcyrd",
+      "name": "kpcyrd",
+      "avatar_url": "https://avatars.githubusercontent.com/u/7763184?v=4",
+      "profile": "https://vulns.xyz",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "coreyleavitt",
+      "name": "Corey Leavitt",
+      "avatar_url": "https://avatars.githubusercontent.com/u/18317330?v=4",
+      "profile": "https://github.com/coreyleavitt",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,

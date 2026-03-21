@@ -230,9 +230,13 @@ pub(crate) trait SealingKey {
 
         assert!(padding_length <= u8::MAX as usize);
         buffer.buffer.push(padding_length as u8);
-        buffer.buffer.extend(payload);
-        self.fill_padding(buffer.buffer.resize_mut(padding_length));
-        buffer.buffer.resize_mut(self.tag_len());
+        buffer.buffer.extend_from_slice(payload);
+        let pad_offset = buffer.buffer.len();
+        buffer.buffer.resize(pad_offset + padding_length, 0);
+        #[allow(clippy::indexing_slicing)] // length checked
+        self.fill_padding(&mut buffer.buffer[pad_offset..]);
+        let tag_offset = buffer.buffer.len();
+        buffer.buffer.resize(tag_offset + self.tag_len(), 0);
 
         #[allow(clippy::indexing_slicing)] // length checked
         let (plaintext, tag) =
@@ -260,7 +264,7 @@ pub(crate) async fn read<R: AsyncRead + Unpin>(
         {
             let seqn = buffer.seqn.0;
             buffer.buffer.clear();
-            buffer.buffer.extend(&len);
+            buffer.buffer.extend_from_slice(&len);
             trace!("reading, seqn = {seqn:?}");
             let len = cipher.decrypt_packet_length(seqn, &len);
             let len = BigEndian::read_u32(&len) as usize;
@@ -274,7 +278,7 @@ pub(crate) async fn read<R: AsyncRead + Unpin>(
         }
     }
 
-    buffer.buffer.resize(buffer.len + 4);
+    buffer.buffer.resize(buffer.len + 4, 0);
     trace!("read_exact {:?}", buffer.len + 4);
 
     let l = cipher.packet_length_to_read_for_block_length();
@@ -299,7 +303,7 @@ pub(crate) async fn read<R: AsyncRead + Unpin>(
     buffer.len = 0;
 
     // Remove the padding
-    buffer.buffer.resize(plaintext_end + 4);
+    buffer.buffer.resize(plaintext_end + 4, 0);
 
     Ok(plaintext_end + 4)
 }
@@ -307,9 +311,17 @@ pub(crate) async fn read<R: AsyncRead + Unpin>(
 pub(crate) const PACKET_LENGTH_LEN: usize = 4;
 
 const MINIMUM_PACKET_LEN: usize = 16;
-const MAXIMUM_PACKET_LEN: usize = 256 * 1024;
-
+// Keep the transport limit aligned with the 256 KiB channel packet baseline.
+const MAXIMUM_PACKET_LEN_BASELINE: usize = 256 * 1024;
+const CHANNEL_DATA_PACKET_OVERHEAD: usize = 1 + 4 + 4;
+const CHANNEL_EXTENDED_DATA_PACKET_OVERHEAD: usize = CHANNEL_DATA_PACKET_OVERHEAD + 4;
 const PADDING_LENGTH_LEN: usize = 1;
+// SSH requires at least four bytes of padding; with 16-byte blocks, that means
+// a full-size channel packet can need up to 19 bytes of transport padding.
+const MAXIMUM_PADDING_LEN: usize = 19;
+const MAXIMUM_PACKET_LEN_HEADROOM: usize =
+    PADDING_LENGTH_LEN + CHANNEL_EXTENDED_DATA_PACKET_OVERHEAD + MAXIMUM_PADDING_LEN;
+const MAXIMUM_PACKET_LEN: usize = MAXIMUM_PACKET_LEN_BASELINE + MAXIMUM_PACKET_LEN_HEADROOM;
 
 #[cfg(feature = "_bench")]
 pub mod benchmark;

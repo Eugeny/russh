@@ -4,6 +4,7 @@
     clippy::indexing_slicing,
     clippy::panic
 )]
+use std::env;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
@@ -26,25 +27,25 @@ mod proxy;
 pub use proxy::*;
 
 #[derive(Clone, Debug, Default)]
-struct HostConfig {
+pub struct HostConfig {
     /// http://man.openbsd.org/OpenBSD-current/man5/ssh_config.5#User
-    user: Option<String>,
+    pub user: Option<String>,
     /// http://man.openbsd.org/OpenBSD-current/man5/ssh_config.5#Hostname
-    hostname: Option<String>,
+    pub hostname: Option<String>,
     /// http://man.openbsd.org/OpenBSD-current/man5/ssh_config.5#Port
-    port: Option<u16>,
+    pub port: Option<u16>,
     /// http://man.openbsd.org/OpenBSD-current/man5/ssh_config.5#IdentityFile
-    identity_file: Option<Vec<PathBuf>>,
+    pub identity_file: Option<Vec<PathBuf>>,
     /// http://man.openbsd.org/OpenBSD-current/man5/ssh_config.5#ProxyCommand
-    proxy_command: Option<String>,
+    pub proxy_command: Option<String>,
     /// http://man.openbsd.org/OpenBSD-current/man5/ssh_config.5#ProxyJump
-    proxy_jump: Option<String>,
+    pub proxy_jump: Option<String>,
     /// http://man.openbsd.org/OpenBSD-current/man5/ssh_config.5#AddKeysToAgent
-    add_keys_to_agent: Option<AddKeysToAgent>,
+    pub add_keys_to_agent: Option<AddKeysToAgent>,
     /// http://man.openbsd.org/OpenBSD-current/man5/ssh_config.5#UserKnownHostsFile
-    user_known_hosts_file: Option<PathBuf>,
+    pub user_known_hosts_file: Option<PathBuf>,
     /// http://man.openbsd.org/OpenBSD-current/man5/ssh_config.5#StrictHostKeyChecking
-    strict_host_key_checking: Option<bool>,
+    pub strict_host_key_checking: Option<bool>,
 }
 
 impl HostConfig {
@@ -132,10 +133,10 @@ impl SshConfig {
 
 #[derive(Clone, Debug)]
 pub struct Config {
-    host_name: String,
-    user: Option<String>,
-    port: Option<u16>,
-    host_config: HostConfig,
+    pub host_name: String,
+    pub user: Option<String>,
+    pub port: Option<u16>,
+    pub host_config: HostConfig,
 }
 
 impl Config {
@@ -320,7 +321,7 @@ pub fn parse(file: &str, host: &str) -> Result<Config, Error> {
 }
 
 pub fn parse_home(host: &str) -> Result<Config, Error> {
-    let mut home = if let Some(home) = home::home_dir() {
+    let mut home = if let Some(home) = env::home_dir() {
         home
     } else {
         return Err(Error::NoHome);
@@ -373,7 +374,7 @@ impl SshConfigStrExt for &str {
 
     fn expand_home(&self) -> Result<PathBuf, Error> {
         if self.starts_with("~/") {
-            if let Some(mut home) = home::home_dir() {
+            if let Some(mut home) = env::home_dir() {
                 home.push(self.split_at(2).1);
                 Ok(home)
             } else {
@@ -388,6 +389,7 @@ impl SshConfigStrExt for &str {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used)]
+    use std::env;
     use std::path::{Path, PathBuf};
 
     use crate::{AddKeysToAgent, Config, Error, SshConfigStrExt, parse};
@@ -420,7 +422,7 @@ mod tests {
         assert_eq!(
             format!(
                 "{}{}",
-                home::home_dir().expect("homedir").to_str().expect("to_str"),
+                env::home_dir().expect("homedir").to_str().expect("to_str"),
                 "/some/folder"
             ),
             value.to_str().unwrap()
@@ -455,7 +457,7 @@ Host test_host
 #";
         let identity_file = PathBuf::from(format!(
             "{}{}",
-            home::home_dir().expect("homedir").to_str().expect("to_str"),
+            env::home_dir().expect("homedir").to_str().expect("to_str"),
             "/.ssh/id_ed25519"
         ));
         let config = parse(value, "test_host").expect("parse");

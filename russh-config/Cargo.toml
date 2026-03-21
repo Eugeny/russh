@@ -7,11 +7,10 @@ include = ["Cargo.toml", "src/lib.rs", "src/proxy.rs"]
 license = "Apache-2.0"
 name = "russh-config"
 repository = "https://github.com/warp-tech/russh"
-version = "0.57.0"
+version = "0.58.0"
 rust-version = "1.85"
 
 [dependencies]
-home.workspace = true
 futures.workspace = true
 globset = "0.4"
 log.workspace = true

@@ -20,7 +20,7 @@ impl<S: AsyncRead + AsyncWrite> AgentStream for S {}
 /// SSH agent client.
 pub struct AgentClient<S: AgentStream> {
     stream: S,
-    buf: CryptoVec,
+    buf: Vec<u8>,
 }
 
 impl<S: AgentStream + Send + Unpin + 'static> AgentClient<S> {
@@ -45,7 +45,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
     pub fn connect(stream: S) -> Self {
         AgentClient {
             stream,
-            buf: CryptoVec::new(),
+            buf: Vec::new(),
         }
     }
 }
@@ -58,7 +58,7 @@ impl AgentClient<tokio::net::UnixStream> {
         let stream = tokio::net::UnixStream::connect(path).await?;
         Ok(AgentClient {
             stream,
-            buf: CryptoVec::new(),
+            buf: Vec::new(),
         })
     }
 
@@ -106,7 +106,7 @@ impl AgentClient<tokio::net::windows::named_pipe::NamedPipeClient> {
 
         Ok(AgentClient {
             stream,
-            buf: CryptoVec::new(),
+            buf: Vec::new(),
         })
     }
 }
@@ -119,13 +119,13 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
 
         // Reading the length
         self.buf.clear();
-        self.buf.resize(4);
+        self.buf.resize(4, 0);
         self.stream.read_exact(&mut self.buf).await?;
 
         // Reading the rest of the buffer
         let len = BigEndian::read_u32(&self.buf) as usize;
         self.buf.clear();
-        self.buf.resize(len);
+        self.buf.resize(len, 0);
         self.stream.read_exact(&mut self.buf).await?;
 
         Ok(())
@@ -150,7 +150,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
         // See IETF draft-miller-ssh-agent-13, section 3.2 for format.
         // https://datatracker.ietf.org/doc/html/draft-miller-ssh-agent
         self.buf.clear();
-        self.buf.resize(4);
+        self.buf.resize(4, 0);
         if constraints.is_empty() {
             self.buf.push(msg::ADD_IDENTITY)
         } else {
@@ -195,7 +195,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
         constraints: &[Constraint],
     ) -> Result<(), Error> {
         self.buf.clear();
-        self.buf.resize(4);
+        self.buf.resize(4, 0);
         if constraints.is_empty() {
             self.buf.push(msg::ADD_SMARTCARD_KEY)
         } else {
@@ -232,7 +232,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
     /// Lock the agent, making it refuse to sign until unlocked.
     pub async fn lock(&mut self, passphrase: &[u8]) -> Result<(), Error> {
         self.buf.clear();
-        self.buf.resize(4);
+        self.buf.resize(4, 0);
         self.buf.push(msg::LOCK);
         passphrase.encode(&mut self.buf)?;
         let len = self.buf.len() - 4;
@@ -244,7 +244,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
     /// Unlock the agent, allowing it to sign again.
     pub async fn unlock(&mut self, passphrase: &[u8]) -> Result<(), Error> {
         self.buf.clear();
-        self.buf.resize(4);
+        self.buf.resize(4, 0);
         msg::UNLOCK.encode(&mut self.buf)?;
         passphrase.encode(&mut self.buf)?;
         let len = self.buf.len() - 4;
@@ -257,7 +257,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
     /// Ask the agent for a list of identities, including certificates.
     pub async fn request_identities(&mut self) -> Result<Vec<AgentIdentity>, Error> {
         self.buf.clear();
-        self.buf.resize(4);
+        self.buf.resize(4, 0);
         msg::REQUEST_IDENTITIES.encode(&mut self.buf)?;
         let len = self.buf.len() - 4;
         BigEndian::write_u32(&mut self.buf[..], len as u32);
@@ -411,7 +411,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
         data: &[u8],
     ) -> Result<u32, Error> {
         self.buf.clear();
-        self.buf.resize(4);
+        self.buf.resize(4, 0);
         msg::SIGN_REQUEST.encode(&mut self.buf)?;
         public.key_data().encoded()?.encode(&mut self.buf)?;
         data.encode(&mut self.buf)?;
@@ -506,7 +506,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
     /// Ask the agent to remove a key from its memory.
     pub async fn remove_identity(&mut self, public: &ssh_key::PublicKey) -> Result<(), Error> {
         self.buf.clear();
-        self.buf.resize(4);
+        self.buf.resize(4, 0);
         self.buf.push(msg::REMOVE_IDENTITY);
         public.key_data().encoded()?.encode(&mut self.buf)?;
         let len = self.buf.len() - 4;
@@ -518,7 +518,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
     /// Ask the agent to remove a smartcard from its memory.
     pub async fn remove_smartcard_key(&mut self, id: &str, pin: &[u8]) -> Result<(), Error> {
         self.buf.clear();
-        self.buf.resize(4);
+        self.buf.resize(4, 0);
         msg::REMOVE_SMARTCARD_KEY.encode(&mut self.buf)?;
         id.encode(&mut self.buf)?;
         pin.encode(&mut self.buf)?;
@@ -531,7 +531,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
     /// Ask the agent to forget all known keys.
     pub async fn remove_all_identities(&mut self) -> Result<(), Error> {
         self.buf.clear();
-        self.buf.resize(4);
+        self.buf.resize(4, 0);
         msg::REMOVE_ALL_IDENTITIES.encode(&mut self.buf)?;
         1u32.encode(&mut self.buf)?;
         self.read_success().await?;
@@ -541,7 +541,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
     /// Send a custom message to the agent.
     pub async fn extension(&mut self, typ: &[u8], ext: &[u8]) -> Result<(), Error> {
         self.buf.clear();
-        self.buf.resize(4);
+        self.buf.resize(4, 0);
         msg::EXTENSION.encode(&mut self.buf)?;
         typ.encode(&mut self.buf)?;
         ext.encode(&mut self.buf)?;
@@ -554,7 +554,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
     /// Ask the agent what extensions about supported extensions.
     pub async fn query_extension(&mut self, typ: &[u8], mut ext: CryptoVec) -> Result<bool, Error> {
         self.buf.clear();
-        self.buf.resize(4);
+        self.buf.resize(4, 0);
         msg::EXTENSION.encode(&mut self.buf)?;
         typ.encode(&mut self.buf)?;
         let len = self.buf.len() - 4;
