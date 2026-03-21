@@ -69,8 +69,8 @@ use crate::session::{CommonSession, EncryptedState, GlobalRequestResponse, NewKe
 use crate::ssh_read::SshRead;
 use crate::sshbuffer::{IncomingSshPacket, PacketWriter, SSHBuffer, SshId};
 use crate::{
-    ChannelId, ChannelOpenFailure, CryptoVec, Disconnect, Error, Limits, MethodSet, Sig, auth,
-    map_err, msg, negotiation,
+    ChannelId, ChannelOpenFailure, Disconnect, Error, Limits, MethodSet, Sig, auth, map_err, msg,
+    negotiation,
 };
 
 mod encrypted;
@@ -118,12 +118,12 @@ enum Reply {
     ChannelOpenFailure,
     SignRequest {
         key: ssh_key::PublicKey,
-        data: CryptoVec,
+        data: Vec<u8>,
     },
     SignRequestCert {
         cert: Certificate,
         hash_alg: Option<HashAlg>,
-        data: CryptoVec,
+        data: Vec<u8>,
     },
     AuthInfoRequest {
         name: String,
@@ -143,7 +143,7 @@ pub enum Msg {
         responses: Vec<String>,
     },
     Signed {
-        data: CryptoVec,
+        data: Vec<u8>,
     },
     ChannelOpenSession {
         channel_ref: ChannelRef,
@@ -883,12 +883,14 @@ impl<H: Handler> Handle<H> {
     ///
     /// This is useful for server-initiated channels; for channels created by
     /// the client, prefer to use the Channel returned from the `open_*` methods.
-    pub async fn data(&self, id: ChannelId, data: impl Into<bytes::Bytes>) -> Result<(), bytes::Bytes> {
+    pub async fn data(
+        &self,
+        id: ChannelId,
+        data: impl Into<bytes::Bytes>,
+    ) -> Result<(), bytes::Bytes> {
         let data = data.into();
         self.sender
-            .send(Msg::Channel(id, ChannelMsg::Data {
-                data: data.clone(),
-            }))
+            .send(Msg::Channel(id, ChannelMsg::Data { data: data.clone() }))
             .await
             .map_err(|e| match e.0 {
                 Msg::Channel(_, ChannelMsg::Data { data, .. }) => data,

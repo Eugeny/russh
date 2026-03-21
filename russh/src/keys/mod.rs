@@ -44,8 +44,8 @@
 //!        let mut client = agent::client::AgentClient::connect(stream);
 //!        client.add_identity(&key, &[agent::Constraint::KeyLifetime { seconds: 60 }]).await?;
 //!        client.request_identities().await?;
-//!        let buf = b"signed message";
-//!        let sig = client.sign_request(&public.into(), None, russh_cryptovec::CryptoVec::from_slice(&buf[..])).await.unwrap();
+//!        let buf = b"signed message".to_vec();
+//!        let sig = client.sign_request(&public.into(), None, buf).await.unwrap();
 //!        // Here, `sig` is encoded in a format usable internally by the SSH protocol.
 //!        Ok::<(), Error>(())
 //!    }).unwrap()
@@ -863,7 +863,7 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
         let mut client = agent::client::AgentClient::connect(stream);
         client.add_identity(&key, &[]).await?;
         client.request_identities().await?;
-        let buf = russh_cryptovec::CryptoVec::from_slice(b"blabla");
+        let buf = b"blabla".to_vec();
         let len = buf.len();
         let buf = client
             .sign_request(
@@ -960,7 +960,7 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
                 .await
                 .unwrap();
             client.request_identities().await.unwrap();
-            let buf = russh_cryptovec::CryptoVec::from_slice(b"blabla");
+            let buf = b"blabla".to_vec();
             let len = buf.len();
             let buf = client
                 .sign_request(&AgentIdentity::from(public.clone()), None, buf)
@@ -1232,7 +1232,7 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
 
         // Create data to sign
         let data_to_sign = b"test data to sign";
-        let buf = russh_cryptovec::CryptoVec::from_slice(data_to_sign);
+        let buf = data_to_sign.to_vec();
         let len = buf.len();
 
         // Sign using the certificate (None for hash_alg since Ed25519 doesn't need it)
@@ -1280,7 +1280,7 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
 
         // Create data to sign
         let data_to_sign = b"test data to sign";
-        let buf = russh_cryptovec::CryptoVec::from_slice(data_to_sign);
+        let buf = data_to_sign.to_vec();
 
         // Try to sign using the certificate - should fail because the key isn't in the agent
         let result = client.sign_request(&cert.into(), None, buf).await;
@@ -1329,7 +1329,7 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
 
         // Create data to sign
         let data_to_sign = b"test data to sign";
-        let buf = russh_cryptovec::CryptoVec::from_slice(data_to_sign);
+        let buf = data_to_sign.to_vec();
 
         // Try to sign using the public key - should fail because the key isn't in the agent
         let result = client
@@ -1455,7 +1455,7 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
 
         // Create data to sign
         let data_to_sign = b"test data to sign with RSA cert";
-        let buf = russh_cryptovec::CryptoVec::from_slice(data_to_sign);
+        let buf = data_to_sign.to_vec();
         let len = buf.len();
 
         // Sign using the certificate with SHA-256 hash algorithm
@@ -1550,7 +1550,7 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
 
         // Create data to sign
         let data_to_sign = b"test data to sign with RSA cert SHA-512";
-        let buf = russh_cryptovec::CryptoVec::from_slice(data_to_sign);
+        let buf = data_to_sign.to_vec();
         let len = buf.len();
 
         // Sign using the certificate with SHA-512 hash algorithm

@@ -25,13 +25,13 @@ use super::IncomingSshPacket;
 use crate::auth::AuthRequest;
 use crate::cert::PublicKeyOrCertificate;
 use crate::client::{Handler, Msg, Prompt, Reply, Session};
-use crate::helpers::{sign_with_hash_alg, AlgorithmExt, EncodedExt, NameList};
+use crate::helpers::{AlgorithmExt, EncodedExt, NameList, sign_with_hash_alg};
 use crate::keys::key::parse_public_key;
 use crate::parsing::{ChannelOpenConfirmation, ChannelType, OpenChannelMessage};
 use crate::session::{Encrypted, EncryptedState, GlobalRequestResponse};
 use crate::{
-    auth, map_err, msg, Channel, ChannelId, ChannelMsg, ChannelOpenFailure, ChannelParams, CryptoVec, Error,
-    MethodSet, Sig,
+    Channel, ChannelId, ChannelMsg, ChannelOpenFailure, ChannelParams, Error, MethodSet, Sig, auth,
+    map_err, msg,
 };
 
 impl Session {
@@ -120,7 +120,9 @@ impl Session {
                             let remaining_methods: MethodSet =
                                 (&map_err!(NameList::decode(&mut r))?).into();
                             let partial_success = map_err!(u8::decode(&mut r))? != 0;
-                            debug!("remaining methods {remaining_methods:?}, partial success {partial_success:?}");
+                            debug!(
+                                "remaining methods {remaining_methods:?}, partial success {partial_success:?}"
+                            );
                             auth_request.methods = remaining_methods.clone();
 
                             let no_more_methods = auth_request.methods.is_empty();
@@ -185,7 +187,7 @@ impl Session {
                                 let responses = loop {
                                     match self.receiver.recv().await {
                                         Some(Msg::AuthInfoResponse { responses }) => {
-                                            break responses
+                                            break responses;
                                         }
                                         None => return Err(crate::Error::RecvError.into()),
                                         _ => {}
@@ -227,19 +229,13 @@ impl Session {
                                     )?;
                                     let len = self.common.buffer.len();
                                     let buf = std::mem::take(&mut self.common.buffer);
-                                    // Convert Vec<u8>→CryptoVec at the Signer
-                                    // trait boundary (public API uses CryptoVec).
-                                    let mut cv = CryptoVec::new();
-                                    cv.extend(&buf);
 
                                     self.sender
-                                        .send(Reply::SignRequest { key, data: cv })
+                                        .send(Reply::SignRequest { key, data: buf })
                                         .map_err(|_| crate::Error::SendError)?;
                                     self.common.buffer = loop {
                                         match self.receiver.recv().await {
-                                            Some(Msg::Signed { data }) => {
-                                                break data[..].to_vec()
-                                            }
+                                            Some(Msg::Signed { data }) => break data[..].to_vec(),
                                             None => return Err(crate::Error::RecvError.into()),
                                             _ => {}
                                         }
@@ -261,13 +257,14 @@ impl Session {
                                         &mut self.common.buffer,
                                     )?;
                                     let len = self.common.buffer.len();
-                                    let buf = std::mem::replace(
-                                        &mut self.common.buffer,
-                                        CryptoVec::new(),
-                                    );
+                                    let buf = std::mem::take(&mut self.common.buffer);
 
                                     self.sender
-                                        .send(Reply::SignRequestCert { cert, hash_alg, data: buf })
+                                        .send(Reply::SignRequestCert {
+                                            cert,
+                                            hash_alg,
+                                            data: buf,
+                                        })
                                         .map_err(|_| crate::Error::SendError)?;
                                     self.common.buffer = loop {
                                         match self.receiver.recv().await {
@@ -445,11 +442,7 @@ impl Session {
                 }
 
                 if let Some(chan) = self.channels.get(&channel_num) {
-                    let _ = chan
-                        .send(ChannelMsg::Data {
-                            data: data.clone(),
-                        })
-                        .await;
+                    let _ = chan.send(ChannelMsg::Data { data: data.clone() }).await;
                 }
 
                 client.data(channel_num, &data, self).await
@@ -899,9 +892,7 @@ impl Session {
                 }
                 EncryptedState::InitCompression | EncryptedState::Authenticated => false,
             };
-            debug!(
-                "write_auth_request_if_needed: is_waiting = {is_waiting:?}"
-            );
+            debug!("write_auth_request_if_needed: is_waiting = {is_waiting:?}");
             if is_waiting {
                 enc.write_auth_request(user, &meth)?;
                 let auth_request = AuthRequest::new(&meth);

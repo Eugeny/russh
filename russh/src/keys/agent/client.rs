@@ -320,8 +320,8 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
         &mut self,
         identity: &AgentIdentity,
         hash_alg: Option<HashAlg>,
-        data: CryptoVec,
-    ) -> Result<CryptoVec, Error> {
+        data: Vec<u8>,
+    ) -> Result<Vec<u8>, Error> {
         match identity {
             AgentIdentity::PublicKey { key, .. } => self.sign_request_pk(key, hash_alg, data).await,
             AgentIdentity::Certificate { certificate, .. } => {
@@ -334,8 +334,8 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
         &mut self,
         public: &PublicKey,
         hash_alg: Option<HashAlg>,
-        mut data: CryptoVec,
-    ) -> Result<CryptoVec, Error> {
+        mut data: Vec<u8>,
+    ) -> Result<Vec<u8>, Error> {
         debug!("sign_request: {data:?}");
         let hash = self.prepare_sign_request(public, hash_alg, &data)?;
 
@@ -364,15 +364,15 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
         &mut self,
         cert: &Certificate,
         hash_alg: Option<HashAlg>,
-        mut data: CryptoVec,
-    ) -> Result<CryptoVec, Error> {
+        mut data: Vec<u8>,
+    ) -> Result<Vec<u8>, Error> {
         debug!("sign_request_cert: {data:?}");
 
         self.buf.clear();
-        self.buf.resize(4);
+        self.buf.resize(4, 0);
         msg::SIGN_REQUEST.encode(&mut self.buf)?;
         cert.to_bytes()?.encode(&mut self.buf)?;
-        data.as_ref().encode(&mut self.buf)?;
+        data.encode(&mut self.buf)?;
 
         // Calculate hash flag for RSA certificates (same logic as prepare_sign_request)
         let hash = match cert.algorithm() {
@@ -436,7 +436,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
         &self,
         r: &mut R,
         hash: u32,
-        data: &mut CryptoVec,
+        data: &mut Vec<u8>,
     ) -> Result<(), Error> {
         let mut resp = &Bytes::decode(r)?[..];
         let t = String::decode(&mut resp)?;

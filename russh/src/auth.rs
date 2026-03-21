@@ -22,7 +22,6 @@ use ssh_key::{Certificate, HashAlg, PrivateKey};
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite};
 
-use crate::CryptoVec;
 use crate::helpers::NameList;
 use crate::keys::PrivateKeyWithHashAlg;
 use crate::keys::agent::AgentIdentity;
@@ -162,8 +161,8 @@ pub trait Signer: Sized {
         &mut self,
         key: &AgentIdentity,
         hash_alg: Option<HashAlg>,
-        to_sign: CryptoVec,
-    ) -> impl Future<Output = Result<CryptoVec, Self::Error>> + Send;
+        to_sign: Vec<u8>,
+    ) -> impl Future<Output = Result<Vec<u8>, Self::Error>> + Send;
 }
 
 #[derive(Debug, Error)]
@@ -185,8 +184,8 @@ impl<R: AsyncRead + AsyncWrite + Unpin + Send + 'static> Signer
         &mut self,
         key: &AgentIdentity,
         hash_alg: Option<HashAlg>,
-        to_sign: CryptoVec,
-    ) -> impl Future<Output = Result<CryptoVec, Self::Error>> {
+        to_sign: Vec<u8>,
+    ) -> impl Future<Output = Result<Vec<u8>, Self::Error>> {
         async move {
             self.sign_request(key, hash_alg, to_sign)
                 .await
