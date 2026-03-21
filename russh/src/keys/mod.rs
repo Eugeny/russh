@@ -45,7 +45,7 @@
 //!        client.add_identity(&key, &[agent::Constraint::KeyLifetime { seconds: 60 }]).await?;
 //!        client.request_identities().await?;
 //!        let buf = b"signed message";
-//!        let sig = client.sign_request(&public, None, russh_cryptovec::CryptoVec::from_slice(&buf[..])).await.unwrap();
+//!        let sig = client.sign_request(&public.into(), None, russh_cryptovec::CryptoVec::from_slice(&buf[..])).await.unwrap();
 //!        // Here, `sig` is encoded in a format usable internally by the SSH protocol.
 //!        Ok::<(), Error>(())
 //!    }).unwrap()
@@ -285,6 +285,8 @@ mod test {
     use futures::Future;
 
     use super::*;
+    #[cfg(unix)]
+    use crate::keys::agent::AgentIdentity;
     use crate::keys::key::PublicKeyExt;
 
     const ED25519_KEY: &str = "-----BEGIN OPENSSH PRIVATE KEY-----
@@ -864,7 +866,11 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
         let buf = russh_cryptovec::CryptoVec::from_slice(b"blabla");
         let len = buf.len();
         let buf = client
-            .sign_request(public, Some(HashAlg::Sha256), buf)
+            .sign_request(
+                &AgentIdentity::from(public.clone()),
+                Some(HashAlg::Sha256),
+                buf,
+            )
             .await
             .unwrap();
         let (a, b) = buf.split_at(len);
@@ -956,7 +962,10 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
             client.request_identities().await.unwrap();
             let buf = russh_cryptovec::CryptoVec::from_slice(b"blabla");
             let len = buf.len();
-            let buf = client.sign_request(public, None, buf).await.unwrap();
+            let buf = client
+                .sign_request(&AgentIdentity::from(public.clone()), None, buf)
+                .await
+                .unwrap();
             let (a, b) = buf.split_at(len);
             if let ssh_key::public::KeyData::Ed25519 { .. } = public.key_data() {
                 let sig = &b[b.len() - 64..];
@@ -1012,10 +1021,7 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
 
     /// Helper to create a test certificate
     #[cfg(unix)]
-    fn create_test_cert(
-        ca_key: &PrivateKey,
-        user_key: &PrivateKey,
-    ) -> ssh_key::Certificate {
+    fn create_test_cert(ca_key: &PrivateKey, user_key: &PrivateKey) -> ssh_key::Certificate {
         use ssh_key::certificate;
         use ssh_key::rand_core::OsRng;
         use std::time::{SystemTime, UNIX_EPOCH};
@@ -1045,7 +1051,7 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
     #[tokio::test]
     #[cfg(unix)]
     async fn test_request_identities_full_with_keys_and_certs() {
-        use crate::keys::agent::{client::AgentClient, AgentIdentity};
+        use crate::keys::agent::{AgentIdentity, client::AgentClient};
         use ssh_key::rand_core::OsRng;
         use std::io::Write;
         use std::process::Stdio;
@@ -1069,9 +1075,18 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
 
         // Write user key (the one to be certified)
         let mut f = std::fs::File::create(&user_key_path).unwrap();
-        f.write_all(user_key.to_openssh(ssh_key::LineEnding::LF).unwrap().as_bytes())
-            .unwrap();
-        std::fs::set_permissions(&user_key_path, std::os::unix::fs::PermissionsExt::from_mode(0o600)).unwrap();
+        f.write_all(
+            user_key
+                .to_openssh(ssh_key::LineEnding::LF)
+                .unwrap()
+                .as_bytes(),
+        )
+        .unwrap();
+        std::fs::set_permissions(
+            &user_key_path,
+            std::os::unix::fs::PermissionsExt::from_mode(0o600),
+        )
+        .unwrap();
 
         // Write certificate
         let mut f = std::fs::File::create(&cert_path).unwrap();
@@ -1079,9 +1094,18 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
 
         // Write plain key
         let mut f = std::fs::File::create(&plain_key_path).unwrap();
-        f.write_all(plain_key.to_openssh(ssh_key::LineEnding::LF).unwrap().as_bytes())
-            .unwrap();
-        std::fs::set_permissions(&plain_key_path, std::os::unix::fs::PermissionsExt::from_mode(0o600)).unwrap();
+        f.write_all(
+            plain_key
+                .to_openssh(ssh_key::LineEnding::LF)
+                .unwrap()
+                .as_bytes(),
+        )
+        .unwrap();
+        std::fs::set_permissions(
+            &plain_key_path,
+            std::os::unix::fs::PermissionsExt::from_mode(0o600),
+        )
+        .unwrap();
 
         // Use ssh-add to add the certificate (it will pick up user_key-cert.pub automatically)
         let status = tokio::process::Command::new("ssh-add")
@@ -1109,7 +1133,7 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
         let stream = tokio::net::UnixStream::connect(&agent_path).await.unwrap();
         let mut client = AgentClient::connect(stream);
 
-        let identities = client.request_identities_full().await.unwrap();
+        let identities = client.request_identities().await.unwrap();
 
         // ssh-add with a certificate adds the cert identity, and the plain key adds another
         // The exact count depends on ssh-agent behavior - just verify we have both types
@@ -1122,7 +1146,7 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
         for identity in &identities {
             match identity {
                 AgentIdentity::PublicKey { .. } => key_count += 1,
-                AgentIdentity::Certificate { cert: c, .. } => {
+                AgentIdentity::Certificate { certificate: c, .. } => {
                     cert_count += 1;
                     // Verify the certificate matches what we created
                     assert_eq!(c.key_id(), "test-cert");
@@ -1136,8 +1160,16 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
         }
 
         // We should have at least one of each (ssh-add may add both key and cert for the same identity)
-        assert!(key_count >= 1, "Expected at least 1 public key, got {}", key_count);
-        assert!(cert_count >= 1, "Expected at least 1 certificate, got {}", cert_count);
+        assert!(
+            key_count >= 1,
+            "Expected at least 1 public key, got {}",
+            key_count
+        );
+        assert!(
+            cert_count >= 1,
+            "Expected at least 1 certificate, got {}",
+            cert_count
+        );
 
         agent.kill().await.unwrap();
         agent.wait().await.unwrap();
@@ -1167,9 +1199,18 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
         let cert_path = dir.path().join("user_key-cert.pub");
 
         let mut f = std::fs::File::create(&user_key_path).unwrap();
-        f.write_all(user_key.to_openssh(ssh_key::LineEnding::LF).unwrap().as_bytes())
-            .unwrap();
-        std::fs::set_permissions(&user_key_path, std::os::unix::fs::PermissionsExt::from_mode(0o600)).unwrap();
+        f.write_all(
+            user_key
+                .to_openssh(ssh_key::LineEnding::LF)
+                .unwrap()
+                .as_bytes(),
+        )
+        .unwrap();
+        std::fs::set_permissions(
+            &user_key_path,
+            std::os::unix::fs::PermissionsExt::from_mode(0o600),
+        )
+        .unwrap();
 
         let mut f = std::fs::File::create(&cert_path).unwrap();
         f.write_all(cert.to_openssh().unwrap().as_bytes()).unwrap();
@@ -1195,7 +1236,7 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
         let len = buf.len();
 
         // Sign using the certificate (None for hash_alg since Ed25519 doesn't need it)
-        let signed_buf = client.sign_request_cert(&cert, None, buf).await.unwrap();
+        let signed_buf = client.sign_request(&cert.into(), None, buf).await.unwrap();
 
         // Verify the signature is appended to the original data
         assert!(signed_buf.len() > len, "Signed buffer should be larger");
@@ -1242,10 +1283,13 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
         let buf = russh_cryptovec::CryptoVec::from_slice(data_to_sign);
 
         // Try to sign using the certificate - should fail because the key isn't in the agent
-        let result = client.sign_request_cert(&cert, None, buf).await;
+        let result = client.sign_request(&cert.into(), None, buf).await;
 
         // Verify we get an AgentFailure error
-        assert!(result.is_err(), "Signing should fail when key is not in agent");
+        assert!(
+            result.is_err(),
+            "Signing should fail when key is not in agent"
+        );
         match result {
             Err(Error::AgentFailure) => {
                 // This is the expected error
@@ -1288,10 +1332,15 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
         let buf = russh_cryptovec::CryptoVec::from_slice(data_to_sign);
 
         // Try to sign using the public key - should fail because the key isn't in the agent
-        let result = client.sign_request(key.public_key(), None, buf).await;
+        let result = client
+            .sign_request(&key.public_key().clone().into(), None, buf)
+            .await;
 
         // Verify we get an AgentFailure error
-        assert!(result.is_err(), "Signing should fail when key is not in agent");
+        assert!(
+            result.is_err(),
+            "Signing should fail when key is not in agent"
+        );
         match result {
             Err(Error::AgentFailure) => {
                 // This is the expected error
@@ -1310,10 +1359,7 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
 
     /// Helper to create a test RSA certificate
     #[cfg(all(unix, feature = "rsa"))]
-    fn create_test_rsa_cert(
-        ca_key: &PrivateKey,
-        user_key: &PrivateKey,
-    ) -> ssh_key::Certificate {
+    fn create_test_rsa_cert(ca_key: &PrivateKey, user_key: &PrivateKey) -> ssh_key::Certificate {
         use ssh_key::certificate;
         use ssh_key::rand_core::OsRng;
         use std::time::{SystemTime, UNIX_EPOCH};
@@ -1353,8 +1399,20 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
         let (mut agent, agent_path, dir) = spawn_agent().await.unwrap();
 
         // Create RSA CA key and user key
-        let ca_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Rsa { hash: Some(HashAlg::Sha256) }).unwrap();
-        let user_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Rsa { hash: Some(HashAlg::Sha256) }).unwrap();
+        let ca_key = PrivateKey::random(
+            &mut OsRng,
+            ssh_key::Algorithm::Rsa {
+                hash: Some(HashAlg::Sha256),
+            },
+        )
+        .unwrap();
+        let user_key = PrivateKey::random(
+            &mut OsRng,
+            ssh_key::Algorithm::Rsa {
+                hash: Some(HashAlg::Sha256),
+            },
+        )
+        .unwrap();
 
         // Create a certificate
         let cert = create_test_rsa_cert(&ca_key, &user_key);
@@ -1364,9 +1422,18 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
         let cert_path = dir.path().join("user_rsa_key-cert.pub");
 
         let mut f = std::fs::File::create(&user_key_path).unwrap();
-        f.write_all(user_key.to_openssh(ssh_key::LineEnding::LF).unwrap().as_bytes())
-            .unwrap();
-        std::fs::set_permissions(&user_key_path, std::os::unix::fs::PermissionsExt::from_mode(0o600)).unwrap();
+        f.write_all(
+            user_key
+                .to_openssh(ssh_key::LineEnding::LF)
+                .unwrap()
+                .as_bytes(),
+        )
+        .unwrap();
+        std::fs::set_permissions(
+            &user_key_path,
+            std::os::unix::fs::PermissionsExt::from_mode(0o600),
+        )
+        .unwrap();
 
         let mut f = std::fs::File::create(&cert_path).unwrap();
         f.write_all(cert.to_openssh().unwrap().as_bytes()).unwrap();
@@ -1392,7 +1459,10 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
         let len = buf.len();
 
         // Sign using the certificate with SHA-256 hash algorithm
-        let signed_buf = client.sign_request_cert(&cert, Some(HashAlg::Sha256), buf).await.unwrap();
+        let signed_buf = client
+            .sign_request(&cert.into(), Some(HashAlg::Sha256), buf)
+            .await
+            .unwrap();
 
         // Verify the signature is appended to the original data
         assert!(signed_buf.len() > len, "Signed buffer should be larger");
@@ -1402,7 +1472,10 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
         assert_eq!(original, data_to_sign);
 
         // The RSA signature should be substantial
-        assert!(sig_data.len() > 100, "RSA signature data should be substantial");
+        assert!(
+            sig_data.len() > 100,
+            "RSA signature data should be substantial"
+        );
 
         agent.kill().await.unwrap();
         agent.wait().await.unwrap();
@@ -1421,8 +1494,20 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
         let (mut agent, agent_path, dir) = spawn_agent().await.unwrap();
 
         // Create RSA CA key and user key
-        let ca_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Rsa { hash: Some(HashAlg::Sha512) }).unwrap();
-        let user_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Rsa { hash: Some(HashAlg::Sha512) }).unwrap();
+        let ca_key = PrivateKey::random(
+            &mut OsRng,
+            ssh_key::Algorithm::Rsa {
+                hash: Some(HashAlg::Sha512),
+            },
+        )
+        .unwrap();
+        let user_key = PrivateKey::random(
+            &mut OsRng,
+            ssh_key::Algorithm::Rsa {
+                hash: Some(HashAlg::Sha512),
+            },
+        )
+        .unwrap();
 
         // Create a certificate
         let cert = create_test_rsa_cert(&ca_key, &user_key);
@@ -1432,9 +1517,18 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
         let cert_path = dir.path().join("user_rsa_key-cert.pub");
 
         let mut f = std::fs::File::create(&user_key_path).unwrap();
-        f.write_all(user_key.to_openssh(ssh_key::LineEnding::LF).unwrap().as_bytes())
-            .unwrap();
-        std::fs::set_permissions(&user_key_path, std::os::unix::fs::PermissionsExt::from_mode(0o600)).unwrap();
+        f.write_all(
+            user_key
+                .to_openssh(ssh_key::LineEnding::LF)
+                .unwrap()
+                .as_bytes(),
+        )
+        .unwrap();
+        std::fs::set_permissions(
+            &user_key_path,
+            std::os::unix::fs::PermissionsExt::from_mode(0o600),
+        )
+        .unwrap();
 
         let mut f = std::fs::File::create(&cert_path).unwrap();
         f.write_all(cert.to_openssh().unwrap().as_bytes()).unwrap();
@@ -1460,7 +1554,10 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
         let len = buf.len();
 
         // Sign using the certificate with SHA-512 hash algorithm
-        let signed_buf = client.sign_request_cert(&cert, Some(HashAlg::Sha512), buf).await.unwrap();
+        let signed_buf = client
+            .sign_request(&cert.into(), Some(HashAlg::Sha512), buf)
+            .await
+            .unwrap();
 
         // Verify the signature is appended to the original data
         assert!(signed_buf.len() > len, "Signed buffer should be larger");
@@ -1470,7 +1567,10 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
         assert_eq!(original, data_to_sign);
 
         // The RSA signature should be substantial
-        assert!(sig_data.len() > 100, "RSA signature data should be substantial");
+        assert!(
+            sig_data.len() > 100,
+            "RSA signature data should be substantial"
+        );
 
         agent.kill().await.unwrap();
         agent.wait().await.unwrap();

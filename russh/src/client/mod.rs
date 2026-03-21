@@ -485,7 +485,7 @@ impl<H: Handler> Handle<H> {
                     });
                 }
                 Some(Reply::SignRequest { key, data }) => {
-                    let data = signer.auth_publickey_sign(&key, hash_alg, data).await;
+                    let data = signer.auth_sign(&key.into(), hash_alg, data).await;
                     let data = match data {
                         Ok(data) => data,
                         Err(e) => return Err(e),
@@ -542,8 +542,12 @@ impl<H: Handler> Handle<H> {
                         partial_success,
                     });
                 }
-                Some(Reply::SignRequestCert { cert, hash_alg, data }) => {
-                    let data = signer.auth_certificate_sign(&cert, hash_alg, data).await;
+                Some(Reply::SignRequestCert {
+                    cert,
+                    hash_alg,
+                    data,
+                }) => {
+                    let data = signer.auth_sign(&cert.into(), hash_alg, data).await;
                     let data = match data {
                         Ok(data) => data,
                         Err(e) => return Err(e),

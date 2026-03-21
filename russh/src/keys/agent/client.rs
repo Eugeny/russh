@@ -8,10 +8,10 @@ use ssh_key::{Algorithm, Certificate, HashAlg, PrivateKey, PublicKey, Signature}
 use tokio;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-use super::{msg, AgentIdentity, Constraint};
-use crate::helpers::EncodedExt;
-use crate::keys::{key, Error};
+use super::{AgentIdentity, Constraint, msg};
 use crate::CryptoVec;
+use crate::helpers::EncodedExt;
+use crate::keys::{Error, key};
 
 pub trait AgentStream: AsyncRead + AsyncWrite {}
 
@@ -254,43 +254,8 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
         Ok(())
     }
 
-    /// Ask the agent for a list of the currently registered public keys.
-    ///
-    /// Note: Certificates held by the agent will be returned as their underlying public
-    /// key only, without the certificate data. Use
-    /// [`request_identities_full`](Self::request_identities_full) to retrieve full
-    /// certificate information.
-    pub async fn request_identities(&mut self) -> Result<Vec<PublicKey>, Error> {
-        self.buf.clear();
-        self.buf.resize(4);
-        msg::REQUEST_IDENTITIES.encode(&mut self.buf)?;
-        let len = self.buf.len() - 4;
-        BigEndian::write_u32(&mut self.buf[..], len as u32);
-
-        self.read_response().await?;
-        debug!("identities: {:?}", &self.buf[..]);
-        let mut keys = Vec::new();
-
-        #[allow(clippy::indexing_slicing)] // static length
-        if let Some((&msg::IDENTITIES_ANSWER, mut r)) = self.buf.split_first() {
-            let n = u32::decode(&mut r)?;
-            for _ in 0..n {
-                let key_blob = Bytes::decode(&mut r)?;
-                let comment = String::decode(&mut r)?;
-                let mut key = key::parse_public_key(&key_blob)?;
-                key.set_comment(comment);
-                keys.push(key);
-            }
-        }
-
-        Ok(keys)
-    }
-
     /// Ask the agent for a list of identities, including certificates.
-    ///
-    /// Unlike [`request_identities`](Self::request_identities) which only returns public keys,
-    /// this method correctly parses OpenSSH certificates held by the agent.
-    pub async fn request_identities_full(&mut self) -> Result<Vec<AgentIdentity>, Error> {
+    pub async fn request_identities(&mut self) -> Result<Vec<AgentIdentity>, Error> {
         self.buf.clear();
         self.buf.resize(4);
         msg::REQUEST_IDENTITIES.encode(&mut self.buf)?;
@@ -313,7 +278,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
                 // This avoids parsing the blob twice for regular keys.
                 let identity = if Self::is_certificate_blob(&key_blob) {
                     match Certificate::decode(&mut key_blob.as_ref()) {
-                        Ok(cert) => AgentIdentity::Certificate { cert, comment },
+                        Ok(cert) => AgentIdentity::Certificate { certificate: cert, comment },
                         Err(_) => {
                             // Fallback to public key if certificate parsing fails
                             let key = key::parse_public_key(&key_blob)?;
@@ -353,6 +318,20 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
     /// Ask the agent to sign the supplied piece of data.
     pub async fn sign_request(
         &mut self,
+        identity: &AgentIdentity,
+        hash_alg: Option<HashAlg>,
+        data: CryptoVec,
+    ) -> Result<CryptoVec, Error> {
+        match identity {
+            AgentIdentity::PublicKey { key, .. } => self.sign_request_pk(key, hash_alg, data).await,
+            AgentIdentity::Certificate { certificate, .. } => {
+                self.sign_request_cert(certificate, hash_alg, data).await
+            }
+        }
+    }
+
+    async fn sign_request_pk(
+        &mut self,
         public: &PublicKey,
         hash_alg: Option<HashAlg>,
         mut data: CryptoVec,
@@ -381,7 +360,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
     /// allowing the agent to match it to the correct private key.
     ///
     /// For RSA certificates, you can specify the hash algorithm to use.
-    pub async fn sign_request_cert(
+    async fn sign_request_cert(
         &mut self,
         cert: &Certificate,
         hash_alg: Option<HashAlg>,

@@ -34,10 +34,28 @@ pub enum AgentIdentity {
     /// An OpenSSH certificate
     Certificate {
         /// The certificate (contains public key plus CA signature, principals, validity, etc.)
-        cert: Certificate,
+        certificate: Certificate,
         /// Comment associated with this identity
         comment: String,
     },
+}
+
+impl From<PublicKey> for AgentIdentity {
+    fn from(key: PublicKey) -> Self {
+        Self::PublicKey {
+            key,
+            comment: String::new(),
+        }
+    }
+}
+
+impl From<Certificate> for AgentIdentity {
+    fn from(certificate: Certificate) -> Self {
+        Self::Certificate {
+            certificate,
+            comment: String::new(),
+        }
+    }
 }
 
 impl AgentIdentity {
@@ -47,8 +65,8 @@ impl AgentIdentity {
     pub fn public_key(&self) -> Cow<'_, PublicKey> {
         match self {
             Self::PublicKey { key, .. } => Cow::Borrowed(key),
-            Self::Certificate { cert, .. } => {
-                Cow::Owned(PublicKey::new(cert.public_key().clone(), ""))
+            Self::Certificate { certificate, .. } => {
+                Cow::Owned(PublicKey::new(certificate.public_key().clone(), ""))
             }
         }
     }
@@ -66,7 +84,7 @@ impl AgentIdentity {
 mod tests {
     use super::*;
     use ssh_key::rand_core::OsRng;
-    use ssh_key::{certificate, PrivateKey};
+    use ssh_key::{PrivateKey, certificate};
 
     fn create_test_certificate() -> Certificate {
         use std::time::{SystemTime, UNIX_EPOCH};
@@ -128,7 +146,7 @@ mod tests {
         let comment = "test-cert-comment".to_string();
 
         let identity = AgentIdentity::Certificate {
-            cert: cert.clone(),
+            certificate: cert.clone(),
             comment: comment.clone(),
         };
 
