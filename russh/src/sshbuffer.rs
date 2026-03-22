@@ -344,6 +344,13 @@ impl PacketWriter {
     }
 
     /// Sends a packet using the reusable plaintext packet buffer.
+    ///
+    /// The closure must append only the packet payload bytes. It must not
+    /// modify or truncate any existing contents in the provided buffer.
+    /// When compression is disabled, the buffer may already contain queued
+    /// packets and the reserved 5-byte packet header prefix for the packet
+    /// being built, so callers must only write new payload bytes starting at
+    /// the current end of the buffer.
     pub fn write_packet<F: FnOnce(&mut Vec<u8>) -> Result<(), Error>>(
         &mut self,
         f: F,
