@@ -44,8 +44,8 @@
 //!        let mut client = agent::client::AgentClient::connect(stream);
 //!        client.add_identity(&key, &[agent::Constraint::KeyLifetime { seconds: 60 }]).await?;
 //!        client.request_identities().await?;
-//!        let buf = b"signed message";
-//!        let sig = client.sign_request(&public, None, russh_cryptovec::CryptoVec::from_slice(&buf[..])).await.unwrap();
+//!        let buf = b"signed message".to_vec();
+//!        let sig = client.sign_request(&public.into(), None, buf).await.unwrap();
 //!        // Here, `sig` is encoded in a format usable internally by the SSH protocol.
 //!        Ok::<(), Error>(())
 //!    }).unwrap()
@@ -285,6 +285,8 @@ mod test {
     use futures::Future;
 
     use super::*;
+    #[cfg(unix)]
+    use crate::keys::agent::AgentIdentity;
     use crate::keys::key::PublicKeyExt;
 
     const ED25519_KEY: &str = "-----BEGIN OPENSSH PRIVATE KEY-----
@@ -861,10 +863,14 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
         let mut client = agent::client::AgentClient::connect(stream);
         client.add_identity(&key, &[]).await?;
         client.request_identities().await?;
-        let buf = russh_cryptovec::CryptoVec::from_slice(b"blabla");
+        let buf = b"blabla".to_vec();
         let len = buf.len();
         let buf = client
-            .sign_request(public, Some(HashAlg::Sha256), buf)
+            .sign_request(
+                &AgentIdentity::from(public.clone()),
+                Some(HashAlg::Sha256),
+                buf,
+            )
             .await
             .unwrap();
         let (a, b) = buf.split_at(len);
@@ -954,9 +960,12 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
                 .await
                 .unwrap();
             client.request_identities().await.unwrap();
-            let buf = russh_cryptovec::CryptoVec::from_slice(b"blabla");
+            let buf = b"blabla".to_vec();
             let len = buf.len();
-            let buf = client.sign_request(public, None, buf).await.unwrap();
+            let buf = client
+                .sign_request(&AgentIdentity::from(public.clone()), None, buf)
+                .await
+                .unwrap();
             let (a, b) = buf.split_at(len);
             if let ssh_key::public::KeyData::Ed25519 { .. } = public.key_data() {
                 let sig = &b[b.len() - 64..];
@@ -982,5 +991,588 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
             let (sock, _addr) = futures::ready!(self.get_mut().listener.poll_accept(cx))?;
             std::task::Poll::Ready(Some(Ok(sock)))
         }
+    }
+
+    /// Helper to spawn an ssh-agent and return the agent process and socket path
+    #[cfg(unix)]
+    async fn spawn_agent() -> Result<
+        (tokio::process::Child, std::path::PathBuf, tempfile::TempDir),
+        Box<dyn std::error::Error>,
+    > {
+        use std::process::Stdio;
+
+        let dir = tempfile::tempdir()?;
+        let agent_path = dir.path().join("agent");
+        let agent = tokio::process::Command::new("ssh-agent")
+            .arg("-a")
+            .arg(&agent_path)
+            .arg("-D")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()?;
+
+        // Wait for the socket to be created
+        while agent_path.canonicalize().is_err() {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+
+        Ok((agent, agent_path, dir))
+    }
+
+    /// Helper to create a test certificate
+    #[cfg(unix)]
+    fn create_test_cert(ca_key: &PrivateKey, user_key: &PrivateKey) -> ssh_key::Certificate {
+        use ssh_key::certificate;
+        use ssh_key::rand_core::OsRng;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let valid_after = now - 3600; // 1 hour ago
+        let valid_before = now + 86400 * 365; // 1 year from now
+
+        let mut builder = certificate::Builder::new_with_random_nonce(
+            &mut OsRng,
+            user_key.public_key(),
+            valid_after,
+            valid_before,
+        )
+        .unwrap();
+
+        builder.serial(1).unwrap();
+        builder.key_id("test-cert").unwrap();
+        builder.cert_type(certificate::CertType::User).unwrap();
+        builder.valid_principal("testuser").unwrap();
+        builder.sign(ca_key).unwrap()
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn test_request_identities_full_with_keys_and_certs() {
+        use crate::keys::agent::{AgentIdentity, client::AgentClient};
+        use ssh_key::rand_core::OsRng;
+        use std::io::Write;
+        use std::process::Stdio;
+
+        env_logger::try_init().unwrap_or(());
+
+        let (mut agent, agent_path, dir) = spawn_agent().await.unwrap();
+
+        // Create a CA key and user key
+        let ca_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap();
+        let user_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap();
+        let plain_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap();
+
+        // Create a certificate
+        let cert = create_test_cert(&ca_key, &user_key);
+
+        // Write the keys and certificate to temp files
+        let user_key_path = dir.path().join("user_key");
+        let cert_path = dir.path().join("user_key-cert.pub");
+        let plain_key_path = dir.path().join("plain_key");
+
+        // Write user key (the one to be certified)
+        let mut f = std::fs::File::create(&user_key_path).unwrap();
+        f.write_all(
+            user_key
+                .to_openssh(ssh_key::LineEnding::LF)
+                .unwrap()
+                .as_bytes(),
+        )
+        .unwrap();
+        std::fs::set_permissions(
+            &user_key_path,
+            std::os::unix::fs::PermissionsExt::from_mode(0o600),
+        )
+        .unwrap();
+
+        // Write certificate
+        let mut f = std::fs::File::create(&cert_path).unwrap();
+        f.write_all(cert.to_openssh().unwrap().as_bytes()).unwrap();
+
+        // Write plain key
+        let mut f = std::fs::File::create(&plain_key_path).unwrap();
+        f.write_all(
+            plain_key
+                .to_openssh(ssh_key::LineEnding::LF)
+                .unwrap()
+                .as_bytes(),
+        )
+        .unwrap();
+        std::fs::set_permissions(
+            &plain_key_path,
+            std::os::unix::fs::PermissionsExt::from_mode(0o600),
+        )
+        .unwrap();
+
+        // Use ssh-add to add the certificate (it will pick up user_key-cert.pub automatically)
+        let status = tokio::process::Command::new("ssh-add")
+            .arg(&user_key_path)
+            .env("SSH_AUTH_SOCK", &agent_path)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .await
+            .unwrap();
+        assert!(status.success(), "ssh-add for certificate failed");
+
+        // Add plain key
+        let status = tokio::process::Command::new("ssh-add")
+            .arg(&plain_key_path)
+            .env("SSH_AUTH_SOCK", &agent_path)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .await
+            .unwrap();
+        assert!(status.success(), "ssh-add for plain key failed");
+
+        // Connect to agent and test request_identities_full
+        let stream = tokio::net::UnixStream::connect(&agent_path).await.unwrap();
+        let mut client = AgentClient::connect(stream);
+
+        let identities = client.request_identities().await.unwrap();
+
+        // ssh-add with a certificate adds the cert identity, and the plain key adds another
+        // The exact count depends on ssh-agent behavior - just verify we have both types
+        assert!(!identities.is_empty(), "Expected at least one identity");
+
+        // Count the types
+        let mut key_count = 0;
+        let mut cert_count = 0;
+
+        for identity in &identities {
+            match identity {
+                AgentIdentity::PublicKey { .. } => key_count += 1,
+                AgentIdentity::Certificate { certificate: c, .. } => {
+                    cert_count += 1;
+                    // Verify the certificate matches what we created
+                    assert_eq!(c.key_id(), "test-cert");
+                    // Verify public_key() works
+                    let pk = identity.public_key();
+                    assert_eq!(pk.key_data(), c.public_key());
+                }
+            }
+            // Verify comment() works
+            let _ = identity.comment();
+        }
+
+        // We should have at least one of each (ssh-add may add both key and cert for the same identity)
+        assert!(
+            key_count >= 1,
+            "Expected at least 1 public key, got {}",
+            key_count
+        );
+        assert!(
+            cert_count >= 1,
+            "Expected at least 1 certificate, got {}",
+            cert_count
+        );
+
+        agent.kill().await.unwrap();
+        agent.wait().await.unwrap();
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn test_sign_request_cert() {
+        use crate::keys::agent::client::AgentClient;
+        use ssh_key::rand_core::OsRng;
+        use std::io::Write;
+        use std::process::Stdio;
+
+        env_logger::try_init().unwrap_or(());
+
+        let (mut agent, agent_path, dir) = spawn_agent().await.unwrap();
+
+        // Create a CA key and user key
+        let ca_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap();
+        let user_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap();
+
+        // Create a certificate
+        let cert = create_test_cert(&ca_key, &user_key);
+
+        // Write the key and certificate to temp files
+        let user_key_path = dir.path().join("user_key");
+        let cert_path = dir.path().join("user_key-cert.pub");
+
+        let mut f = std::fs::File::create(&user_key_path).unwrap();
+        f.write_all(
+            user_key
+                .to_openssh(ssh_key::LineEnding::LF)
+                .unwrap()
+                .as_bytes(),
+        )
+        .unwrap();
+        std::fs::set_permissions(
+            &user_key_path,
+            std::os::unix::fs::PermissionsExt::from_mode(0o600),
+        )
+        .unwrap();
+
+        let mut f = std::fs::File::create(&cert_path).unwrap();
+        f.write_all(cert.to_openssh().unwrap().as_bytes()).unwrap();
+
+        // Use ssh-add to add the certificate
+        let status = tokio::process::Command::new("ssh-add")
+            .arg(&user_key_path)
+            .env("SSH_AUTH_SOCK", &agent_path)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .await
+            .unwrap();
+        assert!(status.success(), "ssh-add failed");
+
+        // Connect to agent and test sign_request_cert
+        let stream = tokio::net::UnixStream::connect(&agent_path).await.unwrap();
+        let mut client = AgentClient::connect(stream);
+
+        // Create data to sign
+        let data_to_sign = b"test data to sign";
+        let buf = data_to_sign.to_vec();
+        let len = buf.len();
+
+        // Sign using the certificate (None for hash_alg since Ed25519 doesn't need it)
+        let signed_buf = client.sign_request(&cert.into(), None, buf).await.unwrap();
+
+        // Verify the signature is appended to the original data
+        assert!(signed_buf.len() > len, "Signed buffer should be larger");
+
+        // Extract and verify signature
+        let (original, sig_data) = signed_buf.split_at(len);
+        assert_eq!(original, data_to_sign);
+
+        // The signature should be valid
+        // For ed25519, signature is 64 bytes, but encoded with type prefix
+        assert!(sig_data.len() > 64, "Signature data should include type");
+
+        agent.kill().await.unwrap();
+        agent.wait().await.unwrap();
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn test_sign_request_cert_missing_key_returns_agent_failure() {
+        use crate::keys::agent::client::AgentClient;
+        use ssh_key::rand_core::OsRng;
+
+        env_logger::try_init().unwrap_or(());
+
+        let (mut agent, agent_path, _dir) = spawn_agent().await.unwrap();
+
+        // Create a CA key and user key, but DON'T add them to the agent
+        let ca_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap();
+        let user_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap();
+
+        // Create a certificate
+        let cert = create_test_cert(&ca_key, &user_key);
+
+        // Connect to agent WITHOUT adding any keys
+        let stream = tokio::net::UnixStream::connect(&agent_path).await.unwrap();
+        let mut client = AgentClient::connect(stream);
+
+        // Verify the agent has no keys
+        let identities = client.request_identities().await.unwrap();
+        assert!(identities.is_empty(), "Agent should have no keys");
+
+        // Create data to sign
+        let data_to_sign = b"test data to sign";
+        let buf = data_to_sign.to_vec();
+
+        // Try to sign using the certificate - should fail because the key isn't in the agent
+        let result = client.sign_request(&cert.into(), None, buf).await;
+
+        // Verify we get an AgentFailure error
+        assert!(
+            result.is_err(),
+            "Signing should fail when key is not in agent"
+        );
+        match result {
+            Err(Error::AgentFailure) => {
+                // This is the expected error
+            }
+            Err(e) => {
+                panic!("Expected AgentFailure error, got: {:?}", e);
+            }
+            Ok(_) => {
+                panic!("Expected error, but signing succeeded");
+            }
+        }
+
+        agent.kill().await.unwrap();
+        agent.wait().await.unwrap();
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn test_sign_request_missing_key_returns_agent_failure() {
+        use crate::keys::agent::client::AgentClient;
+        use ssh_key::rand_core::OsRng;
+
+        env_logger::try_init().unwrap_or(());
+
+        let (mut agent, agent_path, _dir) = spawn_agent().await.unwrap();
+
+        // Create a key but DON'T add it to the agent
+        let key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap();
+
+        // Connect to agent WITHOUT adding any keys
+        let stream = tokio::net::UnixStream::connect(&agent_path).await.unwrap();
+        let mut client = AgentClient::connect(stream);
+
+        // Verify the agent has no keys
+        let identities = client.request_identities().await.unwrap();
+        assert!(identities.is_empty(), "Agent should have no keys");
+
+        // Create data to sign
+        let data_to_sign = b"test data to sign";
+        let buf = data_to_sign.to_vec();
+
+        // Try to sign using the public key - should fail because the key isn't in the agent
+        let result = client
+            .sign_request(&key.public_key().clone().into(), None, buf)
+            .await;
+
+        // Verify we get an AgentFailure error
+        assert!(
+            result.is_err(),
+            "Signing should fail when key is not in agent"
+        );
+        match result {
+            Err(Error::AgentFailure) => {
+                // This is the expected error
+            }
+            Err(e) => {
+                panic!("Expected AgentFailure error, got: {:?}", e);
+            }
+            Ok(_) => {
+                panic!("Expected error, but signing succeeded");
+            }
+        }
+
+        agent.kill().await.unwrap();
+        agent.wait().await.unwrap();
+    }
+
+    /// Helper to create a test RSA certificate
+    #[cfg(all(unix, feature = "rsa"))]
+    fn create_test_rsa_cert(ca_key: &PrivateKey, user_key: &PrivateKey) -> ssh_key::Certificate {
+        use ssh_key::certificate;
+        use ssh_key::rand_core::OsRng;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let valid_after = now - 3600; // 1 hour ago
+        let valid_before = now + 86400 * 365; // 1 year from now
+
+        let mut builder = certificate::Builder::new_with_random_nonce(
+            &mut OsRng,
+            user_key.public_key(),
+            valid_after,
+            valid_before,
+        )
+        .unwrap();
+
+        builder.serial(1).unwrap();
+        builder.key_id("test-rsa-cert").unwrap();
+        builder.cert_type(certificate::CertType::User).unwrap();
+        builder.valid_principal("testuser").unwrap();
+        builder.sign(ca_key).unwrap()
+    }
+
+    #[tokio::test]
+    #[cfg(all(unix, feature = "rsa"))]
+    async fn test_sign_request_cert_rsa() {
+        use crate::keys::agent::client::AgentClient;
+        use ssh_key::rand_core::OsRng;
+        use std::io::Write;
+        use std::process::Stdio;
+
+        env_logger::try_init().unwrap_or(());
+
+        let (mut agent, agent_path, dir) = spawn_agent().await.unwrap();
+
+        // Create RSA CA key and user key
+        let ca_key = PrivateKey::random(
+            &mut OsRng,
+            ssh_key::Algorithm::Rsa {
+                hash: Some(HashAlg::Sha256),
+            },
+        )
+        .unwrap();
+        let user_key = PrivateKey::random(
+            &mut OsRng,
+            ssh_key::Algorithm::Rsa {
+                hash: Some(HashAlg::Sha256),
+            },
+        )
+        .unwrap();
+
+        // Create a certificate
+        let cert = create_test_rsa_cert(&ca_key, &user_key);
+
+        // Write the key and certificate to temp files
+        let user_key_path = dir.path().join("user_rsa_key");
+        let cert_path = dir.path().join("user_rsa_key-cert.pub");
+
+        let mut f = std::fs::File::create(&user_key_path).unwrap();
+        f.write_all(
+            user_key
+                .to_openssh(ssh_key::LineEnding::LF)
+                .unwrap()
+                .as_bytes(),
+        )
+        .unwrap();
+        std::fs::set_permissions(
+            &user_key_path,
+            std::os::unix::fs::PermissionsExt::from_mode(0o600),
+        )
+        .unwrap();
+
+        let mut f = std::fs::File::create(&cert_path).unwrap();
+        f.write_all(cert.to_openssh().unwrap().as_bytes()).unwrap();
+
+        // Use ssh-add to add the certificate
+        let status = tokio::process::Command::new("ssh-add")
+            .arg(&user_key_path)
+            .env("SSH_AUTH_SOCK", &agent_path)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .await
+            .unwrap();
+        assert!(status.success(), "ssh-add failed");
+
+        // Connect to agent and test sign_request_cert
+        let stream = tokio::net::UnixStream::connect(&agent_path).await.unwrap();
+        let mut client = AgentClient::connect(stream);
+
+        // Create data to sign
+        let data_to_sign = b"test data to sign with RSA cert";
+        let buf = data_to_sign.to_vec();
+        let len = buf.len();
+
+        // Sign using the certificate with SHA-256 hash algorithm
+        let signed_buf = client
+            .sign_request(&cert.into(), Some(HashAlg::Sha256), buf)
+            .await
+            .unwrap();
+
+        // Verify the signature is appended to the original data
+        assert!(signed_buf.len() > len, "Signed buffer should be larger");
+
+        // Extract and verify signature
+        let (original, sig_data) = signed_buf.split_at(len);
+        assert_eq!(original, data_to_sign);
+
+        // The RSA signature should be substantial
+        assert!(
+            sig_data.len() > 100,
+            "RSA signature data should be substantial"
+        );
+
+        agent.kill().await.unwrap();
+        agent.wait().await.unwrap();
+    }
+
+    #[tokio::test]
+    #[cfg(all(unix, feature = "rsa"))]
+    async fn test_sign_request_cert_rsa_sha512() {
+        use crate::keys::agent::client::AgentClient;
+        use ssh_key::rand_core::OsRng;
+        use std::io::Write;
+        use std::process::Stdio;
+
+        env_logger::try_init().unwrap_or(());
+
+        let (mut agent, agent_path, dir) = spawn_agent().await.unwrap();
+
+        // Create RSA CA key and user key
+        let ca_key = PrivateKey::random(
+            &mut OsRng,
+            ssh_key::Algorithm::Rsa {
+                hash: Some(HashAlg::Sha512),
+            },
+        )
+        .unwrap();
+        let user_key = PrivateKey::random(
+            &mut OsRng,
+            ssh_key::Algorithm::Rsa {
+                hash: Some(HashAlg::Sha512),
+            },
+        )
+        .unwrap();
+
+        // Create a certificate
+        let cert = create_test_rsa_cert(&ca_key, &user_key);
+
+        // Write the key and certificate to temp files
+        let user_key_path = dir.path().join("user_rsa_key");
+        let cert_path = dir.path().join("user_rsa_key-cert.pub");
+
+        let mut f = std::fs::File::create(&user_key_path).unwrap();
+        f.write_all(
+            user_key
+                .to_openssh(ssh_key::LineEnding::LF)
+                .unwrap()
+                .as_bytes(),
+        )
+        .unwrap();
+        std::fs::set_permissions(
+            &user_key_path,
+            std::os::unix::fs::PermissionsExt::from_mode(0o600),
+        )
+        .unwrap();
+
+        let mut f = std::fs::File::create(&cert_path).unwrap();
+        f.write_all(cert.to_openssh().unwrap().as_bytes()).unwrap();
+
+        // Use ssh-add to add the certificate
+        let status = tokio::process::Command::new("ssh-add")
+            .arg(&user_key_path)
+            .env("SSH_AUTH_SOCK", &agent_path)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .await
+            .unwrap();
+        assert!(status.success(), "ssh-add failed");
+
+        // Connect to agent and test sign_request_cert with SHA-512
+        let stream = tokio::net::UnixStream::connect(&agent_path).await.unwrap();
+        let mut client = AgentClient::connect(stream);
+
+        // Create data to sign
+        let data_to_sign = b"test data to sign with RSA cert SHA-512";
+        let buf = data_to_sign.to_vec();
+        let len = buf.len();
+
+        // Sign using the certificate with SHA-512 hash algorithm
+        let signed_buf = client
+            .sign_request(&cert.into(), Some(HashAlg::Sha512), buf)
+            .await
+            .unwrap();
+
+        // Verify the signature is appended to the original data
+        assert!(signed_buf.len() > len, "Signed buffer should be larger");
+
+        // Extract and verify signature
+        let (original, sig_data) = signed_buf.split_at(len);
+        assert_eq!(original, data_to_sign);
+
+        // The RSA signature should be substantial
+        assert!(
+            sig_data.len() > 100,
+            "RSA signature data should be substantial"
+        );
+
+        agent.kill().await.unwrap();
+        agent.wait().await.unwrap();
     }
 }
