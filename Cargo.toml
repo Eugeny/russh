@@ -30,10 +30,3 @@ ssh-key = { version = "=0.6.18", features = [
 thiserror = "2.0.18"
 tokio = { version = "1.17.0" }
 tokio-stream = { version = "0.1.3", features = ["net", "sync"] }
-
-[patch.crates-io]
-# digest 0.11.2 removed Clone from MacTraits (RustCrypto/traits#2329), breaking
-# hmac 0.13.0-rc.5 which still relies on it. The fix landed in hmac's repo
-# (RustCrypto/MACs#254) but no rc.6 has been published yet. Remove this patch
-# once hmac 0.13.0-rc.6+ is released.
-hmac = { git = "https://github.com/RustCrypto/MACs.git", rev = "da485cd7baf0b7f5e501f5b42644bf9ddd428c6b" }
