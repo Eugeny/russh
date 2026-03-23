@@ -22,9 +22,9 @@ use ssh_key::{Certificate, HashAlg, PrivateKey};
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite};
 
-use crate::CryptoVec;
 use crate::helpers::NameList;
 use crate::keys::PrivateKeyWithHashAlg;
+use crate::keys::agent::AgentIdentity;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MethodKind {
@@ -157,12 +157,12 @@ impl AuthResult {
 pub trait Signer: Sized {
     type Error: From<crate::SendError>;
 
-    fn auth_publickey_sign(
+    fn auth_sign(
         &mut self,
-        key: &ssh_key::PublicKey,
+        key: &AgentIdentity,
         hash_alg: Option<HashAlg>,
-        to_sign: CryptoVec,
-    ) -> impl Future<Output = Result<CryptoVec, Self::Error>> + Send;
+        to_sign: Vec<u8>,
+    ) -> impl Future<Output = Result<Vec<u8>, Self::Error>> + Send;
 }
 
 #[derive(Debug, Error)]
@@ -180,12 +180,12 @@ impl<R: AsyncRead + AsyncWrite + Unpin + Send + 'static> Signer
     type Error = AgentAuthError;
 
     #[allow(clippy::manual_async_fn)]
-    fn auth_publickey_sign(
+    fn auth_sign(
         &mut self,
-        key: &ssh_key::PublicKey,
+        key: &AgentIdentity,
         hash_alg: Option<HashAlg>,
-        to_sign: CryptoVec,
-    ) -> impl Future<Output = Result<CryptoVec, Self::Error>> {
+        to_sign: Vec<u8>,
+    ) -> impl Future<Output = Result<Vec<u8>, Self::Error>> {
         async move {
             self.sign_request(key, hash_alg, to_sign)
                 .await
@@ -210,6 +210,12 @@ pub enum Method {
     },
     FuturePublicKey {
         key: ssh_key::PublicKey,
+        hash_alg: Option<HashAlg>,
+    },
+    /// Certificate-based authentication using an external signer (e.g., SSH agent).
+    /// The certificate is sent to the server, but signing is delegated to the signer.
+    FutureCertificate {
+        cert: Certificate,
         hash_alg: Option<HashAlg>,
     },
     KeyboardInteractive {

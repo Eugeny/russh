@@ -69,8 +69,8 @@ use crate::session::{CommonSession, EncryptedState, GlobalRequestResponse, NewKe
 use crate::ssh_read::SshRead;
 use crate::sshbuffer::{IncomingSshPacket, PacketWriter, SSHBuffer, SshId};
 use crate::{
-    ChannelId, ChannelOpenFailure, CryptoVec, Disconnect, Error, Limits, MethodSet, Sig, auth,
-    map_err, msg, negotiation,
+    ChannelId, ChannelOpenFailure, Disconnect, Error, Limits, MethodSet, Sig, auth, map_err, msg,
+    negotiation,
 };
 
 mod encrypted;
@@ -118,7 +118,12 @@ enum Reply {
     ChannelOpenFailure,
     SignRequest {
         key: ssh_key::PublicKey,
-        data: CryptoVec,
+        data: Vec<u8>,
+    },
+    SignRequestCert {
+        cert: Certificate,
+        hash_alg: Option<HashAlg>,
+        data: Vec<u8>,
     },
     AuthInfoRequest {
         name: String,
@@ -138,7 +143,7 @@ pub enum Msg {
         responses: Vec<String>,
     },
     Signed {
-        data: CryptoVec,
+        data: Vec<u8>,
     },
     ChannelOpenSession {
         channel_ref: ChannelRef,
@@ -481,7 +486,69 @@ impl<H: Handler> Handle<H> {
                     });
                 }
                 Some(Reply::SignRequest { key, data }) => {
-                    let data = signer.auth_publickey_sign(&key, hash_alg, data).await;
+                    let data = signer.auth_sign(&key.into(), hash_alg, data).await;
+                    let data = match data {
+                        Ok(data) => data,
+                        Err(e) => return Err(e),
+                    };
+                    if self.sender.send(Msg::Signed { data }).await.is_err() {
+                        return Err((crate::SendError {}).into());
+                    }
+                }
+                None => {
+                    return Ok(AuthResult::Failure {
+                        remaining_methods: MethodSet::empty(),
+                        partial_success: false,
+                    });
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Authenticate using a certificate with a custom signer that implements the
+    /// [`Signer`][auth::Signer] trait. This is for certificate-based authentication
+    /// where the signing is delegated to an external signer (e.g., SSH agent).
+    ///
+    /// For RSA certificates, you can specify the hash algorithm to use.
+    pub async fn authenticate_certificate_with<U: Into<String>, S: auth::Signer>(
+        &mut self,
+        user: U,
+        cert: Certificate,
+        hash_alg: Option<HashAlg>,
+        signer: &mut S,
+    ) -> Result<AuthResult, S::Error> {
+        let user = user.into();
+        if self
+            .sender
+            .send(Msg::Authenticate {
+                user,
+                method: auth::Method::FutureCertificate { cert, hash_alg },
+            })
+            .await
+            .is_err()
+        {
+            return Err((crate::SendError {}).into());
+        }
+        loop {
+            let reply = self.receiver.recv().await;
+            match reply {
+                Some(Reply::AuthSuccess) => return Ok(AuthResult::Success),
+                Some(Reply::AuthFailure {
+                    proceed_with_methods: remaining_methods,
+                    partial_success,
+                }) => {
+                    return Ok(AuthResult::Failure {
+                        remaining_methods,
+                        partial_success,
+                    });
+                }
+                Some(Reply::SignRequestCert {
+                    cert,
+                    hash_alg,
+                    data,
+                }) => {
+                    let data = signer.auth_sign(&cert.into(), hash_alg, data).await;
                     let data = match data {
                         Ok(data) => data,
                         Err(e) => return Err(e),
@@ -816,12 +883,14 @@ impl<H: Handler> Handle<H> {
     ///
     /// This is useful for server-initiated channels; for channels created by
     /// the client, prefer to use the Channel returned from the `open_*` methods.
-    pub async fn data(&self, id: ChannelId, data: impl Into<bytes::Bytes>) -> Result<(), bytes::Bytes> {
+    pub async fn data(
+        &self,
+        id: ChannelId,
+        data: impl Into<bytes::Bytes>,
+    ) -> Result<(), bytes::Bytes> {
         let data = data.into();
         self.sender
-            .send(Msg::Channel(id, ChannelMsg::Data {
-                data: data.clone(),
-            }))
+            .send(Msg::Channel(id, ChannelMsg::Data { data: data.clone() }))
             .await
             .map_err(|e| match e.0 {
                 Msg::Channel(_, ChannelMsg::Data { data, .. }) => data,
