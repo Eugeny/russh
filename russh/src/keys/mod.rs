@@ -1020,8 +1020,7 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
     #[cfg(unix)]
     fn create_test_cert(ca_key: &PrivateKey, user_key: &PrivateKey) -> ssh_key::Certificate {
         use ssh_key::certificate;
-        use ssh_key::rand_core::OsRng;
-        use std::time::{SystemTime, UNIX_EPOCH};
+                use std::time::{SystemTime, UNIX_EPOCH};
 
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -1031,7 +1030,7 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
         let valid_before = now + 86400 * 365; // 1 year from now
 
         let mut builder = certificate::Builder::new_with_random_nonce(
-            &mut OsRng,
+            &mut rand::rng(),
             user_key.public_key(),
             valid_after,
             valid_before,
@@ -1049,8 +1048,7 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
     #[cfg(unix)]
     async fn test_request_identities_full_with_keys_and_certs() {
         use crate::keys::agent::{AgentIdentity, client::AgentClient};
-        use ssh_key::rand_core::OsRng;
-        use std::io::Write;
+                use std::io::Write;
         use std::process::Stdio;
 
         env_logger::try_init().unwrap_or(());
@@ -1058,9 +1056,9 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
         let (mut agent, agent_path, dir) = spawn_agent().await.unwrap();
 
         // Create a CA key and user key
-        let ca_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap();
-        let user_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap();
-        let plain_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap();
+        let ca_key = PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap();
+        let user_key = PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap();
+        let plain_key = PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap();
 
         // Create a certificate
         let cert = create_test_cert(&ca_key, &user_key);
@@ -1176,8 +1174,7 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
     #[cfg(unix)]
     async fn test_sign_request_cert() {
         use crate::keys::agent::client::AgentClient;
-        use ssh_key::rand_core::OsRng;
-        use std::io::Write;
+                use std::io::Write;
         use std::process::Stdio;
 
         env_logger::try_init().unwrap_or(());
@@ -1185,8 +1182,8 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
         let (mut agent, agent_path, dir) = spawn_agent().await.unwrap();
 
         // Create a CA key and user key
-        let ca_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap();
-        let user_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap();
+        let ca_key = PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap();
+        let user_key = PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap();
 
         // Create a certificate
         let cert = create_test_cert(&ca_key, &user_key);
@@ -1254,15 +1251,14 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
     #[cfg(unix)]
     async fn test_sign_request_cert_missing_key_returns_agent_failure() {
         use crate::keys::agent::client::AgentClient;
-        use ssh_key::rand_core::OsRng;
-
+        
         env_logger::try_init().unwrap_or(());
 
         let (mut agent, agent_path, _dir) = spawn_agent().await.unwrap();
 
         // Create a CA key and user key, but DON'T add them to the agent
-        let ca_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap();
-        let user_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap();
+        let ca_key = PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap();
+        let user_key = PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap();
 
         // Create a certificate
         let cert = create_test_cert(&ca_key, &user_key);
@@ -1307,14 +1303,13 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
     #[cfg(unix)]
     async fn test_sign_request_missing_key_returns_agent_failure() {
         use crate::keys::agent::client::AgentClient;
-        use ssh_key::rand_core::OsRng;
-
+        
         env_logger::try_init().unwrap_or(());
 
         let (mut agent, agent_path, _dir) = spawn_agent().await.unwrap();
 
         // Create a key but DON'T add it to the agent
-        let key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap();
+        let key = PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap();
 
         // Connect to agent WITHOUT adding any keys
         let stream = tokio::net::UnixStream::connect(&agent_path).await.unwrap();
@@ -1358,8 +1353,7 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
     #[cfg(all(unix, feature = "rsa"))]
     fn create_test_rsa_cert(ca_key: &PrivateKey, user_key: &PrivateKey) -> ssh_key::Certificate {
         use ssh_key::certificate;
-        use ssh_key::rand_core::OsRng;
-        use std::time::{SystemTime, UNIX_EPOCH};
+                use std::time::{SystemTime, UNIX_EPOCH};
 
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -1369,7 +1363,7 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
         let valid_before = now + 86400 * 365; // 1 year from now
 
         let mut builder = certificate::Builder::new_with_random_nonce(
-            &mut OsRng,
+            &mut rand::rng(),
             user_key.public_key(),
             valid_after,
             valid_before,
@@ -1387,8 +1381,7 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
     #[cfg(all(unix, feature = "rsa"))]
     async fn test_sign_request_cert_rsa() {
         use crate::keys::agent::client::AgentClient;
-        use ssh_key::rand_core::OsRng;
-        use std::io::Write;
+                use std::io::Write;
         use std::process::Stdio;
 
         env_logger::try_init().unwrap_or(());
@@ -1397,14 +1390,14 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
 
         // Create RSA CA key and user key
         let ca_key = PrivateKey::random(
-            &mut OsRng,
+            &mut rand::rng(),
             ssh_key::Algorithm::Rsa {
                 hash: Some(HashAlg::Sha256),
             },
         )
         .unwrap();
         let user_key = PrivateKey::random(
-            &mut OsRng,
+            &mut rand::rng(),
             ssh_key::Algorithm::Rsa {
                 hash: Some(HashAlg::Sha256),
             },
@@ -1482,8 +1475,7 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
     #[cfg(all(unix, feature = "rsa"))]
     async fn test_sign_request_cert_rsa_sha512() {
         use crate::keys::agent::client::AgentClient;
-        use ssh_key::rand_core::OsRng;
-        use std::io::Write;
+                use std::io::Write;
         use std::process::Stdio;
 
         env_logger::try_init().unwrap_or(());
@@ -1492,14 +1484,14 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
 
         // Create RSA CA key and user key
         let ca_key = PrivateKey::random(
-            &mut OsRng,
+            &mut rand::rng(),
             ssh_key::Algorithm::Rsa {
                 hash: Some(HashAlg::Sha512),
             },
         )
         .unwrap();
         let user_key = PrivateKey::random(
-            &mut OsRng,
+            &mut rand::rng(),
             ssh_key::Algorithm::Rsa {
                 hash: Some(HashAlg::Sha512),
             },
