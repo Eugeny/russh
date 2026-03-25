@@ -30,7 +30,7 @@ _bench = ["dep:criterion"]
 [dependencies]
 aes.workspace = true
 async-trait = { workspace = true, optional = true }
-aws-lc-rs = { version = "1.13.1", optional = true }
+aws-lc-rs = { version = "1.16.2", optional = true }
 bitflags = "2.0"
 block-padding = { version = "0.3", features = ["std"] }
 byteorder.workspace = true
