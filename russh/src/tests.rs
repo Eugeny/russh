@@ -8,7 +8,6 @@ mod compress {
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
 
-    use crate::keys::ssh_key::rand_core::OsRng;
     use keys::PrivateKeyWithHashAlg;
     use log::debug;
     use ssh_key::PrivateKey;
@@ -21,14 +20,14 @@ mod compress {
     async fn compress_local_test() {
         let _ = env_logger::try_init();
 
-        let client_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap();
+        let client_key = PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap();
         let mut config = server::Config::default();
         config.preferred = Preferred::COMPRESSED;
         config.inactivity_timeout = None; // Some(std::time::Duration::from_secs(3));
         config.auth_rejection_time = std::time::Duration::from_secs(3);
         config
             .keys
-            .push(PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap());
+            .push(PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap());
         let config = Arc::new(config);
         let mut sh = Server {
             clients: Arc::new(Mutex::new(HashMap::new())),
@@ -139,7 +138,6 @@ mod compress {
 }
 
 mod channels {
-    use elliptic_curve::rand_core::OsRng;
     use keys::PrivateKeyWithHashAlg;
     use server::Session;
     use ssh_key::PrivateKey;
@@ -166,13 +164,13 @@ mod channels {
 
         let _ = env_logger::try_init();
 
-        let client_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap();
+        let client_key = PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap();
         let mut config = server::Config::default();
         config.inactivity_timeout = None;
         config.auth_rejection_time = std::time::Duration::from_secs(3);
         config
             .keys
-            .push(PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap());
+            .push(PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap());
         let config = Arc::new(config);
         let socket = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = socket.local_addr().unwrap();
@@ -625,7 +623,6 @@ mod future_certificate {
     use std::sync::Arc;
 
     use ssh_key::{certificate, PrivateKey};
-    use ssh_key::rand_core::OsRng;
 
     use crate::keys::agent::client::AgentClient;
     use crate::{client, server};
@@ -668,7 +665,7 @@ mod future_certificate {
         let valid_before = now + 86400 * 365;
 
         let mut builder = certificate::Builder::new_with_random_nonce(
-            &mut OsRng,
+            &mut rand::rng(),
             user_key.public_key(),
             valid_after,
             valid_before,
@@ -690,8 +687,8 @@ mod future_certificate {
         let (mut agent, agent_path, dir) = spawn_agent().await;
 
         // 2. Create CA key and user key
-        let ca_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap();
-        let user_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap();
+        let ca_key = PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap();
+        let user_key = PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap();
 
         // 3. Create a certificate
         let cert = create_test_cert(&ca_key, &user_key);
@@ -733,7 +730,7 @@ mod future_certificate {
         server_config.auth_rejection_time = std::time::Duration::from_secs(3);
         server_config
             .keys
-            .push(PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap());
+            .push(PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap());
         let server_config = Arc::new(server_config);
 
         let socket = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

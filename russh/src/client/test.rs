@@ -10,7 +10,7 @@ mod tests {
     // Import client types directly since we're in the client module
     use crate::client::{Config, Handler, connect};
     use crate::keys::PrivateKeyWithHashAlg;
-    use crate::keys::ssh_key::rand_core::OsRng;
+    use rand::rng;
     use crate::server::{self, Auth, Handler as ServerHandler, Server, Session};
     use crate::{ChannelId, SshId}; // Import directly from crate root
     use crate::Error;
@@ -82,7 +82,7 @@ mod tests {
         let _ = env_logger::try_init();
 
         // Create a client key
-        let client_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap();
+        let client_key = PrivateKey::random(&mut rng(), ssh_key::Algorithm::Ed25519).unwrap();
 
         // Configure the server
         let mut config = server::Config::default();
@@ -91,7 +91,7 @@ mod tests {
         config.inactivity_timeout = None;
         config
             .keys
-            .push(PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap());
+            .push(PrivateKey::random(&mut rng(), ssh_key::Algorithm::Ed25519).unwrap());
         let config = Arc::new(config);
 
         // Create server struct
