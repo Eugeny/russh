@@ -153,6 +153,9 @@ impl std::fmt::Debug for ChannelReadHalf {
 
 impl ChannelReadHalf {
     /// Awaits an incoming [`ChannelMsg`], this method returns [`None`] if the channel has been closed.
+    ///
+    /// When the remote end sends `CHANNEL_CLOSE`, a [`ChannelMsg::Close`] is
+    /// delivered before this method returns [`None`].
     pub async fn wait(&mut self) -> Option<ChannelMsg> {
         self.receiver.recv().await
     }
@@ -581,6 +584,9 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + Sync + 'static> Channel<S> {
     }
 
     /// Awaits an incoming [`ChannelMsg`], this method returns [`None`] if the channel has been closed.
+    ///
+    /// When the remote end sends `CHANNEL_CLOSE`, a [`ChannelMsg::Close`] is
+    /// delivered before this method returns [`None`].
     pub async fn wait(&mut self) -> Option<ChannelMsg> {
         self.read_half.wait().await
     }
