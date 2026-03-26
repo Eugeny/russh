@@ -17,7 +17,7 @@ use core::fmt;
 use std::borrow::Cow;
 use std::num::Wrapping;
 
-use cipher::SealingKey;
+use super::cipher::SealingKey;
 use compression::Compress;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 
