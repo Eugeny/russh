@@ -54,9 +54,9 @@ getrandom = { version = "0.2.15", features = ["js"] }
 hex-literal = "0.4"
 hmac.workspace = true
 inout = { version = "0.1", features = ["std"] }
-libcrux-ml-kem = { version = "0.0.4" }
 log.workspace = true
 md5 = "0.7"
+ml-kem = "0.2.3"
 num-bigint = { version = "0.4.2", features = ["rand"] }
 # num-integer = "0.1"
 p256 = { version = "0.13", features = ["ecdh"] }
@@ -90,7 +90,7 @@ yasna = { version = "0.5.0", features = [
   "num-bigint",
 ], optional = true }
 zeroize = "1.7"
-criterion = { version = "0.3", optional = true, features = ["html_reports"] }
+criterion = { version = "0.4", optional = true, features = ["html_reports"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { workspace = true, features = [
