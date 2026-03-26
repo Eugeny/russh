@@ -226,6 +226,6 @@ pub struct Cli {
     #[clap(long, short = 'o')]
     openssh_certificate: Option<PathBuf>,
 
-    #[clap(multiple = true, index = 2, required = true)]
+    #[clap(index = 2, required = true)]
     command: Vec<String>,
 }
