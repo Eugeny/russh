@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used)]
 use criterion::*;
 use rand_core::TryRng;
+use std::hint::black_box;
 
 pub fn bench(c: &mut Criterion) {
     let mut rand_generator = black_box(rand::rng());

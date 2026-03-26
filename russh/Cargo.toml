@@ -36,6 +36,7 @@ block-padding = { version = "0.3", features = ["std"] }
 byteorder.workspace = true
 bytes.workspace = true
 cbc = { version = "0.1" }
+cipher = "0.5.1" # only pinned due to a cargo-minimal-versions failure in 0.5.0
 ctr = "0.9"
 curve25519-dalek = "5.0.0-pre.6"
 crypto-bigint = { version = "0.7.0-rc.28", features = ["alloc"] }
