@@ -91,6 +91,7 @@ subtle = "2.4"
 thiserror.workspace = true
 tokio = { workspace = true, features = ["io-util", "sync", "time"] }
 typenum = "1.17"
+universal-hash = "0.6.1" # only pinned due to a cargo-minimal-versions failure in 0.6.0
 yasna = { version = "0.5.0", features = [
   "bit-vec",
   "num-bigint",
