@@ -13,27 +13,29 @@
 // limitations under the License.
 //
 use std::borrow::Cow;
+use std::str::FromStr;
 
-use log::debug;
+use log::{debug, error};
 use rand::RngCore;
 use ssh_encoding::{Decode, Encode};
-use ssh_key::{Algorithm, EcdsaCurve, HashAlg, PrivateKey};
+use ssh_key::{Algorithm, Certificate, EcdsaCurve, HashAlg, PrivateKey, PublicKey};
 
 use crate::cipher::CIPHERS;
-use crate::helpers::NameList;
+use crate::helpers::{AlgorithmExt, NameList};
 use crate::kex::{
-    EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT, EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER, KexCause,
+    KexCause, EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT, EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER,
 };
 use crate::keys::key::safe_rng;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::server::Config;
 use crate::sshbuffer::PacketWriter;
-use crate::{AlgorithmKind, Error, cipher, compression, kex, mac, msg};
+use crate::{cipher, compression, kex, mac, msg, AlgorithmKind, Error};
 
 #[cfg(target_arch = "wasm32")]
 /// WASM-only stub
 pub struct Config {
     keys: Vec<PrivateKey>,
+    certificates: Vec<Certificate>,
 }
 
 #[derive(Debug, Clone)]
@@ -84,19 +86,81 @@ pub(crate) fn is_key_compatible_with_algo(key: &PrivateKey, algo: &Algorithm) ->
 }
 
 impl Preferred {
-    pub(crate) fn possible_host_key_algos_for_keys(
+    pub(crate) fn gather_possible_agories(
         &self,
         available_host_keys: &[PrivateKey],
-    ) -> Vec<Algorithm> {
-        self.key
-            .iter()
-            .filter(|n| {
-                available_host_keys
-                    .iter()
-                    .any(|k| is_key_compatible_with_algo(k, n))
-            })
-            .cloned()
-            .collect::<Vec<_>>()
+        available_certificates: Option<&[Certificate]>,
+        ca_public_keys: Option<&[PublicKey]>,
+    ) -> Vec<String> {
+        let mut algos = Vec::new();
+        if let Some(certs) = available_certificates {
+            debug!("found Certs");
+            for c in certs {
+                // For RSA certificates, advertise all three RSA cert algorithm
+                // variants (ssh-rsa, rsa-sha2-256, rsa-sha2-512) since the same
+                // certificate can be used with any of these signing hashes.
+                let variants: Vec<String> = match c.algorithm() {
+                    Algorithm::Rsa { .. } => vec![
+                        Algorithm::Rsa { hash: None }.to_certificate_type(),
+                        Algorithm::Rsa {
+                            hash: Some(HashAlg::Sha256),
+                        }
+                        .to_certificate_type(),
+                        Algorithm::Rsa {
+                            hash: Some(HashAlg::Sha512),
+                        }
+                        .to_certificate_type(),
+                    ],
+                    _ => vec![c.algorithm().to_certificate_type()],
+                };
+                for a in variants {
+                    if !algos.contains(&a) {
+                        debug!("Push Cert algo {a}");
+                        algos.push(a);
+                    }
+                }
+            }
+        }
+
+        // Add certificate algorithms from CA public keys
+        if let Some(ca_keys) = ca_public_keys {
+            for ca_key in ca_keys {
+                let variants: Vec<String> = match ca_key.algorithm() {
+                    Algorithm::Rsa { .. } => vec![
+                        Algorithm::Rsa { hash: None }.to_certificate_type(),
+                        Algorithm::Rsa {
+                            hash: Some(HashAlg::Sha256),
+                        }
+                        .to_certificate_type(),
+                        Algorithm::Rsa {
+                            hash: Some(HashAlg::Sha512),
+                        }
+                        .to_certificate_type(),
+                    ],
+                    _ => vec![ca_key.algorithm().to_certificate_type()],
+                };
+                for a in variants {
+                    if !algos.contains(&a) {
+                        debug!("Push CA cert algo {a}");
+                        algos.push(a);
+                    }
+                }
+            }
+        }
+
+        for algo in self.key.iter() {
+            if available_host_keys
+                .iter()
+                .any(|k| is_key_compatible_with_algo(k, algo))
+            {
+                let a = algo.to_string();
+                if !algos.contains(&a) {
+                    debug!("Push key algo {a}");
+                    algos.push(a);
+                }
+            }
+        }
+        algos
     }
 }
 
@@ -208,6 +272,8 @@ pub(crate) trait Select {
         buffer: &[u8],
         pref: &Preferred,
         available_host_keys: Option<&[PrivateKey]>,
+        available_certificates: Option<&[Certificate]>,
+        ca_public_keys: Option<&[PublicKey]>,
         cause: &KexCause,
     ) -> Result<Names, Error> {
         let &Some(mut r) = &buffer.get(17..) else {
@@ -265,8 +331,40 @@ pub(crate) trait Select {
 
         let key_string = String::decode(&mut r)?;
         let possible_host_key_algos = match available_host_keys {
-            Some(available_host_keys) => pref.possible_host_key_algos_for_keys(available_host_keys),
-            None => pref.key.iter().map(ToOwned::to_owned).collect::<Vec<_>>(),
+            Some(available_host_keys) => pref.gather_possible_agories(
+                available_host_keys,
+                available_certificates,
+                ca_public_keys,
+            ),
+            None => {
+                // When no host keys available, use preferred + CA cert algorithms
+                let mut algos = pref.key.iter().map(ToString::to_string).collect::<Vec<_>>();
+                if let Some(ca_keys) = ca_public_keys {
+                    for ca_key in ca_keys {
+                        let variants: Vec<String> = match ca_key.algorithm() {
+                            Algorithm::Rsa { .. } => vec![
+                                Algorithm::Rsa { hash: None }.to_certificate_type(),
+                                Algorithm::Rsa {
+                                    hash: Some(HashAlg::Sha256),
+                                }
+                                .to_certificate_type(),
+                                Algorithm::Rsa {
+                                    hash: Some(HashAlg::Sha512),
+                                }
+                                .to_certificate_type(),
+                            ],
+                            _ => vec![ca_key.algorithm().to_certificate_type()],
+                        };
+                        for a in variants {
+                            if !algos.contains(&a) {
+                                debug!("Push CA cert algo {a}");
+                                algos.push(a);
+                            }
+                        }
+                    }
+                }
+                algos
+            }
         };
 
         let (key_both_first, key_algorithm) = Self::select(
@@ -345,7 +443,9 @@ pub(crate) trait Select {
         let follows = u8::decode(&mut r)? != 0;
         Ok(Names {
             kex: kex_algorithm,
-            key: key_algorithm,
+            key: Algorithm::new_certificate_ext(&key_algorithm)
+                .or_else(|_| Algorithm::from_str(&key_algorithm))
+                .map_err(|_| Error::UnknownKey)?,
             cipher,
             client_mac,
             server_mac,
@@ -455,20 +555,33 @@ pub(crate) fn write_kex(
 
         if let Some(server_config) = server_config {
             // Only advertise host key algorithms that we have keys for.
-            NameList(
-                prefs
-                    .key
+            let mut algos = Vec::new();
+            // Prepend certificates
+            for cert in &server_config.certificates {
+                let algo_name = cert.algorithm().to_certificate_type();
+                if !algos.contains(&algo_name) {
+                    debug!("Prepare Cert {algo_name} for advertisement");
+                    algos.push(algo_name.clone());
+                } else {
+                    error!("No key for Cert {algo_name}, will not advertise");
+                }
+            }
+
+            // Add keys
+            for algo in prefs.key.iter() {
+                if server_config
+                    .keys
                     .iter()
-                    .filter(|algo| {
-                        server_config
-                            .keys
-                            .iter()
-                            .any(|k| is_key_compatible_with_algo(k, algo))
-                    })
-                    .map(|x| x.to_string())
-                    .collect(),
-            )
-            .encode(w)?;
+                    .any(|k| is_key_compatible_with_algo(k, algo))
+                {
+                    let algo_name = algo.to_string();
+                    if !algos.contains(&algo_name) {
+                        algos.push(algo_name);
+                    }
+                }
+            }
+
+            NameList(algos).encode(w)?;
         } else {
             NameList(prefs.key.iter().map(ToString::to_string).collect()).encode(w)?;
         }
@@ -524,6 +637,93 @@ pub(crate) fn write_kex(
 
         0u8.encode(w)?; // doesn't follow
         0u32.encode(w)?; // reserved
+        Ok(())
+    })
+}
+
+pub(crate) fn write_client_kex(
+    prefs: &Preferred,
+    writer: &mut PacketWriter,
+    certificates: Option<&[Certificate]>,
+    ca_public_keys: Option<&[PublicKey]>,
+) -> Result<Vec<u8>, Error> {
+    writer.packet(|w| {
+        msg::KEXINIT.encode(w)?;
+
+        let mut cookie = [0; 16];
+        safe_rng().fill_bytes(&mut cookie);
+        for b in cookie {
+            b.encode(w)?;
+        }
+
+        NameList(
+            prefs
+                .kex
+                .iter()
+                .filter(|k| {
+                    ![
+                        crate::kex::EXTENSION_SUPPORT_AS_SERVER,
+                        crate::kex::EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER,
+                    ]
+                    .contains(*k)
+                })
+                .map(|x| x.as_ref().to_owned())
+                .collect(),
+        )
+        .encode(w)?;
+
+        let algos = if certificates.is_some() || ca_public_keys.is_some() {
+            prefs.gather_possible_agories(&[], certificates, ca_public_keys)
+        } else {
+            prefs.key.iter().map(ToString::to_string).collect()
+        };
+        NameList(algos).encode(w)?;
+
+        NameList(
+            prefs
+                .cipher
+                .iter()
+                .map(|x| x.as_ref().to_string())
+                .collect(),
+        )
+        .encode(w)?;
+
+        NameList(
+            prefs
+                .cipher
+                .iter()
+                .map(|x| x.as_ref().to_string())
+                .collect(),
+        )
+        .encode(w)?;
+
+        NameList(prefs.mac.iter().map(|x| x.as_ref().to_string()).collect()).encode(w)?;
+
+        NameList(prefs.mac.iter().map(|x| x.as_ref().to_string()).collect()).encode(w)?;
+
+        NameList(
+            prefs
+                .compression
+                .iter()
+                .map(|x| x.as_ref().to_string())
+                .collect(),
+        )
+        .encode(w)?;
+
+        NameList(
+            prefs
+                .compression
+                .iter()
+                .map(|x| x.as_ref().to_string())
+                .collect(),
+        )
+        .encode(w)?;
+
+        Vec::<String>::new().encode(w)?;
+        Vec::<String>::new().encode(w)?;
+
+        0u8.encode(w)?;
+        0u32.encode(w)?;
         Ok(())
     })
 }

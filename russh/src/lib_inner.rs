@@ -14,7 +14,8 @@ mod tests;
 
 mod auth;
 
-mod cert;
+/// Certificate and public key types.
+pub mod cert;
 /// Cipher names
 pub mod cipher;
 /// Compression algorithm names

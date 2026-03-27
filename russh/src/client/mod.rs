@@ -1766,6 +1766,14 @@ pub struct Config {
     pub gex: GexParams,
     /// If active, invoke `set_nodelay(true)` on the ssh socket; disabled by default (i.e. Nagle's algorithm is active).
     pub nodelay: bool,
+    /// Trusted CA public keys for validating server certificates.
+    /// When provided, the corresponding certificate algorithm types will be
+    /// automatically added to the preferred host key algorithms.
+    pub ca_public_keys: Option<Vec<ssh_key::PublicKey>>,
+    /// Client certificates used for hostkey-based authentication.
+    /// When provided, the corresponding certificate algorithm types will be
+    /// advertised to the server during key exchange.
+    pub certificates: Vec<Certificate>,
 }
 
 impl Default for Config {
@@ -1788,6 +1796,8 @@ impl Default for Config {
             anonymous: false,
             gex: Default::default(),
             nodelay: false,
+            ca_public_keys: None,
+            certificates: Vec::new(),
         }
     }
 }
@@ -1817,13 +1827,21 @@ pub trait Handler: Sized + Send {
         async { Ok(()) }
     }
 
-    /// Called to check the server's public key. This is a very important
+    /// Called to check the server's public key or certificate. This is a very important
     /// step to help prevent man-in-the-middle attacks. The default
     /// implementation rejects all keys.
+    ///
+    /// When the server presents an OpenSSH certificate, the argument will be
+    /// [`PublicKeyOrCertificate::Certificate`], allowing you to validate the CA
+    /// signature, validity period, and principals. For plain host keys it will
+    /// be [`PublicKeyOrCertificate::PublicKey`].
+    ///
+    /// Use [`PublicKeyOrCertificate::public_key()`] to obtain the inner public
+    /// key in either case.
     #[allow(unused_variables)]
     fn check_server_key(
         &mut self,
-        server_public_key: &ssh_key::PublicKey,
+        server_public_key: &crate::cert::PublicKeyOrCertificate,
     ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
         async { Ok(false) }
     }
