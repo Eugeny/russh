@@ -7,17 +7,19 @@ use bytes::Bytes;
 use log::{debug, error, warn};
 use signature::Verifier;
 use ssh_encoding::{Decode, Encode};
-use ssh_key::{Mpint, PublicKey, Signature};
+use ssh_key::{Certificate, Mpint, Signature};
 
 use super::IncomingSshPacket;
+use crate::cert::PublicKeyOrCertificate;
 use crate::client::{Config, NewKeys};
+use crate::helpers::EncodedExt;
 use crate::kex::dh::groups::DhGroup;
-use crate::kex::{KexAlgorithm, KexAlgorithmImplementor, KexCause, KexProgress, KEXES};
+use crate::kex::{KEXES, KexAlgorithm, KexAlgorithmImplementor, KexCause, KexProgress};
 use crate::keys::key::parse_public_key;
 use crate::negotiation::{Names, Select};
 use crate::session::Exchange;
 use crate::sshbuffer::PacketWriter;
-use crate::{msg, negotiation, strict_kex_violation, CryptoVec, Error, SshId};
+use crate::{CryptoVec, Error, SshId, msg, negotiation, strict_kex_violation};
 
 thread_local! {
     static HASH_BUFFER: RefCell<CryptoVec> = RefCell::new(CryptoVec::new());
@@ -37,7 +39,7 @@ enum ClientKexState {
         kex: KexAlgorithm,
     },
     WaitingForNewKeys {
-        server_host_key: PublicKey,
+        server_host_key: PublicKeyOrCertificate,
         newkeys: NewKeys,
     },
 }
@@ -88,8 +90,17 @@ impl ClientKex {
     }
 
     pub fn kexinit(&mut self, output: &mut PacketWriter) -> Result<(), Error> {
-        self.exchange.client_kex_init =
-            negotiation::write_kex(&self.config.preferred, output, None)?;
+        let certificates = if self.config.certificates.is_empty() {
+            None
+        } else {
+            Some(self.config.certificates.as_slice())
+        };
+        self.exchange.client_kex_init = negotiation::write_client_kex(
+            &self.config.preferred,
+            output,
+            certificates,
+            self.config.ca_public_keys.as_deref(),
+        )?;
 
         Ok(())
     }
@@ -116,11 +127,16 @@ impl ClientKex {
 
                 let names = {
                     // read algorithms from packet.
-                    self.exchange.server_kex_init.extend_from_slice(&input.buffer);
+                    self.exchange
+                        .server_kex_init
+                        .extend_from_slice(&input.buffer);
+                    let ca_keys = self.config.ca_public_keys.as_deref();
                     negotiation::Client::read_kex(
                         &input.buffer,
                         &self.config.preferred,
                         None,
+                        None,
+                        ca_keys,
                         &self.cause,
                     )?
                 };
@@ -262,19 +278,16 @@ impl ClientKex {
                 #[allow(clippy::indexing_slicing)] // length checked
                 let r = &mut &input.buffer[1..];
 
-                let server_host_key = Bytes::decode(r)?; // server public key.
-                let server_host_key = parse_public_key(&server_host_key)?;
-                debug!(
-                    "received server host key: {:?}",
-                    server_host_key.to_openssh()
-                );
+                let server_host_key_bytes = Bytes::decode(r)?; // server public key.
 
                 let server_ephemeral = Bytes::decode(r)?;
-                self.exchange.server_ephemeral.extend_from_slice(&server_ephemeral);
+                self.exchange
+                    .server_ephemeral
+                    .extend_from_slice(&server_ephemeral);
                 kex.compute_shared_secret(&self.exchange.server_ephemeral)?;
 
-                let mut pubkey_vec = Vec::new();
-                server_host_key.to_bytes()?.encode(&mut pubkey_vec)?;
+                let mut pubkey_vec = CryptoVec::new();
+                server_host_key_bytes.encode(&mut pubkey_vec)?;
 
                 let exchange = &self.exchange;
                 let hash = HASH_BUFFER.with({
@@ -288,10 +301,47 @@ impl ClientKex {
                 let signature = Bytes::decode(r)?;
                 let signature = Signature::decode(&mut &signature[..])?;
 
-                if let Err(e) = Verifier::verify(&server_host_key, hash.as_ref(), &signature) {
-                    debug!("wrong server sig: {e:?}");
-                    return Err(Error::WrongServerSig);
-                }
+                let server_host_key = match Certificate::from_bytes(&server_host_key_bytes) {
+                    // Host certificate verification
+                    Ok(server_certificate) => {
+                        debug!(
+                            "received server certificate: {:?}",
+                            server_certificate.to_openssh()
+                        );
+                        debug!("Parsed server host key as Certificate");
+                        let inner_key_data = server_certificate.public_key();
+                        let inner_key_bytes = inner_key_data.encoded()?;
+                        let inner_public_key = parse_public_key(&inner_key_bytes)?;
+
+                        if let Err(e) =
+                            Verifier::verify(&inner_public_key, hash.as_ref(), &signature)
+                        {
+                            debug!("Certificate inner key verification failed: {e}");
+                            return Err(Error::WrongServerSig);
+                        }
+
+                        PublicKeyOrCertificate::Certificate(server_certificate)
+                    }
+                    Err(_) => {
+                        // Host key verification
+                        let server_host_key = parse_public_key(&server_host_key_bytes)?;
+                        debug!(
+                            "received server host key: {:?}",
+                            server_host_key.to_openssh()
+                        );
+                        if let Err(e) =
+                            Verifier::verify(&server_host_key, hash.as_ref(), &signature)
+                        {
+                            debug!("wrong server sig: {e:?}");
+                            return Err(Error::WrongServerSig);
+                        }
+
+                        PublicKeyOrCertificate::PublicKey {
+                            key: server_host_key,
+                            hash_alg: None,
+                        }
+                    }
+                };
 
                 let newkeys = compute_keys(
                     hash,

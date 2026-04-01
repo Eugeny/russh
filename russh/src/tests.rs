@@ -130,7 +130,7 @@ mod compress {
 
         async fn check_server_key(
             &mut self,
-            _server_public_key: &crate::keys::ssh_key::PublicKey,
+            _server_public_key: &crate::cert::PublicKeyOrCertificate,
         ) -> Result<bool, Self::Error> {
             // println!("check_server_key: {:?}", server_public_key);
             Ok(true)
@@ -224,7 +224,7 @@ mod channels {
 
             async fn check_server_key(
                 &mut self,
-                _server_public_key: &crate::keys::ssh_key::PublicKey,
+                _server_public_key: &crate::cert::PublicKeyOrCertificate,
             ) -> Result<bool, Self::Error> {
                 Ok(true)
             }
@@ -304,7 +304,7 @@ mod channels {
 
             async fn check_server_key(
                 &mut self,
-                _server_public_key: &crate::keys::ssh_key::PublicKey,
+                _server_public_key: &crate::cert::PublicKeyOrCertificate,
             ) -> Result<bool, Self::Error> {
                 Ok(true)
             }
@@ -398,7 +398,7 @@ mod channels {
 
             async fn check_server_key(
                 &mut self,
-                _server_public_key: &crate::keys::ssh_key::PublicKey,
+                _server_public_key: &crate::cert::PublicKeyOrCertificate,
             ) -> Result<bool, Self::Error> {
                 Ok(true)
             }
@@ -552,7 +552,7 @@ mod channels {
 
             async fn check_server_key(
                 &mut self,
-                _server_public_key: &crate::keys::ssh_key::PublicKey,
+                _server_public_key: &crate::cert::PublicKeyOrCertificate,
             ) -> Result<bool, Self::Error> {
                 Ok(true)
             }
