@@ -733,6 +733,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "DDtKey",
+      "name": "Artem Medvedev",
+      "avatar_url": "https://avatars.githubusercontent.com/u/26835520?v=4",
+      "profile": "http://ddtkey.com",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,
