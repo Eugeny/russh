@@ -643,6 +643,26 @@ mod channels {
     }
 }
 
+mod gex {
+    use super::*;
+
+    #[test]
+    fn peer_request_accepts_rfc4419_minimum_when_server_can_choose_stronger_group() {
+        let params = client::GexParams::from_peer_request(1024, 4097, 8192).unwrap();
+
+        assert_eq!(params.min_group_size(), 1024);
+        assert_eq!(params.preferred_group_size(), 4097);
+        assert_eq!(params.max_group_size(), 8192);
+    }
+
+    #[test]
+    fn local_client_config_still_rejects_minimum_below_2048() {
+        let error = client::GexParams::for_client_config(1024, 4097, 8192).unwrap_err();
+
+        assert!(matches!(error, Error::InvalidConfig(_)));
+    }
+}
+
 mod server_kex_junk {
     use std::sync::Arc;
 
