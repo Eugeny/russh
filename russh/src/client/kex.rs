@@ -343,6 +343,13 @@ impl ClientKex {
                     }
                 };
 
+                if let Err(e) =
+                    signature::Verifier::verify(&server_host_key, hash.as_ref(), &signature)
+                {
+                    debug!("wrong server sig: {e:?}");
+                    return Err(Error::WrongServerSig);
+                }
+
                 let newkeys = compute_keys(
                     hash,
                     kex,
