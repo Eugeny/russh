@@ -5,19 +5,18 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use log::{debug, error, warn};
-use signature::Verifier;
 use ssh_encoding::{Decode, Encode};
 use ssh_key::{Mpint, PublicKey, Signature};
 
 use super::IncomingSshPacket;
 use crate::client::{Config, NewKeys};
 use crate::kex::dh::groups::DhGroup;
-use crate::kex::{KexAlgorithm, KexAlgorithmImplementor, KexCause, KexProgress, KEXES};
+use crate::kex::{KEXES, KexAlgorithm, KexAlgorithmImplementor, KexCause, KexProgress};
 use crate::keys::key::parse_public_key;
 use crate::negotiation::{Names, Select};
 use crate::session::Exchange;
 use crate::sshbuffer::PacketWriter;
-use crate::{msg, negotiation, strict_kex_violation, CryptoVec, Error, SshId};
+use crate::{CryptoVec, Error, SshId, msg, negotiation, strict_kex_violation};
 
 thread_local! {
     static HASH_BUFFER: RefCell<CryptoVec> = RefCell::new(CryptoVec::new());
@@ -116,7 +115,9 @@ impl ClientKex {
 
                 let names = {
                     // read algorithms from packet.
-                    self.exchange.server_kex_init.extend_from_slice(&input.buffer);
+                    self.exchange
+                        .server_kex_init
+                        .extend_from_slice(&input.buffer);
                     negotiation::Client::read_kex(
                         &input.buffer,
                         &self.config.preferred,
@@ -270,7 +271,9 @@ impl ClientKex {
                 );
 
                 let server_ephemeral = Bytes::decode(r)?;
-                self.exchange.server_ephemeral.extend_from_slice(&server_ephemeral);
+                self.exchange
+                    .server_ephemeral
+                    .extend_from_slice(&server_ephemeral);
                 kex.compute_shared_secret(&self.exchange.server_ephemeral)?;
 
                 let mut pubkey_vec = Vec::new();
@@ -288,7 +291,9 @@ impl ClientKex {
                 let signature = Bytes::decode(r)?;
                 let signature = Signature::decode(&mut &signature[..])?;
 
-                if let Err(e) = Verifier::verify(&server_host_key, hash.as_ref(), &signature) {
+                if let Err(e) =
+                    signature::Verifier::verify(&server_host_key, hash.as_ref(), &signature)
+                {
                     debug!("wrong server sig: {e:?}");
                     return Err(Error::WrongServerSig);
                 }

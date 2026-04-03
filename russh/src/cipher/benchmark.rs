@@ -1,10 +1,10 @@
 #![allow(clippy::unwrap_used)]
 use criterion::*;
-use rand::TryRngCore;
+use rand_core::TryRng;
 use std::hint;
 
 pub fn bench(c: &mut Criterion) {
-    let mut rand_generator = hint::black_box(rand::rngs::OsRng {});
+    let mut rand_generator = hint::black_box(rand::rng());
 
     let mut packet_length = hint::black_box(vec![0u8; 4]);
 

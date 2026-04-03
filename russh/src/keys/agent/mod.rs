@@ -83,17 +83,16 @@ impl AgentIdentity {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ssh_key::rand_core::OsRng;
     use ssh_key::{PrivateKey, certificate};
 
     fn create_test_certificate() -> Certificate {
         use std::time::{SystemTime, UNIX_EPOCH};
 
         // Create a CA key
-        let ca_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap();
+        let ca_key = PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap();
 
         // Create a user key to be certified
-        let user_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap();
+        let user_key = PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap();
 
         // Build and sign the certificate with reasonable validity window
         let now = SystemTime::now()
@@ -104,7 +103,7 @@ mod tests {
         let valid_before = now + 86400 * 365; // 1 year from now
 
         let mut builder = certificate::Builder::new_with_random_nonce(
-            &mut OsRng,
+            &mut rand::rng(),
             user_key.public_key(),
             valid_after,
             valid_before,
@@ -120,7 +119,7 @@ mod tests {
 
     #[test]
     fn test_agent_identity_public_key_variant() {
-        let key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519)
+        let key = PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519)
             .unwrap()
             .public_key()
             .clone();
@@ -161,7 +160,7 @@ mod tests {
 
     #[test]
     fn test_agent_identity_clone() {
-        let key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519)
+        let key = PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519)
             .unwrap()
             .public_key()
             .clone();
@@ -177,7 +176,7 @@ mod tests {
 
     #[test]
     fn test_agent_identity_debug() {
-        let key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519)
+        let key = PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519)
             .unwrap()
             .public_key()
             .clone();

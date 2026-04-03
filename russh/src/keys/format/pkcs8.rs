@@ -3,7 +3,7 @@ use std::convert::{TryFrom, TryInto};
 use p256::NistP256;
 use p384::NistP384;
 use p521::NistP521;
-use pkcs8::{AssociatedOid, EncodePrivateKey, PrivateKeyInfo, SecretDocument};
+use pkcs8::{AssociatedOid, EncodePrivateKey, PrivateKeyInfoRef, SecretDocument};
 use spki::ObjectIdentifier;
 use ssh_key::PrivateKey;
 use ssh_key::private::{EcdsaKeypair, Ed25519Keypair, Ed25519PrivateKey, KeypairData};
@@ -18,7 +18,7 @@ pub fn decode_pkcs8(
 ) -> Result<ssh_key::PrivateKey, Error> {
     let doc = SecretDocument::try_from(ciphertext)?;
     let doc = if let Some(password) = password {
-        doc.decode_msg::<pkcs8::EncryptedPrivateKeyInfo>()?
+        doc.decode_msg::<pkcs8::EncryptedPrivateKeyInfoRef<'_>>()?
             .decrypt(password)?
     } else {
         doc
@@ -35,12 +35,15 @@ pub fn decode_pkcs8(
         }
         Err(_) => {
             // ASN.1 key
-            Ok(pkcs8_pki_into_keypair_data(doc.decode_msg::<PrivateKeyInfo>()?)?.try_into()?)
+            Ok(
+                pkcs8_pki_into_keypair_data(doc.decode_msg::<PrivateKeyInfoRef<'_>>()?)?
+                    .try_into()?,
+            )
         }
     }
 }
 
-fn pkcs8_pki_into_keypair_data(pki: PrivateKeyInfo<'_>) -> Result<KeypairData, Error> {
+fn pkcs8_pki_into_keypair_data(pki: PrivateKeyInfoRef<'_>) -> Result<KeypairData, Error> {
     // Temporary if {} due to multiple const_oid crate versions
     #[cfg(feature = "rsa")]
     if pki.algorithm.oid.as_bytes() == pkcs1::ALGORITHM_OID.as_bytes() {
@@ -116,9 +119,9 @@ pub fn encode_pkcs8_encrypted(
     key: &PrivateKey,
 ) -> Result<Vec<u8>, Error> {
     let pvi_bytes = encode_pkcs8(key)?;
-    let pvi = PrivateKeyInfo::try_from(pvi_bytes.as_slice())?;
+    let pvi = PrivateKeyInfoRef::try_from(pvi_bytes.as_slice())?;
 
-    use rand::RngCore;
+    use rand_core::Rng;
     let mut rng = safe_rng();
     let mut salt = [0; 64];
     rng.fill_bytes(&mut salt);
@@ -126,7 +129,7 @@ pub fn encode_pkcs8_encrypted(
     rng.fill_bytes(&mut iv);
 
     let doc = pvi.encrypt_with_params(
-        pkcs5::pbes2::Parameters::pbkdf2_sha256_aes256cbc(rounds, &salt, &iv)
+        pkcs5::pbes2::Parameters::pbkdf2_sha256_aes256cbc(rounds, &salt, iv)
             .map_err(|_| Error::InvalidParameters)?,
         pass,
     )?;
@@ -148,15 +151,15 @@ pub fn encode_pkcs8(key: &ssh_key::PrivateKey) -> Result<Vec<u8>, Error> {
         }
         ssh_key::private::KeypairData::Ecdsa(pair) => match pair {
             EcdsaKeypair::NistP256 { private, .. } => {
-                let sk = p256::SecretKey::from_bytes(private.as_slice().into())?;
+                let sk = p256::SecretKey::from_slice(private.as_slice())?;
                 sk.to_pkcs8_der()?.as_bytes().to_vec()
             }
             EcdsaKeypair::NistP384 { private, .. } => {
-                let sk = p384::SecretKey::from_bytes(private.as_slice().into())?;
+                let sk = p384::SecretKey::from_slice(private.as_slice())?;
                 sk.to_pkcs8_der()?.as_bytes().to_vec()
             }
             EcdsaKeypair::NistP521 { private, .. } => {
-                let sk = p521::SecretKey::from_bytes(private.as_slice().into())?;
+                let sk = p521::SecretKey::from_slice(private.as_slice())?;
                 sk.to_pkcs8_der()?.as_bytes().to_vec()
             }
         },

@@ -1,10 +1,7 @@
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::Arc;
 
-use rand::RngCore;
 use russh::keys::PrivateKeyWithHashAlg;
-use russh::keys::key::safe_rng;
-use russh::keys::ssh_key::rand_core::OsRng;
 use russh::server::{self, Auth, Msg, Server as _, Session};
 use russh::{Channel, ChannelMsg, client};
 use ssh_key::PrivateKey;
@@ -120,7 +117,7 @@ async fn stream(
     mut test: impl ChannelDataCopy,
 ) -> Result<(), anyhow::Error> {
     let config = Arc::new(client::Config::default());
-    let key = Arc::new(PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap());
+    let key = Arc::new(PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap());
 
     let mut session = russh::client::connect(config, addr, Client).await?;
     let channel = match session
@@ -147,7 +144,8 @@ async fn stream(
 
 fn data() -> Vec<u8> {
     let mut data = vec![0u8; WINDOW_SIZE as usize * 2 + 7]; // Check whether the window_size resizing works
-    safe_rng().fill_bytes(&mut data);
+    use rand::RngExt;
+    rand::rng().fill(&mut data[..]);
     data
 }
 
@@ -165,7 +163,7 @@ struct Server;
 impl Server {
     async fn run(addr: SocketAddr) {
         let config = Arc::new(server::Config {
-            keys: vec![PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap()],
+            keys: vec![PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap()],
             window_size: WINDOW_SIZE,
             ..Default::default()
         });

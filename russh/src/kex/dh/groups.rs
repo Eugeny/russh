@@ -1,9 +1,8 @@
 use std::fmt::Debug;
 use std::ops::Deref;
 
-use crate::keys::ssh_key::rand_core::OsRng;
 use hex_literal::hex;
-use num_bigint::{BigUint, RandBigInt};
+use num_bigint::{BigRng010, BigUint};
 
 #[derive(Clone)]
 pub enum DhGroupUInt {
@@ -282,9 +281,9 @@ impl DH {
 
     pub fn generate_private_key(&mut self, is_server: bool) -> BigUint {
         let q = (&self.prime_num - &BigUint::from(1u8)) / &BigUint::from(2u8);
-        let mut rng = OsRng;
+        let mut rng = rand::rng();
         self.private_key =
-            rng.gen_biguint_range(&if is_server { 1u8.into() } else { 2u8.into() }, &q);
+            rng.random_biguint_range(&if is_server { 1u8.into() } else { 2u8.into() }, &q);
         self.private_key.clone()
     }
 
