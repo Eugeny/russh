@@ -347,7 +347,7 @@ impl Decode for GexParams {
         let min_group_size = u32::decode(reader)? as usize;
         let preferred_group_size = u32::decode(reader)? as usize;
         let max_group_size = u32::decode(reader)? as usize;
-        GexParams::new(min_group_size, preferred_group_size, max_group_size)
+        GexParams::from_peer_request(min_group_size, preferred_group_size, max_group_size)
     }
 
     type Error = Error;

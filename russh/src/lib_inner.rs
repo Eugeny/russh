@@ -482,6 +482,13 @@ impl ChannelParams {
         self.recipient_maximum_packet_size = c.maximum_packet_size;
         self.confirmed = true;
     }
+
+    pub(crate) fn take_pending_controls(&mut self) -> (bool, bool) {
+        (
+            std::mem::take(&mut self.pending_eof),
+            std::mem::take(&mut self.pending_close),
+        )
+    }
 }
 
 /// Returns `f(val)` if `val` it is [Some], or a forever pending [Future] if it is [None].
