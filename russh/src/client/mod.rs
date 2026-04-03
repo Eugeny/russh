@@ -1685,22 +1685,42 @@ impl GexParams {
         preferred_group_size: usize,
         max_group_size: usize,
     ) -> Result<Self, Error> {
-        let this = Self {
+        Self::for_client_config(min_group_size, preferred_group_size, max_group_size)
+    }
+
+    pub fn for_client_config(
+        min_group_size: usize,
+        preferred_group_size: usize,
+        max_group_size: usize,
+    ) -> Result<Self, Error> {
+        Self::build(
             min_group_size,
             preferred_group_size,
             max_group_size,
-        };
-        this.validate()?;
-        Ok(this)
+            ValidationKind::ClientConfig,
+        )
     }
 
-    pub(crate) fn validate(&self) -> Result<(), Error> {
-        if self.min_group_size < 2048 {
-            return Err(Error::InvalidConfig(format!(
-                "min_group_size must be at least 2048 bits. We got {} bits",
-                self.min_group_size
-            )));
+    fn validate(&self, kind: ValidationKind) -> Result<(), Error> {
+        match kind {
+            ValidationKind::ClientConfig => {
+                if self.min_group_size < 2048 {
+                    return Err(Error::InvalidConfig(format!(
+                        "min_group_size must be at least 2048 bits. We got {} bits",
+                        self.min_group_size
+                    )));
+                }
+            }
+            ValidationKind::PeerRequest => {
+                if self.max_group_size < 2048 {
+                    return Err(Error::InvalidConfig(format!(
+                        "max_group_size must be at least 2048 bits. We got {} bits",
+                        self.max_group_size
+                    )));
+                }
+            }
         }
+
         if self.preferred_group_size < self.min_group_size {
             return Err(Error::InvalidConfig(format!(
                 "preferred_group_size must be at least as large as min_group_size. We have preferred_group_size = {} < min_group_size = {}",
@@ -1713,7 +1733,36 @@ impl GexParams {
                 self.max_group_size, self.preferred_group_size
             )));
         }
+
         Ok(())
+    }
+
+    pub(crate) fn from_peer_request(
+        min_group_size: usize,
+        preferred_group_size: usize,
+        max_group_size: usize,
+    ) -> Result<Self, Error> {
+        Self::build(
+            min_group_size,
+            preferred_group_size,
+            max_group_size,
+            ValidationKind::PeerRequest,
+        )
+    }
+
+    fn build(
+        min_group_size: usize,
+        preferred_group_size: usize,
+        max_group_size: usize,
+        kind: ValidationKind,
+    ) -> Result<Self, Error> {
+        let this = Self {
+            min_group_size,
+            preferred_group_size,
+            max_group_size,
+        };
+        this.validate(kind)?;
+        Ok(this)
     }
 
     pub fn min_group_size(&self) -> usize {
@@ -1727,6 +1776,12 @@ impl GexParams {
     pub fn max_group_size(&self) -> usize {
         self.max_group_size
     }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum ValidationKind {
+    ClientConfig,
+    PeerRequest,
 }
 
 impl Default for GexParams {

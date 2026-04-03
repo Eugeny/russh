@@ -453,10 +453,89 @@ mod channels {
                     panic!("Unexpected message {msg:?}");
                 }
 
+                // After the server closes the channel, we should receive an
+                // explicit Close message before the channel stream ends.
+                let msg = ch.wait().await.unwrap();
+                assert!(
+                    matches!(msg, ChannelMsg::Close),
+                    "expected Close, got {msg:?}"
+                );
                 assert!(ch.wait().await.is_none());
                 c
             },
             |s| async move { s },
+        )
+        .await;
+    }
+
+    /// Verify that the server-side CHANNEL_CLOSE handler delivers
+    /// `ChannelMsg::Close` before the channel stream ends.
+    #[tokio::test]
+    async fn test_server_receives_close_on_client_close() {
+        #[derive(Debug)]
+        struct Client {}
+
+        impl client::Handler for Client {
+            type Error = crate::Error;
+
+            async fn check_server_key(
+                &mut self,
+                _server_public_key: &crate::keys::ssh_key::PublicKey,
+            ) -> Result<bool, Self::Error> {
+                Ok(true)
+            }
+        }
+
+        struct ServerHandle {
+            channel: Option<tokio::sync::oneshot::Sender<Channel<server::Msg>>>,
+        }
+
+        impl server::Handler for ServerHandle {
+            type Error = crate::Error;
+
+            async fn auth_publickey(
+                &mut self,
+                _: &str,
+                _: &crate::keys::ssh_key::PublicKey,
+            ) -> Result<server::Auth, Self::Error> {
+                Ok(server::Auth::Accept)
+            }
+
+            async fn channel_open_session(
+                &mut self,
+                channel: Channel<server::Msg>,
+                _session: &mut server::Session,
+            ) -> Result<bool, Self::Error> {
+                if let Some(tx) = self.channel.take() {
+                    tx.send(channel).unwrap();
+                }
+                Ok(true)
+            }
+        }
+
+        let (tx, rx) = tokio::sync::oneshot::channel::<Channel<server::Msg>>();
+        let sh = ServerHandle { channel: Some(tx) };
+
+        test_session(
+            Client {},
+            sh,
+            |c| async move {
+                let ch = c.channel_open_session().await.unwrap();
+                ch.close().await.unwrap();
+                c
+            },
+            |s| async move {
+                let mut ch = rx.await.unwrap();
+                // The server should receive an explicit Close message
+                // when the client closes the channel.
+                let msg = ch.wait().await.unwrap();
+                assert!(
+                    matches!(msg, ChannelMsg::Close),
+                    "expected Close, got {msg:?}"
+                );
+                assert!(ch.wait().await.is_none());
+                s
+            },
         )
         .await;
     }
@@ -559,6 +638,26 @@ mod channels {
             },
         )
         .await;
+    }
+}
+
+mod gex {
+    use super::*;
+
+    #[test]
+    fn peer_request_accepts_rfc4419_minimum_when_server_can_choose_stronger_group() {
+        let params = client::GexParams::from_peer_request(1024, 4097, 8192).unwrap();
+
+        assert_eq!(params.min_group_size(), 1024);
+        assert_eq!(params.preferred_group_size(), 4097);
+        assert_eq!(params.max_group_size(), 8192);
+    }
+
+    #[test]
+    fn local_client_config_still_rejects_minimum_below_2048() {
+        let error = client::GexParams::for_client_config(1024, 4097, 8192).unwrap_err();
+
+        assert!(matches!(error, Error::InvalidConfig(_)));
     }
 }
 

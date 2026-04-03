@@ -97,6 +97,7 @@ impl<C> Debug for CommonSession<C> {
     }
 }
 
+#[must_use]
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum ChannelFlushResult {
     Incomplete {
@@ -115,11 +116,12 @@ impl ChannelFlushResult {
             ChannelFlushResult::Complete { wrote, .. } => *wrote,
         }
     }
-    pub(crate) fn complete(wrote: usize, channel: &ChannelParams) -> Self {
+    pub(crate) fn complete(wrote: usize, channel: &mut ChannelParams) -> Self {
+        let (pending_eof, pending_close) = channel.take_pending_controls();
         ChannelFlushResult::Complete {
             wrote,
-            pending_eof: channel.pending_eof,
-            pending_close: channel.pending_close,
+            pending_eof,
+            pending_close,
         }
     }
 }
@@ -352,23 +354,19 @@ impl Encrypted {
     }
 
     pub fn flush_pending(&mut self, channel: ChannelId) -> Result<usize, crate::Error> {
-        let mut pending_size = 0;
-        let mut maybe_flush_result = Option::<ChannelFlushResult>::None;
-
-        if let Some(channel) = self.channels.get_mut(&channel) {
-            let flush_result = Self::flush_channel(&mut self.write, channel)?;
-            pending_size += flush_result.wrote();
-            maybe_flush_result = Some(flush_result);
-        }
-        if let Some(flush_result) = maybe_flush_result {
-            self.handle_flushed_channel(channel, flush_result)?
-        }
-        Ok(pending_size)
+        let flush_result = match self.channels.get_mut(&channel) {
+            Some(ch) => Self::flush_channel(&mut self.write, ch)?,
+            None => return Ok(0),
+        };
+        let wrote = flush_result.wrote();
+        self.handle_flushed_channel(channel, flush_result)?;
+        Ok(wrote)
     }
 
     pub fn flush_all_pending(&mut self) -> Result<(), crate::Error> {
-        for channel in self.channels.values_mut() {
-            Self::flush_channel(&mut self.write, channel)?;
+        let channel_ids: Vec<ChannelId> = self.channels.keys().copied().collect();
+        for channel_id in channel_ids {
+            self.flush_pending(channel_id)?;
         }
         Ok(())
     }
@@ -615,4 +613,227 @@ pub(crate) enum GlobalRequestResponse {
     /// request was for StreamLocalForward, sends true for success or false for failure
     StreamLocalForward(oneshot::Sender<bool>),
     CancelStreamLocalForward(oneshot::Sender<bool>),
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::{HashMap, VecDeque};
+    use std::num::Wrapping;
+
+    use byteorder::{BigEndian, ByteOrder};
+    use bytes::Bytes;
+
+    use super::{Encrypted, EncryptedState, Exchange};
+    use crate::compression::{Compression, Decompress};
+    use crate::kex::{KEXES, NONE};
+    use crate::{ChannelId, ChannelParams, CryptoVec, mac, msg};
+
+    fn test_encrypted() -> Encrypted {
+        Encrypted {
+            state: EncryptedState::Authenticated,
+            exchange: Some(Exchange::default()),
+            kex: KEXES.get(&NONE).unwrap().make(),
+            key: 0,
+            client_mac: mac::NONE,
+            server_mac: mac::NONE,
+            session_id: CryptoVec::new(),
+            channels: HashMap::new(),
+            last_channel_id: Wrapping(0),
+            write: Vec::new(),
+            write_cursor: 0,
+            last_rekey: russh_util::time::Instant::now(),
+            server_compression: Compression::None,
+            client_compression: Compression::None,
+            decompress: Decompress::None,
+            rekey_wanted: false,
+            received_extensions: Vec::new(),
+            extension_info_awaiters: HashMap::new(),
+        }
+    }
+
+    fn test_channel(
+        sender_channel: ChannelId,
+        recipient_channel: u32,
+        pending_eof: bool,
+        pending_close: bool,
+    ) -> ChannelParams {
+        ChannelParams {
+            recipient_channel,
+            sender_channel,
+            recipient_window_size: 1024,
+            sender_window_size: 1024,
+            recipient_maximum_packet_size: 1024,
+            sender_maximum_packet_size: 1024,
+            confirmed: true,
+            wants_reply: false,
+            pending_data: VecDeque::from([(Bytes::from_static(b"hello"), None, 0)]),
+            pending_eof,
+            pending_close,
+        }
+    }
+
+    fn packet_types(buf: &[u8]) -> Vec<u8> {
+        let mut packet_types = Vec::new();
+        let mut cursor = 0;
+
+        while cursor < buf.len() {
+            let packet_len = BigEndian::read_u32(&buf[cursor..cursor + 4]) as usize;
+            packet_types.push(buf[cursor + 4]);
+            cursor += 4 + packet_len;
+        }
+
+        packet_types
+    }
+
+    fn test_channel_windowed(
+        sender_channel: ChannelId,
+        recipient_channel: u32,
+        window_size: u32,
+        pending_eof: bool,
+        pending_close: bool,
+    ) -> ChannelParams {
+        ChannelParams {
+            recipient_channel,
+            sender_channel,
+            recipient_window_size: window_size,
+            sender_window_size: 1024,
+            recipient_maximum_packet_size: 1024,
+            sender_maximum_packet_size: 1024,
+            confirmed: true,
+            wants_reply: false,
+            pending_data: VecDeque::from([(Bytes::from_static(b"hello"), None, 0)]),
+            pending_eof,
+            pending_close,
+        }
+    }
+
+    // flush_pending (single-channel path)
+
+    #[test]
+    fn flush_pending_replays_deferred_eof_once() {
+        let channel_id = ChannelId(10);
+        let mut encrypted = test_encrypted();
+        encrypted
+            .channels
+            .insert(channel_id, test_channel(channel_id, 42, true, false));
+
+        encrypted.flush_pending(channel_id).unwrap();
+        assert_eq!(
+            packet_types(&encrypted.write),
+            vec![msg::CHANNEL_DATA, msg::CHANNEL_EOF]
+        );
+        assert!(!encrypted.channels[&channel_id].pending_eof);
+
+        // Second flush must not re-emit EOF.
+        encrypted.flush_pending(channel_id).unwrap();
+        assert_eq!(
+            packet_types(&encrypted.write),
+            vec![msg::CHANNEL_DATA, msg::CHANNEL_EOF]
+        );
+    }
+
+    #[test]
+    fn flush_pending_replays_deferred_close_and_removes_channel() {
+        let channel_id = ChannelId(11);
+        let mut encrypted = test_encrypted();
+        encrypted
+            .channels
+            .insert(channel_id, test_channel(channel_id, 43, true, true));
+
+        encrypted.flush_pending(channel_id).unwrap();
+        assert_eq!(
+            packet_types(&encrypted.write),
+            vec![msg::CHANNEL_DATA, msg::CHANNEL_EOF, msg::CHANNEL_CLOSE]
+        );
+        assert!(!encrypted.channels.contains_key(&channel_id));
+    }
+
+    #[test]
+    fn flush_pending_no_controls_when_incomplete() {
+        // Window smaller than data: flush is incomplete, EOF/CLOSE must not be sent.
+        let channel_id = ChannelId(12);
+        let mut encrypted = test_encrypted();
+        encrypted.channels.insert(
+            channel_id,
+            test_channel_windowed(channel_id, 44, 3, true, true),
+        );
+
+        encrypted.flush_pending(channel_id).unwrap();
+        // Only partial data fits; no EOF or CLOSE yet.
+        assert_eq!(packet_types(&encrypted.write), vec![msg::CHANNEL_DATA]);
+        assert!(encrypted.channels.contains_key(&channel_id));
+        assert!(encrypted.channels[&channel_id].pending_eof);
+        assert!(encrypted.channels[&channel_id].pending_close);
+    }
+
+    // flush_all_pending (multi-channel path)
+
+    #[test]
+    fn flush_all_pending_replays_deferred_eof_once() {
+        let channel_id = ChannelId(1);
+        let mut encrypted = test_encrypted();
+        encrypted
+            .channels
+            .insert(channel_id, test_channel(channel_id, 42, true, false));
+
+        encrypted.flush_all_pending().unwrap();
+        assert_eq!(
+            packet_types(&encrypted.write),
+            vec![msg::CHANNEL_DATA, msg::CHANNEL_EOF]
+        );
+        assert!(!encrypted.channels[&channel_id].pending_eof);
+
+        encrypted.flush_all_pending().unwrap();
+        assert_eq!(
+            packet_types(&encrypted.write),
+            vec![msg::CHANNEL_DATA, msg::CHANNEL_EOF]
+        );
+    }
+
+    #[test]
+    fn flush_all_pending_replays_deferred_close_and_removes_channel() {
+        let channel_id = ChannelId(2);
+        let mut encrypted = test_encrypted();
+        encrypted
+            .channels
+            .insert(channel_id, test_channel(channel_id, 43, true, true));
+
+        encrypted.flush_all_pending().unwrap();
+        assert_eq!(
+            packet_types(&encrypted.write),
+            vec![msg::CHANNEL_DATA, msg::CHANNEL_EOF, msg::CHANNEL_CLOSE]
+        );
+        assert!(!encrypted.channels.contains_key(&channel_id));
+    }
+
+    #[test]
+    fn flush_all_pending_handles_multiple_channels_independently() {
+        let eof_only = ChannelId(3);
+        let close_too = ChannelId(4);
+        let mut encrypted = test_encrypted();
+        encrypted
+            .channels
+            .insert(eof_only, test_channel(eof_only, 50, true, false));
+        encrypted
+            .channels
+            .insert(close_too, test_channel(close_too, 51, true, true));
+
+        encrypted.flush_all_pending().unwrap();
+
+        // eof_only: data + EOF, channel still present
+        assert!(encrypted.channels.contains_key(&eof_only));
+        assert!(!encrypted.channels[&eof_only].pending_eof);
+
+        // close_too: data + EOF + CLOSE, channel removed
+        assert!(!encrypted.channels.contains_key(&close_too));
+
+        // Combined wire output contains both sets of packets (order may vary by map iteration).
+        let types = packet_types(&encrypted.write);
+        assert_eq!(types.iter().filter(|&&t| t == msg::CHANNEL_DATA).count(), 2);
+        assert_eq!(types.iter().filter(|&&t| t == msg::CHANNEL_EOF).count(), 2);
+        assert_eq!(
+            types.iter().filter(|&&t| t == msg::CHANNEL_CLOSE).count(),
+            1
+        );
+    }
 }
