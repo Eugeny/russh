@@ -1,6 +1,5 @@
 #![allow(clippy::unwrap_used)]
 use criterion::*;
-use rand::TryRngCore;
 use rand_core::TryRng;
 use std::hint;
 
