@@ -123,7 +123,7 @@ pub fn encode_pkcs8_encrypted(
 
     use rand_core::Rng;
     let mut rng = safe_rng();
-    let mut salt = [0; 64];
+    let mut salt = [0; 32];
     rng.fill_bytes(&mut salt);
     let mut iv = [0; 16];
     rng.fill_bytes(&mut iv);
