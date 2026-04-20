@@ -522,7 +522,13 @@ async fn read_userauth_info_response<H: Handler + Send, R: Reader>(
     if let Some(CurrentRequest::KeyboardInteractive { ref submethods }) = auth_request.current {
         let n = map_err!(u32::decode(r))?;
 
-        let mut responses = Vec::with_capacity(n as usize);
+        // Bound both allocation and iteration by remaining packet data to
+        // prevent a malicious client from causing a multi-GB allocation or
+        // billions of loop iterations with a crafted count.
+        // Each response needs at least 4 bytes (length prefix).
+        let max_responses = r.remaining_len().saturating_add(3) / 4;
+        let n = (n as usize).min(max_responses);
+        let mut responses = Vec::with_capacity(n);
         for _ in 0..n {
             responses.push(Bytes::decode(r).ok())
         }
