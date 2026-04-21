@@ -496,6 +496,7 @@ mod channels {
 
         impl server::Handler for ServerHandle {
             type Error = crate::Error;
+            type Data = ();
 
             async fn auth_publickey(
                 &mut self,
@@ -849,6 +850,7 @@ mod future_certificate {
 
             impl server::Handler for CertHandler {
                 type Error = crate::Error;
+                type Data = ();
 
                 async fn auth_publickey_offered(
                     &mut self,
