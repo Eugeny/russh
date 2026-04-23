@@ -18,6 +18,7 @@ use std::borrow::Cow;
 use std::num::Wrapping;
 
 use bytes::{Bytes, BytesMut};
+use log::debug;
 use ssh_encoding::Writer;
 use super::cipher::SealingKey;
 use compression::Compress;
@@ -73,9 +74,10 @@ fn test_ssh_id() {
 }
 
 #[test]
-fn test_write_packet_retains_reusable_buffer_for_cold_path_packets() {
+fn test_write_packet_leaves_reusable_buffer_for_cold_path_packets() {
     let mut writer = PacketWriter::clear();
     let large_len = 128 * 1024;
+    let packet_buffer_capacity = writer.packet_buffer.capacity();
 
     writer
         .write_packet(|buf| {
@@ -83,7 +85,7 @@ fn test_write_packet_retains_reusable_buffer_for_cold_path_packets() {
             Ok(())
         })
         .unwrap();
-    assert!(writer.packet_buffer.capacity() >= large_len);
+    assert_eq!(writer.packet_buffer.capacity(), packet_buffer_capacity);
 }
 
 #[test]
@@ -369,6 +371,8 @@ impl Debug for PacketWriter {
 }
 
 impl PacketWriter {
+    // SSH packet prefix = packet_length (cipher::PACKET_LENGTH_LEN bytes)
+    // + padding_length (1 byte).
     const PACKET_PREFIX_LEN: usize = cipher::PACKET_LENGTH_LEN + 1;
 
     pub fn clear() -> Self {
@@ -428,7 +432,6 @@ impl PacketWriter {
                     debug!("> msg type {message_type:?}, len {payload_len}");
                 }
 
-                self.packet_buffer.reserve(payload_len);
                 self.cipher
                     .finish_packet(offset, payload_len, &mut self.write_buffer);
                 Ok(())

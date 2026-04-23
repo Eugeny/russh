@@ -209,6 +209,7 @@ pub(crate) trait SealingKey {
 
     fn seal(&mut self, seqn: u32, plaintext_in_ciphertext_out: &mut [u8], tag_out: &mut [u8]);
 
+    #[allow(clippy::indexing_slicing)] // PacketWriter reserves and sizes the packet buffer first
     fn finish_packet(&mut self, offset: usize, payload_len: usize, buffer: &mut SSHBuffer) {
         let payload_start = offset + PACKET_LENGTH_LEN + PADDING_LENGTH_LEN;
         let payload_end = payload_start + payload_len;
@@ -222,9 +223,8 @@ pub(crate) trait SealingKey {
         // Maximum packet length:
         // https://tools.ietf.org/html/rfc4253#section-6.1
         assert!(packet_length <= u32::MAX as usize);
-        #[allow(clippy::unwrap_used)] // length checked
         BigEndian::write_u32(
-            (&mut buffer.buffer[offset..offset + PACKET_LENGTH_LEN]).try_into().unwrap(),
+            &mut buffer.buffer[offset..offset + PACKET_LENGTH_LEN],
             packet_length as u32,
         );
 
