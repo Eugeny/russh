@@ -887,7 +887,7 @@ impl Session {
                 } => {
                     debug!("sending ssh-userauth service requset");
                     if !*sent {
-                        self.common.packet_writer.packet(|w| {
+                        self.common.packet_writer.write_packet(|w| {
                             msg::SERVICE_REQUEST.encode(w)?;
                             "ssh-userauth".encode(w)?;
                             Ok(())

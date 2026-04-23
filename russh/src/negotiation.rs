@@ -420,7 +420,7 @@ pub(crate) fn write_kex(
     writer: &mut PacketWriter,
     server_config: Option<&Config>,
 ) -> Result<Bytes, Error> {
-    writer.packet(|w| {
+    writer.packet_bytes(|w| {
         // buf.clear();
         msg::KEXINIT.encode(w)?;
 

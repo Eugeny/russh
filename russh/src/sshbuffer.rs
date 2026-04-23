@@ -17,7 +17,8 @@ use core::fmt;
 use std::borrow::Cow;
 use std::num::Wrapping;
 
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
+use ssh_encoding::Writer;
 use super::cipher::SealingKey;
 use compression::Compress;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
@@ -72,7 +73,7 @@ fn test_ssh_id() {
 }
 
 #[test]
-fn test_packet_retains_reusable_buffer_for_cold_path_packets() {
+fn test_write_packet_retains_reusable_buffer_for_cold_path_packets() {
     let mut writer = PacketWriter::clear();
     let large_len = 128 * 1024;
 
@@ -83,7 +84,11 @@ fn test_packet_retains_reusable_buffer_for_cold_path_packets() {
         })
         .unwrap();
     assert!(writer.packet_buffer.capacity() >= large_len);
+}
 
+#[test]
+fn test_packet_returns_retained_bytes() {
+    let mut writer = PacketWriter::clear();
     let retained = writer
         .packet(|buf| {
             buf.extend_from_slice(b"abc");
@@ -92,7 +97,46 @@ fn test_packet_retains_reusable_buffer_for_cold_path_packets() {
         .unwrap();
 
     assert_eq!(&retained[..], b"abc");
-    assert!(writer.packet_buffer.capacity() >= large_len);
+}
+
+#[test]
+fn packet_bytes_returns_retained_bytes() {
+    let mut writer = PacketWriter::clear();
+    let retained = writer
+        .packet_bytes(|buf| {
+            buf.extend_from_slice(b"abc");
+            Ok(())
+        })
+        .unwrap();
+
+    assert_eq!(&retained[..], b"abc");
+}
+
+#[test]
+fn packet_bytes_matches_packet_output() {
+    let payload = b"abcdefghijklmno".to_vec();
+
+    let mut packet_writer = PacketWriter::clear();
+    let packet_retained = packet_writer
+        .packet(|buf| {
+            buf.extend_from_slice(&payload);
+            Ok(())
+        })
+        .unwrap();
+    let packet_buffer = packet_writer.buffer().buffer.clone();
+    let packet_bytes = packet_writer.buffer().bytes;
+
+    let mut packet_bytes_writer = PacketWriter::clear();
+    let bytes_retained = packet_bytes_writer
+        .packet_bytes(|buf| {
+            buf.extend_from_slice(&payload);
+            Ok(())
+        })
+        .unwrap();
+
+    assert_eq!(packet_retained, bytes_retained);
+    assert_eq!(packet_bytes_writer.buffer().buffer, packet_buffer);
+    assert_eq!(packet_bytes_writer.buffer().bytes, packet_bytes);
 }
 
 #[test]
@@ -184,6 +228,35 @@ fn test_packet_retains_plaintext_for_compressed_packets() {
     assert_eq!(&retained[..], &payload);
 }
 
+#[cfg(feature = "flate2")]
+#[test]
+fn packet_bytes_compressed_matches_packet_output() {
+    let payload = b"abcdefghijklmnoabcdefghijklmno".to_vec();
+
+    let mut packet_writer = PacketWriter::new(Box::new(cipher::clear::Key {}), zlib_compress());
+    let packet_retained = packet_writer
+        .packet(|buf| {
+            buf.extend_from_slice(&payload);
+            Ok(())
+        })
+        .unwrap();
+    let packet_buffer = packet_writer.buffer().buffer.clone();
+    let packet_bytes = packet_writer.buffer().bytes;
+
+    let mut packet_bytes_writer =
+        PacketWriter::new(Box::new(cipher::clear::Key {}), zlib_compress());
+    let bytes_retained = packet_bytes_writer
+        .packet_bytes(|buf| {
+            buf.extend_from_slice(&payload);
+            Ok(())
+        })
+        .unwrap();
+
+    assert_eq!(packet_retained, bytes_retained);
+    assert_eq!(packet_bytes_writer.buffer().buffer, packet_buffer);
+    assert_eq!(packet_bytes_writer.buffer().bytes, packet_bytes);
+}
+
 /// SSH packet read/write buffer. Uses Vec<u8> (not CryptoVec/mlocked) because
 /// packet data is not secret material.
 #[derive(Debug, Default)]
@@ -208,6 +281,43 @@ impl SSHBuffer {
 
     pub fn send_ssh_id(&mut self, id: &SshId) {
         id.write(&mut self.buffer);
+    }
+}
+
+pub(crate) struct PacketBytesWriter {
+    buffer: BytesMut,
+}
+
+impl Writer for PacketBytesWriter {
+    fn write(&mut self, bytes: &[u8]) -> ssh_encoding::Result<()> {
+        self.buffer.extend_from_slice(bytes);
+        Ok(())
+    }
+}
+
+impl PacketBytesWriter {
+    #[allow(dead_code)]
+    pub(crate) fn push(&mut self, byte: u8) {
+        self.buffer.extend_from_slice(&[byte]);
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn extend_from_slice(&mut self, bytes: &[u8]) {
+        self.buffer.extend_from_slice(bytes);
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn len(&self) -> usize {
+        self.buffer.len()
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn is_empty(&self) -> bool {
+        self.buffer.is_empty()
+    }
+
+    fn freeze(self) -> Bytes {
+        self.buffer.freeze()
     }
 }
 
@@ -366,14 +476,30 @@ impl PacketWriter {
 
     /// Sends and returns the packet contents for callers that need to retain
     /// the plaintext packet after it has been queued for encryption.
+    #[allow(dead_code)]
     pub fn packet<F: FnOnce(&mut Vec<u8>) -> Result<(), Error>>(
         &mut self,
         f: F,
     ) -> Result<Bytes, Error> {
         let buf = self.prepare_packet(f)?;
-        let result = self.packet_raw(&buf).map(|()| Bytes::copy_from_slice(&buf));
-        self.packet_buffer = buf;
-        result
+        if let Err(err) = self.packet_raw(&buf) {
+            self.packet_buffer = buf;
+            return Err(err);
+        }
+        Ok(Bytes::from(buf))
+    }
+
+    pub(crate) fn packet_bytes<F>(&mut self, f: F) -> Result<Bytes, Error>
+    where
+        F: FnOnce(&mut PacketBytesWriter) -> Result<(), Error>,
+    {
+        let mut buf = PacketBytesWriter {
+            buffer: BytesMut::new(),
+        };
+        f(&mut buf)?;
+        let packet = buf.freeze();
+        self.packet_raw(packet.as_ref())?;
+        Ok(packet)
     }
 
     pub fn buffer(&mut self) -> &mut SSHBuffer {
