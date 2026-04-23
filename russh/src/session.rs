@@ -845,15 +845,26 @@ mod tests {
             .channels
             .insert(channel_id, test_channel(channel_id, 42, false, false));
 
-        let initial_pending = encrypted.channels[&channel_id].pending_data.len();
+        let channel = &encrypted.channels[&channel_id];
+        let initial_pending = channel.pending_data.len();
+        assert!(initial_pending > 0);
+        let initial_front = channel.pending_data.front().unwrap();
+        let initial_front_data = initial_front.0.to_vec();
+        let initial_front_ext = initial_front.1;
+
         encrypted
             .data(channel_id, Bytes::from_static(b"new"), false)
             .unwrap();
 
+        let channel = &encrypted.channels[&channel_id];
+        assert_eq!(channel.pending_data.len(), initial_pending + 1);
         assert_eq!(
-            encrypted.channels[&channel_id].pending_data.len(),
-            initial_pending + 1
+            channel.pending_data.front().unwrap().0.as_ref(),
+            initial_front_data.as_slice()
         );
+        assert_eq!(channel.pending_data.front().unwrap().1, initial_front_ext);
+        assert_eq!(channel.pending_data.back().unwrap().0.as_ref(), b"new");
+        assert_eq!(channel.pending_data.back().unwrap().1, None);
         assert!(encrypted.write.is_empty());
     }
 
@@ -866,13 +877,25 @@ mod tests {
             .channels
             .insert(channel_id, test_channel(channel_id, 42, false, false));
 
-        let initial_pending = encrypted.channels[&channel_id].pending_data.len();
+        let channel = &encrypted.channels[&channel_id];
+        let initial_pending = channel.pending_data.len();
+        assert!(initial_pending > 0);
+        let initial_front = channel.pending_data.front().unwrap();
+        let initial_front_data = initial_front.0.to_vec();
+        let initial_front_ext = initial_front.1;
+
         encrypted
             .extended_data(channel_id, ext, Bytes::from_static(b"new"), false)
             .unwrap();
 
         let channel = &encrypted.channels[&channel_id];
         assert_eq!(channel.pending_data.len(), initial_pending + 1);
+        assert_eq!(
+            channel.pending_data.front().unwrap().0.as_ref(),
+            initial_front_data.as_slice()
+        );
+        assert_eq!(channel.pending_data.front().unwrap().1, initial_front_ext);
+        assert_eq!(channel.pending_data.back().unwrap().0.as_ref(), b"new");
         assert_eq!(channel.pending_data.back().unwrap().1, Some(ext));
         assert!(encrypted.write.is_empty());
     }
