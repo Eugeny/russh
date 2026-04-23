@@ -449,7 +449,7 @@ impl Encrypted {
         let buf0 = buf0.into();
         if let Some(channel) = self.channels.get_mut(&channel) {
             assert!(channel.confirmed);
-            if !channel.pending_data.is_empty() && is_rekeying {
+            if !channel.pending_data.is_empty() || is_rekeying {
                 channel.pending_data.push_back((buf0, None, 0));
                 return Ok(());
             }
@@ -473,7 +473,7 @@ impl Encrypted {
         let buf0 = buf0.into();
         if let Some(channel) = self.channels.get_mut(&channel) {
             assert!(channel.confirmed);
-            if !channel.pending_data.is_empty() && is_rekeying {
+            if !channel.pending_data.is_empty() || is_rekeying {
                 channel.pending_data.push_back((buf0, Some(ext), 0));
                 return Ok(());
             }
@@ -835,5 +835,45 @@ mod tests {
             types.iter().filter(|&&t| t == msg::CHANNEL_CLOSE).count(),
             1
         );
+    }
+
+    #[test]
+    fn data_queues_behind_existing_pending_data_when_not_rekeying() {
+        let channel_id = ChannelId(5);
+        let mut encrypted = test_encrypted();
+        encrypted
+            .channels
+            .insert(channel_id, test_channel(channel_id, 42, false, false));
+
+        let initial_pending = encrypted.channels[&channel_id].pending_data.len();
+        encrypted
+            .data(channel_id, Bytes::from_static(b"new"), false)
+            .unwrap();
+
+        assert_eq!(
+            encrypted.channels[&channel_id].pending_data.len(),
+            initial_pending + 1
+        );
+        assert!(encrypted.write.is_empty());
+    }
+
+    #[test]
+    fn extended_data_queues_behind_existing_pending_data_when_not_rekeying() {
+        let channel_id = ChannelId(6);
+        let ext = 1;
+        let mut encrypted = test_encrypted();
+        encrypted
+            .channels
+            .insert(channel_id, test_channel(channel_id, 42, false, false));
+
+        let initial_pending = encrypted.channels[&channel_id].pending_data.len();
+        encrypted
+            .extended_data(channel_id, ext, Bytes::from_static(b"new"), false)
+            .unwrap();
+
+        let channel = &encrypted.channels[&channel_id];
+        assert_eq!(channel.pending_data.len(), initial_pending + 1);
+        assert_eq!(channel.pending_data.back().unwrap().1, Some(ext));
+        assert!(encrypted.write.is_empty());
     }
 }
