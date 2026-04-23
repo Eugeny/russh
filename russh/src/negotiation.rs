@@ -131,21 +131,12 @@ const CIPHER_ORDER: &[cipher::Name] = &[
     cipher::AES_128_CTR,
 ];
 
-// SHA-1 MAC variants excluded; see HMAC_ORDER for the full list including legacy algorithms.
+// SHA-1 MAC variants are excluded from defaults.
 const SAFE_HMAC_ORDER: &[mac::Name] = &[
     mac::HMAC_SHA512_ETM,
     mac::HMAC_SHA256_ETM,
     mac::HMAC_SHA512,
     mac::HMAC_SHA256,
-];
-
-const HMAC_ORDER: &[mac::Name] = &[
-    mac::HMAC_SHA512_ETM,
-    mac::HMAC_SHA256_ETM,
-    mac::HMAC_SHA512,
-    mac::HMAC_SHA256,
-    mac::HMAC_SHA1_ETM,
-    mac::HMAC_SHA1,
 ];
 
 const COMPRESSION_ORDER: &[compression::Name] = &[
