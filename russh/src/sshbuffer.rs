@@ -87,6 +87,31 @@ fn test_write_packet_retains_reusable_buffer_for_cold_path_packets() {
 }
 
 #[test]
+fn reserve_cleartext_packet_output_reserves_output_capacity() {
+    let mut writer = PacketWriter::clear();
+    let payload_bytes = 4096;
+    let packet_count = 4;
+
+    writer.reserve_cleartext_packet_output(payload_bytes, packet_count);
+
+    let expected = payload_bytes
+        + packet_count * (PacketWriter::PACKET_PREFIX_LEN + writer.cipher.tag_len() + 32);
+    assert!(writer.write_buffer.buffer.capacity() >= expected);
+    assert!(writer.write_buffer.buffer.is_empty());
+}
+
+#[cfg(feature = "flate2")]
+#[test]
+fn reserve_cleartext_packet_output_ignores_compressed_writer() {
+    let mut writer = PacketWriter::new(Box::new(cipher::clear::Key {}), zlib_compress());
+    let capacity = writer.write_buffer.buffer.capacity();
+
+    writer.reserve_cleartext_packet_output(4096, 4);
+
+    assert_eq!(writer.write_buffer.buffer.capacity(), capacity);
+}
+
+#[test]
 fn test_packet_returns_retained_bytes() {
     let mut writer = PacketWriter::clear();
     let retained = writer
@@ -472,6 +497,23 @@ impl PacketWriter {
         let result = self.packet_raw(&buf);
         self.packet_buffer = buf;
         result
+    }
+
+    pub(crate) fn reserve_cleartext_packet_output(
+        &mut self,
+        payload_bytes: usize,
+        packet_count: usize,
+    ) {
+        if !matches!(&self.compress, Compress::None) {
+            return;
+        }
+
+        // Padding is cipher-dependent and rounded to the cipher block size.
+        // Reserving a small fixed margin avoids repeated output-buffer growth
+        // without coupling callers to individual cipher padding formulas.
+        let per_packet_margin = Self::PACKET_PREFIX_LEN + self.cipher.tag_len() + 32;
+        let additional = payload_bytes.saturating_add(packet_count.saturating_mul(per_packet_margin));
+        self.write_buffer.buffer.reserve(additional);
     }
 
     /// Sends and returns the packet contents for callers that need to retain
