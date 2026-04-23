@@ -890,7 +890,7 @@ impl<H: Handler> Handle<H> {
     ) -> Result<(), bytes::Bytes> {
         let data = data.into();
         self.sender
-            .send(Msg::Channel(id, ChannelMsg::Data { data: data.clone() }))
+            .send(Msg::Channel(id, ChannelMsg::Data { data }))
             .await
             .map_err(|e| match e.0 {
                 Msg::Channel(_, ChannelMsg::Data { data, .. }) => data,

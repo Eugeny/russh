@@ -104,9 +104,7 @@ impl Handle {
     pub async fn data(&self, id: ChannelId, data: impl Into<bytes::Bytes>) -> Result<(), bytes::Bytes> {
         let data = data.into();
         self.sender
-            .send(Msg::Channel(id, ChannelMsg::Data {
-                data: data.clone(),
-            }))
+            .send(Msg::Channel(id, ChannelMsg::Data { data }))
             .await
             .map_err(|e| match e.0 {
                 Msg::Channel(_, ChannelMsg::Data { data }) => data,
@@ -125,7 +123,7 @@ impl Handle {
         self.sender
             .send(Msg::Channel(id, ChannelMsg::ExtendedData {
                 ext,
-                data: data.clone(),
+                data,
             }))
             .await
             .map_err(|e| match e.0 {
