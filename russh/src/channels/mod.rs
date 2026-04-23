@@ -359,7 +359,10 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + Sync + 'static> ChannelWriteHalf<
         Ok(())
     }
 
-    async fn reserve_writable_chunk(&self, remaining: usize) -> usize {
+    async fn reserve_writable_chunk(&self, remaining: usize) -> Result<usize, Error> {
+        if self.max_packet_size == 0 {
+            return Err(Error::Inconsistent);
+        }
         loop {
             let mut window_size = self.window_size.value.lock().await;
             let writable = (self.max_packet_size as usize)
@@ -370,10 +373,11 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + Sync + 'static> ChannelWriteHalf<
                 if *window_size > 0 {
                     self.window_size.notifier.notify_one();
                 }
-                return writable;
+                return Ok(writable);
             }
+            let notified = self.window_size.notifier.notified();
             drop(window_size);
-            self.window_size.notifier.notified().await;
+            notified.await;
         }
     }
 
@@ -384,7 +388,7 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + Sync + 'static> ChannelWriteHalf<
 
         let mut offset = 0;
         while offset < data.len() {
-            let writable = self.reserve_writable_chunk(data.len() - offset).await;
+            let writable = self.reserve_writable_chunk(data.len() - offset).await?;
             let end = offset + writable;
             let chunk = data.slice(offset..end);
             let msg = match ext {
@@ -695,8 +699,6 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + Sync + 'static> Channel<S> {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
     use tokio::sync::mpsc;
 
     use super::*;
@@ -792,18 +794,15 @@ mod tests {
     async fn data_bytes_waits_for_window_update() {
         let window_size = WindowSizeRef::new(0);
         let (write_half, mut receiver) = test_write_half(window_size.clone(), 1024);
-        let mut send = tokio::spawn(async move {
+        let send = tokio::spawn(async move {
             write_half
                 .data_bytes(Bytes::from_static(b"after-window"))
                 .await
                 .unwrap();
         });
 
-        assert!(
-            tokio::time::timeout(Duration::from_millis(10), &mut send)
-                .await
-                .is_err()
-        );
+        tokio::task::yield_now().await;
+        assert!(!send.is_finished());
 
         window_size.update(1024).await;
         send.await.unwrap();
@@ -814,6 +813,16 @@ mod tests {
             }
             msg => panic!("unexpected message: {msg:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn data_bytes_rejects_zero_max_packet_size() {
+        let (write_half, mut receiver) = test_write_half(WindowSizeRef::new(1024), 0);
+
+        let result = write_half.data_bytes(Bytes::from_static(b"owned")).await;
+
+        assert!(matches!(result, Err(Error::Inconsistent)));
+        assert!(receiver.try_recv().is_err());
     }
 
     #[tokio::test]
