@@ -333,6 +333,29 @@ impl Encrypted {
         Ok(ChannelFlushResult::complete(pending_size, channel))
     }
 
+    fn flush_channel_with_writer(
+        write: &mut Vec<u8>,
+        writer: &mut PacketWriter,
+        channel: &mut ChannelParams,
+    ) -> Result<ChannelFlushResult, crate::Error> {
+        let mut pending_size = 0;
+        while let Some((buf, a, from)) = channel.pending_data.pop_front() {
+            let size = if write.is_empty() {
+                Self::data_noqueue_direct(writer, channel, &buf, a, from)?
+            } else {
+                Self::data_noqueue(write, channel, &buf, a, from)?
+            };
+            pending_size += size;
+            if from + size < buf.len() {
+                channel.pending_data.push_front((buf, a, from + size));
+                return Ok(ChannelFlushResult::Incomplete {
+                    wrote: pending_size,
+                });
+            }
+        }
+        Ok(ChannelFlushResult::complete(pending_size, channel))
+    }
+
     fn handle_flushed_channel(
         &mut self,
         channel: ChannelId,
@@ -364,10 +387,36 @@ impl Encrypted {
         Ok(wrote)
     }
 
+    pub fn flush_pending_with_writer(
+        &mut self,
+        writer: &mut PacketWriter,
+        channel: ChannelId,
+    ) -> Result<usize, crate::Error> {
+        let flush_result = match self.channels.get_mut(&channel) {
+            Some(ch) => Self::flush_channel_with_writer(&mut self.write, writer, ch)?,
+            None => return Ok(0),
+        };
+        let wrote = flush_result.wrote();
+        self.handle_flushed_channel(channel, flush_result)?;
+        Ok(wrote)
+    }
+
+    #[allow(dead_code)]
     pub fn flush_all_pending(&mut self) -> Result<(), crate::Error> {
         let channel_ids: Vec<ChannelId> = self.channels.keys().copied().collect();
         for channel_id in channel_ids {
             self.flush_pending(channel_id)?;
+        }
+        Ok(())
+    }
+
+    pub fn flush_all_pending_with_writer(
+        &mut self,
+        writer: &mut PacketWriter,
+    ) -> Result<(), crate::Error> {
+        let channel_ids: Vec<ChannelId> = self.channels.keys().copied().collect();
+        for channel_id in channel_ids {
+            self.flush_pending_with_writer(writer, channel_id)?;
         }
         Ok(())
     }
@@ -1052,6 +1101,135 @@ mod tests {
         assert_eq!(channel.pending_data.back().unwrap().0.as_ref(), b"new");
         assert_eq!(channel.pending_data.back().unwrap().1, Some(ext));
         assert!(encrypted.write.is_empty());
+    }
+
+    #[test]
+    fn flush_pending_with_writer_matches_staged_channel_data() {
+        let channel_id = ChannelId(7);
+        let mut staged = test_encrypted();
+        let mut direct = test_encrypted();
+        staged
+            .channels
+            .insert(channel_id, test_channel(channel_id, 42, false, false));
+        direct
+            .channels
+            .insert(channel_id, test_channel(channel_id, 42, false, false));
+
+        let mut staged_writer = PacketWriter::clear();
+        staged.flush_pending(channel_id).unwrap();
+        staged
+            .flush(&Limits::default(), &mut staged_writer)
+            .unwrap();
+
+        let mut direct_writer = PacketWriter::clear();
+        direct
+            .flush_pending_with_writer(&mut direct_writer, channel_id)
+            .unwrap();
+
+        assert_eq!(direct_writer.buffer().buffer, staged_writer.buffer().buffer);
+        assert_eq!(
+            direct.channels[&channel_id].recipient_window_size,
+            staged.channels[&channel_id].recipient_window_size
+        );
+        assert!(direct.channels[&channel_id].pending_data.is_empty());
+    }
+
+    #[test]
+    fn flush_pending_with_writer_matches_staged_extended_data() {
+        let channel_id = ChannelId(8);
+        let mut staged = test_encrypted();
+        let mut direct = test_encrypted();
+        let mut staged_channel = test_channel(channel_id, 42, false, false);
+        staged_channel.pending_data =
+            VecDeque::from([(Bytes::from_static(b"hello"), Some(1), 0)]);
+        let mut direct_channel = test_channel(channel_id, 42, false, false);
+        direct_channel.pending_data =
+            VecDeque::from([(Bytes::from_static(b"hello"), Some(1), 0)]);
+        staged.channels.insert(channel_id, staged_channel);
+        direct.channels.insert(channel_id, direct_channel);
+
+        let mut staged_writer = PacketWriter::clear();
+        staged.flush_pending(channel_id).unwrap();
+        staged
+            .flush(&Limits::default(), &mut staged_writer)
+            .unwrap();
+
+        let mut direct_writer = PacketWriter::clear();
+        direct
+            .flush_pending_with_writer(&mut direct_writer, channel_id)
+            .unwrap();
+
+        assert_eq!(direct_writer.buffer().buffer, staged_writer.buffer().buffer);
+        assert!(direct.channels[&channel_id].pending_data.is_empty());
+    }
+
+    #[test]
+    fn flush_pending_with_writer_falls_back_when_write_queue_nonempty() {
+        let channel_id = ChannelId(9);
+        let mut encrypted = test_encrypted();
+        encrypted
+            .channels
+            .insert(channel_id, test_channel(channel_id, 42, false, false));
+        push_packet!(encrypted.write, encrypted.write.push(msg::REQUEST_SUCCESS));
+
+        let mut writer = PacketWriter::clear();
+        encrypted
+            .flush_pending_with_writer(&mut writer, channel_id)
+            .unwrap();
+
+        assert!(writer.buffer().buffer.is_empty());
+        assert_eq!(
+            packet_types(&encrypted.write),
+            vec![msg::REQUEST_SUCCESS, msg::CHANNEL_DATA]
+        );
+    }
+
+    #[test]
+    fn flush_pending_with_writer_preserves_partial_window_remainder() {
+        let channel_id = ChannelId(13);
+        let payload = Bytes::from_static(b"abcdef");
+        let mut encrypted = test_encrypted();
+        let mut channel = test_channel_windowed(channel_id, 42, 3, false, false);
+        channel.pending_data = VecDeque::from([(payload.clone(), None, 0)]);
+        encrypted.channels.insert(channel_id, channel);
+
+        let mut writer = PacketWriter::clear();
+        encrypted
+            .flush_pending_with_writer(&mut writer, channel_id)
+            .unwrap();
+
+        let channel = &encrypted.channels[&channel_id];
+        assert_eq!(
+            clear_packet_types(&writer.buffer().buffer),
+            vec![msg::CHANNEL_DATA]
+        );
+        assert_eq!(channel.recipient_window_size, 0);
+        assert_eq!(channel.pending_data.len(), 1);
+        let pending = channel.pending_data.back().unwrap();
+        assert_eq!(pending.0, payload);
+        assert_eq!(pending.1, None);
+        assert_eq!(pending.2, 3);
+    }
+
+    #[test]
+    fn flush_pending_with_writer_emits_controls_after_replayed_data() {
+        let channel_id = ChannelId(14);
+        let mut encrypted = test_encrypted();
+        encrypted
+            .channels
+            .insert(channel_id, test_channel(channel_id, 42, true, true));
+
+        let mut writer = PacketWriter::clear();
+        encrypted
+            .flush_pending_with_writer(&mut writer, channel_id)
+            .unwrap();
+        encrypted.flush(&Limits::default(), &mut writer).unwrap();
+
+        assert_eq!(
+            clear_packet_types(&writer.buffer().buffer),
+            vec![msg::CHANNEL_DATA, msg::CHANNEL_EOF, msg::CHANNEL_CLOSE]
+        );
+        assert!(!encrypted.channels.contains_key(&channel_id));
     }
 
     #[test]
