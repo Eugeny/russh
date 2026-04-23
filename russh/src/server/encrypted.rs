@@ -683,7 +683,9 @@ impl Session {
                 }
                 let common = &mut self.common;
                 if let Some(enc) = common.encrypted.as_mut() {
-                    enc.flush_pending_with_writer(&mut common.packet_writer, channel_num)?;
+                    new_size -= enc
+                        .flush_pending_with_writer(&mut common.packet_writer, channel_num)?
+                        as u32;
                 }
                 if let Some(chan) = self.channels.get(&channel_num) {
                     chan.window_size().update(new_size).await;
