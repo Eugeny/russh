@@ -448,16 +448,17 @@ impl Encrypted {
         if from >= buf0.len() {
             return Ok(0);
         }
-        let mut buf = if buf0.len() as u32 > from as u32 + channel.recipient_window_size {
-            #[allow(clippy::indexing_slicing)] // length checked
-            &buf0[from..from + channel.recipient_window_size as usize]
-        } else {
-            #[allow(clippy::indexing_slicing)] // length checked
-            &buf0[from..]
-        };
+        let window_end = from
+            .checked_add(channel.recipient_window_size as usize)
+            .unwrap_or(usize::MAX);
+        let end = std::cmp::min(buf0.len(), window_end);
+        #[allow(clippy::indexing_slicing)] // length checked
+        let mut buf = &buf0[from..end];
         let buf_len = buf.len();
         let max_packet_size = channel.recipient_maximum_packet_size as usize;
-        assert!(max_packet_size > 0);
+        if max_packet_size == 0 {
+            return Err(crate::Error::Inconsistent);
+        }
         let packet_count = buf_len.div_ceil(max_packet_size);
         let packet_overhead = match a {
             None => 4 + 1 + 4 + 4,
@@ -509,16 +510,17 @@ impl Encrypted {
             return Ok(0);
         }
         let buf0 = buf0.as_ref();
-        let mut buf = if buf0.len() as u32 > from as u32 + channel.recipient_window_size {
-            #[allow(clippy::indexing_slicing)] // length checked
-            &buf0[from..from + channel.recipient_window_size as usize]
-        } else {
-            #[allow(clippy::indexing_slicing)] // length checked
-            &buf0[from..]
-        };
+        let window_end = from
+            .checked_add(channel.recipient_window_size as usize)
+            .unwrap_or(usize::MAX);
+        let end = std::cmp::min(buf0.len(), window_end);
+        #[allow(clippy::indexing_slicing)] // length checked
+        let mut buf = &buf0[from..end];
         let buf_len = buf.len();
         let max_packet_size = channel.recipient_maximum_packet_size as usize;
-        assert!(max_packet_size > 0);
+        if max_packet_size == 0 {
+            return Err(crate::Error::Inconsistent);
+        }
         let packet_count = buf_len.div_ceil(max_packet_size);
         let channel_payload_overhead = match a {
             None => 1 + 4 + 4,
@@ -1363,6 +1365,39 @@ mod tests {
         );
         assert!(encrypted.channels[&channel_id].pending_data.is_empty());
         assert_eq!(encrypted.channels[&channel_id].recipient_window_size, 0);
+    }
+
+    #[test]
+    fn data_staged_rejects_zero_recipient_max_packet_size() {
+        let channel_id = ChannelId(27);
+        let mut encrypted = test_encrypted();
+        let mut channel = test_ready_channel(channel_id, 49);
+        channel.recipient_maximum_packet_size = 0;
+        encrypted.channels.insert(channel_id, channel);
+
+        let result = encrypted.data(channel_id, Bytes::from_static(b"new"), false);
+
+        assert!(matches!(result, Err(crate::Error::Inconsistent)));
+        assert!(encrypted.write.is_empty());
+        assert_eq!(encrypted.channels[&channel_id].recipient_window_size, 1024);
+    }
+
+    #[test]
+    fn data_direct_rejects_zero_recipient_max_packet_size() {
+        let channel_id = ChannelId(28);
+        let mut encrypted = test_encrypted();
+        let mut channel = test_ready_channel(channel_id, 50);
+        channel.recipient_maximum_packet_size = 0;
+        encrypted.channels.insert(channel_id, channel);
+
+        let mut writer = PacketWriter::clear();
+        let result =
+            encrypted.data_with_writer(&mut writer, channel_id, Bytes::from_static(b"new"), false);
+
+        assert!(matches!(result, Err(crate::Error::Inconsistent)));
+        assert!(writer.buffer().buffer.is_empty());
+        assert!(encrypted.write.is_empty());
+        assert_eq!(encrypted.channels[&channel_id].recipient_window_size, 1024);
     }
 
     #[test]
