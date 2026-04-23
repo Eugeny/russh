@@ -1612,18 +1612,20 @@ async fn reply<H: Handler>(
                         // This is a rekey
                         {
                             let common = &mut session.common;
-                            let enc = common.encrypted.as_mut().expect("checked encrypted");
-                            enc.last_rekey = Instant::now();
+                            common.newkeys(newkeys);
                             common.packet_writer.buffer().bytes = 0;
-                            enc.flush_all_pending_with_writer(&mut common.packet_writer)?;
+                            if let Some(enc) = common.encrypted.as_mut() {
+                                enc.last_rekey = Instant::now();
+                                enc.flush_all_pending_with_writer(&mut common.packet_writer)?;
+                            }
                         }
+
                         let mut pending = std::mem::take(&mut session.pending_reads);
                         for p in pending.drain(..) {
                             session.process_packet(handler, &p).await?;
                         }
                         session.pending_reads = pending;
                         session.pending_len = 0;
-                        session.common.newkeys(newkeys);
                     } else {
                         // This is the initial kex
                         if let Some(server_host_key) = &server_host_key {
