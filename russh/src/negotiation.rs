@@ -14,6 +14,7 @@
 //
 use std::borrow::Cow;
 
+use bytes::Bytes;
 use log::debug;
 use rand_core::Rng;
 use ssh_encoding::{Decode, Encode};
@@ -418,9 +419,8 @@ pub(crate) fn write_kex(
     prefs: &Preferred,
     writer: &mut PacketWriter,
     server_config: Option<&Config>,
-) -> Result<Vec<u8>, Error> {
-    writer.packet(|w| {
-        // buf.clear();
+) -> Result<Bytes, Error> {
+    writer.packet_bytes(|w| {
         msg::KEXINIT.encode(w)?;
 
         let mut cookie = [0; 16];

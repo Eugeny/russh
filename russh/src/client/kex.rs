@@ -115,9 +115,7 @@ impl ClientKex {
 
                 let names = {
                     // read algorithms from packet.
-                    self.exchange
-                        .server_kex_init
-                        .extend_from_slice(&input.buffer);
+                    self.exchange.server_kex_init = input.buffer.clone().into();
                     negotiation::Client::read_kex(
                         &input.buffer,
                         &self.config.preferred,
@@ -147,7 +145,7 @@ impl ClientKex {
                         self.cause.session_id(),
                     )?;
 
-                    output.packet(|w| {
+                    output.write_packet(|w| {
                         msg::NEWKEYS.encode(w)?;
                         Ok(())
                     })?;
@@ -159,14 +157,14 @@ impl ClientKex {
                 }
 
                 if kex.is_dh_gex() {
-                    output.packet(|w| {
+                    output.write_packet(|w| {
                         kex.client_dh_gex_init(&self.config.gex, w)?;
                         Ok(())
                     })?;
 
                     self.state = ClientKexState::WaitingForGexReply { names, kex };
                 } else {
-                    output.packet(|w| {
+                    output.write_packet(|w| {
                         kex.client_dh(&mut self.exchange.client_ephemeral, w)?;
                         Ok(())
                     })?;
@@ -217,7 +215,7 @@ impl ClientKex {
                 let exchange = &mut self.exchange;
                 exchange.gex = Some((self.config.gex.clone(), group.clone()));
                 kex.dh_gex_set_group(group)?;
-                output.packet(|w| {
+                output.write_packet(|w| {
                     kex.client_dh(&mut exchange.client_ephemeral, w)?;
                     Ok(())
                 })?;
@@ -306,7 +304,7 @@ impl ClientKex {
                     self.cause.session_id(),
                 )?;
 
-                output.packet(|w| {
+                output.write_packet(|w| {
                     msg::NEWKEYS.encode(w)?;
                     Ok(())
                 })?;
