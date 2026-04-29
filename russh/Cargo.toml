@@ -31,10 +31,10 @@ _bench = ["dep:criterion"]
 # Compatibility floor pins for cargo-minimal-versions. These are otherwise
 # transitive members of the RustCrypto prerelease stack; some are renamed to
 # coexist with older direct dependency lines.
-aead_0_6 = { package = "aead", version = "0.6.0-rc.10" }
+aead_0_6 = { package = "aead", version = "=0.6.0-rc.10" }
 aes.workspace = true
 aes_0_9 = { package = "aes", version = "0.9.0" }
-aes_gcm_0_11 = { package = "aes-gcm", version = "0.11.0-rc.3" }
+aes_gcm_0_11 = { package = "aes-gcm", version = "=0.11.0-rc.3" }
 async-trait = { workspace = true, optional = true }
 aws-lc-rs = { version = "1.16.2", optional = true }
 bitflags = "2.0"
@@ -46,16 +46,16 @@ cbc_0_2 = { package = "cbc", version = "0.2.0" }
 cipher = "0.5.1" # only pinned due to a cargo-minimal-versions failure in 0.5.0
 ctr = "0.9"
 ctr_0_10 = { package = "ctr", version = "0.10.0" }
-curve25519-dalek = "5.0.0-pre.6"
-crypto-bigint = { version = "0.7.0-rc.28", features = ["alloc"] }
+curve25519-dalek = "=5.0.0-pre.6"
+crypto-bigint = { version = "=0.7.0-rc.28", features = ["alloc"] }
 data-encoding = "2.3"
 delegate.workspace = true
 digest.workspace = true
 der = "0.8"
 des = { version = "0.8.1", optional = true }
-ecdsa = "0.17.0-rc.16"
-ed25519-dalek = { version = "3.0.0-pre.6", features = ["alloc", "rand_core", "pkcs8"] }
-elliptic-curve = { version = "0.14.0-rc.28", features = ["ecdh"] }
+ecdsa = "=0.17.0-rc.16"
+ed25519-dalek = { version = "=3.0.0-pre.6", features = ["alloc", "rand_core", "pkcs8"] }
+elliptic-curve = { version = "=0.14.0-rc.28", features = ["ecdh"] }
 enum_dispatch = "0.3.13"
 flate2 = { version = "1.0.15", optional = true }
 futures.workspace = true
@@ -70,7 +70,7 @@ inout = { version = "0.1", features = ["std"] }
 keccak = "0.2.0"
 log.workspace = true
 md5 = "0.7"
-ml-kem = "0.3.0-rc.1"
+ml-kem = "=0.3.0-rc.1"
 module-lattice = "0.2"
 # num-bigint 0.4.x only supports rand 0.8. PR #338 adds rand 0.10 support
 # via the `rand_0_10` feature flag. Replace with upstream once a release with
@@ -78,19 +78,19 @@ module-lattice = "0.2"
 num-bigint = { package = "internal-russh-num-bigint", version = "=0.5.0", features = ["rand_0_10"] }
 num_bigint_0_4 = { package = "num-bigint", version = "0.4.6" }
 # num-integer = "0.1"
-p256 = { version = "0.14.0-rc.7", features = ["ecdh"] }
-p384 = { version = "0.14.0-rc.7", features = ["ecdh"] }
-p521 = { version = "0.14.0-rc.7", features = ["ecdh"] }
+p256 = { version = "=0.14.0-rc.7", features = ["ecdh"] }
+p384 = { version = "=0.14.0-rc.7", features = ["ecdh"] }
+p521 = { version = "=0.14.0-rc.7", features = ["ecdh"] }
 pbkdf2 = "0.12"
 pbkdf2_0_13 = { package = "pbkdf2", version = "0.13.0" }
-pkcs1 = { version = "0.8.0-rc.4", optional = true }
-pkcs5 = "0.8.0-rc.13"
-pkcs8 = { version = "0.11.0-rc.11", features = ["encryption", "std"] }
+pkcs1 = { version = "=0.8.0-rc.4", optional = true }
+pkcs5 = "=0.8.0-rc.13"
+pkcs8 = { version = "=0.11.0-rc.11", features = ["encryption", "std"] }
 polyval = "0.7.1" # only pinned due to a cargo-minimal-versions failure in 0.7.0
 rand_core = { version = "0.10.0" }
 rand.workspace = true
 ring = { version = "0.17.14", optional = true }
-rsa = { version = "0.10.0-rc.10", optional = true }
+rsa = { version = "=0.10.0-rc.16", optional = true }
 russh-cryptovec = { version = "0.59.0", path = "../cryptovec", features = [
   "ssh-encoding",
 ] }
@@ -104,7 +104,7 @@ sha2.workspace = true
 sha2_0_11 = { package = "sha2", version = "0.11.0" }
 sha3 = "0.11.0"
 signature.workspace = true
-spki = "0.8.0-rc.4"
+spki = "=0.8.0-rc.4"
 ssh-encoding.workspace = true
 ssh-key.workspace = true
 subtle = "2.4"
