@@ -480,7 +480,7 @@ mod channels {
 
             async fn check_server_key(
                 &mut self,
-                _server_public_key: &crate::keys::ssh_key::PublicKey,
+                _server_public_key: &crate::cert::PublicKeyOrCertificate,
             ) -> Result<bool, Self::Error> {
                 Ok(true)
             }
@@ -893,7 +893,7 @@ mod future_certificate {
 
             async fn check_server_key(
                 &mut self,
-                _server_public_key: &ssh_key::PublicKey,
+                _server_public_key: &crate::cert::PublicKeyOrCertificate,
             ) -> Result<bool, Self::Error> {
                 Ok(true)
             }

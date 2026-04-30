@@ -1,6 +1,5 @@
 #![cfg(not(target_arch = "wasm32"))]
 use russh::keys::ssh_key::certificate::{Builder, CertType};
-use russh::keys::ssh_key::rand_core::OsRng;
 use russh::keys::ssh_key::{self, Algorithm, HashAlg, PrivateKey};
 use russh::*;
 use std::sync::{Arc, Mutex};
@@ -12,11 +11,11 @@ async fn test_server_certificate_auth() {
     let _ = env_logger::try_init();
 
     // Generate CA key
-    let ca_key = PrivateKey::random(&mut OsRng, Algorithm::Ed25519).unwrap();
+    let ca_key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
     let ca_public_key = ca_key.public_key();
 
     // Generate Server key
-    let server_key = PrivateKey::random(&mut OsRng, Algorithm::Ed25519).unwrap();
+    let server_key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
     let server_public_key = server_key.public_key();
 
     //. Create Server Certificate signed by CA
@@ -27,7 +26,7 @@ async fn test_server_certificate_auth() {
     let end = start + 3600;
 
     let mut builder =
-        Builder::new_with_random_nonce(&mut OsRng, server_public_key.clone(), start, end).unwrap();
+        Builder::new_with_random_nonce(&mut rand::rng(), server_public_key.clone(), start, end).unwrap();
     builder.serial(42).unwrap();
     builder.key_id("test-server").unwrap();
     builder.cert_type(CertType::Host).unwrap();
@@ -82,16 +81,16 @@ async fn test_server_wrong_ca_certificate_auth() {
     let _ = env_logger::try_init();
 
     //Generate CA key
-    let ca_key = PrivateKey::random(&mut OsRng, Algorithm::Ed25519).unwrap();
+    let ca_key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
     let ca_public_key = ca_key.public_key();
 
     //Generate second CA key
-    let evil_ca_key = PrivateKey::random(&mut OsRng, Algorithm::Ed25519).unwrap();
+    let evil_ca_key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
 
     assert_ne!(evil_ca_key, ca_key);
 
     // Generate Server key
-    let server_key = PrivateKey::random(&mut OsRng, Algorithm::Ed25519).unwrap();
+    let server_key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
     let server_public_key = server_key.public_key();
 
     // Create Server Certificate signed by CA
@@ -103,7 +102,7 @@ async fn test_server_wrong_ca_certificate_auth() {
     let end = start + 3600;
 
     let mut builder =
-        Builder::new_with_random_nonce(&mut OsRng, server_public_key.clone(), start, end).unwrap();
+        Builder::new_with_random_nonce(&mut rand::rng(), server_public_key.clone(), start, end).unwrap();
     builder.serial(42).unwrap();
     builder.key_id("test-server").unwrap();
     builder.cert_type(CertType::Host).unwrap();
@@ -161,7 +160,7 @@ async fn test_server_rsa_sha2_512_certificate_auth() {
 
     // Generate CA key (RSA, SHA-512)
     let ca_key = PrivateKey::random(
-        &mut OsRng,
+        &mut rand::rng(),
         Algorithm::Rsa {
             hash: Some(HashAlg::Sha512),
         },
@@ -171,7 +170,7 @@ async fn test_server_rsa_sha2_512_certificate_auth() {
 
     // Generate Server key (RSA, SHA-512)
     let server_key = PrivateKey::random(
-        &mut OsRng,
+        &mut rand::rng(),
         Algorithm::Rsa {
             hash: Some(HashAlg::Sha512),
         },
@@ -187,7 +186,7 @@ async fn test_server_rsa_sha2_512_certificate_auth() {
     let end = start + 3600;
 
     let mut builder =
-        Builder::new_with_random_nonce(&mut OsRng, server_public_key.clone(), start, end).unwrap();
+        Builder::new_with_random_nonce(&mut rand::rng(), server_public_key.clone(), start, end).unwrap();
     builder.serial(42).unwrap();
     builder.key_id("test-server-rsa").unwrap();
     builder.cert_type(CertType::Host).unwrap();
