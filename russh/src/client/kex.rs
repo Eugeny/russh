@@ -7,7 +7,7 @@ use bytes::Bytes;
 use log::{debug, error, warn};
 use ssh_encoding::{Decode, Encode};
 use signature::Verifier;
-use ssh_key::{Certificate, Mpint, PublicKey, Signature};
+use ssh_key::{Certificate, Mpint, Signature};
 
 use super::IncomingSshPacket;
 use crate::cert::PublicKeyOrCertificate;

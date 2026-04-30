@@ -26,7 +26,8 @@ async fn test_server_certificate_auth() {
     let end = start + 3600;
 
     let mut builder =
-        Builder::new_with_random_nonce(&mut rand::rng(), server_public_key.clone(), start, end).unwrap();
+        Builder::new_with_random_nonce(&mut rand::rng(), server_public_key.clone(), start, end)
+            .unwrap();
     builder.serial(42).unwrap();
     builder.key_id("test-server").unwrap();
     builder.cert_type(CertType::Host).unwrap();
@@ -102,7 +103,8 @@ async fn test_server_wrong_ca_certificate_auth() {
     let end = start + 3600;
 
     let mut builder =
-        Builder::new_with_random_nonce(&mut rand::rng(), server_public_key.clone(), start, end).unwrap();
+        Builder::new_with_random_nonce(&mut rand::rng(), server_public_key.clone(), start, end)
+            .unwrap();
     builder.serial(42).unwrap();
     builder.key_id("test-server").unwrap();
     builder.cert_type(CertType::Host).unwrap();
@@ -186,7 +188,8 @@ async fn test_server_rsa_sha2_512_certificate_auth() {
     let end = start + 3600;
 
     let mut builder =
-        Builder::new_with_random_nonce(&mut rand::rng(), server_public_key.clone(), start, end).unwrap();
+        Builder::new_with_random_nonce(&mut rand::rng(), server_public_key.clone(), start, end)
+            .unwrap();
     builder.serial(42).unwrap();
     builder.key_id("test-server-rsa").unwrap();
     builder.cert_type(CertType::Host).unwrap();
@@ -236,6 +239,67 @@ async fn test_server_rsa_sha2_512_certificate_auth() {
         .await
         .unwrap();
 }
+#[tokio::test]
+async fn test_server_infinite_validity_certificate_auth() {
+    let _ = env_logger::try_init();
+
+    // Generate CA key
+    let ca_key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
+    let ca_public_key = ca_key.public_key();
+
+    // Generate Server key
+    let server_key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
+    let server_public_key = server_key.public_key();
+
+    // Create host cert with valid_after=0 and valid_before=u64::MAX (OpenSSH "no expiry"
+    // sentinel per PROTOCOL.certkeys), matching what `ssh-keygen -s ca -h key.pub` generates
+    // without the -V flag.
+    let mut builder =
+        Builder::new_with_random_nonce(&mut rand::rng(), server_public_key.clone(), 0, u64::MAX)
+            .unwrap();
+    builder.serial(42).unwrap();
+    builder.key_id("test-server-infinite").unwrap();
+    builder.cert_type(CertType::Host).unwrap();
+    builder.valid_principal("localhost").unwrap();
+
+    let cert = builder.sign(&ca_key).unwrap();
+
+    // Configure Server
+    let mut config = server::Config::default();
+    config.keys.push(server_key);
+    config.certificates.push(cert);
+    let config = Arc::new(config);
+
+    // Start Server
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    tokio::spawn(async move {
+        let (socket, _) = listener.accept().await.unwrap();
+        server::run_stream(config, socket, TestServer {})
+            .await
+            .unwrap();
+    });
+
+    // Configure Client
+    let mut client_config = client::Config::default();
+    client_config.ca_public_keys = Some(vec![ca_public_key.clone()]);
+    let client_config = Arc::new(client_config);
+
+    let client = TestClient {
+        ca_public_key: ca_public_key.clone(),
+        verified: Arc::new(Mutex::new(false)),
+    };
+
+    // Must connect successfully — infinite-validity certs were previously rejected
+    // because valid_before=u64::MAX caused certificate parsing to fail.
+    let session = client::connect(client_config, addr, client).await.unwrap();
+    session
+        .disconnect(Disconnect::ByApplication, "", "")
+        .await
+        .unwrap();
+}
+
 struct TestServer {}
 
 impl server::Handler for TestServer {
