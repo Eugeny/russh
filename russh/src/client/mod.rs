@@ -450,6 +450,26 @@ impl<H: Handler> Handle<H> {
         self.wait_recv_reply().await
     }
 
+    /// Same as [`Handle::authenticate_openssh_cert`], but allows specifying a hash algorithm for RSA keys in the certificate. 
+    /// This is necessary for authentication to succeed with some old servers that does not support `rsa-sha2-512`.
+    /// Perform public OpenSSH Certificate-based SSH authentication with a specified hash algorithm for RSA keys
+    pub async fn authenticate_openssh_cert_with_hash_alg<U: Into<String>>(
+        &mut self,
+        user: U,
+        key: PrivateKeyWithHashAlg,
+        cert: Certificate,
+    ) -> Result<AuthResult, crate::Error> {
+        let user = user.into();
+        self.sender
+            .send(Msg::Authenticate {
+                user,
+                method: auth::Method::OpenSshCertificateWithHashAlg { key, cert },
+            })
+            .await
+            .map_err(|_| crate::Error::SendError)?;
+        self.wait_recv_reply().await
+    }
+
     /// Authenticate using a custom method that implements the
     /// [`Signer`][auth::Signer] trait. Currently, this crate only provides an
     /// implementation for an [SSH agent][crate::keys::agent::client::AgentClient].

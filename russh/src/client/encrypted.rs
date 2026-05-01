@@ -208,7 +208,7 @@ impl Session {
                                         &mut self.common.buffer,
                                     )?
                                 }
-                                Some(auth_method @ auth::Method::OpenSshCertificate { .. }) => {
+                                Some(auth_method @ auth::Method::OpenSshCertificate { .. }) | Some(auth_method @ auth::Method::OpenSshCertificateWithHashAlg { .. })=> {
                                     self.common.buffer.clear();
                                     enc.client_send_signature(
                                         &self.common.auth_user,
@@ -948,7 +948,7 @@ impl Encrypted {
                     key.public_key().to_bytes()?.encode(&mut self.write)?;
                     true
                 }
-                auth::Method::OpenSshCertificate { ref cert, .. } => {
+                auth::Method::OpenSshCertificate { ref cert, .. } | auth::Method::OpenSshCertificateWithHashAlg { ref cert, .. } => {
                     user.as_bytes().encode(&mut self.write)?;
                     "ssh-connection".encode(&mut self.write)?;
                     "publickey".encode(&mut self.write)?;
@@ -1063,6 +1063,20 @@ impl Encrypted {
                 push_packet!(self.write, {
                     #[allow(clippy::indexing_slicing)] // length checked
                     self.write.extend_from_slice(&buffer[i0..]);
+                })
+            }
+            auth::Method::OpenSshCertificateWithHashAlg { key, cert} => {
+                let i0 = self.client_make_to_sign(
+                    user,
+                    &PublicKeyOrCertificate::Certificate(cert.clone()),
+                    buffer,
+                )?;
+
+                sign_with_hash_alg(key, buffer)?.encode(&mut *buffer)?;
+
+                push_packet!(self.write, {
+                    #[allow(clippy::indexing_slicing)] // length checked
+                    self.write.extend(&buffer[i0..]);
                 })
             }
             _ => {}
