@@ -153,6 +153,8 @@ tempfile = "3.14.0"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 russh-sftp = "2.1.0"
+russh-config = { version = "0.57.0", path = "../russh-config" }
+home = { workspace = true }
 tokio.workspace = true
 tokio-stream.workspace = true
 
