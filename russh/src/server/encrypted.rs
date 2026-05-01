@@ -606,7 +606,8 @@ impl Session {
             msg::CHANNEL_CLOSE => {
                 let channel_num = map_err!(ChannelId::decode(r))?;
                 if let Some(ref mut enc) = self.common.encrypted {
-                    enc.channels.remove(&channel_num);
+                    // Reply with CHANNEL_CLOSE per RFC 4254 Section 5.3.
+                    enc.close(channel_num)?;
                 }
                 // Forward the close to the channel before removing it, so that
                 // consumers waiting on `Channel::wait()` receive an explicit
