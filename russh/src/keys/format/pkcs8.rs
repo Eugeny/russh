@@ -129,7 +129,7 @@ pub fn encode_pkcs8_encrypted(
     rng.fill_bytes(&mut iv);
 
     let doc = pvi.encrypt_with_params(
-        pkcs5::pbes2::Parameters::pbkdf2_sha256_aes256cbc(rounds, &salt, iv)
+        pkcs5::pbes2::Parameters::generate_pbkdf2_sha256_aes256cbc(rounds, &salt, iv)
             .map_err(|_| Error::InvalidParameters)?,
         pass,
     )?;
