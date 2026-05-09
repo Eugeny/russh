@@ -44,6 +44,7 @@ bytes.workspace = true
 cbc = { version = "0.1" }
 cipher = "0.5.1" # only pinned due to a cargo-minimal-versions failure in 0.5.0
 ctr = "0.9"
+ctr_0_10 = { package = "ctr", version = "0.10.0" } # floor pin: rc.3 uses cipher::common::BlockSizes which doesn't exist in cipher 0.5 stable
 curve25519-dalek = "5.0.0-pre.6"
 crypto-bigint = { version = "0.7.0-rc.28", features = ["alloc"] }
 data-encoding = "2.3"
