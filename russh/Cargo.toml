@@ -52,7 +52,8 @@ digest.workspace = true
 der = "0.8"
 des = { version = "0.8.1", optional = true }
 ecdsa = "0.17.0-rc.16"
-ed25519-dalek = { version = "3.0.0-pre.6", features = ["alloc", "rand_core", "pkcs8"] }
+ed25519 = "3.0.0" # floor pin: rc.4 uses Error::KeyMalformed as unit variant, incompatible with pkcs8 0.11 stable
+ed25519-dalek = { version = "3.0.0-pre.7", features = ["alloc", "rand_core", "pkcs8"] }
 elliptic-curve = { version = "0.14.0-rc.28", features = ["ecdh"] }
 enum_dispatch = "0.3.13"
 flate2 = { version = "1.0.15", optional = true }
