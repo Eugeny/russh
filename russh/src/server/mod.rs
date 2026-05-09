@@ -75,6 +75,8 @@ pub struct Config {
     pub auth_rejection_time_initial: Option<std::time::Duration>,
     /// The server's keys. The first key pair in the client's preference order will be chosen.
     pub keys: Vec<PrivateKey>,
+    /// The server's host certificates.
+    pub certificates: Vec<Certificate>,
     /// The bytes and time limits before key re-exchange.
     pub limits: Limits,
     /// The initial size of a channel (used for flow control).
@@ -112,6 +114,7 @@ impl Default for Config {
             auth_rejection_time: std::time::Duration::from_secs(1),
             auth_rejection_time_initial: None,
             keys: Vec::new(),
+            certificates: Vec::new(),
             window_size: 2097152,
             maximum_packet_size: 32768,
             channel_buffer_size: 100,
@@ -139,6 +142,7 @@ impl Debug for Config {
                 &self.auth_rejection_time_initial,
             )
             .field("keys", &"***")
+            .field("certificates", &"***")
             .field("window_size", &self.window_size)
             .field("maximum_packet_size", &self.maximum_packet_size)
             .field("channel_buffer_size", &self.channel_buffer_size)
