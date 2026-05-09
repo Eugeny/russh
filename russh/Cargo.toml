@@ -86,7 +86,7 @@ polyval = "0.7.1" # only pinned due to a cargo-minimal-versions failure in 0.7.0
 rand_core = { version = "0.10.0" }
 rand.workspace = true
 ring = { version = "0.17.14", optional = true }
-rsa = { version = "=0.10.0-rc.16", optional = true }
+rsa = { version = "=0.10.0-rc.18", optional = true }
 russh-cryptovec = { version = "0.59.0", path = "../cryptovec", features = [
   "ssh-encoding",
 ] }
