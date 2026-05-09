@@ -75,9 +75,9 @@ module-lattice = "0.2"
 # rand 0.10 support is published. https://github.com/rust-num/num-bigint/pull/338
 num-bigint = { package = "internal-russh-num-bigint", version = "=0.5.0", features = ["rand_0_10"] }
 # num-integer = "0.1"
-p256 = { version = "0.14.0-rc.7", features = ["ecdh"] }
-p384 = { version = "0.14.0-rc.7", features = ["ecdh"] }
-p521 = { version = "0.14.0-rc.7", features = ["ecdh"] }
+p256 = { version = "0.14.0-rc.9", features = ["ecdh"] }
+p384 = { version = "0.14.0-rc.9", features = ["ecdh"] }
+p521 = { version = "0.14.0-rc.9", features = ["ecdh"] }
 pbkdf2 = "0.12"
 pkcs1 = { version = "0.8.0-rc.4", optional = true }
 pkcs5 = "0.8.0-rc.13"
