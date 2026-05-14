@@ -19,6 +19,7 @@ where
     GenericArray::from_slice(chunk).clone()
 }
 
+#[derive(Clone)]
 pub struct CbcWrapper<C: BlockEncrypt + BlockCipher + BlockDecrypt> {
     encryptor: Encryptor<C>,
     decryptor: Decryptor<C>,

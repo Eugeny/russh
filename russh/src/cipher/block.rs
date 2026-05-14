@@ -36,8 +36,8 @@ fn new_cipher_from_slices<C: KeyIvInit>(k: &[u8], n: &[u8]) -> C {
 
 pub struct SshBlockCipher<C: BlockStreamCipher + KeySizeUser + IvSizeUser>(pub PhantomData<C>);
 
-impl<C: BlockStreamCipher + KeySizeUser + IvSizeUser + KeyIvInit + Send + 'static> super::Cipher
-    for SshBlockCipher<C>
+impl<C: BlockStreamCipher + KeySizeUser + IvSizeUser + KeyIvInit + Clone + Send + 'static>
+    super::Cipher for SshBlockCipher<C>
 {
     fn key_len(&self) -> usize {
         C::key_size()
@@ -88,7 +88,7 @@ pub struct SealingKey<C: BlockStreamCipher> {
     pub(crate) mac: Box<dyn Mac + Send>,
 }
 
-impl<C: BlockStreamCipher + KeySizeUser + IvSizeUser> super::OpeningKey for OpeningKey<C> {
+impl<C: BlockStreamCipher + KeySizeUser + IvSizeUser + Clone> super::OpeningKey for OpeningKey<C> {
     fn packet_length_to_read_for_block_length(&self) -> usize {
         16
     }
@@ -108,8 +108,7 @@ impl<C: BlockStreamCipher + KeySizeUser + IvSizeUser> super::OpeningKey for Open
             #[allow(clippy::unwrap_used, clippy::indexing_slicing)]
             encrypted_packet_length[..4].try_into().unwrap()
         } else {
-            // Work around uncloneable Aes<>
-            let mut cipher: C = unsafe { std::ptr::read(&self.cipher as *const C) };
+            let mut cipher = self.cipher.clone();
 
             cipher.decrypt_data(&mut first_block);
 
@@ -220,5 +219,77 @@ impl<T: StreamCipher> BlockStreamCipher for T {
 
     fn decrypt_data(&mut self, data: &mut [u8]) {
         self.apply_keystream(data);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use aes::cipher::{IvSizeUser, KeySizeUser};
+    use digest::typenum::U16;
+    use tokio::io::AsyncWriteExt;
+
+    use super::{BlockStreamCipher, OpeningKey};
+    use crate::mac::MacAlgorithm;
+    use crate::sshbuffer::SSHBuffer;
+
+    #[test]
+    fn decrypt_packet_length_uses_independent_cipher_state() -> std::io::Result<()> {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?;
+        let opening = OpeningKey {
+            cipher: OwnedStateCipher::new(),
+            mac: crate::mac::_NONE.make_mac(&[]),
+        };
+        let mut opening = opening;
+        let mut buffer = SSHBuffer::new();
+        let bytes_read = runtime.block_on(async {
+            let (mut writer, mut reader) = tokio::io::duplex(64);
+            writer.write_all(&[0; 17]).await?;
+            drop(writer);
+            crate::cipher::read(&mut reader, &mut buffer, &mut opening).await
+        })
+        .map_err(std::io::Error::other)?;
+
+        assert_eq!(bytes_read, 16);
+        Ok(())
+    }
+
+    struct OwnedStateCipher {
+        packet_length: Box<[u8; 4]>,
+    }
+
+    impl OwnedStateCipher {
+        fn new() -> Self {
+            Self {
+                packet_length: Box::new([0, 0, 0, 13]),
+            }
+        }
+    }
+
+    impl Clone for OwnedStateCipher {
+        fn clone(&self) -> Self {
+            Self {
+                packet_length: Box::new([0, 0, 0, 12]),
+            }
+        }
+    }
+
+    impl KeySizeUser for OwnedStateCipher {
+        type KeySize = U16;
+    }
+
+    impl IvSizeUser for OwnedStateCipher {
+        type IvSize = U16;
+    }
+
+    impl BlockStreamCipher for OwnedStateCipher {
+        fn encrypt_data(&mut self, _data: &mut [u8]) {}
+
+        fn decrypt_data(&mut self, data: &mut [u8]) {
+            if let Some(prefix) = data.get_mut(..4) {
+                prefix.copy_from_slice(&self.packet_length[..]);
+            }
+        }
     }
 }
