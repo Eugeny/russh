@@ -277,8 +277,7 @@ impl CryptoVec {
                     std::ptr::copy_nonoverlapping(old_ptr, next_ptr, self.size);
                     zeroize(old_ptr, self.size);
                     let _ = munlock(old_ptr, self.capacity);
-                    let layout =
-                        std::alloc::Layout::from_size_align_unchecked(self.capacity, 1);
+                    let layout = std::alloc::Layout::from_size_align_unchecked(self.capacity, 1);
                     std::alloc::dealloc(old_ptr, layout);
                 }
 
