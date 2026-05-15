@@ -158,12 +158,14 @@ const MAX_CAPACITY: usize = 1usize << (usize::BITS - 2);
 #[cold]
 #[inline(never)]
 fn capacity_overflow(len: usize) -> ! {
+    #[allow(clippy::panic)]
     panic!("CryptoVec capacity overflow: {len}")
 }
 
 #[cold]
 #[inline(never)]
 fn length_overflow(lhs: usize, rhs: usize) -> ! {
+    #[allow(clippy::panic)]
     panic!("CryptoVec length overflow: {lhs} + {rhs}")
 }
 
