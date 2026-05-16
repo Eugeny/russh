@@ -714,6 +714,458 @@ mod server_kex_junk {
     }
 }
 
+pub(crate) mod raw_no_crypto {
+    use std::borrow::Cow;
+    use std::io;
+    use std::sync::{Arc, Mutex, OnceLock};
+    use std::time::Duration;
+
+    use byteorder::{BigEndian, ByteOrder};
+    use ssh_key::{Algorithm, PrivateKey};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    use super::*;
+
+    pub(crate) const MSG_SERVICE_REQUEST: u8 = 5;
+    pub(crate) const MSG_SERVICE_ACCEPT: u8 = 6;
+    pub(crate) const MSG_KEXINIT: u8 = 20;
+    pub(crate) const MSG_NEWKEYS: u8 = 21;
+    pub(crate) const MSG_USERAUTH_REQUEST: u8 = 50;
+    pub(crate) const MSG_USERAUTH_FAILURE: u8 = 51;
+    pub(crate) const MSG_USERAUTH_SUCCESS: u8 = 52;
+    pub(crate) const MSG_CHANNEL_OPEN: u8 = 90;
+    pub(crate) const MSG_CHANNEL_OPEN_CONFIRMATION: u8 = 91;
+    pub(crate) const MSG_CHANNEL_REQUEST: u8 = 98;
+
+    pub(crate) async fn raw_service_request_signal(
+        build_payload: impl FnOnce(&mut Vec<u8>),
+    ) -> ServerSignal {
+        let mut stream = RawSession::connect().await;
+        let mut payload = Vec::new();
+        build_payload(&mut payload);
+        stream.send_packet(&payload).await.unwrap();
+        stream.result().await
+    }
+
+    pub(crate) async fn raw_auth_request_signal(
+        build_payload: impl FnOnce(&mut Vec<u8>),
+    ) -> ServerSignal {
+        let mut stream = RawSession::connect().await;
+        stream.service_request().await.unwrap();
+
+        let mut payload = Vec::new();
+        build_payload(&mut payload);
+        stream.send_packet(&payload).await.unwrap();
+        stream.result().await
+    }
+
+    pub(crate) async fn raw_kex_signal(build_payload: impl FnOnce(&mut Vec<u8>)) -> ServerSignal {
+        let mut stream = RawSession::connect_without_kex().await;
+
+        let mut payload = Vec::new();
+        build_payload(&mut payload);
+        stream.send_packet(&payload).await.unwrap();
+        stream.result().await
+    }
+
+    pub(crate) async fn raw_channel_request_signal(
+        build_payload: impl FnOnce(u32) -> Vec<u8>,
+    ) -> ServerSignal {
+        let mut stream = RawSession::connect().await;
+        stream.auth_none().await.unwrap();
+        let server_channel = stream.open_session().await.unwrap();
+        stream
+            .send_packet(&build_payload(server_channel))
+            .await
+            .unwrap();
+        stream.result().await
+    }
+
+    pub(crate) struct RawSession {
+        pub(crate) events: Arc<Mutex<Vec<&'static str>>>,
+        pub(crate) stream: tokio::net::TcpStream,
+        pub(crate) server_task: tokio::task::JoinHandle<Result<(), Error>>,
+    }
+
+    impl RawSession {
+        pub(crate) async fn connect() -> Self {
+            let mut stream = Self::connect_without_kex().await;
+            raw_client_no_crypto_kex(&mut stream.stream).await.unwrap();
+            stream
+        }
+
+        pub(crate) async fn connect_without_kex() -> Self {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            let events = Arc::new(Mutex::new(Vec::new()));
+            let server_events = events.clone();
+            let server_task = tokio::spawn(async move {
+                let (socket, _) = listener.accept().await.unwrap();
+                let running =
+                    server::run_stream(
+                        no_crypto_server_config(),
+                        socket,
+                        MalformedInputServer {
+                            events: server_events,
+                        },
+                    )
+                    .await
+                    .unwrap();
+                running.await
+            });
+
+            let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+            stream.write_all(b"SSH-2.0-russh-test\r\n").await.unwrap();
+            read_ssh_id(&mut stream).await.unwrap();
+            let _server_kex = read_packet(&mut stream).await.unwrap();
+            Self {
+                events,
+                stream,
+                server_task,
+            }
+        }
+
+        pub(crate) async fn service_request(&mut self) -> io::Result<()> {
+            let mut service = Vec::new();
+            service.push(MSG_SERVICE_REQUEST);
+            encode_string(&mut service, b"ssh-userauth");
+            self.send_packet(&service).await?;
+
+            let accept = read_packet(&mut self.stream).await?;
+            assert_eq!(accept.first(), Some(&MSG_SERVICE_ACCEPT));
+            Ok(())
+        }
+
+        pub(crate) async fn auth_none(&mut self) -> io::Result<()> {
+            self.service_request().await?;
+
+            let mut auth = Vec::new();
+            auth.push(MSG_USERAUTH_REQUEST);
+            encode_string(&mut auth, b"test");
+            encode_string(&mut auth, b"ssh-connection");
+            encode_string(&mut auth, b"none");
+            self.send_packet(&auth).await?;
+
+            let success = read_packet(&mut self.stream).await?;
+            assert_eq!(success.first(), Some(&MSG_USERAUTH_SUCCESS));
+            Ok(())
+        }
+
+        pub(crate) async fn open_session(&mut self) -> io::Result<u32> {
+            let mut open = Vec::new();
+            open.push(MSG_CHANNEL_OPEN);
+            encode_string(&mut open, b"session");
+            push_u32(&mut open, 0);
+            push_u32(&mut open, 1024 * 1024);
+            push_u32(&mut open, 32 * 1024);
+            self.send_packet(&open).await?;
+
+            let confirmation = read_packet(&mut self.stream).await?;
+            assert_eq!(confirmation.first(), Some(&MSG_CHANNEL_OPEN_CONFIRMATION));
+            Ok(BigEndian::read_u32(&confirmation[5..9]))
+        }
+
+        pub(crate) async fn send_packet(&mut self, payload: &[u8]) -> io::Result<()> {
+            self.stream.write_all(&ssh_packet(payload)).await?;
+            self.stream.flush().await
+        }
+
+        pub(crate) async fn result(mut self) -> ServerSignal {
+            let result =
+                tokio::time::timeout(Duration::from_millis(200), &mut self.server_task).await;
+            let events = self.events.lock().unwrap().clone();
+
+            match result {
+                Ok(Ok(Ok(()))) => ServerSignal::Closed { events },
+                Ok(Ok(Err(_error))) => ServerSignal::ProtocolError { events },
+                Ok(Err(join)) if join.is_panic() => ServerSignal::Panicked { events },
+                Err(_) => {
+                    self.server_task.abort();
+                    ServerSignal::Survived { events }
+                }
+                _ => ServerSignal::Closed { events },
+            }
+        }
+    }
+
+    fn no_crypto_server_config() -> Arc<server::Config> {
+        let mut config = server::Config::default();
+        config.inactivity_timeout = None;
+        config.auth_rejection_time = Duration::from_millis(1);
+        config.auth_rejection_time_initial = Some(Duration::from_millis(1));
+        config.preferred = no_crypto_preferred();
+        config
+            .keys
+            .push(PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap());
+        Arc::new(config)
+    }
+
+    fn no_crypto_preferred() -> Preferred {
+        Preferred {
+            kex: Cow::Owned(vec![kex::NONE]),
+            key: Cow::Owned(vec![Algorithm::Ed25519]),
+            cipher: Cow::Owned(vec![cipher::NONE]),
+            mac: Cow::Owned(vec![mac::NONE]),
+            compression: Cow::Owned(vec![compression::NONE]),
+        }
+    }
+
+    async fn raw_client_no_crypto_kex(stream: &mut tokio::net::TcpStream) -> io::Result<()> {
+        stream
+            .write_all(&ssh_packet(&kexinit_payload("none")))
+            .await?;
+        let newkeys = read_packet(stream).await?;
+        assert_eq!(newkeys.first(), Some(&MSG_NEWKEYS));
+        stream.write_all(&ssh_packet(&[MSG_NEWKEYS])).await?;
+        stream.flush().await
+    }
+
+    pub(crate) fn pty_req_payload(server_channel: u32, terminal_modes: &[u8]) -> Vec<u8> {
+        let mut payload = channel_request_payload(server_channel, b"pty-req");
+        encode_string(&mut payload, b"xterm");
+        push_u32(&mut payload, 80);
+        push_u32(&mut payload, 24);
+        push_u32(&mut payload, 0);
+        push_u32(&mut payload, 0);
+        encode_string(&mut payload, terminal_modes);
+        payload
+    }
+
+    pub(crate) fn channel_open_payload(channel_type: &[u8]) -> Vec<u8> {
+        let mut payload = Vec::new();
+        encode_string(&mut payload, channel_type);
+        push_u32(&mut payload, 0);
+        push_u32(&mut payload, 1024 * 1024);
+        push_u32(&mut payload, 32 * 1024);
+        payload
+    }
+
+    pub(crate) fn channel_request_payload(server_channel: u32, request_type: &[u8]) -> Vec<u8> {
+        let mut payload = Vec::new();
+        payload.push(MSG_CHANNEL_REQUEST);
+        push_u32(&mut payload, server_channel);
+        encode_string(&mut payload, request_type);
+        payload.push(1);
+        payload
+    }
+
+    pub(crate) fn kexinit_payload(kex_name: &str) -> Vec<u8> {
+        let mut payload = Vec::new();
+        payload.push(MSG_KEXINIT);
+        payload.extend_from_slice(&[0; 16]);
+        encode_name_list(&mut payload, &[kex_name]);
+        encode_name_list(&mut payload, &["ssh-ed25519"]);
+        encode_name_list(&mut payload, &["none"]);
+        encode_name_list(&mut payload, &["none"]);
+        encode_name_list(&mut payload, &["none"]);
+        encode_name_list(&mut payload, &["none"]);
+        encode_name_list(&mut payload, &["none"]);
+        encode_name_list(&mut payload, &["none"]);
+        encode_name_list(&mut payload, &[]);
+        encode_name_list(&mut payload, &[]);
+        payload.push(0);
+        push_u32(&mut payload, 0);
+        payload
+    }
+
+    fn ssh_packet(payload: &[u8]) -> Vec<u8> {
+        let mut padding_len = 8 - ((5 + payload.len()) % 8);
+        if padding_len < 4 {
+            padding_len += 8;
+        }
+        let packet_len = 1 + payload.len() + padding_len;
+        let mut packet = Vec::with_capacity(4 + packet_len);
+        push_u32(&mut packet, packet_len as u32);
+        packet.push(padding_len as u8);
+        packet.extend_from_slice(payload);
+        packet.resize(packet.len() + padding_len, 0);
+        packet
+    }
+
+    pub(crate) async fn read_packet(stream: &mut tokio::net::TcpStream) -> io::Result<Vec<u8>> {
+        let mut len_buf = [0; 4];
+        stream.read_exact(&mut len_buf).await?;
+        let packet_len = BigEndian::read_u32(&len_buf) as usize;
+        let mut packet = vec![0; packet_len];
+        stream.read_exact(&mut packet).await?;
+        let padding_len = packet[0] as usize;
+        Ok(packet[1..packet.len() - padding_len].to_vec())
+    }
+
+    async fn read_ssh_id(stream: &mut tokio::net::TcpStream) -> io::Result<Vec<u8>> {
+        let mut id = Vec::new();
+        loop {
+            let mut byte = [0];
+            stream.read_exact(&mut byte).await?;
+            id.push(byte[0]);
+            if byte[0] == b'\n' {
+                return Ok(id);
+            }
+        }
+    }
+
+    fn encode_name_list(buf: &mut Vec<u8>, names: &[&str]) {
+        encode_string(buf, names.join(",").as_bytes());
+    }
+
+    pub(crate) fn encode_string(buf: &mut Vec<u8>, value: &[u8]) {
+        push_u32(buf, value.len() as u32);
+        buf.extend_from_slice(value);
+    }
+
+    pub(crate) fn push_u32(buf: &mut Vec<u8>, value: u32) {
+        let mut bytes = [0; 4];
+        BigEndian::write_u32(&mut bytes, value);
+        buf.extend_from_slice(&bytes);
+    }
+
+    pub(crate) async fn timeout(
+        future: impl Future<Output = ServerSignal>,
+    ) -> Result<ServerSignal, tokio::time::error::Elapsed> {
+        tokio::time::timeout(Duration::from_secs(3), future).await
+    }
+
+    pub(crate) async fn capture_panics<T>(future: impl Future<Output = T>) -> (T, bool) {
+        static PANIC_HOOK_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+        let _guard = PANIC_HOOK_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap();
+        let panicked = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let panicked_hook = panicked.clone();
+        let previous_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |_| {
+            panicked_hook.store(true, std::sync::atomic::Ordering::SeqCst);
+        }));
+
+        let result = future.await;
+
+        std::panic::set_hook(previous_hook);
+        (result, panicked.load(std::sync::atomic::Ordering::SeqCst))
+    }
+
+    #[derive(Debug)]
+    pub(crate) enum ServerSignal {
+        Closed { events: Vec<&'static str> },
+        ProtocolError { events: Vec<&'static str> },
+        Panicked { events: Vec<&'static str> },
+        Survived { events: Vec<&'static str> },
+    }
+
+    impl ServerSignal {
+        pub(crate) fn events(&self) -> &[&'static str] {
+            match self {
+                Self::Closed { events }
+                | Self::ProtocolError { events }
+                | Self::Panicked { events }
+                | Self::Survived { events } => events,
+            }
+        }
+    }
+
+    pub(crate) fn assert_rejected(
+        result: Result<ServerSignal, tokio::time::error::Elapsed>,
+        message: &str,
+    ) {
+        assert!(
+            matches!(
+                result,
+                Ok(ServerSignal::Closed { .. } | ServerSignal::ProtocolError { .. })
+            ),
+            "{message}: {result:?}; handler events: {:?}",
+            result.as_ref().ok().map(ServerSignal::events).unwrap_or(&[])
+        );
+    }
+
+    #[derive(Clone)]
+    struct MalformedInputServer {
+        events: Arc<Mutex<Vec<&'static str>>>,
+    }
+
+    impl MalformedInputServer {
+        fn record(&self, event: &'static str) {
+            self.events.lock().unwrap().push(event);
+        }
+    }
+
+    impl server::Handler for MalformedInputServer {
+        type Error = Error;
+
+        async fn auth_none(&mut self, _user: &str) -> Result<server::Auth, Self::Error> {
+            self.record("auth_none");
+            Ok(server::Auth::Accept)
+        }
+
+        async fn auth_password(
+            &mut self,
+            _user: &str,
+            _password: &str,
+        ) -> Result<server::Auth, Self::Error> {
+            self.record("auth_password");
+            Ok(server::Auth::Reject {
+                proceed_with_methods: None,
+                partial_success: false,
+            })
+        }
+
+        async fn channel_open_session(
+            &mut self,
+            _channel: Channel<server::Msg>,
+            _session: &mut server::Session,
+        ) -> Result<bool, Self::Error> {
+            self.record("channel_open_session");
+            Ok(true)
+        }
+
+        async fn pty_request(
+            &mut self,
+            _channel: ChannelId,
+            _term: &str,
+            _col_width: u32,
+            _row_height: u32,
+            _pix_width: u32,
+            _pix_height: u32,
+            _modes: &[(Pty, u32)],
+            _session: &mut server::Session,
+        ) -> Result<(), Self::Error> {
+            self.record("pty_request");
+            Ok(())
+        }
+
+        async fn env_request(
+            &mut self,
+            _channel: ChannelId,
+            _variable_name: &str,
+            _variable_value: &str,
+            _session: &mut server::Session,
+        ) -> Result<(), Self::Error> {
+            self.record("env_request");
+            Ok(())
+        }
+
+        async fn exec_request(
+            &mut self,
+            _channel: ChannelId,
+            _data: &[u8],
+            _session: &mut server::Session,
+        ) -> Result<(), Self::Error> {
+            self.record("exec_request");
+            Ok(())
+        }
+
+        async fn signal(
+            &mut self,
+            _channel: ChannelId,
+            _signal: Sig,
+            _session: &mut server::Session,
+        ) -> Result<(), Self::Error> {
+            self.record("signal");
+            Ok(())
+        }
+    }
+}
+
 /// Integration test for FutureCertificate authentication flow
 #[cfg(unix)]
 mod future_certificate {

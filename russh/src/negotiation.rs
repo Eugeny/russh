@@ -26,6 +26,7 @@ use crate::kex::{
     EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT, EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER, KexCause,
 };
 use crate::keys::key::safe_rng;
+use crate::parsing::ensure_end;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::server::Config;
 use crate::sshbuffer::PacketWriter;
@@ -343,6 +344,8 @@ pub(crate) trait Select {
         String::decode(&mut r)?; // languages server-to-client
 
         let follows = u8::decode(&mut r)? != 0;
+        u32::decode(&mut r)?;
+        ensure_end(&r)?;
         Ok(Names {
             kex: kex_algorithm,
             key: key_algorithm,

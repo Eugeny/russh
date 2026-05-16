@@ -14,6 +14,7 @@ use crate::kex::dh::groups::DhGroup;
 use crate::kex::{KEXES, KexAlgorithm, KexAlgorithmImplementor, KexCause, KexProgress};
 use crate::keys::key::parse_public_key;
 use crate::negotiation::{Names, Select};
+use crate::parsing::ensure_end;
 use crate::session::Exchange;
 use crate::sshbuffer::PacketWriter;
 use crate::{CryptoVec, Error, SshId, msg, negotiation, strict_kex_violation};
@@ -195,6 +196,7 @@ impl ClientKex {
 
                 let prime = Mpint::decode(&mut r)?;
                 let generator = Mpint::decode(&mut r)?;
+                ensure_end(&r)?;
                 debug!("received gex group: prime={prime}, generator={generator}");
 
                 let group = DhGroup {
@@ -287,7 +289,10 @@ impl ClientKex {
                 })?;
 
                 let signature = Bytes::decode(r)?;
-                let signature = Signature::decode(&mut &signature[..])?;
+                let mut signature_reader = &signature[..];
+                let signature = Signature::decode(&mut signature_reader)?;
+                ensure_end(&signature_reader)?;
+                ensure_end(r)?;
 
                 if let Err(e) =
                     signature::Verifier::verify(&server_host_key, hash.as_ref(), &signature)
@@ -338,6 +343,8 @@ impl ClientKex {
                     );
                     return Err(Error::Kex);
                 }
+                let r = &input.buffer[1..];
+                ensure_end(&r)?;
 
                 Ok(KexProgress::Done {
                     newkeys,
