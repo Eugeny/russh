@@ -53,9 +53,9 @@ delegate.workspace = true
 digest.workspace = true
 der = "0.8"
 des = { version = "0.8.1", optional = true }
-ecdsa = "0.17.0-rc.18"
-ed25519-dalek = { version = "3.0.0-pre.7", features = ["alloc", "rand_core", "pkcs8"] }
-elliptic-curve = { version = "0.14.0-rc.32", features = ["ecdh"] }
+ecdsa = "=0.17.0-rc.18"
+ed25519-dalek = { version = "=3.0.0-pre.7", features = ["alloc", "rand_core", "pkcs8"] }
+elliptic-curve = { version = "=0.14.0-rc.32", features = ["ecdh"] }
 enum_dispatch = "0.3.13"
 flate2 = { version = "1.0.15", optional = true }
 futures.workspace = true
@@ -78,9 +78,9 @@ module-lattice = "0.2"
 num-bigint = { package = "internal-russh-num-bigint", version = "=0.5.0", features = ["rand_0_10"] }
 num_bigint_0_4 = { package = "num-bigint", version = "0.4.6" }
 # num-integer = "0.1"
-p256 = { version = "0.14.0-rc.9", features = ["ecdh"] }
-p384 = { version = "0.14.0-rc.9", features = ["ecdh"] }
-p521 = { version = "0.14.0-rc.9", features = ["ecdh"] }
+p256 = { version = "=0.14.0-rc.9", features = ["ecdh"] }
+p384 = { version = "=0.14.0-rc.9", features = ["ecdh"] }
+p521 = { version = "=0.14.0-rc.9", features = ["ecdh"] }
 pbkdf2 = "0.12"
 pbkdf2_0_13 = { package = "pbkdf2", version = "0.13.0" }
 pkcs1 = { version = "=0.8.0-rc.4", optional = true }
@@ -90,7 +90,7 @@ polyval = "0.7.1" # only pinned due to a cargo-minimal-versions failure in 0.7.0
 rand_core = { version = "0.10.0" }
 rand.workspace = true
 ring = { version = "0.17.14", optional = true }
-rsa = { version = "0.10.0-rc.18", optional = true }
+rsa = { version = "=0.10.0-rc.18", optional = true }
 russh-cryptovec = { version = "0.60.3", path = "../cryptovec", features = [
   "ssh-encoding",
 ] }
