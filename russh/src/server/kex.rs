@@ -109,7 +109,7 @@ impl ServerKex {
                 }
 
                 let names = {
-                    self.exchange.client_kex_init.extend_from_slice(&input.buffer);
+                    self.exchange.client_kex_init = input.buffer.clone().into();
                     negotiation::Server::read_kex(
                         &input.buffer,
                         &self.config.preferred,
@@ -138,7 +138,7 @@ impl ServerKex {
                         self.cause.session_id(),
                     )?;
 
-                    output.packet(|w| {
+                    output.write_packet(|w| {
                         msg::NEWKEYS.encode(w)?;
                         Ok(())
                     })?;
@@ -187,7 +187,7 @@ impl ServerKex {
                 self.exchange.gex = Some((gex_params, dh_group.clone()));
                 kex.dh_gex_set_group(dh_group)?;
 
-                output.packet(|w| {
+                output.write_packet(|w| {
                     msg::KEX_DH_GEX_GROUP.encode(w)?;
                     prime.encode(w)?;
                     generator.encode(w)?;
@@ -278,7 +278,7 @@ impl ServerKex {
                 )
                 .map_err(Into::into)?;
 
-                output.packet(|w| {
+                output.write_packet(|w| {
                     match kex.is_dh_gex() {
                         true => &msg::KEX_DH_GEX_REPLY,
                         false => &msg::KEX_ECDH_REPLY,
@@ -290,7 +290,7 @@ impl ServerKex {
                     Ok(())
                 })?;
 
-                output.packet(|w| {
+                output.write_packet(|w| {
                     msg::NEWKEYS.encode(w)?;
                     Ok(())
                 })?;

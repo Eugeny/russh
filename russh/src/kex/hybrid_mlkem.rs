@@ -335,8 +335,8 @@ mod tests {
         let mut exchange = Exchange {
             client_id: b"SSH-2.0-Test_Client".to_vec(),
             server_id: b"SSH-2.0-Test_Server".to_vec(),
-            client_kex_init: b"client_kex_init".to_vec(),
-            server_kex_init: b"server_kex_init".to_vec(),
+            client_kex_init: bytes::Bytes::from_static(b"client_kex_init"),
+            server_kex_init: bytes::Bytes::from_static(b"server_kex_init"),
             client_ephemeral: client_ephemeral.clone(),
             server_ephemeral: Vec::new(),
             gex: None,

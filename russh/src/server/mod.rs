@@ -1116,11 +1116,17 @@ async fn reply<H: Handler + Send>(
                     session.common.strict_kex =
                         session.common.strict_kex || newkeys.names.strict_kex();
 
-                    if let Some(ref mut enc) = session.common.encrypted {
+                    if session.common.encrypted.is_some() {
                         // This is a rekey
-                        enc.last_rekey = Instant::now();
-                        session.common.packet_writer.buffer().bytes = 0;
-                        enc.flush_all_pending()?;
+                        {
+                            let common = &mut session.common;
+                            common.newkeys(newkeys);
+                            common.packet_writer.buffer().bytes = 0;
+                            if let Some(enc) = common.encrypted.as_mut() {
+                                enc.last_rekey = Instant::now();
+                                enc.flush_all_pending_with_writer(&mut common.packet_writer)?;
+                            }
+                        }
 
                         let mut pending = std::mem::take(&mut session.pending_reads);
                         for p in pending.drain(..) {
@@ -1128,7 +1134,6 @@ async fn reply<H: Handler + Send>(
                         }
                         session.pending_reads = pending;
                         session.pending_len = 0;
-                        session.common.newkeys(newkeys);
                         session.flush()?;
                     } else {
                         // This is the initial kex
