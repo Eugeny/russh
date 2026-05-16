@@ -34,10 +34,12 @@ fn new_cipher_from_slices<C: KeyIvInit>(k: &[u8], n: &[u8]) -> C {
     )
 }
 
-pub struct SshBlockCipher<C: BlockStreamCipher + KeySizeUser + IvSizeUser>(pub PhantomData<C>);
+pub struct SshBlockCipher<C: BlockStreamCipher + PacketLengthProbe + KeySizeUser + IvSizeUser>(
+    pub PhantomData<C>,
+);
 
-impl<C: BlockStreamCipher + KeySizeUser + IvSizeUser + KeyIvInit + Send + 'static> super::Cipher
-    for SshBlockCipher<C>
+impl<C: BlockStreamCipher + PacketLengthProbe + KeySizeUser + IvSizeUser + KeyIvInit + Send + 'static>
+    super::Cipher for SshBlockCipher<C>
 {
     fn key_len(&self) -> usize {
         C::key_size()
@@ -78,7 +80,7 @@ impl<C: BlockStreamCipher + KeySizeUser + IvSizeUser + KeyIvInit + Send + 'stati
     }
 }
 
-pub struct OpeningKey<C: BlockStreamCipher> {
+pub struct OpeningKey<C: BlockStreamCipher + PacketLengthProbe> {
     pub(crate) cipher: C,
     pub(crate) mac: Box<dyn Mac + Send>,
 }
@@ -88,7 +90,9 @@ pub struct SealingKey<C: BlockStreamCipher> {
     pub(crate) mac: Box<dyn Mac + Send>,
 }
 
-impl<C: BlockStreamCipher + KeySizeUser + IvSizeUser> super::OpeningKey for OpeningKey<C> {
+impl<C: BlockStreamCipher + PacketLengthProbe + KeySizeUser + IvSizeUser> super::OpeningKey
+    for OpeningKey<C>
+{
     fn packet_length_to_read_for_block_length(&self) -> usize {
         16
     }
@@ -108,10 +112,7 @@ impl<C: BlockStreamCipher + KeySizeUser + IvSizeUser> super::OpeningKey for Open
             #[allow(clippy::unwrap_used, clippy::indexing_slicing)]
             encrypted_packet_length[..4].try_into().unwrap()
         } else {
-            // Work around uncloneable Aes<>
-            let mut cipher: C = unsafe { std::ptr::read(&self.cipher as *const C) };
-
-            cipher.decrypt_data(&mut first_block);
+            self.cipher.decrypt_packet_length_block(&mut first_block);
 
             // Fine because of self.packet_length_to_read_for_block_length()
             #[allow(clippy::unwrap_used, clippy::indexing_slicing)]
@@ -213,6 +214,10 @@ pub trait BlockStreamCipher {
     fn decrypt_data(&mut self, data: &mut [u8]);
 }
 
+pub(crate) trait PacketLengthProbe {
+    fn decrypt_packet_length_block(&self, first_block: &mut [u8; 16]);
+}
+
 impl<T: StreamCipher> BlockStreamCipher for T {
     fn encrypt_data(&mut self, data: &mut [u8]) {
         self.apply_keystream(data);
@@ -220,5 +225,125 @@ impl<T: StreamCipher> BlockStreamCipher for T {
 
     fn decrypt_data(&mut self, data: &mut [u8]) {
         self.apply_keystream(data);
+    }
+}
+
+impl<T: StreamCipher + Clone> PacketLengthProbe for T {
+    fn decrypt_packet_length_block(&self, first_block: &mut [u8; 16]) {
+        let mut cipher = self.clone();
+        cipher.apply_keystream(first_block);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use aes::cipher::KeyIvInit;
+    use aes::cipher::StreamCipher;
+    use aes::Aes128;
+    use aes::cipher::{IvSizeUser, KeySizeUser};
+    use ctr::Ctr128BE;
+    use digest::typenum::U16;
+    use tokio::io::AsyncWriteExt;
+
+    use super::{BlockStreamCipher, OpeningKey, PacketLengthProbe};
+    use crate::mac::MacAlgorithm;
+    use crate::sshbuffer::SSHBuffer;
+
+    #[test]
+    fn stream_cipher_probe_does_not_advance_cipher_state() {
+        let plaintext = *b"0123456789ABCDEF";
+        let key = fixture_bytes::<16>(7);
+        let iv = fixture_bytes::<16>(3);
+
+        let mut encryptor = Ctr128BE::<Aes128>::new(&key.into(), &iv.into());
+        let mut ciphertext = plaintext;
+        encryptor.apply_keystream(&mut ciphertext);
+
+        let cipher = Ctr128BE::<Aes128>::new(&key.into(), &iv.into());
+        let mut probed_block = ciphertext;
+        cipher.decrypt_packet_length_block(&mut probed_block);
+        assert_eq!(probed_block, plaintext);
+
+        let mut decrypted = ciphertext;
+        let mut cipher_after_probe = cipher;
+        cipher_after_probe.decrypt_data(&mut decrypted);
+        assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn decrypt_packet_length_uses_independent_cipher_state() -> std::io::Result<()> {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?;
+        let opening = OpeningKey {
+            cipher: OwnedStateCipher::new(),
+            mac: crate::mac::_NONE.make_mac(&[]),
+        };
+        let mut opening = opening;
+        let mut buffer = SSHBuffer::new();
+        let bytes_read = runtime.block_on(async {
+            let (mut writer, mut reader) = tokio::io::duplex(64);
+            writer.write_all(&[0; 17]).await?;
+            drop(writer);
+            crate::cipher::read(&mut reader, &mut buffer, &mut opening).await
+        })
+        .map_err(std::io::Error::other)?;
+
+        assert_eq!(bytes_read, 16);
+        Ok(())
+    }
+
+    struct OwnedStateCipher {
+        packet_length: Box<[u8; 4]>,
+    }
+
+    impl OwnedStateCipher {
+        fn new() -> Self {
+            Self {
+                packet_length: Box::new([0, 0, 0, 13]),
+            }
+        }
+    }
+
+    impl Clone for OwnedStateCipher {
+        fn clone(&self) -> Self {
+            Self {
+                packet_length: Box::new([0, 0, 0, 12]),
+            }
+        }
+    }
+
+    impl KeySizeUser for OwnedStateCipher {
+        type KeySize = U16;
+    }
+
+    impl IvSizeUser for OwnedStateCipher {
+        type IvSize = U16;
+    }
+
+    impl BlockStreamCipher for OwnedStateCipher {
+        fn encrypt_data(&mut self, _data: &mut [u8]) {}
+
+        fn decrypt_data(&mut self, data: &mut [u8]) {
+            if let Some(prefix) = data.get_mut(..4) {
+                prefix.copy_from_slice(&self.packet_length[..]);
+            }
+        }
+    }
+
+    impl PacketLengthProbe for OwnedStateCipher {
+        fn decrypt_packet_length_block(&self, first_block: &mut [u8; 16]) {
+            if let Some(prefix) = first_block.get_mut(..4) {
+                prefix.copy_from_slice(&[0, 0, 0, 12]);
+            }
+        }
+    }
+
+    fn fixture_bytes<const N: usize>(seed: u8) -> [u8; N] {
+        let mut bytes = [0; N];
+        for (i, byte) in bytes.iter_mut().enumerate() {
+            *byte = seed.wrapping_add(i as u8);
+        }
+        bytes
     }
 }

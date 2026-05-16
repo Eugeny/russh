@@ -44,7 +44,7 @@ bytes.workspace = true
 cbc = { version = "0.1" }
 cbc_0_2 = { package = "cbc", version = "0.2.0" }
 cipher = "0.5.1" # only pinned due to a cargo-minimal-versions failure in 0.5.0
-ctr = "0.9"
+ctr = "0.9.2"
 ctr_0_10 = { package = "ctr", version = "0.10.0" }
 curve25519-dalek = "=5.0.0-pre.6"
 crypto-bigint = { version = "0.7.3", features = ["alloc"] }
