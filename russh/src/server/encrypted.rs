@@ -32,7 +32,7 @@ use super::*;
 use crate::helpers::NameList;
 use crate::map_err;
 use crate::msg::SSH_OPEN_ADMINISTRATIVELY_PROHIBITED;
-use crate::parsing::{ChannelOpenConfirmation, ChannelType, OpenChannelMessage};
+use crate::parsing::{ChannelOpenConfirmation, ChannelType, OpenChannelMessage, ensure_end};
 
 impl Session {
     /// Returns false iff a request was rejected.
@@ -73,6 +73,7 @@ impl Session {
                 Some((&msg::SERVICE_REQUEST, mut r)),
             ) => {
                 let request = map_err!(String::decode(&mut r))?;
+                map_err!(ensure_end(&r))?;
                 debug!("request: {request:?}");
                 if request == "ssh-userauth" {
                     let auth_request = server_accept_service(
@@ -143,6 +144,165 @@ impl Session {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tests::raw_no_crypto::{
+        MSG_SERVICE_REQUEST, MSG_USERAUTH_FAILURE, MSG_USERAUTH_REQUEST, RawSession,
+        assert_rejected, capture_panics, channel_request_payload, encode_string, pty_req_payload,
+        raw_auth_request_signal, raw_channel_request_signal, raw_service_request_signal,
+        read_packet, timeout,
+    };
+
+    #[tokio::test]
+    async fn malformed_pty_req_truncated_modes_rejected_by_server() {
+        let (result, panicked) = capture_panics(async {
+            timeout(raw_channel_request_signal(|server_channel| {
+                pty_req_payload(server_channel, &[Pty::VINTR as u8, 0, 0, 0])
+            }))
+            .await
+        })
+        .await;
+
+        assert!(!panicked, "truncated pty terminal modes caused a panic");
+        assert_rejected(result, "truncated pty terminal modes crashed or survived");
+    }
+
+    #[tokio::test]
+    async fn malformed_pty_req_rejects_bytes_after_mode_end() {
+        let result = timeout(raw_channel_request_signal(|server_channel| {
+            pty_req_payload(server_channel, &[Pty::TTY_OP_END as u8, 0])
+        }))
+        .await;
+
+        assert_rejected(
+            result,
+            "server accepted trailing bytes inside pty terminal modes",
+        );
+    }
+
+    #[tokio::test]
+    async fn malformed_pty_req_trailing_bytes_rejected_by_server() {
+        let result = timeout(raw_channel_request_signal(|server_channel| {
+            let mut payload = pty_req_payload(server_channel, &[Pty::TTY_OP_END as u8]);
+            payload.push(0);
+            payload
+        }))
+        .await;
+
+        assert_rejected(result, "server accepted a pty request with trailing bytes");
+    }
+
+    #[tokio::test]
+    async fn env_request_with_trailing_bytes_rejected_by_server() {
+        let result = timeout(raw_channel_request_signal(|server_channel| {
+            let mut payload = channel_request_payload(server_channel, b"env");
+            encode_string(&mut payload, b"LANG");
+            encode_string(&mut payload, b"C");
+            payload.push(0);
+            payload
+        }))
+        .await;
+
+        assert_rejected(result, "server accepted an env request with trailing bytes");
+    }
+
+    #[tokio::test]
+    async fn exec_request_with_trailing_bytes_rejected_by_server() {
+        let result = timeout(raw_channel_request_signal(|server_channel| {
+            let mut payload = channel_request_payload(server_channel, b"exec");
+            encode_string(&mut payload, b"true");
+            payload.push(0);
+            payload
+        }))
+        .await;
+
+        assert_rejected(result, "server accepted an exec request with trailing bytes");
+    }
+
+    #[tokio::test]
+    async fn signal_request_with_trailing_bytes_rejected_by_server() {
+        let result = timeout(raw_channel_request_signal(|server_channel| {
+            let mut payload = channel_request_payload(server_channel, b"signal");
+            encode_string(&mut payload, b"TERM");
+            payload.push(0);
+            payload
+        }))
+        .await;
+
+        assert_rejected(result, "server accepted a signal request with trailing bytes");
+    }
+
+    #[tokio::test]
+    async fn service_request_with_trailing_bytes_rejected_by_server() {
+        let result = timeout(raw_service_request_signal(|payload| {
+            payload.push(MSG_SERVICE_REQUEST);
+            encode_string(payload, b"ssh-userauth");
+            payload.push(0);
+        }))
+        .await;
+
+        assert_rejected(result, "server accepted a service request with trailing bytes");
+    }
+
+    #[tokio::test]
+    async fn auth_none_with_trailing_bytes_rejected_by_server() {
+        let result = timeout(raw_auth_request_signal(|payload| {
+            payload.push(MSG_USERAUTH_REQUEST);
+            encode_string(payload, b"test");
+            encode_string(payload, b"ssh-connection");
+            encode_string(payload, b"none");
+            payload.push(0);
+        }))
+        .await;
+
+        assert_rejected(result, "server accepted a none auth request with trailing bytes");
+    }
+
+    #[tokio::test]
+    async fn auth_password_with_trailing_bytes_rejected_by_server() {
+        let result = timeout(raw_auth_request_signal(|payload| {
+            payload.push(MSG_USERAUTH_REQUEST);
+            encode_string(payload, b"test");
+            encode_string(payload, b"ssh-connection");
+            encode_string(payload, b"password");
+            payload.push(0);
+            encode_string(payload, b"secret");
+            payload.push(0);
+        }))
+        .await;
+
+        assert_rejected(
+            result,
+            "server accepted a password auth request with trailing bytes",
+        );
+    }
+
+    #[tokio::test]
+    async fn password_change_request_is_parsed_and_rejected_by_server() {
+        let mut stream = RawSession::connect().await;
+        stream.service_request().await.unwrap();
+
+        let mut payload = Vec::new();
+        payload.push(MSG_USERAUTH_REQUEST);
+        encode_string(&mut payload, b"test");
+        encode_string(&mut payload, b"ssh-connection");
+        encode_string(&mut payload, b"password");
+        payload.push(1);
+        encode_string(&mut payload, b"old-password");
+        encode_string(&mut payload, b"new-password");
+        stream.send_packet(&payload).await.unwrap();
+
+        let failure = read_packet(&mut stream.stream).await.unwrap();
+        assert_eq!(failure.first(), Some(&MSG_USERAUTH_FAILURE));
+        assert!(
+            !stream.events.lock().unwrap().contains(&"auth_password"),
+            "password-change requests should not call normal password auth"
+        );
+        stream.server_task.abort();
+    }
+}
+
 fn server_accept_service(
     banner: Option<String>,
     methods: MethodSet,
@@ -196,9 +356,20 @@ impl Encrypted {
                 };
                 auth_user.clear();
                 auth_user.push_str(&user);
-                map_err!(u8::decode(r))?;
+                let change = map_err!(u8::decode(r))? != 0;
                 let password = map_err!(String::decode(r))?;
-                let auth = handler.auth_password(&user, &password).await?;
+                if change {
+                    let _new_password = map_err!(String::decode(r))?;
+                }
+                map_err!(ensure_end(r))?;
+                let auth = if change {
+                    Auth::Reject {
+                        proceed_with_methods: None,
+                        partial_success: false,
+                    }
+                } else {
+                    handler.auth_password(&user, &password).await?
+                };
                 if let Auth::Accept = auth {
                     server_auth_request_success(&mut self.write);
                     self.state = EncryptedState::InitCompression;
@@ -237,6 +408,7 @@ impl Encrypted {
                 };
 
                 until = initial_auth_until;
+                map_err!(ensure_end(r))?;
 
                 let auth = handler.auth_none(&user).await?;
                 if let Auth::Accept = auth {
@@ -269,6 +441,7 @@ impl Encrypted {
                 auth_user.push_str(&user);
                 let _ = map_err!(String::decode(r))?; // language_tag, deprecated.
                 let submethods = map_err!(String::decode(r))?;
+                map_err!(ensure_end(r))?;
                 debug!("{submethods:?}");
                 auth_request.current = Some(CurrentRequest::KeyboardInteractive {
                     submethods: submethods.to_string(),
@@ -374,7 +547,10 @@ impl Encrypted {
 
                     let encoded_signature = map_err!(Vec::<u8>::decode(r))?;
 
-                    let sig = map_err!(Signature::decode(&mut encoded_signature.as_slice()))?;
+                    let mut signature_reader = encoded_signature.as_slice();
+                    let sig = map_err!(Signature::decode(&mut signature_reader))?;
+                    map_err!(ensure_end(&signature_reader))?;
+                    map_err!(ensure_end(r))?;
 
                     let is_valid = if sent_pk_ok && user == auth_user {
                         true
@@ -433,6 +609,7 @@ impl Encrypted {
                     }
                     Ok(())
                 } else {
+                    map_err!(ensure_end(r))?;
                     auth_user.clear();
                     auth_user.push_str(user);
                     let auth = handler.auth_publickey_offered(user, &pubkey).await?;
@@ -532,6 +709,7 @@ async fn read_userauth_info_response<H: Handler + Send, R: Reader>(
         for _ in 0..n {
             responses.push(Bytes::decode(r).ok())
         }
+        map_err!(ensure_end(r))?;
 
         let auth = handler
             .auth_keyboard_interactive(user, submethods, Some(Response(&mut responses.into_iter())))
@@ -605,6 +783,7 @@ impl Session {
                 .map(|_| ()),
             msg::CHANNEL_CLOSE => {
                 let channel_num = map_err!(ChannelId::decode(r))?;
+                map_err!(ensure_end(r))?;
                 if let Some(ref mut enc) = self.common.encrypted {
                     enc.channels.remove(&channel_num);
                 }
@@ -620,6 +799,7 @@ impl Session {
             }
             msg::CHANNEL_EOF => {
                 let channel_num = map_err!(ChannelId::decode(r))?;
+                map_err!(ensure_end(r))?;
                 if let Some(chan) = self.channels.get(&channel_num) {
                     chan.send(ChannelMsg::Eof).await.unwrap_or(())
                 }
@@ -636,6 +816,7 @@ impl Session {
                 };
                 trace!("handler.data {ext:?} {channel_num:?}");
                 let data = map_err!(Bytes::decode(r))?;
+                map_err!(ensure_end(r))?;
                 let target = self.target_window_size;
 
                 if let Some(ref mut enc) = self.common.encrypted {
@@ -672,6 +853,7 @@ impl Session {
             msg::CHANNEL_WINDOW_ADJUST => {
                 let channel_num = map_err!(ChannelId::decode(r))?;
                 let amount = map_err!(u32::decode(r))?;
+                map_err!(ensure_end(r))?;
                 let mut new_size = 0;
                 if let Some(ref mut enc) = self.common.encrypted {
                     if let Some(channel) = enc.channels.get_mut(&channel_num) {
@@ -701,6 +883,7 @@ impl Session {
             msg::CHANNEL_OPEN_CONFIRMATION => {
                 debug!("channel_open_confirmation");
                 let msg = map_err!(ChannelOpenConfirmation::decode(r))?;
+                map_err!(ensure_end(r))?;
                 let local_id = ChannelId(msg.recipient_channel);
 
                 if let Some(ref mut enc) = self.common.encrypted {
@@ -756,14 +939,21 @@ impl Session {
                         let mut i = 0;
                         {
                             let mode_string = map_err!(Bytes::decode(r))?;
-                            while 5 * i < mode_string.len() {
+                            let mut mode_bytes = mode_string.as_ref();
+                            while !mode_bytes.is_empty() {
                                 #[allow(clippy::indexing_slicing)] // length checked
-                                let code = mode_string[5 * i];
+                                let code = mode_bytes[0];
                                 if code == 0 {
+                                    if mode_bytes.len() != 1 {
+                                        return Err(Error::Inconsistent.into());
+                                    }
                                     break;
                                 }
+                                if mode_bytes.len() < 5 {
+                                    return Err(Error::Inconsistent.into());
+                                }
                                 #[allow(clippy::indexing_slicing)] // length checked
-                                let num = BigEndian::read_u32(&mode_string[5 * i + 1..]);
+                                let num = BigEndian::read_u32(&mode_bytes[1..5]);
                                 debug!("code = {code:?}");
                                 if let Some(code) = Pty::from_u8(code) {
                                     #[allow(clippy::indexing_slicing)] // length checked
@@ -775,9 +965,11 @@ impl Session {
                                 } else {
                                     info!("pty-req: unknown pty code {code:?}");
                                 }
-                                i += 1
+                                i += 1;
+                                mode_bytes = &mode_bytes[5..];
                             }
                         }
+                        map_err!(ensure_end(r))?;
 
                         if let Some(chan) = self.channels.get(&channel_num) {
                             let _ = chan
@@ -813,6 +1005,7 @@ impl Session {
                         let x11_auth_protocol = map_err!(String::decode(r))?;
                         let x11_auth_cookie = map_err!(String::decode(r))?;
                         let x11_screen_number = map_err!(u32::decode(r))?;
+                        map_err!(ensure_end(r))?;
 
                         if let Some(chan) = self.channels.get(&channel_num) {
                             let _ = chan
@@ -840,6 +1033,7 @@ impl Session {
                     "env" => {
                         let env_variable = map_err!(String::decode(r))?;
                         let env_value = map_err!(String::decode(r))?;
+                        map_err!(ensure_end(r))?;
 
                         if let Some(chan) = self.channels.get(&channel_num) {
                             let _ = chan
@@ -857,6 +1051,7 @@ impl Session {
                             .await
                     }
                     "shell" => {
+                        map_err!(ensure_end(r))?;
                         if let Some(chan) = self.channels.get(&channel_num) {
                             let _ = chan
                                 .send(ChannelMsg::RequestShell { want_reply: true })
@@ -866,6 +1061,7 @@ impl Session {
                         handler.shell_request(channel_num, self).await
                     }
                     "auth-agent-req@openssh.com" => {
+                        map_err!(ensure_end(r))?;
                         if let Some(chan) = self.channels.get(&channel_num) {
                             let _ = chan
                                 .send(ChannelMsg::AgentForward { want_reply: true })
@@ -883,6 +1079,7 @@ impl Session {
                     }
                     "exec" => {
                         let req = map_err!(Bytes::decode(r))?;
+                        map_err!(ensure_end(r))?;
                         if let Some(chan) = self.channels.get(&channel_num) {
                             let _ = chan
                                 .send(ChannelMsg::Exec {
@@ -896,6 +1093,7 @@ impl Session {
                     }
                     "subsystem" => {
                         let name = map_err!(String::decode(r))?;
+                        map_err!(ensure_end(r))?;
 
                         if let Some(chan) = self.channels.get(&channel_num) {
                             let _ = chan
@@ -913,6 +1111,7 @@ impl Session {
                         let row_height = map_err!(u32::decode(r))?;
                         let pix_width = map_err!(u32::decode(r))?;
                         let pix_height = map_err!(u32::decode(r))?;
+                        map_err!(ensure_end(r))?;
 
                         if let Some(chan) = self.channels.get(&channel_num) {
                             let _ = chan
@@ -939,6 +1138,7 @@ impl Session {
                     }
                     "signal" => {
                         let signal = Sig::from_name(&map_err!(String::decode(r))?);
+                        map_err!(ensure_end(r))?;
                         if let Some(chan) = self.channels.get(&channel_num) {
                             chan.send(ChannelMsg::Signal {
                                 signal: signal.clone(),
@@ -963,6 +1163,7 @@ impl Session {
                     "tcpip-forward" => {
                         let address = map_err!(String::decode(r))?;
                         let port = map_err!(u32::decode(r))?;
+                        map_err!(ensure_end(r))?;
                         debug!("handler.tcpip_forward {address:?} {port:?}");
                         let mut returned_port = port;
                         let result = handler
@@ -985,6 +1186,7 @@ impl Session {
                     "cancel-tcpip-forward" => {
                         let address = map_err!(String::decode(r))?;
                         let port = map_err!(u32::decode(r))?;
+                        map_err!(ensure_end(r))?;
                         debug!("handler.cancel_tcpip_forward {address:?} {port:?}");
                         let result = handler.cancel_tcpip_forward(&address, port, self).await?;
                         if let Some(ref mut enc) = self.common.encrypted {
@@ -998,6 +1200,7 @@ impl Session {
                     }
                     "streamlocal-forward@openssh.com" => {
                         let server_socket_path = map_err!(String::decode(r))?;
+                        map_err!(ensure_end(r))?;
                         debug!("handler.streamlocal_forward {server_socket_path:?}");
                         let result = handler
                             .streamlocal_forward(&server_socket_path, self)
@@ -1013,6 +1216,7 @@ impl Session {
                     }
                     "cancel-streamlocal-forward@openssh.com" => {
                         let socket_path = map_err!(String::decode(r))?;
+                        map_err!(ensure_end(r))?;
                         debug!("handler.cancel_streamlocal_forward {socket_path:?}");
                         let result = handler
                             .cancel_streamlocal_forward(&socket_path, self)
@@ -1043,6 +1247,7 @@ impl Session {
                     .unwrap_or(ChannelOpenFailure::Unknown);
                 let description = map_err!(String::decode(r))?;
                 let language_tag = map_err!(String::decode(r))?;
+                map_err!(ensure_end(r))?;
 
                 trace!("Channel open failure description: {description}");
                 trace!("Channel open failure language tag: {language_tag}");
@@ -1064,9 +1269,11 @@ impl Session {
                 trace!("Global Request Success");
                 match self.open_global_requests.pop_front() {
                     Some(GlobalRequestResponse::Keepalive) => {
+                        map_err!(ensure_end(r))?;
                         // ignore keepalives
                     }
                     Some(GlobalRequestResponse::Ping(return_channel)) => {
+                        map_err!(ensure_end(r))?;
                         let _ = return_channel.send(());
                     }
                     Some(GlobalRequestResponse::TcpIpForward(return_channel)) => {
@@ -1075,7 +1282,16 @@ impl Session {
                             Some(0)
                         } else {
                             match u32::decode(r) {
-                                Ok(port) => Some(port),
+                                Ok(port) => {
+                                    if let Err(e) = ensure_end(r) {
+                                        error!(
+                                            "Error parsing port for TcpIpForward request: {e:?}"
+                                        );
+                                        None
+                                    } else {
+                                        Some(port)
+                                    }
+                                }
                                 Err(e) => {
                                     error!("Error parsing port for TcpIpForward request: {e:?}");
                                     None
@@ -1085,6 +1301,7 @@ impl Session {
                         let _ = return_channel.send(result);
                     }
                     Some(GlobalRequestResponse::CancelTcpIpForward(return_channel)) => {
+                        map_err!(ensure_end(r))?;
                         let _ = return_channel.send(true);
                     }
                     _ => {
@@ -1095,6 +1312,7 @@ impl Session {
             }
             msg::REQUEST_FAILURE => {
                 trace!("global request failure");
+                map_err!(ensure_end(r))?;
                 match self.open_global_requests.pop_front() {
                     Some(GlobalRequestResponse::Keepalive) => {
                         // ignore keepalives
