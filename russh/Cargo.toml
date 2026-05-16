@@ -70,7 +70,7 @@ inout = { version = "0.1", features = ["std"] }
 keccak = "0.2.0"
 log.workspace = true
 md5 = "0.7"
-ml-kem = "=0.3.0-rc.1"
+ml-kem = "0.3"
 module-lattice = "0.2"
 # num-bigint 0.4.x only supports rand 0.8. PR #338 adds rand 0.10 support
 # via the `rand_0_10` feature flag. Replace with upstream once a release with
