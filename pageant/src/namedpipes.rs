@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use delegate::delegate;
 use log::debug;
+use base16ct::lower;
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeClient};
@@ -109,7 +110,7 @@ impl PageantStream {
         let mut hasher = Sha256::new();
         hasher.update((cryptdata.len() as u32).to_be_bytes());
         hasher.update(&cryptdata);
-        Ok(format!("{:x}", hasher.finalize()))
+        Ok(lower::encode_string(&hasher.finalize()))
     }
 }
 

@@ -13,6 +13,7 @@ rust-version = "1.85"
 thiserror.workspace = true
 
 [target.'cfg(windows)'.dependencies]
+base16ct = { workspace = true, features = ["alloc"] }
 futures.workspace = true
 rand.workspace = true
 byteorder.workspace = true
@@ -45,4 +46,3 @@ namedpipes = [
     "windows/Win32_Security_Authentication_Identity",
     "windows/Win32_Security_Cryptography",
 ]
-
