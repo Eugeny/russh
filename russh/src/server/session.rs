@@ -1265,7 +1265,7 @@ impl Session {
                     use super::negotiation::Select;
                     key_extension_client = super::negotiation::Server::select(
                         &[EXTENSION_SUPPORT_AS_CLIENT],
-                        &parse_kex_algo_list(&kex_string),
+                        &parse_kex_algo_list(&kex_string)?,
                         AlgorithmKind::Kex,
                     )
                     .is_ok();
