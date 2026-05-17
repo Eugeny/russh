@@ -981,7 +981,11 @@ impl Session {
                                     info!("pty-req: unknown pty code {code:?}");
                                 }
                                 i += 1;
-                                mode_bytes = &mode_bytes[5..];
+
+                                #[allow(clippy::indexing_slicing, reason = "length checked")]
+                                {
+                                    mode_bytes = &mode_bytes[5..];
+                                }
                             }
                         }
                         map_err!(ensure_end(r))?;
