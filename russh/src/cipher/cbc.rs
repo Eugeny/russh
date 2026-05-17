@@ -1,7 +1,9 @@
-use cbc::Encryptor;
 use cbc::cipher::{InnerIvInit, Iv, IvSizeUser};
-use cipher::{Block, BlockCipherDecrypt, BlockCipherEncrypt, BlockModeEncrypt};
+use cbc::{Decryptor, Encryptor};
 use cipher::common::InnerUser;
+use cipher::{
+    Block, BlockCipherDecrypt, BlockCipherEncrypt, BlockModeDecrypt, BlockModeEncrypt, IvState,
+};
 
 use super::block::{BlockStreamCipher, PacketLengthProbe};
 
@@ -20,6 +22,25 @@ where
     dec_iv: Block<C>,
 }
 
+impl<C> CbcWrapper<C>
+where
+    C: BlockCipherEncrypt + BlockCipherDecrypt + Clone,
+{
+    #[must_use]
+    fn decrypt_inner(&self, data: &mut [u8]) -> Iv<Self> {
+        let mut dec = Decryptor::<C>::inner_iv_init(self.dec_cipher.clone(), &self.dec_iv);
+
+        for chunk in data.chunks_exact_mut(C::block_size()) {
+            #[allow(clippy::expect_used)]
+            let block = <&mut Block<C>>::try_from(chunk).expect("chunk length matches block size");
+
+            dec.decrypt_block(block.try_into().unwrap());
+        }
+
+        dec.iv_state()
+    }
+}
+
 impl<C: BlockCipherEncrypt + BlockCipherDecrypt> InnerUser for CbcWrapper<C> {
     type Inner = C;
 }
@@ -28,7 +49,7 @@ impl<C: BlockCipherEncrypt + BlockCipherDecrypt> IvSizeUser for CbcWrapper<C> {
     type IvSize = C::BlockSize;
 }
 
-impl<C: BlockCipherEncrypt + BlockCipherDecrypt> BlockStreamCipher for CbcWrapper<C> {
+impl<C: BlockCipherEncrypt + BlockCipherDecrypt + Clone> BlockStreamCipher for CbcWrapper<C> {
     fn encrypt_data(&mut self, data: &mut [u8]) {
         for chunk in data.chunks_exact_mut(C::block_size()) {
             #[allow(clippy::expect_used)]
@@ -38,38 +59,13 @@ impl<C: BlockCipherEncrypt + BlockCipherDecrypt> BlockStreamCipher for CbcWrappe
     }
 
     fn decrypt_data(&mut self, data: &mut [u8]) {
-        for chunk in data.chunks_exact_mut(C::block_size()) {
-            #[allow(clippy::expect_used)]
-            let ciphertext =
-                Block::<C>::try_from(chunk.as_ref()).expect("chunk length matches block size");
-            #[allow(clippy::expect_used)]
-            let block =
-                <&mut Block<C>>::try_from(chunk).expect("chunk length matches block size");
-            self.dec_cipher.decrypt_block(block);
-            for (b, k) in block.iter_mut().zip(self.dec_iv.iter()) {
-                *b ^= k;
-            }
-            self.dec_iv = ciphertext;
-        }
+        self.dec_iv = self.decrypt_inner(data)
     }
 }
 
-impl<C: BlockCipherEncrypt + BlockCipherDecrypt> PacketLengthProbe for CbcWrapper<C> {
+impl<C: BlockCipherEncrypt + BlockCipherDecrypt + Clone> PacketLengthProbe for CbcWrapper<C> {
     fn decrypt_packet_length_block(&self, first_block: &mut [u8; 16]) {
-        // Use a local copy of the IV so self.dec_iv is never modified (peek, no consume).
-        // BlockCipherDecrypt::decrypt_block takes &self — no mutation of dec_cipher.
-        let mut iv = self.dec_iv.clone();
-        for chunk in first_block.chunks_exact_mut(C::block_size()) {
-            #[allow(clippy::expect_used)]
-            let ciphertext = Block::<C>::try_from(chunk.as_ref()).expect("chunk length matches block size");
-            #[allow(clippy::expect_used)]
-            let block = <&mut Block<C>>::try_from(chunk).expect("chunk length matches block size");
-            self.dec_cipher.decrypt_block(block);
-            for (b, k) in block.iter_mut().zip(iv.iter()) {
-                *b ^= k;
-            }
-            iv = ciphertext;
-        }
+        let _ = self.decrypt_inner(first_block);
     }
 }
 
