@@ -34,7 +34,7 @@ where
             #[allow(clippy::expect_used)]
             let block = <&mut Block<C>>::try_from(chunk).expect("chunk length matches block size");
 
-            dec.decrypt_block(block.try_into().unwrap());
+            dec.decrypt_block(block);
         }
 
         dec.iv_state()
