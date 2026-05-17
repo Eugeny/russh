@@ -191,8 +191,17 @@ impl Default for Preferred {
     }
 }
 
-pub(crate) fn parse_kex_algo_list(list: &str) -> Vec<&str> {
-    list.split(',').collect()
+pub(crate) fn parse_kex_algo_list(list: &str) -> Result<Vec<&str>, Error> {
+    list.split(',').try_fold(Vec::new(), |mut v, i| {
+        if v.len() > 1024 {
+            Err(Error::PacketSize(v.len()))
+        } else if i.len() > 1024 {
+            Err(Error::PacketSize(i.len()))
+        } else {
+            v.push(i);
+            Ok(v)
+        }
+    })
 }
 
 pub(crate) trait Select {
@@ -225,7 +234,7 @@ pub(crate) trait Select {
             .filter(|k| !KEX_EXTENSION_NAMES.contains(k))
             .cloned()
             .collect::<Vec<_>>();
-        let _remote_kexes_no_ext = parse_kex_algo_list(&kex_string)
+        let _remote_kexes_no_ext = parse_kex_algo_list(&kex_string)?
             .into_iter()
             .filter(|k| {
                 kex::Name::try_from(*k)
@@ -253,7 +262,7 @@ pub(crate) trait Select {
             } else {
                 EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER
             }],
-            &parse_kex_algo_list(&kex_string),
+            &parse_kex_algo_list(&kex_string)?,
             AlgorithmKind::Kex,
         )
         .is_ok();
@@ -272,7 +281,7 @@ pub(crate) trait Select {
 
         let (key_both_first, key_algorithm) = Self::select(
             &possible_host_key_algos[..],
-            &parse_kex_algo_list(&key_string),
+            &parse_kex_algo_list(&key_string)?,
             AlgorithmKind::Key,
         )?;
 
@@ -281,7 +290,7 @@ pub(crate) trait Select {
         let cipher_string = String::decode(&mut r)?;
         let (_cipher_both_first, cipher) = Self::select(
             &pref.cipher,
-            &parse_kex_algo_list(&cipher_string),
+            &parse_kex_algo_list(&cipher_string)?,
             AlgorithmKind::Cipher,
         )?;
         String::decode(&mut r)?; // cipher server-to-client.
@@ -292,7 +301,7 @@ pub(crate) trait Select {
 
         let client_mac = match Self::select(
             &pref.mac,
-            &parse_kex_algo_list(&String::decode(&mut r)?),
+            &parse_kex_algo_list(&String::decode(&mut r)?)?,
             AlgorithmKind::Mac,
         ) {
             Ok((_, m)) => m,
@@ -306,7 +315,7 @@ pub(crate) trait Select {
         };
         let server_mac = match Self::select(
             &pref.mac,
-            &parse_kex_algo_list(&String::decode(&mut r)?),
+            &parse_kex_algo_list(&String::decode(&mut r)?)?,
             AlgorithmKind::Mac,
         ) {
             Ok((_, m)) => m,
@@ -325,7 +334,7 @@ pub(crate) trait Select {
         let client_compression = compression::Compression::new(
             &Self::select(
                 &pref.compression,
-                &parse_kex_algo_list(&String::decode(&mut r)?),
+                &parse_kex_algo_list(&String::decode(&mut r)?)?,
                 AlgorithmKind::Compression,
             )?
             .1,
@@ -335,7 +344,7 @@ pub(crate) trait Select {
         let server_compression = compression::Compression::new(
             &Self::select(
                 &pref.compression,
-                &parse_kex_algo_list(&String::decode(&mut r)?),
+                &parse_kex_algo_list(&String::decode(&mut r)?)?,
                 AlgorithmKind::Compression,
             )?
             .1,

@@ -1135,6 +1135,7 @@ impl Session {
                     // The kex signal has not been consumed yet,
                     // so we can send return the concrete error to be propagated
                     // into the JoinHandle and returned from `connect_stream`
+                    debug!("disconnected during handshake {e:?}");
                     Err(e)
                 } else {
                     // The kex signal has been consumed, so no one is
