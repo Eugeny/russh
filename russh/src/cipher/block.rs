@@ -14,9 +14,11 @@
 use std::convert::TryInto;
 use std::marker::PhantomData;
 
-use aes::cipher::{IvSizeUser, KeyIvInit, KeySizeUser, StreamCipher};
+use aes::cipher::{
+    InOutBuf, Iv, IvSizeUser, Key, KeyIvInit, KeySizeUser, StreamCipher, StreamCipherError,
+    StreamCipherSeek,
+};
 #[allow(deprecated)]
-use digest::generic_array::GenericArray as GenericArray_0_14;
 use rand_core::Rng;
 
 use super::super::Error;
@@ -24,22 +26,79 @@ use super::PACKET_LENGTH_LEN;
 use crate::keys::key::safe_rng;
 use crate::mac::{Mac, MacAlgorithm};
 
-// Allow deprecated generic-array 0.14 usage until RustCrypto crates (cipher, digest, etc.)
-// upgrade to generic-array 1.x. Remove this when dependencies no longer use 0.14.
-#[allow(deprecated)]
 fn new_cipher_from_slices<C: KeyIvInit>(k: &[u8], n: &[u8]) -> C {
+    #[allow(clippy::expect_used)]
     C::new(
-        GenericArray_0_14::from_slice(k),
-        GenericArray_0_14::from_slice(n),
+        <&Key<C>>::try_from(k).expect("key length matches"),
+        <&Iv<C>>::try_from(n).expect("iv length matches"),
     )
+}
+
+/// Cloneable wrapper for `Ctr128BE<>`
+pub struct CtrWrapper<C>
+where
+    C: KeyIvInit,
+{
+    key: Key<C>,
+    initial_iv: Iv<C>,
+    pos: u64,
+}
+
+impl<C: KeyIvInit> Clone for CtrWrapper<C> {
+    fn clone(&self) -> Self {
+        Self {
+            key: self.key.clone(),
+            initial_iv: self.initial_iv.clone(),
+            pos: self.pos,
+        }
+    }
+}
+
+impl<C: KeyIvInit> KeySizeUser for CtrWrapper<C> {
+    type KeySize = <C as KeySizeUser>::KeySize;
+}
+
+impl<C: KeyIvInit> IvSizeUser for CtrWrapper<C> {
+    type IvSize = <C as IvSizeUser>::IvSize;
+}
+
+impl<C: KeyIvInit> KeyIvInit for CtrWrapper<C> {
+    fn new(key: &Key<Self>, iv: &Iv<Self>) -> Self {
+        Self {
+            key: key.clone(),
+            initial_iv: iv.clone(),
+            pos: 0,
+        }
+    }
+}
+
+impl<C: KeyIvInit + StreamCipher + StreamCipherSeek> StreamCipher for CtrWrapper<C> {
+    fn check_remaining(&self, _data_len: usize) -> Result<(), StreamCipherError> {
+        Ok(())
+    }
+
+    fn unchecked_apply_keystream_inout(&mut self, buf: InOutBuf<'_, '_, u8>) {
+        let mut cipher = C::new(&self.key, &self.initial_iv);
+        cipher.seek(self.pos);
+        cipher.unchecked_apply_keystream_inout(buf);
+        self.pos = cipher.current_pos();
+    }
+
+    fn unchecked_write_keystream(&mut self, buf: &mut [u8]) {
+        let mut cipher = C::new(&self.key, &self.initial_iv);
+        cipher.seek(self.pos);
+        cipher.unchecked_write_keystream(buf);
+        self.pos = cipher.current_pos();
+    }
 }
 
 pub struct SshBlockCipher<C: BlockStreamCipher + PacketLengthProbe + KeySizeUser + IvSizeUser>(
     pub PhantomData<C>,
 );
 
-impl<C: BlockStreamCipher + PacketLengthProbe + KeySizeUser + IvSizeUser + KeyIvInit + Send + 'static>
-    super::Cipher for SshBlockCipher<C>
+impl<
+    C: BlockStreamCipher + PacketLengthProbe + KeySizeUser + IvSizeUser + KeyIvInit + Send + 'static,
+> super::Cipher for SshBlockCipher<C>
 {
     fn key_len(&self) -> usize {
         C::key_size()
@@ -237,15 +296,15 @@ impl<T: StreamCipher + Clone> PacketLengthProbe for T {
 
 #[cfg(test)]
 mod tests {
+    use aes::Aes128;
     use aes::cipher::KeyIvInit;
     use aes::cipher::StreamCipher;
-    use aes::Aes128;
     use aes::cipher::{IvSizeUser, KeySizeUser};
     use ctr::Ctr128BE;
     use digest::typenum::U16;
     use tokio::io::AsyncWriteExt;
 
-    use super::{BlockStreamCipher, OpeningKey, PacketLengthProbe};
+    use super::{BlockStreamCipher, CtrWrapper, OpeningKey, PacketLengthProbe};
     use crate::mac::MacAlgorithm;
     use crate::sshbuffer::SSHBuffer;
 
@@ -255,11 +314,11 @@ mod tests {
         let key = fixture_bytes::<16>(7);
         let iv = fixture_bytes::<16>(3);
 
-        let mut encryptor = Ctr128BE::<Aes128>::new(&key.into(), &iv.into());
+        let mut encryptor = CtrWrapper::<Ctr128BE<Aes128>>::new(&key.into(), &iv.into());
         let mut ciphertext = plaintext;
         encryptor.apply_keystream(&mut ciphertext);
 
-        let cipher = Ctr128BE::<Aes128>::new(&key.into(), &iv.into());
+        let cipher = CtrWrapper::<Ctr128BE<Aes128>>::new(&key.into(), &iv.into());
         let mut probed_block = ciphertext;
         cipher.decrypt_packet_length_block(&mut probed_block);
         assert_eq!(probed_block, plaintext);
@@ -281,13 +340,14 @@ mod tests {
         };
         let mut opening = opening;
         let mut buffer = SSHBuffer::new();
-        let bytes_read = runtime.block_on(async {
-            let (mut writer, mut reader) = tokio::io::duplex(64);
-            writer.write_all(&[0; 17]).await?;
-            drop(writer);
-            crate::cipher::read(&mut reader, &mut buffer, &mut opening).await
-        })
-        .map_err(std::io::Error::other)?;
+        let bytes_read = runtime
+            .block_on(async {
+                let (mut writer, mut reader) = tokio::io::duplex(64);
+                writer.write_all(&[0; 17]).await?;
+                drop(writer);
+                crate::cipher::read(&mut reader, &mut buffer, &mut opening).await
+            })
+            .map_err(std::io::Error::other)?;
 
         assert_eq!(bytes_read, 16);
         Ok(())

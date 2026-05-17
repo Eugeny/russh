@@ -61,7 +61,6 @@ use std::io::Read;
 use std::path::Path;
 use std::string::FromUtf8Error;
 
-use aes::cipher::block_padding::UnpadError;
 use aes::cipher::inout::PadError;
 use data_encoding::BASE64_MIME;
 use thiserror::Error;
@@ -145,7 +144,7 @@ pub enum Error {
     Pad(#[from] PadError),
 
     #[error(transparent)]
-    Unpad(#[from] UnpadError),
+    Unpad(#[from] aes::cipher::block_padding::Error),
 
     #[error("Base64 decoding error: {0}")]
     Decode(#[from] data_encoding::DecodeError),
@@ -1251,7 +1250,7 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
     #[cfg(unix)]
     async fn test_sign_request_cert_missing_key_returns_agent_failure() {
         use crate::keys::agent::client::AgentClient;
-        
+
         env_logger::try_init().unwrap_or(());
 
         let (mut agent, agent_path, _dir) = spawn_agent().await.unwrap();
@@ -1303,7 +1302,7 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
     #[cfg(unix)]
     async fn test_sign_request_missing_key_returns_agent_failure() {
         use crate::keys::agent::client::AgentClient;
-        
+
         env_logger::try_init().unwrap_or(());
 
         let (mut agent, agent_path, _dir) = spawn_agent().await.unwrap();

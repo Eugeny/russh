@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::env;
 
 use data_encoding::BASE64_MIME;
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use log::debug;
 use sha1::Sha1;
 
