@@ -75,7 +75,7 @@ mod name_list {
     impl Decode for NameList {
         fn decode(reader: &mut impl ssh_encoding::Reader) -> Result<Self, ssh_encoding::Error> {
             let s = String::decode(reader)?;
-            Ok(Self::from_encoded_string(&s)?)
+            Self::from_encoded_string(&s)
         }
 
         type Error = ssh_encoding::Error;

@@ -222,7 +222,7 @@ pub(crate) trait Select {
             .cloned()
             .collect::<Vec<_>>();
         let _remote_kexes_no_ext = kex_list
-            .into_iter()
+            .iter()
             .filter(|k| {
                 kex::Name::try_from(k.as_str())
                     .ok()
