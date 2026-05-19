@@ -15,42 +15,74 @@ impl<E: Encode> EncodedExt for E {
     }
 }
 
-pub struct NameList(pub Vec<String>);
+mod name_list {
+    use std::ops::Deref;
 
-impl Debug for NameList {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
+    use super::*;
+    const MAX_NAME_LIST_ENTRIES: usize = 1024;
+
+    pub struct NameList(pub Vec<String>);
+
+    impl Debug for NameList {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            self.0.fmt(f)
+        }
+    }
+
+    impl Deref for NameList {
+        type Target = [String];
+
+        fn deref(&self) -> &Self::Target {
+            &self.0
+        }
+    }
+
+    impl NameList {
+        pub fn as_encoded_string(&self) -> String {
+            self.0.join(",")
+        }
+
+        pub fn from_encoded_string(value: &str) -> Result<Self, ssh_encoding::Error> {
+            Ok(Self(
+                value.split(',').map(|s| s.trim().to_owned()).try_fold(
+                    Vec::new(),
+                    |mut v, i| {
+                        if v.len() > MAX_NAME_LIST_ENTRIES {
+                            Err(ssh_encoding::Error::Length)
+                        } else {
+                            v.push(i);
+                            Ok(v)
+                        }
+                    },
+                )?,
+            ))
+        }
+    }
+
+    impl Encode for NameList {
+        fn encoded_len(&self) -> Result<usize, ssh_encoding::Error> {
+            self.as_encoded_string().encoded_len()
+        }
+
+        fn encode(
+            &self,
+            writer: &mut impl ssh_encoding::Writer,
+        ) -> Result<(), ssh_encoding::Error> {
+            self.as_encoded_string().encode(writer)
+        }
+    }
+
+    impl Decode for NameList {
+        fn decode(reader: &mut impl ssh_encoding::Reader) -> Result<Self, ssh_encoding::Error> {
+            let s = String::decode(reader)?;
+            Ok(Self::from_encoded_string(&s)?)
+        }
+
+        type Error = ssh_encoding::Error;
     }
 }
 
-impl NameList {
-    pub fn as_encoded_string(&self) -> String {
-        self.0.join(",")
-    }
-
-    pub fn from_encoded_string(value: &str) -> Self {
-        Self(value.split(',').map(|x| x.to_string()).collect())
-    }
-}
-
-impl Encode for NameList {
-    fn encoded_len(&self) -> Result<usize, ssh_encoding::Error> {
-        self.as_encoded_string().encoded_len()
-    }
-
-    fn encode(&self, writer: &mut impl ssh_encoding::Writer) -> Result<(), ssh_encoding::Error> {
-        self.as_encoded_string().encode(writer)
-    }
-}
-
-impl Decode for NameList {
-    fn decode(reader: &mut impl ssh_encoding::Reader) -> Result<Self, ssh_encoding::Error> {
-        let s = String::decode(reader)?;
-        Ok(Self::from_encoded_string(&s))
-    }
-
-    type Error = ssh_encoding::Error;
-}
+pub use name_list::NameList;
 
 pub(crate) mod macros {
     #[allow(clippy::crate_in_macro_def)]

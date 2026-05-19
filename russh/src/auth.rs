@@ -100,7 +100,6 @@ impl From<&NameList> for MethodSet {
     fn from(value: &NameList) -> Self {
         Self(
             value
-                .0
                 .iter()
                 .filter_map(|x| MethodKind::from_str(x).ok())
                 .collect(),
