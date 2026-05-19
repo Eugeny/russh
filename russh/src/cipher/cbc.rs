@@ -28,7 +28,7 @@ where
 {
     #[must_use]
     fn decrypt_inner(&self, data: &mut [u8]) -> Iv<Self> {
-        let mut dec = Decryptor::<C>::inner_iv_init(self.dec_cipher.clone(), &self.dec_iv);
+        let mut dec = Decryptor::<&C>::inner_iv_init(&self.dec_cipher, &self.dec_iv);
 
         for chunk in data.chunks_exact_mut(C::block_size()) {
             #[allow(clippy::expect_used)]
