@@ -341,8 +341,7 @@ impl Session {
         let algs = NameList::decode(r)?;
         debug!("* server-sig-algs");
         self.server_sig_algs = Some(
-            algs.0
-                .iter()
+            algs.iter()
                 .filter_map(|x| Algorithm::from_str(x).ok())
                 .inspect(|x| {
                     debug!("  * {x:?}");

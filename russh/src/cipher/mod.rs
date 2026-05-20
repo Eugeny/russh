@@ -26,6 +26,7 @@ use aes::{Aes128, Aes192, Aes256};
 #[cfg(feature = "aws-lc-rs")]
 use aws_lc_rs::aead::{AES_128_GCM as ALGORITHM_AES_128_GCM, AES_256_GCM as ALGORITHM_AES_256_GCM};
 use byteorder::{BigEndian, ByteOrder};
+use block::CtrWrapper;
 use ctr::Ctr128BE;
 use delegate::delegate;
 use log::trace;
@@ -103,9 +104,9 @@ pub const NONE: Name = Name("none");
 pub(crate) static _CLEAR: Clear = Clear {};
 #[cfg(feature = "des")]
 static _3DES_CBC: SshBlockCipher<CbcWrapper<des::TdesEde3>> = SshBlockCipher(PhantomData);
-static _AES_128_CTR: SshBlockCipher<Ctr128BE<Aes128>> = SshBlockCipher(PhantomData);
-static _AES_192_CTR: SshBlockCipher<Ctr128BE<Aes192>> = SshBlockCipher(PhantomData);
-static _AES_256_CTR: SshBlockCipher<Ctr128BE<Aes256>> = SshBlockCipher(PhantomData);
+static _AES_128_CTR: SshBlockCipher<CtrWrapper<Ctr128BE<Aes128>>> = SshBlockCipher(PhantomData);
+static _AES_192_CTR: SshBlockCipher<CtrWrapper<Ctr128BE<Aes192>>> = SshBlockCipher(PhantomData);
+static _AES_256_CTR: SshBlockCipher<CtrWrapper<Ctr128BE<Aes256>>> = SshBlockCipher(PhantomData);
 static _AES_128_GCM: GcmCipher = GcmCipher(&ALGORITHM_AES_128_GCM);
 static _AES_256_GCM: GcmCipher = GcmCipher(&ALGORITHM_AES_256_GCM);
 static _AES_128_CBC: SshBlockCipher<CbcWrapper<Aes128>> = SshBlockCipher(PhantomData);

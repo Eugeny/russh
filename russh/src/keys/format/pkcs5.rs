@@ -11,8 +11,7 @@ pub fn decode_pkcs5(
     password: Option<&str>,
     enc: Encryption,
 ) -> Result<PrivateKey, Error> {
-    use aes::cipher::{BlockDecryptMut, KeyIvInit};
-    use block_padding::Pkcs7;
+    use aes::cipher::{block_padding::Pkcs7, BlockModeDecrypt, KeyIvInit};
 
     if let Some(pass) = password {
         let sec = match enc {
@@ -25,7 +24,7 @@ pub fn decode_pkcs5(
                 #[allow(clippy::unwrap_used)] // AES parameters are static
                 let c = cbc::Decryptor::<Aes128>::new_from_slices(&md5.0, &iv[..]).unwrap();
                 let mut dec = secret.to_vec();
-                c.decrypt_padded_mut::<Pkcs7>(&mut dec)?.to_vec()
+                c.decrypt_padded::<Pkcs7>(&mut dec)?.to_vec()
             }
             Encryption::Aes256Cbc(_) => unimplemented!(),
         };

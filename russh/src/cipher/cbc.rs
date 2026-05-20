@@ -1,86 +1,89 @@
-use aes::cipher::{
-    BlockCipher, BlockDecrypt, BlockDecryptMut, BlockEncrypt, BlockEncryptMut, InnerIvInit, Iv,
-    IvSizeUser,
-};
+use cbc::cipher::{InnerIvInit, Iv, IvSizeUser};
 use cbc::{Decryptor, Encryptor};
-use digest::crypto_common::InnerUser;
-#[allow(deprecated)]
-use digest::generic_array::GenericArray;
+use cipher::common::InnerUser;
+use cipher::{
+    Block, BlockCipherDecrypt, BlockCipherEncrypt, BlockModeDecrypt, BlockModeEncrypt, IvState,
+};
 
 use super::block::{BlockStreamCipher, PacketLengthProbe};
 
-// Allow deprecated generic-array 0.14 usage until RustCrypto crates (cipher, cbc, etc.)
-// upgrade to generic-array 1.x. Remove this when dependencies no longer use 0.14.
-#[allow(deprecated)]
-fn generic_array_from_slice<N>(chunk: &[u8]) -> GenericArray<u8, N>
+/// CBC wrapper that stores the decryption cipher and IV separately rather than
+/// a `cbc::Decryptor`, because `Decryptor` is no longer `Clone` in cbc 0.2.
+/// This allows stateless peeking at the packet length block without cloning.
+pub struct CbcWrapper<C>
 where
-    N: digest::generic_array::ArrayLength<u8>,
+    C: BlockCipherEncrypt + BlockCipherDecrypt,
 {
-    GenericArray::from_slice(chunk).clone()
-}
-
-pub struct CbcWrapper<C: BlockEncrypt + BlockCipher + BlockDecrypt> {
     encryptor: Encryptor<C>,
-    decryptor: Decryptor<C>,
+    /// Raw cipher used for decryption. `BlockCipherDecrypt::decrypt_block` takes
+    /// `&self`, so this can be used without mutation for packet-length probing.
+    dec_cipher: C,
+    /// Current CBC decryption IV (i.e. the last ciphertext block consumed).
+    dec_iv: Block<C>,
 }
 
-impl<C: BlockEncrypt + BlockCipher + BlockDecrypt> InnerUser for CbcWrapper<C> {
+impl<C> CbcWrapper<C>
+where
+    C: BlockCipherEncrypt + BlockCipherDecrypt + Clone,
+{
+    #[must_use]
+    fn decrypt_inner(&self, data: &mut [u8]) -> Iv<Self> {
+        let mut dec = Decryptor::<&C>::inner_iv_init(&self.dec_cipher, &self.dec_iv);
+
+        for chunk in data.chunks_exact_mut(C::block_size()) {
+            #[allow(clippy::expect_used)]
+            let block = <&mut Block<C>>::try_from(chunk).expect("chunk length matches block size");
+
+            dec.decrypt_block(block);
+        }
+
+        dec.iv_state()
+    }
+}
+
+impl<C: BlockCipherEncrypt + BlockCipherDecrypt> InnerUser for CbcWrapper<C> {
     type Inner = C;
 }
 
-impl<C: BlockEncrypt + BlockCipher + BlockDecrypt> IvSizeUser for CbcWrapper<C> {
+impl<C: BlockCipherEncrypt + BlockCipherDecrypt> IvSizeUser for CbcWrapper<C> {
     type IvSize = C::BlockSize;
 }
 
-impl<C: BlockEncrypt + BlockCipher + BlockDecrypt> BlockStreamCipher for CbcWrapper<C> {
+impl<C: BlockCipherEncrypt + BlockCipherDecrypt + Clone> BlockStreamCipher for CbcWrapper<C> {
     fn encrypt_data(&mut self, data: &mut [u8]) {
         for chunk in data.chunks_exact_mut(C::block_size()) {
-            let mut block = generic_array_from_slice(chunk);
-            self.encryptor.encrypt_block_mut(&mut block);
-            chunk.copy_from_slice(&block);
+            #[allow(clippy::expect_used)]
+            let block = <&mut Block<C>>::try_from(chunk).expect("chunk length matches block size");
+            self.encryptor.encrypt_block(block);
         }
     }
 
     fn decrypt_data(&mut self, data: &mut [u8]) {
-        for chunk in data.chunks_exact_mut(C::block_size()) {
-            let mut block = generic_array_from_slice(chunk);
-            self.decryptor.decrypt_block_mut(&mut block);
-            chunk.copy_from_slice(&block);
-        }
+        self.dec_iv = self.decrypt_inner(data)
     }
 }
 
-impl<C: BlockEncrypt + BlockCipher + BlockDecrypt + Clone> PacketLengthProbe for CbcWrapper<C>
-where
-    C: BlockDecryptMut,
-{
+impl<C: BlockCipherEncrypt + BlockCipherDecrypt + Clone> PacketLengthProbe for CbcWrapper<C> {
     fn decrypt_packet_length_block(&self, first_block: &mut [u8; 16]) {
-        let mut decryptor = self.decryptor.clone();
-        for chunk in first_block.chunks_exact_mut(C::block_size()) {
-            let mut block = generic_array_from_slice(chunk);
-            decryptor.decrypt_block_mut(&mut block);
-            chunk.copy_from_slice(&block);
-        }
+        let _ = self.decrypt_inner(first_block);
     }
 }
 
-impl<C: BlockEncrypt + BlockCipher + BlockDecrypt + Clone> InnerIvInit for CbcWrapper<C>
-where
-    C: BlockEncryptMut + BlockCipher,
-{
+impl<C: BlockCipherEncrypt + BlockCipherDecrypt + Clone> InnerIvInit for CbcWrapper<C> {
     #[inline]
     fn inner_iv_init(cipher: C, iv: &Iv<Self>) -> Self {
         Self {
             encryptor: Encryptor::inner_iv_init(cipher.clone(), iv),
-            decryptor: Decryptor::inner_iv_init(cipher, iv),
+            dec_cipher: cipher,
+            dec_iv: iv.clone(),
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use aes::cipher::KeyIvInit;
     use aes::Aes128;
+    use cbc::cipher::KeyIvInit;
     #[cfg(feature = "des")]
     use des::TdesEde3;
 

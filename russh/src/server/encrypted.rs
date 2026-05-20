@@ -217,7 +217,10 @@ mod tests {
         }))
         .await;
 
-        assert_rejected(result, "server accepted an exec request with trailing bytes");
+        assert_rejected(
+            result,
+            "server accepted an exec request with trailing bytes",
+        );
     }
 
     #[tokio::test]
@@ -230,7 +233,10 @@ mod tests {
         }))
         .await;
 
-        assert_rejected(result, "server accepted a signal request with trailing bytes");
+        assert_rejected(
+            result,
+            "server accepted a signal request with trailing bytes",
+        );
     }
 
     #[tokio::test]
@@ -242,7 +248,10 @@ mod tests {
         }))
         .await;
 
-        assert_rejected(result, "server accepted a service request with trailing bytes");
+        assert_rejected(
+            result,
+            "server accepted a service request with trailing bytes",
+        );
     }
 
     #[tokio::test]
@@ -256,7 +265,10 @@ mod tests {
         }))
         .await;
 
-        assert_rejected(result, "server accepted a none auth request with trailing bytes");
+        assert_rejected(
+            result,
+            "server accepted a none auth request with trailing bytes",
+        );
     }
 
     #[tokio::test]
@@ -508,7 +520,12 @@ impl Encrypted {
                     PublicKeyOrCertificate::Certificate(ref cert) => {
                         // Validate certificate expiration
                         let now = SystemTime::now();
-                        if now < cert.valid_after_time() || now > cert.valid_before_time() {
+                        if cert.valid_after_time().map(|t| now < t).unwrap_or_default()
+                            || cert
+                                .valid_before_time()
+                                .map(|t| now > t)
+                                .unwrap_or_default()
+                        {
                             warn!("Certificate is expired or not yet valid");
                             reject_auth_request(until, &mut self.write, auth_request).await?;
                             return Ok(());
@@ -840,11 +857,9 @@ impl Session {
                     handler.extended_data(channel_num, ext, &data, self).await
                 } else {
                     if let Some(chan) = self.channels.get(&channel_num) {
-                        chan.send(ChannelMsg::Data {
-                            data: data.clone(),
-                        })
-                        .await
-                        .unwrap_or(())
+                        chan.send(ChannelMsg::Data { data: data.clone() })
+                            .await
+                            .unwrap_or(())
                     }
                     handler.data(channel_num, &data, self).await
                 }
@@ -966,7 +981,11 @@ impl Session {
                                     info!("pty-req: unknown pty code {code:?}");
                                 }
                                 i += 1;
-                                mode_bytes = &mode_bytes[5..];
+
+                                #[allow(clippy::indexing_slicing, reason = "length checked")]
+                                {
+                                    mode_bytes = &mode_bytes[5..];
+                                }
                             }
                         }
                         map_err!(ensure_end(r))?;

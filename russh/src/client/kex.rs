@@ -343,6 +343,8 @@ impl ClientKex {
                     );
                     return Err(Error::Kex);
                 }
+
+                #[allow(clippy::indexing_slicing, reason = "length checked")]
                 let r = &input.buffer[1..];
                 ensure_end(&r)?;
 

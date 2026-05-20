@@ -7,11 +7,11 @@ use sha2::Digest;
 use ssh_encoding::{Encode, Writer};
 
 use super::{
-    compute_keys, encode_mpint, KexAlgorithm, KexAlgorithmImplementor, KexType, SharedSecret,
+    KexAlgorithm, KexAlgorithmImplementor, KexType, SharedSecret, compute_keys, encode_mpint,
 };
 use crate::mac::{self};
 use crate::session::Exchange;
-use crate::{cipher, msg, CryptoVec};
+use crate::{CryptoVec, cipher, msg};
 
 pub struct Curve25519KexType {}
 
@@ -79,7 +79,9 @@ impl KexAlgorithmImplementor for Curve25519Kex {
 
         // fill exchange.
         exchange.server_ephemeral.clear();
-        exchange.server_ephemeral.extend_from_slice(&server_pubkey.0);
+        exchange
+            .server_ephemeral
+            .extend_from_slice(&server_pubkey.0);
         let shared = server_secret * client_pubkey;
         self.shared_secret = Some(shared);
         Ok(())
@@ -99,7 +101,7 @@ impl KexAlgorithmImplementor for Curve25519Kex {
         client_ephemeral.extend_from_slice(&client_pubkey.0);
 
         msg::KEX_ECDH_INIT.encode(writer)?;
-        client_pubkey.0.encode(writer)?;
+        (client_pubkey.0[..]).encode(writer)?;
 
         self.local_secret = Some(client_secret);
         Ok(())
