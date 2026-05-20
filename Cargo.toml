@@ -26,6 +26,7 @@ ssh-key = { version = "=0.7.0-rc.10", features = [
     "p521",
     "encryption",
     "ppk",
+    "sha1",
 ] }
 thiserror = "2.0.18"
 tokio = { version = "1.17.0" }

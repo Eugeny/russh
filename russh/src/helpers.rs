@@ -81,7 +81,7 @@ mod name_list {
         }
 
         pub fn from_encoded_string(value: &str) -> Result<Self, ssh_encoding::Error> {
-            Ok(Self(value.split(',').map(|s| s).try_fold(
+            Ok(Self(value.split(',').try_fold(
                 Vec::new(),
                 |mut list, name| {
                     if name.is_empty() || !name.is_ascii() {
