@@ -15,11 +15,49 @@ impl<E: Encode> EncodedExt for E {
     }
 }
 
+mod limited_string {
+    use super::*;
+    use std::ops::Deref;
+
+    pub struct LimitedString<const N: usize>(String);
+
+    impl<const N: usize> Deref for LimitedString<N> {
+        type Target = String;
+
+        fn deref(&self) -> &Self::Target {
+            &self.0
+        }
+    }
+
+    impl<const N: usize> Decode for LimitedString<N> {
+        type Error = ssh_encoding::Error;
+
+        fn decode(reader: &mut impl ssh_encoding::Reader) -> Result<Self, Self::Error> {
+            reader.read_prefixed(|reader| {
+                let len = reader.remaining_len();
+                if len > N {
+                    return Err(ssh_encoding::Error::Length);
+                }
+
+                // Allocate only after the SSH string length has been bounded.
+                let mut buf = vec![0; len];
+                reader.read(&mut buf)?;
+                let value =
+                    String::from_utf8(buf).map_err(|_| ssh_encoding::Error::CharacterEncoding)?;
+                reader.ensure_finished()?;
+
+                Ok(Self(value))
+            })
+        }
+    }
+}
+
 mod name_list {
     use std::ops::Deref;
 
     use super::*;
     const MAX_NAME_LIST_ENTRIES: usize = 1024;
+    const MAX_NAME_LIST_BYTES: usize = 16 * 1024;
 
     pub struct NameList(pub Vec<String>);
 
@@ -43,19 +81,20 @@ mod name_list {
         }
 
         pub fn from_encoded_string(value: &str) -> Result<Self, ssh_encoding::Error> {
-            Ok(Self(
-                value.split(',').map(|s| s.trim().to_owned()).try_fold(
-                    Vec::new(),
-                    |mut v, i| {
-                        if v.len() > MAX_NAME_LIST_ENTRIES {
-                            Err(ssh_encoding::Error::Length)
-                        } else {
-                            v.push(i);
-                            Ok(v)
-                        }
-                    },
-                )?,
-            ))
+            Ok(Self(value.split(',').map(|s| s).try_fold(
+                Vec::new(),
+                |mut list, name| {
+                    if name.is_empty() || !name.is_ascii() {
+                        return Err(ssh_encoding::Error::CharacterEncoding);
+                    }
+                    if list.len() > MAX_NAME_LIST_ENTRIES {
+                        Err(ssh_encoding::Error::Length)
+                    } else {
+                        list.push(name.into());
+                        Ok(list)
+                    }
+                },
+            )?))
         }
     }
 
@@ -74,7 +113,7 @@ mod name_list {
 
     impl Decode for NameList {
         fn decode(reader: &mut impl ssh_encoding::Reader) -> Result<Self, ssh_encoding::Error> {
-            let s = String::decode(reader)?;
+            let s = LimitedString::<MAX_NAME_LIST_BYTES>::decode(reader)?;
             Self::from_encoded_string(&s)
         }
 
@@ -82,6 +121,7 @@ mod name_list {
     }
 }
 
+pub use limited_string::LimitedString;
 pub use name_list::NameList;
 
 pub(crate) mod macros {
