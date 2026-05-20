@@ -170,8 +170,13 @@ impl Session {
                                 let n_prompts = map_err!(u32::decode(&mut r))?;
 
                                 // read prompts
-                                let mut prompts =
-                                    Vec::with_capacity(n_prompts.try_into().unwrap_or(0));
+                                // Each prompt needs at least a 4-byte length plus a 1-byte echo flag.
+                                let max_prompts = r.remaining_len() / 5;
+                                let n_prompts = n_prompts as usize;
+                                if n_prompts > max_prompts {
+                                    return Err(crate::Error::Inconsistent.into());
+                                }
+                                let mut prompts = Vec::with_capacity(n_prompts);
                                 for _i in 0..n_prompts {
                                     let prompt = map_err!(String::decode(&mut r))?;
 
