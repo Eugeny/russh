@@ -333,12 +333,7 @@ fn server_accept_service(
         })
     }
 
-    Ok(AuthRequest {
-        methods,
-        partial_success: false, // not used immediately anway.
-        current: None,
-        rejection_count: 0,
-    })
+    Ok(AuthRequest::server(methods))
 }
 
 impl Encrypted {
@@ -359,6 +354,18 @@ impl Encrypted {
         debug!("name: {user:?} {service_name:?} {method:?}",);
 
         if service_name == "ssh-connection" {
+            {
+                let auth_request = if let EncryptedState::WaitingAuthRequest(ref mut a) = self.state
+                {
+                    a
+                } else {
+                    unreachable!()
+                };
+                if auth_request.bind_or_reset_principal(&user, &service_name) {
+                    auth_user.clear();
+                }
+            }
+
             if method == "password" {
                 let auth_request = if let EncryptedState::WaitingAuthRequest(ref mut a) = self.state
                 {
