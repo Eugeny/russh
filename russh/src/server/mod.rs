@@ -1041,9 +1041,9 @@ async fn read_ssh_id<R: AsyncRead + Unpin>(
     read: &mut SshRead<R>,
 ) -> Result<CommonSession<Arc<Config>>, Error> {
     let sshid = if let Some(t) = config.inactivity_timeout {
-        tokio::time::timeout(t, read.read_ssh_id()).await??
+        tokio::time::timeout(t, read.read_client_ssh_id()).await??
     } else {
-        read.read_ssh_id().await?
+        read.read_client_ssh_id().await?
     };
 
     let session = CommonSession {
