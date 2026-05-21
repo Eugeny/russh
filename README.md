@@ -121,6 +121,8 @@ This is a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Éti
   * Uses russh::client for SSH transport, authentication, and interactive PTY sessions.
 * [Yazi](https://github.com/sxyazi/yazi) - Blazing fast terminal file manager written in Rust, based on async I/O.
   * Uses `russh::client` to implement an async SFTP provider for remote file management.
+* [Calagopus](https://github.com/calagopus/panel) - Fast, Efficient and Scalable Game hosting - built for everyone.
+  * Uses `russh::server` for efficiently implementing SSH shells and SFTP file management.
 
 ## Contributors ✨
 
