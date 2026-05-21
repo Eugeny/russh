@@ -81,6 +81,12 @@ mod name_list {
         }
 
         pub fn from_encoded_string(value: &str) -> Result<Self, ssh_encoding::Error> {
+            // RFC 4251 §5: a name-list may have zero names (a string of
+            // zero length). `"".split(',')` yields one empty element,
+            // which the per-name validation below would reject.
+            if value.is_empty() {
+                return Ok(Self(Vec::new()));
+            }
             Ok(Self(value.split(',').try_fold(
                 Vec::new(),
                 |mut list, name| {
@@ -118,6 +124,33 @@ mod name_list {
         }
 
         type Error = ssh_encoding::Error;
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn empty_name_list_is_valid() {
+            // RFC 4251 §5 permits a zero-name list. Servers that only
+            // offer AEAD ciphers (e.g. hssh) send empty MAC name-lists.
+            let nl = NameList::from_encoded_string("").unwrap();
+            assert!(nl.0.is_empty());
+        }
+
+        #[test]
+        fn name_list_round_trip() {
+            let nl = NameList::from_encoded_string("a,b,c").unwrap();
+            assert_eq!(nl.0, vec!["a", "b", "c"]);
+            assert_eq!(nl.as_encoded_string(), "a,b,c");
+        }
+
+        #[test]
+        fn name_list_rejects_empty_entry() {
+            // An empty entry mid-list (",,") is still invalid — only
+            // the zero-length whole-list case is allowed.
+            assert!(NameList::from_encoded_string("a,,b").is_err());
+        }
     }
 }
 
