@@ -448,9 +448,16 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
         let t = String::decode(&mut resp)?;
         if (hash == 2 && t == "rsa-sha2-256") || (hash == 4 && t == "rsa-sha2-512") || hash == 0 {
             let sig = Bytes::decode(&mut resp)?;
-            (t.len() + sig.len() + 8).encode(data)?;
+            let is_sk_signature = t.starts_with("sk-");
+            (t.len() + sig.len() + 8 + if is_sk_signature { 5 } else { 0 }).encode(data)?;
             t.encode(data)?;
             sig.encode(data)?;
+            if is_sk_signature {
+                let flags = u8::decode(&mut resp)?;
+                let counter = u32::decode(&mut resp)?;
+                flags.encode(data)?;
+                counter.encode(data)?;
+            }
             Ok(())
         } else {
             error!("unexpected agent signature type: {t:?}");
