@@ -363,6 +363,9 @@ const MAXIMUM_PADDING_LEN: usize = 19;
 const MAXIMUM_PACKET_LEN_HEADROOM: usize =
     PADDING_LENGTH_LEN + CHANNEL_EXTENDED_DATA_PACKET_OVERHEAD + MAXIMUM_PADDING_LEN;
 const MAXIMUM_PACKET_LEN: usize = MAXIMUM_PACKET_LEN_BASELINE + MAXIMUM_PACKET_LEN_HEADROOM;
+// Keep post-decompression growth within the same packet-acceptance model as
+// the transport read path.
+pub(crate) const MAXIMUM_DECOMPRESSED_PACKET_LEN: usize = MAXIMUM_PACKET_LEN;
 
 #[cfg(feature = "_bench")]
 pub mod benchmark;

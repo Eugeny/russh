@@ -1666,7 +1666,9 @@ async fn reply<H: Handler>(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use std::collections::{HashMap, VecDeque};
+    #[cfg(feature = "flate2")]
+    use std::io::Write;
     use std::num::Wrapping;
     use std::sync::Arc;
 
@@ -1679,6 +1681,7 @@ mod tests {
     use crate::compression::{Compression, Decompress};
     use crate::kex::{KEXES, NONE};
     use crate::session::{CommonSession, Encrypted, EncryptedState, Exchange};
+    use crate::sshbuffer::{IncomingSshPacket, PacketWriter, SSHBuffer};
     use crate::{CryptoVec, cipher, mac};
 
     struct TestHandler;
@@ -1750,6 +1753,56 @@ mod tests {
         (session, sender, reply_receiver)
     }
 
+    #[cfg(feature = "flate2")]
+    fn authenticated_session() -> Session {
+        let config = Arc::new(Config::default());
+        let (receiver_sender, receiver) = channel(config.channel_buffer_size);
+        let (reply_sender, _) = unbounded_channel();
+        let mut session = Session::new(
+            config.window_size,
+            CommonSession {
+                auth_user: String::new(),
+                auth_attempts: 0,
+                auth_method: None,
+                remote_to_local: Box::new(cipher::clear::Key),
+                encrypted: Some(Encrypted {
+                    state: EncryptedState::Authenticated,
+                    exchange: Some(Exchange::default()),
+                    kex: KEXES.get(&NONE).unwrap().make(),
+                    key: 0,
+                    client_mac: mac::NONE,
+                    server_mac: mac::NONE,
+                    session_id: CryptoVec::new(),
+                    channels: HashMap::new(),
+                    last_channel_id: Wrapping(0),
+                    write: Vec::new(),
+                    write_cursor: 0,
+                    last_rekey: russh_util::time::Instant::now(),
+                    server_compression: Compression::None,
+                    client_compression: Compression::None,
+                    decompress: Decompress::Zlib(flate2::Decompress::new(true)),
+                    rekey_wanted: false,
+                    received_extensions: Vec::new(),
+                    extension_info_awaiters: HashMap::new(),
+                }),
+                config,
+                wants_reply: false,
+                disconnected: false,
+                buffer: Vec::new(),
+                strict_kex: false,
+                alive_timeouts: 0,
+                received_data: false,
+                remote_sshid: b"SSH-2.0-test".to_vec(),
+                packet_writer: PacketWriter::clear(),
+            },
+            receiver,
+            reply_sender,
+        );
+        session.open_global_requests = VecDeque::new();
+        let _ = receiver_sender;
+        session
+    }
+
     fn oversized_prompt_count_packet() -> Vec<u8> {
         let mut packet = Vec::new();
         msg::USERAUTH_INFO_REQUEST_OR_USERAUTH_PK_OK
@@ -1772,7 +1825,59 @@ mod tests {
             .expect_err("malformed prompt count must fail");
 
         assert!(matches!(err, crate::Error::Inconsistent));
-        assert!(replies.try_recv().is_err(), "malformed packet must not emit a reply");
+        assert!(
+            replies.try_recv().is_err(),
+            "malformed packet must not emit a reply"
+        );
+    }
+
+    #[cfg(feature = "flate2")]
+    fn compressed_debug_payload(payload_len: usize) -> Vec<u8> {
+        let mut payload = vec![b'A'; payload_len];
+        payload[0] = crate::msg::DEBUG;
+
+        let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
+        encoder.write_all(&payload).unwrap();
+        let compressed = encoder.finish().unwrap();
+        assert!(compressed.len() < 256 * 1024);
+        compressed
+    }
+
+    #[cfg(feature = "flate2")]
+    fn incoming_packet(compressed: Vec<u8>) -> SSHBuffer {
+        let mut buffer = SSHBuffer::new();
+        buffer.buffer.extend_from_slice(&[0; 5]);
+        buffer.buffer.extend_from_slice(&compressed);
+        buffer
+    }
+
+    #[cfg(feature = "flate2")]
+    #[tokio::test]
+    async fn compressed_debug_is_ignored_after_client_parses_it() {
+        let mut session = authenticated_session();
+        let mut handler = TestHandler;
+        let mut kex_done_signal = None;
+        let buffer = incoming_packet(compressed_debug_payload(200 * 1024));
+        let mut pkt: IncomingSshPacket = session.maybe_decompress(&buffer).unwrap();
+
+        super::reply(&mut session, &mut handler, &mut kex_done_signal, &mut pkt)
+            .await
+            .unwrap();
+
+        assert!(!session.common.disconnected);
+    }
+
+    #[cfg(feature = "flate2")]
+    #[test]
+    fn oversized_compressed_debug_is_rejected_before_client_ignores_it() {
+        let mut session = authenticated_session();
+        let oversized = crate::cipher::MAXIMUM_DECOMPRESSED_PACKET_LEN + 1024;
+        let buffer = incoming_packet(compressed_debug_payload(oversized));
+
+        let err = session.maybe_decompress(&buffer).unwrap_err();
+        assert!(
+            matches!(err, crate::Error::PacketSize(len) if len > crate::cipher::MAXIMUM_DECOMPRESSED_PACKET_LEN)
+        );
     }
 }
 

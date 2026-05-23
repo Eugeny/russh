@@ -1317,3 +1317,124 @@ impl Session {
         Ok(())
     }
 }
+
+#[cfg(all(test, feature = "flate2"))]
+mod tests {
+    use std::collections::{HashMap, VecDeque};
+    use std::io::Write;
+    use std::num::Wrapping;
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::compression::{Compression, Decompress};
+    use crate::kex::{KEXES, NONE, SessionKexState};
+    use crate::session::{CommonSession, Encrypted, EncryptedState, Exchange};
+    use crate::sshbuffer::{IncomingSshPacket, PacketWriter, SSHBuffer};
+    use crate::{CryptoVec, cipher, mac};
+
+    struct TestHandler;
+
+    impl crate::server::Handler for TestHandler {
+        type Error = crate::Error;
+    }
+
+    fn authenticated_session() -> Session {
+        let config = Arc::new(crate::server::Config::default());
+        let (sender, receiver) = tokio::sync::mpsc::channel(config.event_buffer_size);
+        let handle = Handle {
+            sender,
+            channel_buffer_size: config.channel_buffer_size,
+        };
+
+        Session {
+            common: CommonSession {
+                auth_user: String::new(),
+                remote_sshid: b"SSH-2.0-test".to_vec(),
+                config: config.clone(),
+                encrypted: Some(Encrypted {
+                    state: EncryptedState::Authenticated,
+                    exchange: Some(Exchange::default()),
+                    kex: KEXES.get(&NONE).unwrap().make(),
+                    key: 0,
+                    client_mac: mac::NONE,
+                    server_mac: mac::NONE,
+                    session_id: CryptoVec::new(),
+                    channels: HashMap::new(),
+                    last_channel_id: Wrapping(0),
+                    write: Vec::new(),
+                    write_cursor: 0,
+                    last_rekey: russh_util::time::Instant::now(),
+                    server_compression: Compression::None,
+                    client_compression: Compression::None,
+                    decompress: Decompress::Zlib(flate2::Decompress::new(true)),
+                    rekey_wanted: false,
+                    received_extensions: Vec::new(),
+                    extension_info_awaiters: HashMap::new(),
+                }),
+                auth_method: None,
+                auth_attempts: 0,
+                packet_writer: PacketWriter::clear(),
+                remote_to_local: Box::new(cipher::clear::Key),
+                wants_reply: false,
+                disconnected: false,
+                buffer: Vec::new(),
+                strict_kex: false,
+                alive_timeouts: 0,
+                received_data: false,
+            },
+            sender: handle,
+            receiver,
+            target_window_size: config.window_size,
+            pending_reads: Vec::new(),
+            pending_len: 0,
+            channels: HashMap::new(),
+            open_global_requests: VecDeque::new(),
+            kex: SessionKexState::Idle,
+        }
+    }
+
+    fn compressed_debug_payload(payload_len: usize) -> Vec<u8> {
+        let mut payload = vec![b'A'; payload_len];
+        payload[0] = crate::msg::DEBUG;
+
+        let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
+        encoder.write_all(&payload).unwrap();
+        let compressed = encoder.finish().unwrap();
+        assert!(compressed.len() < 256 * 1024);
+        compressed
+    }
+
+    fn incoming_packet(compressed: Vec<u8>) -> SSHBuffer {
+        let mut buffer = SSHBuffer::new();
+        buffer.buffer.extend_from_slice(&[0; 5]);
+        buffer.buffer.extend_from_slice(&compressed);
+        buffer
+    }
+
+    #[tokio::test]
+    async fn compressed_debug_is_ignored_after_server_parses_it() {
+        let mut session = authenticated_session();
+        let mut handler = TestHandler;
+        let buffer = incoming_packet(compressed_debug_payload(200 * 1024));
+        let mut pkt: IncomingSshPacket = session.maybe_decompress(&buffer).unwrap();
+
+        super::super::reply(&mut session, &mut handler, &mut pkt)
+            .await
+            .unwrap();
+
+        assert!(!session.common.disconnected);
+    }
+
+    #[test]
+    fn oversized_compressed_debug_is_rejected_before_server_ignores_it() {
+        let mut session = authenticated_session();
+        let buffer = incoming_packet(compressed_debug_payload(
+            crate::cipher::MAXIMUM_DECOMPRESSED_PACKET_LEN + 1024,
+        ));
+
+        let err = session.maybe_decompress(&buffer).unwrap_err();
+        assert!(
+            matches!(err, crate::Error::PacketSize(len) if len > crate::cipher::MAXIMUM_DECOMPRESSED_PACKET_LEN)
+        );
+    }
+}

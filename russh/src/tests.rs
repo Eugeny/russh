@@ -4,8 +4,11 @@ use futures::Future;
 
 use super::*;
 
+#[cfg(feature = "flate2")]
 mod compress {
+    use std::borrow::Cow;
     use std::collections::HashMap;
+    use std::io::Write;
     use std::sync::{Arc, Mutex};
 
     use keys::PrivateKeyWithHashAlg;
@@ -14,7 +17,10 @@ mod compress {
 
     use super::server::{Server as _, Session};
     use super::*;
+    use crate::cipher::MAXIMUM_DECOMPRESSED_PACKET_LEN;
     use crate::server::Msg;
+
+    const OVERSIZED_DEBUG_MESSAGE_LEN: usize = MAXIMUM_DECOMPRESSED_PACKET_LEN + 1024;
 
     #[tokio::test]
     async fn compress_local_test() {
@@ -22,7 +28,7 @@ mod compress {
 
         let client_key = PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap();
         let mut config = server::Config::default();
-        config.preferred = Preferred::COMPRESSED;
+        config.preferred = preferred_zlib();
         config.inactivity_timeout = None; // Some(std::time::Duration::from_secs(3));
         config.auth_rejection_time = std::time::Duration::from_secs(3);
         config
@@ -44,7 +50,7 @@ mod compress {
         });
 
         let mut config = client::Config::default();
-        config.preferred = Preferred::COMPRESSED;
+        config.preferred = preferred_zlib();
         let config = Arc::new(config);
 
         let mut session = client::connect(config, addr, Client {}).await.unwrap();
@@ -71,6 +77,19 @@ mod compress {
             }
             msg => panic!("Unexpected message {msg:?}"),
         }
+    }
+
+    #[test]
+    fn oversized_debug_payload_can_stay_below_wire_cap() {
+        let payload = vec![b'A'; OVERSIZED_DEBUG_MESSAGE_LEN];
+        let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
+        encoder.write_all(&payload).unwrap();
+        let compressed = encoder.finish().unwrap();
+
+        assert!(
+            compressed.len() < 256 * 1024,
+            "attacker-crafted compressed payload should stay below the normal SSH wire cap"
+        );
     }
 
     #[derive(Clone)]
@@ -133,6 +152,17 @@ mod compress {
         ) -> Result<bool, Self::Error> {
             // println!("check_server_key: {:?}", server_public_key);
             Ok(true)
+        }
+    }
+
+    fn preferred_zlib() -> Preferred {
+        Preferred {
+            compression: Cow::Borrowed(&[
+                crate::compression::ZLIB,
+                crate::compression::ZLIB_LEGACY,
+                crate::compression::NONE,
+            ]),
+            ..Preferred::DEFAULT
         }
     }
 }
