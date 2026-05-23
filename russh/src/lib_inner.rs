@@ -3,7 +3,7 @@ use std::fmt::{Debug, Display, Formatter};
 use std::future::{Future, Pending};
 
 use futures::future::Either as EitherFuture;
-use log::{debug, warn};
+use log::warn;
 use parsing::ChannelOpenConfirmation;
 pub use russh_cryptovec::CryptoVec;
 use ssh_encoding::{Decode, Encode};

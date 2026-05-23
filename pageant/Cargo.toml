@@ -6,13 +6,14 @@ edition = "2024"
 license = "Apache-2.0"
 name = "pageant"
 repository = "https://github.com/warp-tech/russh"
-version = "0.2.0"
+version = "0.2.1"
 rust-version = "1.85"
 
 [dependencies]
 thiserror.workspace = true
 
 [target.'cfg(windows)'.dependencies]
+base16ct = { workspace = true, features = ["alloc"] }
 futures.workspace = true
 rand.workspace = true
 byteorder.workspace = true
@@ -45,4 +46,3 @@ namedpipes = [
     "windows/Win32_Security_Authentication_Identity",
     "windows/Win32_Security_Cryptography",
 ]
-

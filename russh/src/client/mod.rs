@@ -890,7 +890,7 @@ impl<H: Handler> Handle<H> {
     ) -> Result<(), bytes::Bytes> {
         let data = data.into();
         self.sender
-            .send(Msg::Channel(id, ChannelMsg::Data { data: data.clone() }))
+            .send(Msg::Channel(id, ChannelMsg::Data { data }))
             .await
             .map_err(|e| match e.0 {
                 Msg::Channel(_, ChannelMsg::Data { data, .. }) => data,
@@ -1135,6 +1135,7 @@ impl Session {
                     // The kex signal has not been consumed yet,
                     // so we can send return the concrete error to be propagated
                     // into the JoinHandle and returned from `connect_stream`
+                    debug!("disconnected during handshake {e:?}");
                     Err(e)
                 } else {
                     // The kex signal has been consumed, so no one is
@@ -1608,18 +1609,24 @@ async fn reply<H: Handler>(
                         .kex_done(shared_secret, &newkeys.names, session)
                         .await?;
 
-                    if let Some(ref mut enc) = session.common.encrypted {
+                    if session.common.encrypted.is_some() {
                         // This is a rekey
-                        enc.last_rekey = Instant::now();
-                        session.common.packet_writer.buffer().bytes = 0;
-                        enc.flush_all_pending()?;
+                        {
+                            let common = &mut session.common;
+                            common.newkeys(newkeys);
+                            common.packet_writer.buffer().bytes = 0;
+                            if let Some(enc) = common.encrypted.as_mut() {
+                                enc.last_rekey = Instant::now();
+                                enc.flush_all_pending_with_writer(&mut common.packet_writer)?;
+                            }
+                        }
+
                         let mut pending = std::mem::take(&mut session.pending_reads);
                         for p in pending.drain(..) {
                             session.process_packet(handler, &p).await?;
                         }
                         session.pending_reads = pending;
                         session.pending_len = 0;
-                        session.common.newkeys(newkeys);
                     } else {
                         // This is the initial kex
                         if let Some(server_host_key) = &server_host_key {
@@ -1655,6 +1662,118 @@ async fn reply<H: Handler>(
     }
 
     session.client_read_encrypted(handler, pkt).await
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::num::Wrapping;
+    use std::sync::Arc;
+
+    use ssh_encoding::Encode;
+    use tokio::sync::mpsc::channel;
+    use tokio::sync::mpsc::unbounded_channel;
+
+    use super::*;
+    use crate::auth::{AuthRequest, Method};
+    use crate::compression::{Compression, Decompress};
+    use crate::kex::{KEXES, NONE};
+    use crate::session::{CommonSession, Encrypted, EncryptedState, Exchange};
+    use crate::{CryptoVec, cipher, mac};
+
+    struct TestHandler;
+
+    impl Handler for TestHandler {
+        type Error = crate::Error;
+
+        async fn check_server_key(
+            &mut self,
+            _: &ssh_key::PublicKey,
+        ) -> Result<bool, Self::Error> {
+            Ok(true)
+        }
+    }
+
+    fn keyboard_interactive_session() -> (
+        Session,
+        tokio::sync::mpsc::Sender<Msg>,
+        tokio::sync::mpsc::UnboundedReceiver<Reply>,
+    ) {
+        let config = Arc::new(Config::default());
+        let (sender, receiver) = channel(config.channel_buffer_size);
+        let (reply_sender, reply_receiver) = unbounded_channel();
+        let auth_request = AuthRequest::new(&Method::KeyboardInteractive {
+            submethods: String::new(),
+        });
+        let session = Session::new(
+            config.window_size,
+            CommonSession {
+                auth_user: "user".to_owned(),
+                auth_attempts: 0,
+                auth_method: Some(Method::KeyboardInteractive {
+                    submethods: String::new(),
+                }),
+                remote_to_local: Box::new(cipher::clear::Key),
+                encrypted: Some(Encrypted {
+                    state: EncryptedState::WaitingAuthRequest(auth_request),
+                    exchange: Some(Exchange::default()),
+                    kex: KEXES.get(&NONE).unwrap().make(),
+                    key: 0,
+                    client_mac: mac::NONE,
+                    server_mac: mac::NONE,
+                    session_id: CryptoVec::new(),
+                    channels: HashMap::new(),
+                    last_channel_id: Wrapping(0),
+                    write: Vec::new(),
+                    write_cursor: 0,
+                    last_rekey: russh_util::time::Instant::now(),
+                    server_compression: Compression::None,
+                    client_compression: Compression::None,
+                    decompress: Decompress::None,
+                    rekey_wanted: false,
+                    received_extensions: Vec::new(),
+                    extension_info_awaiters: HashMap::new(),
+                }),
+                config,
+                wants_reply: false,
+                disconnected: false,
+                buffer: Vec::new(),
+                strict_kex: false,
+                alive_timeouts: 0,
+                received_data: false,
+                remote_sshid: b"SSH-2.0-test".to_vec(),
+                packet_writer: PacketWriter::clear(),
+            },
+            receiver,
+            reply_sender,
+        );
+        (session, sender, reply_receiver)
+    }
+
+    fn oversized_prompt_count_packet() -> Vec<u8> {
+        let mut packet = Vec::new();
+        msg::USERAUTH_INFO_REQUEST_OR_USERAUTH_PK_OK
+            .encode(&mut packet)
+            .unwrap();
+        "name".encode(&mut packet).unwrap();
+        "instructions".encode(&mut packet).unwrap();
+        "".encode(&mut packet).unwrap();
+        u32::MAX.encode(&mut packet).unwrap();
+        packet
+    }
+
+    #[tokio::test]
+    async fn oversized_keyboard_interactive_prompt_count_is_rejected() {
+        let (mut session, _sender, mut replies) = keyboard_interactive_session();
+        let mut handler = TestHandler;
+        let err = session
+            .process_packet(&mut handler, &oversized_prompt_count_packet())
+            .await
+            .expect_err("malformed prompt count must fail");
+
+        assert!(matches!(err, crate::Error::Inconsistent));
+        assert!(replies.try_recv().is_err(), "malformed packet must not emit a reply");
+    }
 }
 
 fn initial_encrypted_state(session: &Session) -> EncryptedState {

@@ -10,9 +10,10 @@ use ssh_key::Algorithm;
 use super::*;
 use crate::helpers::sign_with_hash_alg;
 use crate::kex::dh::biguint_to_mpint;
-use crate::kex::{KexAlgorithm, KexAlgorithmImplementor, KexCause, KEXES};
+use crate::kex::{KEXES, KexAlgorithm, KexAlgorithmImplementor, KexCause};
 use crate::keys::key::PrivateKeyWithHashAlg;
-use crate::negotiation::{is_key_compatible_with_algo, Names, Select};
+use crate::negotiation::{Names, Select, is_key_compatible_with_algo};
+use crate::parsing::ensure_end;
 use crate::{msg, negotiation};
 
 thread_local! {
@@ -109,7 +110,7 @@ impl ServerKex {
                 }
 
                 let names = {
-                    self.exchange.client_kex_init.extend_from_slice(&input.buffer);
+                    self.exchange.client_kex_init = input.buffer.clone().into();
                     negotiation::Server::read_kex(
                         &input.buffer,
                         &self.config.preferred,
@@ -138,7 +139,7 @@ impl ServerKex {
                         self.cause.session_id(),
                     )?;
 
-                    output.packet(|w| {
+                    output.write_packet(|w| {
                         msg::NEWKEYS.encode(w)?;
                         Ok(())
                     })?;
@@ -173,11 +174,15 @@ impl ServerKex {
                 }
 
                 #[allow(clippy::indexing_slicing)] // length checked
-                let gex_params = GexParams::decode(&mut &input.buffer[1..])?;
+                let mut r = &input.buffer[1..];
+                let gex_params = GexParams::decode(&mut r)?;
+                ensure_end(&r)?;
                 debug!("client requests a gex group: {gex_params:?}");
 
                 let Some(dh_group) = handler.lookup_dh_gex_group(&gex_params).await? else {
-                    debug!("server::Handler impl did not find a matching DH group (is lookup_dh_gex_group implemented?)");
+                    debug!(
+                        "server::Handler impl did not find a matching DH group (is lookup_dh_gex_group implemented?)"
+                    );
                     return Err(Error::Kex)?;
                 };
 
@@ -187,7 +192,7 @@ impl ServerKex {
                 self.exchange.gex = Some((gex_params, dh_group.clone()));
                 kex.dh_gex_set_group(dh_group)?;
 
-                output.packet(|w| {
+                output.write_packet(|w| {
                     msg::KEX_DH_GEX_GROUP.encode(w)?;
                     prime.encode(w)?;
                     generator.encode(w)?;
@@ -236,6 +241,7 @@ impl ServerKex {
                 self.exchange
                     .client_ephemeral
                     .extend_from_slice(&Bytes::decode(&mut r).map_err(Into::into)?);
+                ensure_end(&r)?;
 
                 let exchange = &mut self.exchange;
                 kex.server_dh(exchange, &input.buffer)?;
@@ -278,7 +284,7 @@ impl ServerKex {
                 )
                 .map_err(Into::into)?;
 
-                output.packet(|w| {
+                output.write_packet(|w| {
                     match kex.is_dh_gex() {
                         true => &msg::KEX_DH_GEX_REPLY,
                         false => &msg::KEX_ECDH_REPLY,
@@ -290,7 +296,7 @@ impl ServerKex {
                     Ok(())
                 })?;
 
-                output.packet(|w| {
+                output.write_packet(|w| {
                     msg::NEWKEYS.encode(w)?;
                     Ok(())
                 })?;
@@ -324,6 +330,9 @@ impl ServerKex {
                     );
                     return Err(Error::Kex.into());
                 }
+                #[allow(clippy::indexing_slicing, reason = "checked")]
+                let r = &input.buffer[1..];
+                ensure_end(&r)?;
 
                 debug!("new keys received");
                 Ok(KexProgress::Done {
@@ -371,4 +380,20 @@ fn compute_keys(
         cipher: c,
         session_id: session_id_cv,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::tests::raw_no_crypto::{assert_rejected, kexinit_payload, raw_kex_signal, timeout};
+
+    #[tokio::test]
+    async fn kexinit_with_trailing_bytes_rejected_by_server() {
+        let result = timeout(raw_kex_signal(|payload| {
+            payload.extend_from_slice(&kexinit_payload("none"));
+            payload.push(0);
+        }))
+        .await;
+
+        assert_rejected(result, "server accepted a kexinit with trailing bytes");
+    }
 }

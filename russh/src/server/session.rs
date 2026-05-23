@@ -5,15 +5,14 @@ use std::sync::Arc;
 use channels::WindowSizeRef;
 use kex::ServerKex;
 use log::debug;
-use negotiation::parse_kex_algo_list;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
-use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::mpsc::{Receiver, Sender, channel};
 use tokio::sync::oneshot;
 
 use super::*;
 use crate::channels::{Channel, ChannelMsg, ChannelReadHalf, ChannelRef, ChannelWriteHalf};
 use crate::helpers::NameList;
-use crate::kex::{KexCause, SessionKexState, EXTENSION_SUPPORT_AS_CLIENT};
+use crate::kex::{EXTENSION_SUPPORT_AS_CLIENT, KexCause, SessionKexState};
 use crate::{map_err, msg};
 
 /// A connected server session. This type is unique to a client.
@@ -101,12 +100,14 @@ pub struct Handle {
 
 impl Handle {
     /// Send data to the session referenced by this handler.
-    pub async fn data(&self, id: ChannelId, data: impl Into<bytes::Bytes>) -> Result<(), bytes::Bytes> {
+    pub async fn data(
+        &self,
+        id: ChannelId,
+        data: impl Into<bytes::Bytes>,
+    ) -> Result<(), bytes::Bytes> {
         let data = data.into();
         self.sender
-            .send(Msg::Channel(id, ChannelMsg::Data {
-                data: data.clone(),
-            }))
+            .send(Msg::Channel(id, ChannelMsg::Data { data }))
             .await
             .map_err(|e| match e.0 {
                 Msg::Channel(_, ChannelMsg::Data { data }) => data,
@@ -123,10 +124,7 @@ impl Handle {
     ) -> Result<(), bytes::Bytes> {
         let data = data.into();
         self.sender
-            .send(Msg::Channel(id, ChannelMsg::ExtendedData {
-                ext,
-                data: data.clone(),
-            }))
+            .send(Msg::Channel(id, ChannelMsg::ExtendedData { ext, data }))
             .await
             .map_err(|e| match e.0 {
                 Msg::Channel(_, ChannelMsg::ExtendedData { data, .. }) => data,
@@ -403,7 +401,7 @@ impl Handle {
                     });
                 }
                 Some(ChannelMsg::OpenFailure(reason)) => {
-                    return Err(Error::ChannelOpenFailure(reason))
+                    return Err(Error::ChannelOpenFailure(reason));
                 }
                 None => {
                     return Err(Error::Disconnect);
@@ -917,8 +915,10 @@ impl Session {
     /// The number of bytes added to the "sending pipeline" (to be
     /// processed by the event loop) is returned.
     pub fn data(&mut self, channel: ChannelId, data: impl Into<bytes::Bytes>) -> Result<(), Error> {
-        if let Some(ref mut enc) = self.common.encrypted {
-            enc.data(channel, data, self.kex.active())
+        let is_rekeying = self.kex.active();
+        let common = &mut self.common;
+        if let Some(enc) = common.encrypted.as_mut() {
+            enc.data_with_writer(&mut common.packet_writer, channel, data, is_rekeying)
         } else {
             unreachable!()
         }
@@ -936,8 +936,16 @@ impl Session {
         extended: u32,
         data: impl Into<bytes::Bytes>,
     ) -> Result<(), Error> {
-        if let Some(ref mut enc) = self.common.encrypted {
-            enc.extended_data(channel, extended, data, self.kex.active())
+        let is_rekeying = self.kex.active();
+        let common = &mut self.common;
+        if let Some(enc) = common.encrypted.as_mut() {
+            enc.extended_data_with_writer(
+                &mut common.packet_writer,
+                channel,
+                extended,
+                data,
+                is_rekeying,
+            )
         } else {
             unreachable!()
         }
@@ -1253,11 +1261,11 @@ impl Session {
                 let Some(mut r) = e.client_kex_init.get(17..) else {
                     return Ok(());
                 };
-                if let Ok(kex_string) = String::decode(&mut r) {
+                if let Ok(kex_list) = NameList::decode(&mut r) {
                     use super::negotiation::Select;
                     key_extension_client = super::negotiation::Server::select(
                         &[EXTENSION_SUPPORT_AS_CLIENT],
-                        &parse_kex_algo_list(&kex_string),
+                        &kex_list,
                         AlgorithmKind::Kex,
                     )
                     .is_ok();

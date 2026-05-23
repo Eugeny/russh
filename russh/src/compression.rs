@@ -142,6 +142,17 @@ impl Compress {
     ) -> Result<&'a [u8], crate::Error> {
         Ok(input)
     }
+
+    pub fn compress_into(
+        &mut self,
+        input: &[u8],
+        output: &mut Vec<u8>,
+        start_len: usize,
+    ) -> Result<usize, crate::Error> {
+        output.truncate(start_len);
+        output.extend_from_slice(input);
+        Ok(input.len())
+    }
 }
 
 #[cfg(not(feature = "flate2"))]
@@ -157,6 +168,10 @@ impl Decompress {
 
 #[cfg(feature = "flate2")]
 impl Compress {
+    fn zlib_output_reserve_bound(input_len: usize) -> usize {
+        input_len.saturating_add(10)
+    }
+
     pub fn compress<'a>(
         &mut self,
         input: &'a [u8],
@@ -185,6 +200,45 @@ impl Compress {
                 let n_out_ = z.total_out() as usize - n_out;
                 #[allow(clippy::indexing_slicing)] // length checked
                 Ok(&output[..n_out_])
+            }
+        }
+    }
+
+    pub fn compress_into(
+        &mut self,
+        input: &[u8],
+        output: &mut Vec<u8>,
+        start_len: usize,
+    ) -> Result<usize, crate::Error> {
+        match *self {
+            Compress::None => {
+                output.truncate(start_len);
+                output.extend_from_slice(input);
+                Ok(input.len())
+            }
+            Compress::Zlib(ref mut z) => {
+                output.truncate(start_len);
+                let n_in = z.total_in() as usize;
+                let n_out = z.total_out() as usize;
+                let reserve = Self::zlib_output_reserve_bound(input.len());
+                output.resize(start_len + reserve, 0);
+                let flush = flate2::FlushCompress::Partial;
+                loop {
+                    let n_in_ = z.total_in() as usize - n_in;
+                    let n_out_ = z.total_out() as usize - n_out;
+                    #[allow(clippy::indexing_slicing)] // length checked
+                    let c = z.compress(&input[n_in_..], &mut output[start_len + n_out_..], flush)?;
+                    match c {
+                        flate2::Status::BufError => {
+                            let growth = output.len().saturating_sub(start_len).max(1);
+                            output.resize(output.len() + growth, 0);
+                        }
+                        _ => break,
+                    }
+                }
+                let n_out_ = z.total_out() as usize - n_out;
+                output.truncate(start_len + n_out_);
+                Ok(n_out_)
             }
         }
     }

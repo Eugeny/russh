@@ -3,6 +3,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
+use base16ct::lower;
 use delegate::delegate;
 use log::debug;
 use sha2::{Digest, Sha256};
@@ -109,7 +110,7 @@ impl PageantStream {
         let mut hasher = Sha256::new();
         hasher.update((cryptdata.len() as u32).to_be_bytes());
         hasher.update(&cryptdata);
-        Ok(format!("{:x}", hasher.finalize()))
+        Ok(lower::encode_string(&hasher.finalize()))
     }
 }
 

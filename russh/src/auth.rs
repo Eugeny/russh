@@ -100,7 +100,6 @@ impl From<&NameList> for MethodSet {
     fn from(value: &NameList) -> Self {
         Self(
             value
-                .0
                 .iter()
                 .filter_map(|x| MethodKind::from_str(x).ok())
                 .collect(),
@@ -227,12 +226,21 @@ pub enum Method {
 #[doc(hidden)]
 #[derive(Debug)]
 pub struct AuthRequest {
+    initial_methods: MethodSet,
     pub methods: MethodSet,
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub partial_success: bool,
     pub current: Option<CurrentRequest>,
+    pub(crate) principal: Option<AuthPrincipal>,
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub rejection_count: usize,
+}
+
+#[doc(hidden)]
+#[derive(Debug)]
+pub(crate) struct AuthPrincipal {
+    user: String,
+    service: String,
 }
 
 #[doc(hidden)]
@@ -253,22 +261,53 @@ pub enum CurrentRequest {
 }
 
 impl AuthRequest {
+    pub(crate) fn server(methods: MethodSet) -> Self {
+        Self {
+            initial_methods: methods.clone(),
+            methods,
+            partial_success: false,
+            current: None,
+            principal: None,
+            rejection_count: 0,
+        }
+    }
+
     pub(crate) fn new(method: &Method) -> Self {
         match method {
             Method::KeyboardInteractive { submethods } => Self {
+                initial_methods: MethodSet::all(),
                 methods: MethodSet::all(),
                 partial_success: false,
                 current: Some(CurrentRequest::KeyboardInteractive {
                     submethods: submethods.to_string(),
                 }),
+                principal: None,
                 rejection_count: 0,
             },
             _ => Self {
+                initial_methods: MethodSet::all(),
                 methods: MethodSet::all(),
                 partial_success: false,
                 current: None,
+                principal: None,
                 rejection_count: 0,
             },
+        }
+    }
+
+    pub(crate) fn bind_or_reset_principal(&mut self, user: &str, service: &str) -> bool {
+        match &self.principal {
+            Some(bound) if bound.user == user && bound.service == service => false,
+            _ => {
+                self.principal = Some(AuthPrincipal {
+                    user: user.to_owned(),
+                    service: service.to_owned(),
+                });
+                self.methods = self.initial_methods.clone();
+                self.partial_success = false;
+                self.current = None;
+                true
+            }
         }
     }
 }

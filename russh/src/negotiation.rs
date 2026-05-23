@@ -14,6 +14,7 @@
 //
 use std::borrow::Cow;
 
+use bytes::Bytes;
 use log::debug;
 use rand_core::Rng;
 use ssh_encoding::{Decode, Encode};
@@ -25,6 +26,7 @@ use crate::kex::{
     EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT, EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER, KexCause,
 };
 use crate::keys::key::safe_rng;
+use crate::parsing::ensure_end;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::server::Config;
 use crate::sshbuffer::PacketWriter;
@@ -189,18 +191,14 @@ impl Default for Preferred {
     }
 }
 
-pub(crate) fn parse_kex_algo_list(list: &str) -> Vec<&str> {
-    list.split(',').collect()
-}
-
 pub(crate) trait Select {
     fn is_server() -> bool;
 
-    fn select<S: AsRef<str> + Clone>(
-        a: &[S],
-        b: &[&str],
+    fn select<A: AsRef<str> + Clone, B: AsRef<str> + Clone>(
+        a: &[A],
+        b: &[B],
         kind: AlgorithmKind,
-    ) -> Result<(bool, S), Error>;
+    ) -> Result<(bool, A), Error>;
 
     /// `available_host_keys`, if present, is used to limit the host key algorithms to the ones we have keys for.
     fn read_kex(
@@ -215,7 +213,7 @@ pub(crate) trait Select {
 
         // Key exchange
 
-        let kex_string = String::decode(&mut r)?;
+        let kex_list = NameList::decode(&mut r)?;
         // Filter out extension kex names from both lists before selecting
         let _local_kexes_no_ext = pref
             .kex
@@ -223,10 +221,10 @@ pub(crate) trait Select {
             .filter(|k| !KEX_EXTENSION_NAMES.contains(k))
             .cloned()
             .collect::<Vec<_>>();
-        let _remote_kexes_no_ext = parse_kex_algo_list(&kex_string)
-            .into_iter()
+        let _remote_kexes_no_ext = kex_list
+            .iter()
             .filter(|k| {
-                kex::Name::try_from(*k)
+                kex::Name::try_from(k.as_str())
                     .ok()
                     .map(|k| !KEX_EXTENSION_NAMES.contains(&k))
                     .unwrap_or(false)
@@ -251,7 +249,7 @@ pub(crate) trait Select {
             } else {
                 EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER
             }],
-            &parse_kex_algo_list(&kex_string),
+            &kex_list,
             AlgorithmKind::Kex,
         )
         .is_ok();
@@ -262,60 +260,48 @@ pub(crate) trait Select {
 
         // Host key
 
-        let key_string = String::decode(&mut r)?;
+        let key_list = NameList::decode(&mut r)?;
         let possible_host_key_algos = match available_host_keys {
             Some(available_host_keys) => pref.possible_host_key_algos_for_keys(available_host_keys),
             None => pref.key.iter().map(ToOwned::to_owned).collect::<Vec<_>>(),
         };
 
-        let (key_both_first, key_algorithm) = Self::select(
-            &possible_host_key_algos[..],
-            &parse_kex_algo_list(&key_string),
-            AlgorithmKind::Key,
-        )?;
+        let (key_both_first, key_algorithm) =
+            Self::select(&possible_host_key_algos[..], &key_list, AlgorithmKind::Key)?;
 
         // Cipher
 
-        let cipher_string = String::decode(&mut r)?;
-        let (_cipher_both_first, cipher) = Self::select(
-            &pref.cipher,
-            &parse_kex_algo_list(&cipher_string),
-            AlgorithmKind::Cipher,
-        )?;
+        let cipher_list = NameList::decode(&mut r)?;
+        let (_cipher_both_first, cipher) =
+            Self::select(&pref.cipher, &cipher_list, AlgorithmKind::Cipher)?;
         String::decode(&mut r)?; // cipher server-to-client.
 
         // MAC
 
         let need_mac = CIPHERS.get(&cipher).map(|x| x.needs_mac()).unwrap_or(false);
 
-        let client_mac = match Self::select(
-            &pref.mac,
-            &parse_kex_algo_list(&String::decode(&mut r)?),
-            AlgorithmKind::Mac,
-        ) {
-            Ok((_, m)) => m,
-            Err(e) => {
-                if need_mac {
-                    return Err(e);
-                } else {
-                    mac::NONE
+        let client_mac =
+            match Self::select(&pref.mac, &NameList::decode(&mut r)?, AlgorithmKind::Mac) {
+                Ok((_, m)) => m,
+                Err(e) => {
+                    if need_mac {
+                        return Err(e);
+                    } else {
+                        mac::NONE
+                    }
                 }
-            }
-        };
-        let server_mac = match Self::select(
-            &pref.mac,
-            &parse_kex_algo_list(&String::decode(&mut r)?),
-            AlgorithmKind::Mac,
-        ) {
-            Ok((_, m)) => m,
-            Err(e) => {
-                if need_mac {
-                    return Err(e);
-                } else {
-                    mac::NONE
+            };
+        let server_mac =
+            match Self::select(&pref.mac, &NameList::decode(&mut r)?, AlgorithmKind::Mac) {
+                Ok((_, m)) => m,
+                Err(e) => {
+                    if need_mac {
+                        return Err(e);
+                    } else {
+                        mac::NONE
+                    }
                 }
-            }
-        };
+            };
 
         // Compression
 
@@ -323,7 +309,7 @@ pub(crate) trait Select {
         let client_compression = compression::Compression::new(
             &Self::select(
                 &pref.compression,
-                &parse_kex_algo_list(&String::decode(&mut r)?),
+                &NameList::decode(&mut r)?,
                 AlgorithmKind::Compression,
             )?
             .1,
@@ -333,7 +319,7 @@ pub(crate) trait Select {
         let server_compression = compression::Compression::new(
             &Self::select(
                 &pref.compression,
-                &parse_kex_algo_list(&String::decode(&mut r)?),
+                &NameList::decode(&mut r)?,
                 AlgorithmKind::Compression,
             )?
             .1,
@@ -342,6 +328,8 @@ pub(crate) trait Select {
         String::decode(&mut r)?; // languages server-to-client
 
         let follows = u8::decode(&mut r)? != 0;
+        u32::decode(&mut r)?;
+        ensure_end(&r)?;
         Ok(Names {
             kex: kex_algorithm,
             key: key_algorithm,
@@ -365,15 +353,15 @@ impl Select for Server {
         true
     }
 
-    fn select<S: AsRef<str> + Clone>(
-        server_list: &[S],
-        client_list: &[&str],
+    fn select<A: AsRef<str> + Clone, B: AsRef<str> + Clone>(
+        server_list: &[A],
+        client_list: &[B],
         kind: AlgorithmKind,
-    ) -> Result<(bool, S), Error> {
+    ) -> Result<(bool, A), Error> {
         let mut both_first_choice = true;
         for c in client_list {
             for s in server_list {
-                if c == &s.as_ref() {
+                if c.as_ref() == s.as_ref() {
                     return Ok((both_first_choice, s.clone()));
                 }
                 both_first_choice = false
@@ -382,7 +370,7 @@ impl Select for Server {
         Err(Error::NoCommonAlgo {
             kind,
             ours: server_list.iter().map(|x| x.as_ref().to_owned()).collect(),
-            theirs: client_list.iter().map(|x| (*x).to_owned()).collect(),
+            theirs: client_list.iter().map(|x| x.as_ref().to_owned()).collect(),
         })
     }
 }
@@ -392,15 +380,15 @@ impl Select for Client {
         false
     }
 
-    fn select<S: AsRef<str> + Clone>(
-        client_list: &[S],
-        server_list: &[&str],
+    fn select<A: AsRef<str> + Clone, B: AsRef<str> + Clone>(
+        client_list: &[A],
+        server_list: &[B],
         kind: AlgorithmKind,
-    ) -> Result<(bool, S), Error> {
+    ) -> Result<(bool, A), Error> {
         let mut both_first_choice = true;
         for c in client_list {
             for s in server_list {
-                if s == &c.as_ref() {
+                if s.as_ref() == c.as_ref() {
                     return Ok((both_first_choice, c.clone()));
                 }
                 both_first_choice = false
@@ -409,7 +397,7 @@ impl Select for Client {
         Err(Error::NoCommonAlgo {
             kind,
             ours: client_list.iter().map(|x| x.as_ref().to_owned()).collect(),
-            theirs: server_list.iter().map(|x| (*x).to_owned()).collect(),
+            theirs: server_list.iter().map(|x| x.as_ref().to_owned()).collect(),
         })
     }
 }
@@ -418,9 +406,8 @@ pub(crate) fn write_kex(
     prefs: &Preferred,
     writer: &mut PacketWriter,
     server_config: Option<&Config>,
-) -> Result<Vec<u8>, Error> {
-    writer.packet(|w| {
-        // buf.clear();
+) -> Result<Bytes, Error> {
+    writer.packet_bytes(|w| {
         msg::KEXINIT.encode(w)?;
 
         let mut cookie = [0; 16];

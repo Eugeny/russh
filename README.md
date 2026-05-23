@@ -123,6 +123,8 @@ This is a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Éti
   * Uses `russh::client` to implement an async SFTP provider for remote file management.
 * [GitArena](https://github.com/mellowagain/gitarena) - Software development platform with built-in vcs, issue tracking and code review.
   * Uses `russh::server` to allow Git operations over SSH. 
+* [Calagopus](https://github.com/calagopus/wings) - Fast, Efficient and Scalable Game hosting - built for everyone.
+  * Uses `russh::server` for efficiently implementing SSH shells and SFTP file management.
 
 ## Contributors ✨
 
