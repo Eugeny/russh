@@ -147,6 +147,15 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::borrow::Cow;
+    use std::num::Wrapping;
+    use std::sync::Arc;
+
+    use bytes::BytesMut;
+    use crate::compression::{Compression, Decompress};
+    use crate::helpers::sign_with_hash_alg;
+    use crate::kex::{SessionKexState, KEXES, NONE as KEX_NONE};
+    use crate::keys::PrivateKeyWithHashAlg;
     use crate::tests::raw_no_crypto::{
         MSG_SERVICE_REQUEST, MSG_USERAUTH_FAILURE, MSG_USERAUTH_REQUEST, RawSession,
         assert_rejected, capture_panics, channel_request_payload, encode_string, pty_req_payload,
@@ -312,6 +321,170 @@ mod tests {
             "password-change requests should not call normal password auth"
         );
         stream.server_task.abort();
+    }
+
+    #[tokio::test]
+    async fn signed_publickey_request_cannot_reuse_pk_ok_for_a_different_key() {
+        struct Probe {
+            pk_ok_key: PublicKey,
+            signed_key: PublicKey,
+            final_auth_reached_for_signed_key: bool,
+        }
+
+        impl Handler for Probe {
+            type Error = Error;
+
+            async fn auth_publickey_offered(
+                &mut self,
+                _user: &str,
+                public_key: &PublicKey,
+            ) -> Result<Auth, Self::Error> {
+                if public_key == &self.pk_ok_key {
+                    return Ok(Auth::Accept);
+                }
+                Ok(Auth::reject())
+            }
+
+            async fn auth_publickey(
+                &mut self,
+                _user: &str,
+                public_key: &PublicKey,
+            ) -> Result<Auth, Self::Error> {
+                if public_key == &self.signed_key {
+                    self.final_auth_reached_for_signed_key = true;
+                }
+                Ok(Auth::reject())
+            }
+        }
+
+        let pk_ok_private =
+            PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap();
+        let signed_private =
+            PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap();
+        let pk_ok_key = pk_ok_private.public_key().clone();
+        let signed_key = signed_private.public_key().clone();
+
+        let mut session = test_auth_session();
+        let mut handler = Probe {
+            pk_ok_key: pk_ok_key.clone(),
+            signed_key: signed_key.clone(),
+            final_auth_reached_for_signed_key: false,
+        };
+
+        let probe = publickey_probe_packet("alice", &pk_ok_key);
+        let mut probe = BytesMut::from(probe.as_slice());
+        session.process_packet(&mut handler, &mut probe).await.unwrap();
+
+        let signed = publickey_signed_packet("alice", Arc::new(signed_private), &signed_key);
+        let mut signed = BytesMut::from(signed.as_slice());
+        session.process_packet(&mut handler, &mut signed).await.unwrap();
+
+        assert!(
+            !handler.final_auth_reached_for_signed_key,
+            "signed publickey request reused PK_OK state from a different public key"
+        );
+    }
+
+    fn publickey_probe_packet(user: &str, public_key: &PublicKey) -> Vec<u8> {
+        let mut packet = Vec::new();
+        packet.push(msg::USERAUTH_REQUEST);
+        user.encode(&mut packet).unwrap();
+        "ssh-connection".encode(&mut packet).unwrap();
+        "publickey".encode(&mut packet).unwrap();
+        0u8.encode(&mut packet).unwrap();
+        public_key.algorithm().as_str().encode(&mut packet).unwrap();
+        public_key.to_bytes().unwrap().encode(&mut packet).unwrap();
+        packet
+    }
+
+    fn publickey_signed_packet(
+        user: &str,
+        private_key: Arc<PrivateKey>,
+        public_key: &PublicKey,
+    ) -> Vec<u8> {
+        let mut packet = Vec::new();
+        packet.push(msg::USERAUTH_REQUEST);
+        user.encode(&mut packet).unwrap();
+        "ssh-connection".encode(&mut packet).unwrap();
+        "publickey".encode(&mut packet).unwrap();
+        1u8.encode(&mut packet).unwrap();
+        public_key.algorithm().as_str().encode(&mut packet).unwrap();
+        public_key.to_bytes().unwrap().encode(&mut packet).unwrap();
+
+        let mut signed = Vec::new();
+        CryptoVec::new().as_ref().encode(&mut signed).unwrap();
+        signed.extend_from_slice(&packet);
+        let signature =
+            sign_with_hash_alg(&PrivateKeyWithHashAlg::new(private_key, None), &signed).unwrap();
+        signature.encode(&mut packet).unwrap();
+        packet
+    }
+
+    fn test_auth_session() -> Session {
+        let mut config = Config::default();
+        config.preferred = Preferred {
+            kex: Cow::Owned(vec![KEX_NONE]),
+            key: Cow::Owned(vec![ssh_key::Algorithm::Ed25519]),
+            cipher: Cow::Owned(vec![cipher::NONE]),
+            mac: Cow::Owned(vec![mac::NONE]),
+            compression: Cow::Owned(vec![compression::NONE]),
+        };
+        let config = Arc::new(config);
+        let (sender, receiver) = tokio::sync::mpsc::channel(1);
+        let handle = Handle {
+            sender,
+            channel_buffer_size: config.channel_buffer_size,
+        };
+
+        Session {
+            target_window_size: config.window_size,
+            common: CommonSession {
+                packet_writer: PacketWriter::clear(),
+                auth_user: String::new(),
+                auth_method: None,
+                auth_attempts: 0,
+                remote_to_local: Box::new(clear::Key),
+                encrypted: Some(test_auth_encrypted()),
+                config,
+                wants_reply: false,
+                disconnected: false,
+                buffer: Vec::new(),
+                strict_kex: false,
+                alive_timeouts: 0,
+                received_data: false,
+                remote_sshid: Vec::new(),
+            },
+            receiver,
+            sender: handle,
+            pending_reads: Vec::new(),
+            pending_len: 0,
+            channels: std::collections::HashMap::new(),
+            open_global_requests: std::collections::VecDeque::new(),
+            kex: SessionKexState::Idle,
+        }
+    }
+
+    fn test_auth_encrypted() -> Encrypted {
+        Encrypted {
+            state: EncryptedState::WaitingAuthRequest(AuthRequest::server(MethodSet::all())),
+            exchange: Some(Exchange::default()),
+            kex: KEXES.get(&KEX_NONE).expect("none kex").make(),
+            key: 0,
+            client_mac: mac::NONE,
+            server_mac: mac::NONE,
+            session_id: CryptoVec::new(),
+            channels: std::collections::HashMap::new(),
+            last_channel_id: Wrapping(0),
+            write: Vec::new(),
+            write_cursor: 0,
+            last_rekey: russh_util::time::Instant::now(),
+            server_compression: Compression::None,
+            client_compression: Compression::None,
+            decompress: Decompress::None,
+            rekey_wanted: false,
+            received_extensions: Vec::new(),
+            extension_info_awaiters: std::collections::HashMap::new(),
+        }
     }
 }
 
@@ -561,10 +734,15 @@ impl Encrypted {
                         &original_packet[0..init_len as usize]
                     };
 
-                    let sent_pk_ok = if let Some(CurrentRequest::PublicKey { sent_pk_ok, .. }) =
-                        auth_request.current
+                    let accepted_probe_matches = if let Some(CurrentRequest::PublicKey {
+                        key,
+                        algo,
+                        sent_pk_ok,
+                    }) = &auth_request.current
                     {
-                        sent_pk_ok
+                        *sent_pk_ok
+                            && algo.as_slice() == pubkey_algo.as_bytes()
+                            && key.as_slice() == pubkey_key.as_ref()
                     } else {
                         false
                     };
@@ -576,15 +754,13 @@ impl Encrypted {
                     map_err!(ensure_end(&signature_reader))?;
                     map_err!(ensure_end(r))?;
 
-                    let is_valid = if sent_pk_ok && user == auth_user {
+                    let is_valid = if accepted_probe_matches && user == auth_user {
                         true
-                    } else if auth_user.is_empty() {
+                    } else {
                         auth_user.clear();
                         auth_user.push_str(user);
                         let auth = handler.auth_publickey_offered(user, &pubkey).await?;
                         auth == Auth::Accept
-                    } else {
-                        false
                     };
 
                     if is_valid {
@@ -626,9 +802,11 @@ impl Encrypted {
                             }
                         } else {
                             debug!("signature wrong");
+                            auth_user.clear();
                             reject_auth_request(until, &mut self.write, auth_request).await?;
                         }
                     } else {
+                        auth_user.clear();
                         reject_auth_request(until, &mut self.write, auth_request).await?;
                     }
                     Ok(())
