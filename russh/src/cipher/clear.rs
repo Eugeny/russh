@@ -13,6 +13,8 @@
 // limitations under the License.
 //
 
+use std::convert::TryInto;
+
 use crate::mac::MacAlgorithm;
 use crate::Error;
 
@@ -48,8 +50,10 @@ impl super::Cipher for Clear {
 }
 
 impl super::OpeningKey for Key {
-    fn decrypt_packet_length(&self, _seqn: u32, packet_length: [u8; 4]) -> [u8; 4] {
-        packet_length
+    fn decrypt_packet_length(&self, _seqn: u32, packet_length: &[u8]) -> [u8; 4] {
+        // Fine because of self.packet_length_to_read_for_block_length()
+        #[allow(clippy::unwrap_used, clippy::indexing_slicing)]
+        packet_length.try_into().unwrap()
     }
 
     fn tag_len(&self) -> usize {
@@ -59,12 +63,10 @@ impl super::OpeningKey for Key {
     fn open<'a>(
         &mut self,
         _seqn: u32,
-        ciphertext_in_plaintext_out: &'a mut [u8],
-        tag: &[u8],
+        ciphertext_and_tag: &'a mut [u8],
     ) -> Result<&'a [u8], Error> {
-        debug_assert_eq!(tag.len(), 0); // self.tag_len());
         #[allow(clippy::indexing_slicing)] // length known
-        Ok(&ciphertext_in_plaintext_out[4..])
+        Ok(&ciphertext_and_tag[4..])
     }
 }
 

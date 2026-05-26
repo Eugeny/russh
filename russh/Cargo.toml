@@ -2,71 +2,151 @@
 authors = ["Pierre-Étienne Meunier <pe@pijul.org>"]
 description = "A client and server SSH library."
 documentation = "https://docs.rs/russh"
-edition = "2018"
-homepage = "https://pijul.org/russh"
+edition = "2024"
+homepage = "https://github.com/warp-tech/russh"
 keywords = ["ssh"]
 license = "Apache-2.0"
 name = "russh"
 readme = "../README.md"
 repository = "https://github.com/warp-tech/russh"
-version = "0.38.0-beta.1"
-rust-version = "1.60"
+version = "0.61.1"
+rust-version = "1.85"
 
 [features]
-default = ["flate2"]
-openssl = ["russh-keys/openssl", "dep:openssl"]
-vendored-openssl = ["openssl/vendored", "russh-keys/vendored-openssl"]
+default = ["flate2", "aws-lc-rs", "rsa"]
+# Crypto backends: enable at least one of `aws-lc-rs` or `ring`.
+aws-lc-rs = ["dep:aws-lc-rs"] # Default crypto backend.
+async-trait = ["dep:async-trait"]
+legacy-ed25519-pkcs8-parser = ["yasna"]
+# Danger: 3DES cipher is insecure.
+des = ["dep:des"]
+# Danger: DSA algorithm is insecure.
+dsa = ["ssh-key/dsa"]
+ring = ["dep:ring"] # Alternative crypto backend.
+rsa = ["dep:rsa", "dep:pkcs1", "ssh-key/rsa"]
+serde = ["ssh-key/serde"]
+_bench = ["dep:criterion"]
 
 [dependencies]
-aes = "0.8"
-aes-gcm = "0.10"
-async-trait = "0.1"
+aes.workspace = true
+async-trait = { workspace = true, optional = true }
+aws-lc-rs = { version = "1.16.2", optional = true }
 bitflags = "2.0"
-byteorder = "1.3"
-chacha20 = "0.9"
-curve25519-dalek = "4.0"
-poly1305 = "0.8"
-ctr = "0.9"
-digest = "0.10"
-flate2 = { version = "1.0", optional = true }
-futures = "0.3"
-generic-array = "0.14"
-hmac = "0.12"
-log = "0.4"
-once_cell = "1.13"
-openssl = { version = "0.10", optional = true }
-rand = "0.8"
-russh-cryptovec = { version = "0.7.0", path = "../cryptovec" }
-russh-keys = { version = "0.37.1", path = "../russh-keys" }
-sha1 = "0.10"
-sha2 = "0.10"
-hex-literal = "0.4"
-num-bigint = { version = "0.4", features = ["rand"] }
-subtle = "2.4"
-thiserror = "1.0"
-tokio = { version = "1.17.0", features = [
-    "io-util",
-    "rt-multi-thread",
-    "time",
-    "net",
-    "sync",
-    "macros",
-    "process",
+block-padding = { version = "0.4" }
+byteorder.workspace = true
+bytes.workspace = true
+cbc = { version = "0.2" }
+cipher = "0.5.1" # only pinned due to a cargo-minimal-versions failure in 0.5.0
+ctr = "0.10"
+curve25519-dalek = "=5.0.0-pre.6"
+crypto-bigint = { version = "0.7.3", features = ["alloc"] }
+data-encoding = "2.3"
+delegate.workspace = true
+digest.workspace = true
+der = "0.8"
+des = { version = "0.9", optional = true }
+ecdsa = "=0.17.0-rc.18"
+ed25519-dalek = { version = "=3.0.0-pre.7", features = ["alloc", "rand_core", "pkcs8"] }
+elliptic-curve = { version = "=0.14.0-rc.32", features = ["ecdh"] }
+enum_dispatch = "0.3.13"
+flate2 = { version = "1.0.15", optional = true }
+futures.workspace = true
+generic-array = { version = "1.3.3", features = ["compat-0_14"] }
+getrandom = { version = "0.2.15", features = ["js"] }
+ghash = "0.6.0" # only pinned due to a cargo-minimal-versions failure in 0.6.0-rc.3
+hex-literal = "1"
+hkdf = "0.13.0"
+hmac.workspace = true
+inout = { version = "0.1", features = ["std"] }
+keccak = "0.2.0"
+log.workspace = true
+md5 = "0.7"
+ml-kem = "0.3"
+module-lattice = "0.2"
+# num-bigint 0.4.x only supports rand 0.8. PR #338 adds rand 0.10 support
+# via the `rand_0_10` feature flag. Replace with upstream once a release with
+# rand 0.10 support is published. https://github.com/rust-num/num-bigint/pull/338
+num-bigint = { package = "internal-russh-num-bigint", version = "=0.5.0", features = ["rand_0_10"] }
+num_bigint_0_4 = { package = "num-bigint", version = "0.4.6" }
+# num-integer = "0.1"
+p256 = { version = "=0.14.0-rc.9", features = ["ecdh"] }
+p384 = { version = "=0.14.0-rc.9", features = ["ecdh"] }
+p521 = { version = "=0.14.0-rc.9", features = ["ecdh"] }
+pbkdf2 = "0.13"
+pkcs1 = { version = "=0.8.0-rc.4", optional = true }
+pkcs5 = "0.8"
+pkcs8 = { version = "0.11", features = ["encryption", "std"] }
+polyval = "0.7.1" # only pinned due to a cargo-minimal-versions failure in 0.7.0
+rand_core = { version = "0.10.0" }
+rand.workspace = true
+ring = { version = "0.17.14", optional = true }
+rsa = { version = "=0.10.0-rc.18", optional = true }
+russh-cryptovec = { version = "0.61.0", path = "../cryptovec", features = [
+  "ssh-encoding",
 ] }
-tokio-util = "0.7"
+russh-util = { version = "0.52.0", path = "../russh-util" }
+salsa20 = "0.11.0"
+scrypt = "0.12.0"
+sec1 = { version = "0.8", features = ["der"] }
+sha1.workspace = true
+sha2.workspace = true
+sha3 = "0.11.0"
+signature.workspace = true
+spki = "0.8"
+ssh-encoding.workspace = true
+ssh-key.workspace = true
+subtle = "2.4"
+thiserror.workspace = true
+tokio = { workspace = true, features = ["io-util", "sync", "time"] }
+typenum = "1.17"
+universal-hash = "0.6.1" # only pinned due to a cargo-minimal-versions failure in 0.6.0
+yasna = { version = "0.5.0", features = [
+  "bit-vec",
+  "num-bigint",
+], optional = true }
+zeroize = "1.7"
+criterion = { version = "0.7", optional = true, features = ["html_reports"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { workspace = true, features = [
+  "io-util",
+  "rt-multi-thread",
+  "time",
+  "net",
+] }
+
+[target.'cfg(windows)'.dependencies]
+pageant = { version = "0.2", path = "../pageant" }
 
 [dev-dependencies]
-anyhow = "1.0"
-env_logger = "0.10"
-tokio = { version = "1.17.0", features = [
-    "io-util",
-    "rt-multi-thread",
-    "time",
-    "net",
-    "sync",
-    "macros",
+anyhow = "1.0.4"
+env_logger.workspace = true
+clap = { version = "4", features = ["derive"] }
+tokio = { workspace = true, features = [
+  "io-std",
+  "io-util",
+  "rt-multi-thread",
+  "time",
+  "net",
+  "sync",
+  "macros",
+  "process",
 ] }
-russh-sftp = "1.1"
+rand.workspace = true
+shell-escape = "0.1"
+tokio-fd = "0.3"
+termion = "4"
+ratatui = "0.30"
+tempfile = "3.14.0"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+russh-sftp = "2.1.0"
+tokio.workspace = true
+tokio-stream.workspace = true
 
 [package.metadata.docs.rs]
-features = ["openssl"]
+all-features = true
+
+[[bench]]
+name = "ciphers"
+harness = false

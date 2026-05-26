@@ -1,18 +1,19 @@
-use russh_cryptovec::CryptoVec;
+use ssh_encoding::Writer;
 
-use super::{KexAlgorithm, KexType};
+use super::{KexAlgorithm, KexAlgorithmImplementor, KexType};
 
 pub struct NoneKexType {}
 
 impl KexType for NoneKexType {
-    fn make(&self) -> Box<dyn KexAlgorithm + Send> {
-        Box::new(NoneKexAlgorithm {}) as Box<dyn KexAlgorithm + Send>
+    fn make(&self) -> KexAlgorithm {
+        NoneKexAlgorithm {}.into()
     }
 }
 
-struct NoneKexAlgorithm {}
+#[doc(hidden)]
+pub struct NoneKexAlgorithm {}
 
-impl KexAlgorithm for NoneKexAlgorithm {
+impl KexAlgorithmImplementor for NoneKexAlgorithm {
     fn skip_exchange(&self) -> bool {
         true
     }
@@ -27,8 +28,8 @@ impl KexAlgorithm for NoneKexAlgorithm {
 
     fn client_dh(
         &mut self,
-        _client_ephemeral: &mut russh_cryptovec::CryptoVec,
-        _buf: &mut russh_cryptovec::CryptoVec,
+        _client_ephemeral: &mut Vec<u8>,
+        _buf: &mut impl Writer,
     ) -> Result<(), crate::Error> {
         Ok(())
     }
@@ -37,19 +38,23 @@ impl KexAlgorithm for NoneKexAlgorithm {
         Ok(())
     }
 
+    fn shared_secret_bytes(&self) -> Option<&[u8]> {
+        None
+    }
+
     fn compute_exchange_hash(
         &self,
-        _key: &russh_cryptovec::CryptoVec,
+        _key: &[u8],
         _exchange: &crate::session::Exchange,
         _buffer: &mut russh_cryptovec::CryptoVec,
-    ) -> Result<russh_cryptovec::CryptoVec, crate::Error> {
-        Ok(CryptoVec::new())
+    ) -> Result<Vec<u8>, crate::Error> {
+        Ok(Vec::new())
     }
 
     fn compute_keys(
         &self,
-        session_id: &russh_cryptovec::CryptoVec,
-        exchange_hash: &russh_cryptovec::CryptoVec,
+        session_id: &[u8],
+        exchange_hash: &[u8],
         cipher: crate::cipher::Name,
         remote_to_local_mac: crate::mac::Name,
         local_to_remote_mac: crate::mac::Name,
