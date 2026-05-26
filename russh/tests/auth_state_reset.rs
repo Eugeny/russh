@@ -1,9 +1,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use russh::client;
 use russh::keys::PrivateKey;
-use russh::{MethodKind, MethodSet, server};
+use russh::{MethodKind, MethodSet, client, server};
 
 struct AcceptTestServerKey;
 
