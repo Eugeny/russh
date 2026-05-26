@@ -1343,6 +1343,7 @@ mod tests {
 
     impl crate::server::Handler for TestHandler {
         type Error = crate::Error;
+        type Data = ();
     }
 
     fn authenticated_session() -> Session {

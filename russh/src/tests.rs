@@ -1128,6 +1128,7 @@ pub(crate) mod raw_no_crypto {
 
     impl server::Handler for MalformedInputServer {
         type Error = Error;
+        type Data = ();
 
         async fn auth_none(&mut self, _user: &str) -> Result<server::Auth, Self::Error> {
             self.record("auth_none");
