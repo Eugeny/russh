@@ -211,18 +211,19 @@ impl Auth {
 pub trait Handler: Sized {
     type Error: From<crate::Error> + Send;
 
-    /// Check authentication using the "none" method. Russh makes
-    /// sure rejection happens in time `config.auth_rejection_time`,
+    /// Check authentication using the "none" method.
+    ///
+    /// Russh makes sure rejection takes a constant [`Config::auth_rejection_time`],
     /// except if this method takes more than that.
     #[allow(unused_variables)]
     fn auth_none(&mut self, user: &str) -> impl Future<Output = Result<Auth, Self::Error>> + Send {
         async { Ok(Auth::reject()) }
     }
 
-    /// Check authentication using the "password" method. Russh
-    /// makes sure rejection happens in time
-    /// `config.auth_rejection_time`, except if this method takes more
-    /// than that.
+    /// Check authentication using the "password" method.
+    ///
+    /// Russh makes sure rejection takes a constant [`Config::auth_rejection_time`],
+    /// except if this method takes more than that.
     #[allow(unused_variables)]
     fn auth_password(
         &mut self,
@@ -232,13 +233,30 @@ pub trait Handler: Sized {
         async { Ok(Auth::reject()) }
     }
 
-    /// Check authentication using the "publickey" method. This method
-    /// should just check whether the public key matches the
-    /// authorized ones. Russh then checks the signature. If the key
-    /// is unknown, or the signature is invalid, Russh guarantees
-    /// that rejection happens in constant time
-    /// `config.auth_rejection_time`, except if this method takes more
-    /// time than that.
+    /// Pre-authentication callback for public key authentication.
+    /// This method is called when a client is:
+    /// * probing public key authentication without a signature (yet) or
+    /// * attempting authentication with a signature without doing
+    /// a prior probe.
+    ///
+    /// The purpose of this callback is to spare the effort of signing
+    /// and verifying the signature if the server will not accept this
+    /// public key anyway.
+    ///
+    /// Note that at this stage, the ownership of the key has
+    /// not been verified yet.
+    ///
+    /// You should not alter your session's authentication state
+    /// from this callback. Implement your actual authentication check
+    /// in [`Handler::auth_publickey`]. Seeing an unknown key here should
+    /// in most cases not be counted towards an eventual authentication
+    /// attempt limit.
+    ///
+    /// The default implementation accepts all keys, allowing them to
+    /// proceed to [`Handler::auth_publickey`].
+    ///
+    /// Russh makes sure rejection takes a constant [`Config::auth_rejection_time`],
+    /// except if this method takes more than that.
     #[allow(unused_variables)]
     fn auth_publickey_offered(
         &mut self,
@@ -251,9 +269,9 @@ pub trait Handler: Sized {
     /// Check authentication using the "publickey" method. This method
     /// is called after the signature has been verified and key
     /// ownership has been confirmed.
-    /// Russh guarantees that rejection happens in constant time
-    /// `config.auth_rejection_time`, except if this method takes more
-    /// time than that.
+    ///
+    /// Russh makes sure rejection takes a constant [`Config::auth_rejection_time`],
+    /// except if this method takes more than that.
     #[allow(unused_variables)]
     fn auth_publickey(
         &mut self,
@@ -266,9 +284,9 @@ pub trait Handler: Sized {
     /// Check authentication using an OpenSSH certificate. This method
     /// is called after the signature has been verified and key
     /// ownership has been confirmed.
-    /// Russh guarantees that rejection happens in constant time
-    /// `config.auth_rejection_time`, except if this method takes more
-    /// time than that.
+    ///
+    /// Russh makes sure rejection takes a constant [`Config::auth_rejection_time`],
+    /// except if this method takes more than that.
     #[allow(unused_variables)]
     fn auth_openssh_certificate(
         &mut self,
@@ -279,9 +297,10 @@ pub trait Handler: Sized {
     }
 
     /// Check authentication using the "keyboard-interactive"
-    /// method. Russh makes sure rejection happens in time
-    /// `config.auth_rejection_time`, except if this method takes more
-    /// than that.
+    /// method.
+    ///
+    /// Russh makes sure rejection takes a constant [`Config::auth_rejection_time`],
+    /// except if this method takes more than that.
     #[allow(unused_variables)]
     fn auth_keyboard_interactive<'a>(
         &'a mut self,
