@@ -77,7 +77,6 @@ impl Session {
                 debug!("request: {request:?}");
                 if request == "ssh-userauth" {
                     let auth_request = server_accept_service(
-                        handler.authentication_banner().await?,
                         self.common.config.as_ref().methods.clone(),
                         &mut enc.write,
                     )?;
@@ -86,7 +85,9 @@ impl Session {
                 }
                 Ok(())
             }
-            (EncryptedState::WaitingAuthRequest(_), Some((&msg::USERAUTH_REQUEST, mut r))) => {
+            (EncryptedState::WaitingAuthRequest(_), Some((&msg::SERVICE_REQUEST, mut r)))
+                if buf.first() == Some(&msg::USERAUTH_REQUEST) =>
+            {
                 enc.server_read_auth_request(
                     rejection_wait_until,
                     initial_none_rejection_wait_until,
@@ -316,7 +317,6 @@ mod tests {
 }
 
 fn server_accept_service(
-    banner: Option<String>,
     methods: MethodSet,
     buffer: &mut Vec<u8>,
 ) -> Result<AuthRequest, crate::Error> {
@@ -324,14 +324,6 @@ fn server_accept_service(
         buffer.push(msg::SERVICE_ACCEPT);
         "ssh-userauth".encode(buffer)?;
     });
-
-    if let Some(banner) = banner {
-        push_packet!(buffer, {
-            buffer.push(msg::USERAUTH_BANNER);
-            banner.encode(buffer)?;
-            "".encode(buffer)?;
-        })
-    }
 
     Ok(AuthRequest::server(methods))
 }
@@ -352,6 +344,26 @@ impl Encrypted {
         let service_name = map_err!(String::decode(r))?;
         let method = map_err!(String::decode(r))?;
         debug!("name: {user:?} {service_name:?} {method:?}",);
+
+        // Send pre-auth banner on the first USERAUTH_REQUEST.
+        // OpenSSH (and many other clients) only display USERAUTH_BANNER messages
+        // that arrive AFTER the first auth request; sending it together with
+        // SERVICE_ACCEPT causes the banner to be silently ignored. This mirrors
+        // the behavior of golang.org/x/crypto/ssh's BannerCallback.
+        let is_first_auth_request = if let EncryptedState::WaitingAuthRequest(ref a) = self.state {
+            a.rejection_count == 0
+        } else {
+            false
+        };
+        if is_first_auth_request {
+            if let Some(banner) = handler.authentication_banner().await? {
+                push_packet!(self.write, {
+                    self.write.push(msg::USERAUTH_BANNER);
+                    map_err!(banner.encode(&mut self.write))?;
+                    map_err!("".encode(&mut self.write))?;
+                });
+            }
+        }
 
         if service_name == "ssh-connection" {
             {
