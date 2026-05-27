@@ -237,7 +237,7 @@ pub trait Handler: Sized {
     /// This method is called when a client is:
     /// * probing public key authentication without a signature (yet) or
     /// * attempting authentication with a signature without doing
-    /// a prior probe.
+    ///   a prior probe.
     ///
     /// The purpose of this callback is to spare the effort of signing
     /// and verifying the signature if the server will not accept this
