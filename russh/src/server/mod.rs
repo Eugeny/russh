@@ -389,6 +389,7 @@ pub trait Handler: Sized {
     }
 
     /// Called when a new remote forwarded TCP connection comes in.
+    ///
     /// <https://www.rfc-editor.org/rfc/rfc4254#section-7>
     #[allow(unused_variables)]
     fn channel_open_forwarded_tcpip(
@@ -479,8 +480,9 @@ pub trait Handler: Sized {
     /// specifications.
     ///
     /// **Note:** Success or failure should be communicated to the client by calling
-    /// `session.channel_success(channel)` or `session.channel_failure(channel)` respectively. For
-    /// instance:
+    /// [`Session::channel_success`] or [`Session::channel_failure`] respectively.
+    ///
+    /// For instance:
     ///
     /// ```ignore
     /// async fn pty_request(
@@ -516,8 +518,9 @@ pub trait Handler: Sized {
     /// The client requests an X11 connection.
     ///
     /// **Note:** Success or failure should be communicated to the client by calling
-    /// `session.channel_success(channel)` or `session.channel_failure(channel)` respectively. For
-    /// instance:
+    /// [`Session::channel_success`] or [`Session::channel_failure`] respectively.
+    ///
+    /// For instance:
     ///
     /// ```ignore
     /// async fn x11_request(
@@ -551,8 +554,9 @@ pub trait Handler: Sized {
     /// environment to be set.
     ///
     /// **Note:** Success or failure should be communicated to the client by calling
-    /// `session.channel_success(channel)` or `session.channel_failure(channel)` respectively. For
-    /// instance:
+    /// [`Session::channel_success`] or [`Session::channel_failure`] respectively.
+    ///
+    /// For instance:
     ///
     /// ```ignore
     /// async fn env_request(
@@ -580,8 +584,9 @@ pub trait Handler: Sized {
     /// The client requests a shell.
     ///
     /// **Note:** Success or failure should be communicated to the client by calling
-    /// `session.channel_success(channel)` or `session.channel_failure(channel)` respectively. For
-    /// instance:
+    /// [`Session::channel_success`] or [`Session::channel_failure`] respectively.
+    ///
+    /// For instance:
     ///
     /// ```ignore
     /// async fn shell_request(
@@ -606,8 +611,9 @@ pub trait Handler: Sized {
     /// shell. Make sure to check the command before doing so.
     ///
     /// **Note:** Success or failure should be communicated to the client by calling
-    /// `session.channel_success(channel)` or `session.channel_failure(channel)` respectively. For
-    /// instance:
+    /// [`Session::channel_success`] or [`Session::channel_failure`] respectively.
+    ///
+    /// For instance:
     ///
     /// ```ignore
     /// async fn exec_request(
@@ -634,8 +640,9 @@ pub trait Handler: Sized {
     /// (such as sftp).
     ///
     /// **Note:** Success or failure should be communicated to the client by calling
-    /// `session.channel_success(channel)` or `session.channel_failure(channel)` respectively. For
-    /// instance:
+    /// [`Session::channel_success`] or [`Session::channel_failure`] respectively.
+    ///
+    /// For instance:
     ///
     /// ```ignore
     /// async fn subsystem_request(
@@ -661,8 +668,9 @@ pub trait Handler: Sized {
     /// The client's pseudo-terminal window size has changed.
     ///
     /// **Note:** Success or failure should be communicated to the client by calling
-    /// `session.channel_success(channel)` or `session.channel_failure(channel)` respectively. For
-    /// instance:
+    /// [`Session::channel_success`] or [`Session::channel_failure`] respectively.
+    ///
+    /// For instance:
     ///
     /// ```ignore
     /// async fn window_change_request(
@@ -694,8 +702,9 @@ pub trait Handler: Sized {
     /// The client requests OpenSSH agent forwarding
     ///
     /// **Note:** Success or failure should be communicated to the client by calling
-    /// `session.channel_success(channel)` or `session.channel_failure(channel)` respectively. For
-    /// instance:
+    /// [`Session::channel_success`] or [`Session::channel_failure`] respectively.
+    ///
+    /// For instance:
     ///
     /// ```ignore
     /// async fn agent_request(
@@ -772,6 +781,7 @@ pub trait Handler: Sized {
     }
 
     /// Override when enabling the `diffie-hellman-group-exchange-*` key exchange methods.
+    ///
     /// Should return a Diffie-Hellman group with a safe prime whose length is
     /// between `gex_params.min_group_size` and `gex_params.max_group_size` and
     /// (if possible) over and as close as possible to `gex_params.preferred_group_size`.
