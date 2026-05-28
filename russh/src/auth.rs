@@ -173,7 +173,7 @@ pub enum AgentAuthError {
 }
 
 #[cfg_attr(feature = "async-trait", async_trait::async_trait)]
-impl<R: AsyncRead + AsyncWrite + Unpin + Send + 'static> Signer
+impl<R: AsyncRead + AsyncWrite + Unpin + Send> Signer
     for crate::keys::agent::client::AgentClient<R>
 {
     type Error = AgentAuthError;

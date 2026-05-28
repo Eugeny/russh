@@ -134,8 +134,6 @@ tokio = { workspace = true, features = [
 ] }
 rand.workspace = true
 shell-escape = "0.1"
-tokio-fd = "0.3"
-termion = "4"
 ratatui = "0.30"
 tempfile = "3.14.0"
 
@@ -143,6 +141,10 @@ tempfile = "3.14.0"
 russh-sftp = "2.1.0"
 tokio.workspace = true
 tokio-stream.workspace = true
+
+[target.'cfg(not(target_os = "windows"))'.dev-dependencies]
+tokio-fd = "0.3"
+termion = "4"
 
 [package.metadata.docs.rs]
 all-features = true
