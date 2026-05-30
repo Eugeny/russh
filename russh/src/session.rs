@@ -690,11 +690,18 @@ impl Encrypted {
             return Ok(false);
         }
 
-        let now = russh_util::time::Instant::now();
-        let dur = now.duration_since(self.last_rekey);
-        Ok(replace(&mut self.rekey_wanted, false)
-            || writer.buffer().bytes >= limits.rekey_write_limit
-            || dur >= limits.rekey_time_limit)
+        // zfc fork: disable *server-initiated* rekey on the data-volume / time
+        // thresholds. In an inbound-proxy deployment, when `begin_rekey()` fires
+        // mid-bulk-transfer the run loop's channel-data receiver branch is gated
+        // off for the whole key exchange (`msg = self.receiver.recv(), if
+        // !self.kex.active()` in `server/session.rs`). Under a saturated download
+        // this stops the per-channel `ChannelTx` queues from draining, the
+        // re-exchange never completes, and the entire session wedges permanently
+        // (reproduced at the default 1 GiB `rekey_write_limit`, on the 2nd
+        // back-to-back speedtest). Client-initiated rekey (an incoming KEXINIT,
+        // handled in `server/mod.rs`) is unaffected, as is `rekey_wanted`.
+        let _ = (limits, &self.last_rekey);
+        Ok(replace(&mut self.rekey_wanted, false))
     }
 
     pub fn new_channel_id(&mut self) -> ChannelId {
