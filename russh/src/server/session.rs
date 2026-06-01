@@ -507,6 +507,20 @@ impl Session {
         pin!(reading);
         let mut is_reading = None;
 
+        // HOLDIAG: downstream head-of-line diagnostics. Every channel's
+        // server->client data is multiplexed through one mpsc (`self.receiver`,
+        // cap = event_buffer_size) drained by this single select loop. If the loop
+        // parks (e.g. on the socket write below under client backpressure) the mpsc
+        // fills and ALL channels block on `reserve_owned()` -> cross-channel HoL,
+        // even while the TCP socket itself is healthy.
+        let hol_cap = self.sender.sender.max_capacity();
+        let mut hol_saturated = false;
+        let mut hol_since = std::time::Instant::now();
+        log::info!(
+            "HOLDIAG loop start: mpsc_cap(event_buffer)={hol_cap} channel_buffer={}",
+            self.sender.channel_buffer_size
+        );
+
         #[allow(clippy::panic)] // false positive in macro
         while !self.common.disconnected {
             self.common.received_data = false;
@@ -536,9 +550,35 @@ impl Session {
                             // TODO it'd be cleaner to just pass cipher to reply()
                             std::mem::swap(&mut opening_cipher, &mut self.common.remote_to_local);
 
+                            // HOLDIAG A3: time inbound dispatch, attributed by SSH
+                            // message type. The default handler.data() is a no-op;
+                            // the loop actually parks on the per-message await inside
+                            // reply(), e.g. CHANNEL_DATA -> `chan.send().await` on the
+                            // bounded per-channel ChannelStream buffer (full when the
+                            // zfc relay task drains upstream slowly = upstream
+                            // backpressure), or CHANNEL_OPEN -> accept-queue send, or
+                            // USERAUTH reject jitter. Logging the type avoids
+                            // misattributing channel-open/auth latency as data relay.
+                            let hol_msg = pkt.buffer.first().copied().unwrap_or(0);
+                            let hol_reply_start = std::time::Instant::now();
                             match reply(&mut self, &mut handler, &mut pkt).await {
                                 Ok(_) => {},
                                 Err(e) => return Err(e),
+                            }
+                            let hol_reply_ms = hol_reply_start.elapsed().as_millis();
+                            if hol_reply_ms >= 200 {
+                                let hol_kind = match hol_msg {
+                                    msg::CHANNEL_DATA => "CHANNEL_DATA: per-channel buffer full -> zfc relay/upstream backpressure",
+                                    msg::CHANNEL_EXTENDED_DATA => "CHANNEL_EXTENDED_DATA",
+                                    msg::CHANNEL_OPEN => "CHANNEL_OPEN: accept-queue send",
+                                    msg::CHANNEL_WINDOW_ADJUST => "CHANNEL_WINDOW_ADJUST",
+                                    msg::CHANNEL_REQUEST => "CHANNEL_REQUEST",
+                                    msg::USERAUTH_REQUEST => "USERAUTH_REQUEST: auth jitter",
+                                    _ => "other",
+                                };
+                                log::warn!(
+                                    "HOLDIAG slow inbound reply {hol_reply_ms}ms msg={hol_msg} ({hol_kind}) — parks session loop (blocks mpsc drain -> all-channel HoL)"
+                                );
                             }
                             buffer.seqn = pkt.seqn; // TODO reply changes seqn internall, find cleaner way
 
@@ -642,12 +682,40 @@ impl Session {
             }
             self.flush()?;
 
+            // HOLDIAG A1: time the actual socket write. A long flush = client
+            // downlink backpressure; while parked here the loop cannot drain
+            // `self.receiver`, so the shared mpsc backs up and every channel's
+            // downstream write stalls together (cross-channel HoL).
+            let hol_flush_start = std::time::Instant::now();
             map_err!(
                 self.common
                     .packet_writer
                     .flush_into(&mut stream_write)
                     .await
             )?;
+            let hol_flush_ms = hol_flush_start.elapsed().as_millis();
+            if hol_flush_ms >= 200 {
+                log::warn!(
+                    "HOLDIAG slow downstream flush {hol_flush_ms}ms — client backpressure parks session loop (blocks mpsc drain -> all-channel HoL)"
+                );
+            }
+            // HOLDIAG A2: shared downstream mpsc saturation = HoL across all
+            // channels. Hysteresis (75% onset / 25% clear) avoids flapping; logs
+            // the onset and the stall duration on clear.
+            let hol_used = hol_cap.saturating_sub(self.sender.sender.capacity());
+            if !hol_saturated && hol_used.saturating_mul(4) >= hol_cap.saturating_mul(3) {
+                hol_saturated = true;
+                hol_since = std::time::Instant::now();
+                log::warn!(
+                    "HOLDIAG mpsc saturated {hol_used}/{hol_cap} — downstream HoL onset (channels blocking on reserve_owned)"
+                );
+            } else if hol_saturated && hol_used.saturating_mul(4) <= hol_cap {
+                let stalled_ms = hol_since.elapsed().as_millis();
+                log::warn!(
+                    "HOLDIAG mpsc drained {hol_used}/{hol_cap} — HoL cleared after {stalled_ms}ms"
+                );
+                hol_saturated = false;
+            }
 
             if self.common.received_data {
                 // Reset the number of failed keepalive attempts. We don't
