@@ -3,6 +3,8 @@ use std::io::ErrorKind;
 use std::sync::Arc;
 
 use channels::WindowSizeRef;
+use futures::stream::FuturesUnordered;
+use futures::StreamExt;
 use kex::ServerKex;
 use log::debug;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
@@ -15,6 +17,124 @@ use crate::helpers::NameList;
 use crate::kex::{EXTENSION_SUPPORT_AS_CLIENT, KexCause, SessionKexState};
 use crate::{map_err, msg};
 
+/// A single inbound message destined for a channel's application buffer. Held in an
+/// [`InboundQueue`] when the channel's bounded buffer is full, so the shared session loop never
+/// blocks on one channel's slow consumer. See `RC2_HOL_FIX_DESIGN.md` (Scheme C).
+#[derive(Debug)]
+pub(crate) enum InboundItem {
+    Data(bytes::Bytes),
+    ExtendedData { ext: u32, data: bytes::Bytes },
+    Eof,
+    Close,
+}
+
+impl InboundItem {
+    /// Number of payload bytes this item contributes to the per-channel pending budget.
+    fn byte_len(&self) -> usize {
+        match self {
+            InboundItem::Data(data) => data.len(),
+            InboundItem::ExtendedData { data, .. } => data.len(),
+            InboundItem::Eof | InboundItem::Close => 0,
+        }
+    }
+
+    /// Build the corresponding [`ChannelMsg`] without consuming `self` (cheap: `Bytes` clone).
+    fn to_msg(&self) -> ChannelMsg {
+        match self {
+            InboundItem::Data(data) => ChannelMsg::Data { data: data.clone() },
+            InboundItem::ExtendedData { ext, data } => ChannelMsg::ExtendedData {
+                ext: *ext,
+                data: data.clone(),
+            },
+            InboundItem::Eof => ChannelMsg::Eof,
+            InboundItem::Close => ChannelMsg::Close,
+        }
+    }
+
+    /// Move into the corresponding [`ChannelMsg`].
+    fn into_msg(self) -> ChannelMsg {
+        match self {
+            InboundItem::Data(data) => ChannelMsg::Data { data },
+            InboundItem::ExtendedData { ext, data } => ChannelMsg::ExtendedData { ext, data },
+            InboundItem::Eof => ChannelMsg::Eof,
+            InboundItem::Close => ChannelMsg::Close,
+        }
+    }
+
+    /// Whether delivering this item should trigger a deferred inbound window grant (I2).
+    fn grants_window(&self) -> bool {
+        matches!(
+            self,
+            InboundItem::Data(_) | InboundItem::ExtendedData { .. }
+        )
+    }
+}
+
+/// The deferred `Handler` callback for a queued inbound item, captured at delivery time so a
+/// custom `Handler` never observes data before it reaches the channel application buffer (matching
+/// the fast-path order: buffer first, then callback). Fast-path (immediately-delivered) items fire
+/// their callback inline in `server_read_authenticated` instead.
+enum DeferredCallback {
+    Data(bytes::Bytes),
+    ExtendedData { ext: u32, data: bytes::Bytes },
+    Eof,
+    Close,
+}
+
+impl DeferredCallback {
+    fn capture(item: &InboundItem) -> Self {
+        match item {
+            InboundItem::Data(d) => DeferredCallback::Data(d.clone()),
+            InboundItem::ExtendedData { ext, data } => DeferredCallback::ExtendedData {
+                ext: *ext,
+                data: data.clone(),
+            },
+            InboundItem::Eof => DeferredCallback::Eof,
+            InboundItem::Close => DeferredCallback::Close,
+        }
+    }
+}
+
+/// Per-channel inbound backpressure state (Scheme C). While non-empty / `reserving`, the channel
+/// is backpressured: its inbound window grant is withheld so the peer stops sending, isolating the
+/// slow consumer instead of stalling the whole session.
+#[derive(Debug, Default)]
+pub(crate) struct InboundQueue {
+    queue: std::collections::VecDeque<InboundItem>,
+    pending_bytes: usize,
+    /// Bumped on teardown so a late-resolving `reserve_owned()` future is recognised as stale.
+    generation: u64,
+    /// At most one `reserve_owned()` future is in flight per channel at a time.
+    reserving: bool,
+}
+
+/// Outcome of [`Session::deliver_inbound`].
+pub(crate) enum InboundDelivery {
+    /// The item was handed to the application buffer immediately (fast path).
+    Delivered,
+    /// The buffer was full (or already backpressured); the item is queued.
+    Queued,
+    /// The per-channel pending cap was exceeded; the item was NOT queued.
+    Overflow,
+    /// The channel's application receiver is gone; the item was dropped.
+    ChannelGone,
+}
+
+/// Boxed `reserve_owned()` future carried in the run loop's `FuturesUnordered`. Resolves to the
+/// channel id, the generation it was issued under (stale results are dropped), and either the
+/// owned permit or `Err(())` when the application receiver was dropped.
+type BoxReserve = std::pin::Pin<
+    Box<
+        dyn std::future::Future<
+                Output = (
+                    ChannelId,
+                    u64,
+                    Result<tokio::sync::mpsc::OwnedPermit<ChannelMsg>, ()>,
+                ),
+            > + Send,
+    >,
+>;
+
 /// A connected server session. This type is unique to a client.
 #[derive(Debug)]
 pub struct Session {
@@ -25,6 +145,12 @@ pub struct Session {
     pub(crate) pending_reads: Vec<Vec<u8>>,
     pub(crate) pending_len: u32,
     pub(crate) channels: HashMap<ChannelId, ChannelRef>,
+    /// Per-channel inbound backpressure queues (Scheme C). Present only for channels that are
+    /// currently backpressured (their app buffer filled up).
+    pub(crate) inbound: HashMap<ChannelId, InboundQueue>,
+    /// Channels that have a pending item but no in-flight `reserve_owned()` future yet; the run
+    /// loop drains this into its `FuturesUnordered` after each inbound batch.
+    pub(crate) inbound_needs_reserve: Vec<ChannelId>,
     pub(crate) open_global_requests: VecDeque<GlobalRequestResponse>,
     pub(crate) kex: SessionKexState<ServerKex>,
 }
@@ -455,6 +581,222 @@ impl Handle {
 }
 
 impl Session {
+    /// Deliver one inbound [`InboundItem`] to a channel's application buffer without ever blocking
+    /// the shared session loop (Scheme C). Fast path uses `try_send`; on `Full` the channel becomes
+    /// backpressured and the item is queued behind a single in-flight `reserve_owned()` future.
+    pub(crate) fn deliver_inbound(&mut self, id: ChannelId, item: InboundItem) -> InboundDelivery {
+        use tokio::sync::mpsc::error::TrySendError;
+
+        let cap = self.common.config.max_pending_inbound_bytes;
+
+        // Already backpressured for this channel: preserve FIFO by queueing behind existing items.
+        if let Some(q) = self.inbound.get(&id) {
+            if !q.queue.is_empty() || q.reserving {
+                // Safe: get_mut after the immutable borrow above is dropped.
+                let q = match self.inbound.get_mut(&id) {
+                    Some(q) => q,
+                    None => return InboundDelivery::ChannelGone,
+                };
+                if q.pending_bytes.saturating_add(item.byte_len()) > cap {
+                    return InboundDelivery::Overflow;
+                }
+                // Window grant is withheld while backpressured (per-channel backpressure, I2/I4).
+                let needs_reserve = !q.reserving;
+                q.pending_bytes = q.pending_bytes.saturating_add(item.byte_len());
+                q.queue.push_back(item);
+                if needs_reserve {
+                    q.reserving = true;
+                    self.inbound_needs_reserve.push(id);
+                }
+                return InboundDelivery::Queued;
+            }
+        }
+
+        // Fast path: try to hand the item straight to the application buffer.
+        let chan = match self.channels.get(&id) {
+            Some(chan) => chan,
+            None => return InboundDelivery::ChannelGone,
+        };
+        match std::ops::Deref::deref(chan).try_send(item.to_msg()) {
+            Ok(()) => InboundDelivery::Delivered,
+            Err(TrySendError::Full(_)) => {
+                let len = item.byte_len();
+                // First item to queue for this channel: enforce the same hard cap as the
+                // already-backpressured path (matters only if the cap is configured small;
+                // a sane cap is >= window_size + maximum_packet_size).
+                let existing = self.inbound.get(&id).map(|q| q.pending_bytes).unwrap_or(0);
+                if existing.saturating_add(len) > cap {
+                    return InboundDelivery::Overflow;
+                }
+                let q = self.inbound.entry(id).or_default();
+                q.pending_bytes = q.pending_bytes.saturating_add(len);
+                q.queue.push_back(item);
+                q.reserving = true;
+                self.inbound_needs_reserve.push(id);
+                InboundDelivery::Queued
+            }
+            Err(TrySendError::Closed(_)) => InboundDelivery::ChannelGone,
+        }
+    }
+
+    /// For each channel flagged in `inbound_needs_reserve`, register a single `reserve_owned()`
+    /// future (tagged with the current generation) into the run loop's `FuturesUnordered`.
+    pub(crate) fn drain_needs_reserve(&mut self, reserves: &mut FuturesUnordered<BoxReserve>) {
+        for id in std::mem::take(&mut self.inbound_needs_reserve) {
+            let generation = match self.inbound.get(&id) {
+                Some(q) if q.reserving && !q.queue.is_empty() => q.generation,
+                // Either already drained or no longer needs a reserve.
+                Some(_) => continue,
+                None => continue,
+            };
+            match self.channels.get(&id) {
+                Some(chan) => {
+                    let sender = std::ops::Deref::deref(chan).clone();
+                    let fut: BoxReserve = Box::pin(async move {
+                        let r = sender.reserve_owned().await.map_err(|_| ());
+                        (id, generation, r)
+                    });
+                    reserves.push(fut);
+                }
+                None => {
+                    // Application receiver gone before we could reserve: drop the queue.
+                    self.teardown_inbound_channel(id);
+                }
+            }
+        }
+    }
+
+    /// Resolve one completed `reserve_owned()` future: deliver the head item into the application
+    /// buffer, grant window (I2) if it was payload, fire the item's handler callback **after**
+    /// delivery (so a custom `Handler` never observes data before it reaches the channel buffer —
+    /// matching the fast path), finalize a delivered `Close`, and re-arm the next reserve.
+    pub(crate) async fn pump_inbound<H: Handler>(
+        &mut self,
+        id: ChannelId,
+        generation: u64,
+        res: Result<tokio::sync::mpsc::OwnedPermit<ChannelMsg>, ()>,
+        handler: &mut H,
+    ) -> Result<(), H::Error> {
+        {
+            let q = match self.inbound.get_mut(&id) {
+                Some(q) => q,
+                None => return Ok(()),
+            };
+            if generation != q.generation {
+                // Stale result for a torn-down channel; drop it.
+                return Ok(());
+            }
+            q.reserving = false;
+        }
+
+        let permit = match res {
+            Ok(p) => p,
+            Err(()) => {
+                // Application dropped its receiver while we were reserving.
+                self.teardown_inbound_channel(id);
+                return Ok(());
+            }
+        };
+
+        let item = match self
+            .inbound
+            .get_mut(&id)
+            .and_then(|q| q.queue.pop_front())
+        {
+            Some(item) => item,
+            None => return Ok(()),
+        };
+        if let Some(q) = self.inbound.get_mut(&id) {
+            q.pending_bytes = q.pending_bytes.saturating_sub(item.byte_len());
+        }
+        let grants = item.grants_window();
+        // Capture the deferred handler-callback payload before the item is consumed (cheap Bytes
+        // clone). The callback is fired below, after the data is in the application buffer.
+        let callback = DeferredCallback::capture(&item);
+        permit.send(item.into_msg());
+
+        if grants {
+            self.maybe_grant_after_delivery(id, handler)?;
+        }
+
+        match callback {
+            DeferredCallback::Data(data) => handler.data(id, &data, self).await?,
+            DeferredCallback::ExtendedData { ext, data } => {
+                handler.extended_data(id, ext, &data, self).await?
+            }
+            DeferredCallback::Eof => handler.channel_eof(id, self).await?,
+            DeferredCallback::Close => {
+                handler.channel_close(id, self).await?;
+                self.finalize_close(id);
+                return Ok(());
+            }
+        }
+
+        let more = self
+            .inbound
+            .get(&id)
+            .map(|q| !q.queue.is_empty())
+            .unwrap_or(false);
+        if more {
+            if let Some(q) = self.inbound.get_mut(&id) {
+                q.reserving = true;
+            }
+            self.inbound_needs_reserve.push(id);
+        } else {
+            // Drained: return the channel to the flowing fast path.
+            self.inbound.remove(&id);
+        }
+        Ok(())
+    }
+
+    /// I2: grant more inbound receive window for a channel after its data was accepted into the
+    /// application buffer. Only granted at delivery time, so a backpressured channel withholds its
+    /// own grant (per-channel backpressure replacing the removed blocking `.await`).
+    pub(crate) fn maybe_grant_after_delivery<H: Handler>(
+        &mut self,
+        id: ChannelId,
+        handler: &mut H,
+    ) -> Result<(), crate::Error> {
+        let target = self.target_window_size;
+        let granted = self
+            .common
+            .encrypted
+            .as_mut()
+            .map(|enc| enc.maybe_grant_recv_window(id, target))
+            .transpose()?
+            .unwrap_or(false);
+        if granted {
+            let w = handler.adjust_window(id, self.target_window_size);
+            if w > 0 {
+                self.target_window_size = w;
+            }
+        }
+        Ok(())
+    }
+
+    /// Deferred CHANNEL_CLOSE teardown: only run once the queued `Close` has actually been
+    /// delivered, so queued data ahead of it is never dropped. Bumps the generation so any
+    /// late-resolving reserve future is recognised as stale.
+    pub(crate) fn finalize_close(&mut self, id: ChannelId) {
+        if let Some(q) = self.inbound.get_mut(&id) {
+            q.generation = q.generation.wrapping_add(1);
+        }
+        self.inbound.remove(&id);
+        self.channels.remove(&id);
+        if let Some(enc) = self.common.encrypted.as_mut() {
+            enc.channels.remove(&id);
+        }
+    }
+
+    /// Tear down a channel's inbound queue when its application receiver was dropped mid-flight.
+    /// Bumps the generation so a stale reserve result is ignored.
+    pub(crate) fn teardown_inbound_channel(&mut self, id: ChannelId) {
+        if let Some(q) = self.inbound.get_mut(&id) {
+            q.generation = q.generation.wrapping_add(1);
+        }
+        self.inbound.remove(&id);
+    }
+
     fn maybe_decompress(&mut self, buffer: &SSHBuffer) -> Result<IncomingSshPacket, Error> {
         if let Some(ref mut enc) = self.common.encrypted {
             let mut decomp = Vec::new();
@@ -507,19 +849,10 @@ impl Session {
         pin!(reading);
         let mut is_reading = None;
 
-        // HOLDIAG: downstream head-of-line diagnostics. Every channel's
-        // server->client data is multiplexed through one mpsc (`self.receiver`,
-        // cap = event_buffer_size) drained by this single select loop. If the loop
-        // parks (e.g. on the socket write below under client backpressure) the mpsc
-        // fills and ALL channels block on `reserve_owned()` -> cross-channel HoL,
-        // even while the TCP socket itself is healthy.
-        let hol_cap = self.sender.sender.max_capacity();
-        let mut hol_saturated = false;
-        let mut hol_since = std::time::Instant::now();
-        log::info!(
-            "HOLDIAG loop start: mpsc_cap(event_buffer)={hol_cap} channel_buffer={}",
-            self.sender.channel_buffer_size
-        );
+        // Scheme C: in-flight `reserve_owned()` futures for backpressured channels. Kept local to
+        // the run loop (not on `Session`, which must stay `Debug`). Each resolution delivers one
+        // queued inbound item without the loop ever blocking on a single channel's slow consumer.
+        let mut inbound_reserves: FuturesUnordered<BoxReserve> = FuturesUnordered::new();
 
         #[allow(clippy::panic)] // false positive in macro
         while !self.common.disconnected {
@@ -550,42 +883,26 @@ impl Session {
                             // TODO it'd be cleaner to just pass cipher to reply()
                             std::mem::swap(&mut opening_cipher, &mut self.common.remote_to_local);
 
-                            // HOLDIAG A3: time inbound dispatch, attributed by SSH
-                            // message type. The default handler.data() is a no-op;
-                            // the loop actually parks on the per-message await inside
-                            // reply(), e.g. CHANNEL_DATA -> `chan.send().await` on the
-                            // bounded per-channel ChannelStream buffer (full when the
-                            // zfc relay task drains upstream slowly = upstream
-                            // backpressure), or CHANNEL_OPEN -> accept-queue send, or
-                            // USERAUTH reject jitter. Logging the type avoids
-                            // misattributing channel-open/auth latency as data relay.
-                            let hol_msg = pkt.buffer.first().copied().unwrap_or(0);
-                            let hol_reply_start = std::time::Instant::now();
                             match reply(&mut self, &mut handler, &mut pkt).await {
                                 Ok(_) => {},
                                 Err(e) => return Err(e),
                             }
-                            let hol_reply_ms = hol_reply_start.elapsed().as_millis();
-                            if hol_reply_ms >= 200 {
-                                let hol_kind = match hol_msg {
-                                    msg::CHANNEL_DATA => "CHANNEL_DATA: per-channel buffer full -> zfc relay/upstream backpressure",
-                                    msg::CHANNEL_EXTENDED_DATA => "CHANNEL_EXTENDED_DATA",
-                                    msg::CHANNEL_OPEN => "CHANNEL_OPEN: accept-queue send",
-                                    msg::CHANNEL_WINDOW_ADJUST => "CHANNEL_WINDOW_ADJUST",
-                                    msg::CHANNEL_REQUEST => "CHANNEL_REQUEST",
-                                    msg::USERAUTH_REQUEST => "USERAUTH_REQUEST: auth jitter",
-                                    _ => "other",
-                                };
-                                log::warn!(
-                                    "HOLDIAG slow inbound reply {hol_reply_ms}ms msg={hol_msg} ({hol_kind}) — parks session loop (blocks mpsc drain -> all-channel HoL)"
-                                );
-                            }
+                            // Register reserve futures for any channels that became backpressured
+                            // while handling this packet (their app buffer filled up).
+                            self.drain_needs_reserve(&mut inbound_reserves);
                             buffer.seqn = pkt.seqn; // TODO reply changes seqn internall, find cleaner way
 
                             std::mem::swap(&mut opening_cipher, &mut self.common.remote_to_local);
                         }
                     }
                     reading.set(start_reading(stream_read, buffer, opening_cipher));
+                }
+                Some((cid, generation, res)) = inbound_reserves.next(), if !inbound_reserves.is_empty() && !self.kex.active() => {
+                    // A backpressured channel's application buffer freed a slot: deliver its head
+                    // item and re-arm. The grant for that channel is emitted into `self.write` and
+                    // goes out via the flush below — never blocking the loop on this channel.
+                    self.pump_inbound(cid, generation, res, &mut handler).await?;
+                    self.drain_needs_reserve(&mut inbound_reserves);
                 }
                 () = &mut keepalive_timer => {
                     self.common.alive_timeouts = self.common.alive_timeouts.saturating_add(1);
@@ -681,41 +998,12 @@ impl Session {
                 }
             }
             self.flush()?;
-
-            // HOLDIAG A1: time the actual socket write. A long flush = client
-            // downlink backpressure; while parked here the loop cannot drain
-            // `self.receiver`, so the shared mpsc backs up and every channel's
-            // downstream write stalls together (cross-channel HoL).
-            let hol_flush_start = std::time::Instant::now();
             map_err!(
                 self.common
                     .packet_writer
                     .flush_into(&mut stream_write)
                     .await
             )?;
-            let hol_flush_ms = hol_flush_start.elapsed().as_millis();
-            if hol_flush_ms >= 200 {
-                log::warn!(
-                    "HOLDIAG slow downstream flush {hol_flush_ms}ms — client backpressure parks session loop (blocks mpsc drain -> all-channel HoL)"
-                );
-            }
-            // HOLDIAG A2: shared downstream mpsc saturation = HoL across all
-            // channels. Hysteresis (75% onset / 25% clear) avoids flapping; logs
-            // the onset and the stall duration on clear.
-            let hol_used = hol_cap.saturating_sub(self.sender.sender.capacity());
-            if !hol_saturated && hol_used.saturating_mul(4) >= hol_cap.saturating_mul(3) {
-                hol_saturated = true;
-                hol_since = std::time::Instant::now();
-                log::warn!(
-                    "HOLDIAG mpsc saturated {hol_used}/{hol_cap} — downstream HoL onset (channels blocking on reserve_owned)"
-                );
-            } else if hol_saturated && hol_used.saturating_mul(4) <= hol_cap {
-                let stalled_ms = hol_since.elapsed().as_millis();
-                log::warn!(
-                    "HOLDIAG mpsc drained {hol_used}/{hol_cap} — HoL cleared after {stalled_ms}ms"
-                );
-                hol_saturated = false;
-            }
 
             if self.common.received_data {
                 // Reset the number of failed keepalive attempts. We don't
@@ -1407,7 +1695,11 @@ mod tests {
     }
 
     fn authenticated_session() -> Session {
-        let config = Arc::new(crate::server::Config::default());
+        authenticated_session_with(crate::server::Config::default())
+    }
+
+    fn authenticated_session_with(config: crate::server::Config) -> Session {
+        let config = Arc::new(config);
         let (sender, receiver) = tokio::sync::mpsc::channel(config.event_buffer_size);
         let handle = Handle {
             sender,
@@ -1456,6 +1748,8 @@ mod tests {
             pending_reads: Vec::new(),
             pending_len: 0,
             channels: HashMap::new(),
+            inbound: HashMap::new(),
+            inbound_needs_reserve: Vec::new(),
             open_global_requests: VecDeque::new(),
             kex: SessionKexState::Idle,
         }
@@ -1504,5 +1798,178 @@ mod tests {
         assert!(
             matches!(err, crate::Error::PacketSize(len) if len > crate::cipher::MAXIMUM_DECOMPRESSED_PACKET_LEN)
         );
+    }
+
+    // ----- RC2 inbound head-of-line-blocking fix (Scheme C) -----
+
+    use bytes::Bytes;
+
+    /// Insert a channel whose application buffer holds `buf` messages, returning a spare sender
+    /// clone (for minting reserve permits) and the receiver (to drain the buffer).
+    fn insert_test_channel(
+        session: &mut Session,
+        id: ChannelId,
+        buf: usize,
+    ) -> (
+        tokio::sync::mpsc::Sender<ChannelMsg>,
+        tokio::sync::mpsc::Receiver<ChannelMsg>,
+    ) {
+        let (tx, rx) = tokio::sync::mpsc::channel::<ChannelMsg>(buf);
+        session.channels.insert(id, ChannelRef::new(tx.clone()));
+        (tx, rx)
+    }
+
+    /// Once a channel is backpressured, further items queue in FIFO order across kinds (Data before
+    /// Close), exactly one reserve is requested, and the grant is withheld (the queue just grows).
+    #[tokio::test]
+    async fn inbound_fifo_preserves_order_and_backpressures() {
+        let mut session = authenticated_session();
+        let id = ChannelId(1);
+        let (_tx, _rx) = insert_test_channel(&mut session, id, 1);
+
+        // First item fits the buffer (capacity 1).
+        assert!(matches!(
+            session.deliver_inbound(id, InboundItem::Data(Bytes::from_static(b"a"))),
+            InboundDelivery::Delivered
+        ));
+        // Buffer now full: subsequent items queue, preserving arrival order including Close.
+        assert!(matches!(
+            session.deliver_inbound(id, InboundItem::Data(Bytes::from_static(b"bb"))),
+            InboundDelivery::Queued
+        ));
+        assert!(matches!(
+            session.deliver_inbound(id, InboundItem::Data(Bytes::from_static(b"ccc"))),
+            InboundDelivery::Queued
+        ));
+        assert!(matches!(
+            session.deliver_inbound(id, InboundItem::Close),
+            InboundDelivery::Queued
+        ));
+
+        let q = session.inbound.get(&id).expect("backpressured");
+        assert_eq!(q.queue.len(), 3);
+        assert_eq!(q.pending_bytes, 2 + 3); // "bb" + "ccc"; Close carries no bytes
+        assert!(q.reserving);
+        assert!(matches!(q.queue.front(), Some(InboundItem::Data(d)) if d.as_ref() == b"bb"));
+        assert!(matches!(q.queue.back(), Some(InboundItem::Close)));
+        // Exactly one reserve requested for the channel despite three queued items.
+        assert_eq!(session.inbound_needs_reserve, vec![id]);
+    }
+
+    /// A queued payload item must NOT trigger its `Handler` callback until it is actually delivered
+    /// into the application buffer (the RC2 ordering fix). The fast path fires inline; the queued
+    /// path fires from `pump_inbound`, after `permit.send`.
+    #[tokio::test]
+    async fn queued_handler_callback_is_deferred_until_delivery() {
+        struct Rec(std::sync::Arc<std::sync::Mutex<Vec<Vec<u8>>>>);
+        impl crate::server::Handler for Rec {
+            type Error = crate::Error;
+            async fn data(
+                &mut self,
+                _channel: ChannelId,
+                data: &[u8],
+                _session: &mut Session,
+            ) -> Result<(), Self::Error> {
+                self.0.lock().unwrap().push(data.to_vec());
+                Ok(())
+            }
+        }
+
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<Vec<u8>>::new()));
+        let mut handler = Rec(seen.clone());
+        let mut session = authenticated_session();
+        let id = ChannelId(1);
+        let (tx, mut rx) = insert_test_channel(&mut session, id, 1);
+
+        // Fill the buffer, then queue "b".
+        assert!(matches!(
+            session.deliver_inbound(id, InboundItem::Data(Bytes::from_static(b"a"))),
+            InboundDelivery::Delivered
+        ));
+        assert!(matches!(
+            session.deliver_inbound(id, InboundItem::Data(Bytes::from_static(b"b"))),
+            InboundDelivery::Queued
+        ));
+        // The queued item's handler callback must not have fired yet.
+        assert!(seen.lock().unwrap().is_empty());
+
+        // Free a slot and pump: now "b" is delivered AND its callback fires (in that order).
+        assert!(matches!(rx.recv().await, Some(ChannelMsg::Data { .. })));
+        let generation = session.inbound.get(&id).unwrap().generation;
+        let permit = tx.clone().reserve_owned().await.unwrap();
+        session
+            .pump_inbound(id, generation, Ok(permit), &mut handler)
+            .await
+            .unwrap();
+
+        assert_eq!(seen.lock().unwrap().as_slice(), &[b"b".to_vec()]);
+        match rx.recv().await {
+            Some(ChannelMsg::Data { data }) => assert_eq!(data.as_ref(), b"b"),
+            other => panic!("expected delivered Data(b), got {other:?}"),
+        }
+        // Queue drained -> channel returns to the flowing fast path.
+        assert!(!session.inbound.contains_key(&id));
+    }
+
+    /// The hard per-channel cap is enforced on the FIRST overflowing item, not only once already
+    /// backpressured — even when the buffer just became full.
+    #[tokio::test]
+    async fn first_full_item_respects_pending_cap() {
+        let config = crate::server::Config {
+            max_pending_inbound_bytes: 4,
+            ..Default::default()
+        };
+        let mut session = authenticated_session_with(config);
+        let id = ChannelId(1);
+        let (_tx, _rx) = insert_test_channel(&mut session, id, 1);
+
+        // Fills the single buffer slot.
+        assert!(matches!(
+            session.deliver_inbound(id, InboundItem::Data(Bytes::from_static(b"aaaa"))),
+            InboundDelivery::Delivered
+        ));
+        // Buffer full now; the very first queued item already exceeds the 4-byte cap -> Overflow,
+        // and nothing is queued.
+        assert!(matches!(
+            session.deliver_inbound(id, InboundItem::Data(Bytes::from_static(b"bbbbb"))),
+            InboundDelivery::Overflow
+        ));
+        assert!(!session.inbound.contains_key(&id));
+    }
+
+    /// Exceeding the cap while already backpressured returns Overflow and leaves the existing queue
+    /// (and other channels) untouched — the caller closes just this one channel.
+    #[tokio::test]
+    async fn overflow_while_backpressured_isolated_to_channel() {
+        let config = crate::server::Config {
+            max_pending_inbound_bytes: 6,
+            ..Default::default()
+        };
+        let mut session = authenticated_session_with(config);
+        let victim = ChannelId(1);
+        let other = ChannelId(2);
+        let (_tx_v, _rx_v) = insert_test_channel(&mut session, victim, 1);
+        let (_tx_o, _rx_o) = insert_test_channel(&mut session, other, 1);
+
+        assert!(matches!(
+            session.deliver_inbound(victim, InboundItem::Data(Bytes::from_static(b"aa"))),
+            InboundDelivery::Delivered
+        ));
+        assert!(matches!(
+            session.deliver_inbound(victim, InboundItem::Data(Bytes::from_static(b"bbbb"))),
+            InboundDelivery::Queued
+        ));
+        // 4 (queued) + 3 > cap 6 -> Overflow; the queued "bbbb" stays, nothing new added.
+        assert!(matches!(
+            session.deliver_inbound(victim, InboundItem::Data(Bytes::from_static(b"ccc"))),
+            InboundDelivery::Overflow
+        ));
+        assert_eq!(session.inbound.get(&victim).unwrap().queue.len(), 1);
+        // The other channel is entirely unaffected and still on the fast path.
+        assert!(matches!(
+            session.deliver_inbound(other, InboundItem::Data(Bytes::from_static(b"z"))),
+            InboundDelivery::Delivered
+        ));
+        assert!(!session.inbound.contains_key(&other));
     }
 }

@@ -85,6 +85,12 @@ pub struct Config {
     pub channel_buffer_size: usize,
     /// Internal event buffer size
     pub event_buffer_size: usize,
+    /// Hard safety cap on the number of inbound payload bytes that may be queued per channel
+    /// while its application buffer is full (head-of-line backpressure, see
+    /// `RC2_HOL_FIX_DESIGN.md`). With delivery-gated window grants a well-behaved peer can hold at
+    /// most ~`window_size` bytes in flight, so this only trips when a peer ignores its advertised
+    /// window; exceeding it closes that one channel as a protocol violation, never the session.
+    pub max_pending_inbound_bytes: usize,
     /// Lists of preferred algorithms.
     pub preferred: Preferred,
     /// Maximal number of allowed authentication attempts.
@@ -116,6 +122,7 @@ impl Default for Config {
             maximum_packet_size: 32768,
             channel_buffer_size: 100,
             event_buffer_size: 10,
+            max_pending_inbound_bytes: 8 * 2_000_000,
             limits: Limits::default(),
             preferred: Default::default(),
             max_auth_attempts: 10,
@@ -143,6 +150,7 @@ impl Debug for Config {
             .field("maximum_packet_size", &self.maximum_packet_size)
             .field("channel_buffer_size", &self.channel_buffer_size)
             .field("event_buffer_size", &self.event_buffer_size)
+            .field("max_pending_inbound_bytes", &self.max_pending_inbound_bytes)
             .field("limits", &self.limits)
             .field("preferred", &self.preferred)
             .field("max_auth_attempts", &self.max_auth_attempts)
@@ -1025,6 +1033,8 @@ where
         pending_reads: Vec::new(),
         pending_len: 0,
         channels: HashMap::new(),
+        inbound: HashMap::new(),
+        inbound_needs_reserve: Vec::new(),
         open_global_requests: VecDeque::new(),
         kex: SessionKexState::Idle,
     };

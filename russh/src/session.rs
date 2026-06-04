@@ -282,22 +282,56 @@ impl Encrypted {
         }
     }
 
+    /// Receive-time inbound flow-control: consume the window for the received bytes and
+    /// immediately grant more once it drops below `target/2`.
+    ///
+    /// This is the historical, receive-time-grant behaviour. It is still used by the **client**
+    /// inbound path (`client/encrypted.rs`). The **server** inbound path now splits this into
+    /// [`Self::consume_recv_window`] (at receive) + [`Self::maybe_grant_recv_window`] (after the
+    /// data is accepted into the per-channel application buffer) to fix cross-channel
+    /// head-of-line blocking — see `RC2_HOL_FIX_DESIGN.md`. Do not change this wrapper's
+    /// behaviour without also updating the client path.
     pub fn adjust_window_size(
         &mut self,
         channel: ChannelId,
         data: &[u8],
         target: u32,
     ) -> Result<bool, crate::Error> {
+        self.consume_recv_window(channel, data.len());
+        self.maybe_grant_recv_window(channel, target)
+    }
+
+    /// I1: consume the inbound receive window for `len` received bytes. The bytes are already off
+    /// the wire, so the peer's send allowance is genuinely used up regardless of when (or
+    /// whether) they are delivered to the application buffer. Never grants more window.
+    pub fn consume_recv_window(&mut self, channel: ChannelId, len: usize) {
         if let Some(channel) = self.channels.get_mut(&channel) {
             trace!(
-                "adjust_window_size, channel = {}, size = {},",
-                channel.sender_channel, target
+                "consume_recv_window, channel = {}, len = {}",
+                channel.sender_channel, len
             );
-            // Ignore extra data.
-            // https://tools.ietf.org/html/rfc4254#section-5.2
-            if data.len() as u32 <= channel.sender_window_size {
-                channel.sender_window_size -= data.len() as u32;
+            // Ignore extra data. https://tools.ietf.org/html/rfc4254#section-5.2
+            if len as u32 <= channel.sender_window_size {
+                channel.sender_window_size -= len as u32;
             }
+        }
+    }
+
+    /// I2: grant more inbound receive window if it has dropped below `target/2`. Pushes a
+    /// `CHANNEL_WINDOW_ADJUST` (raising the window back to `target`) and returns `true` iff a
+    /// grant was emitted.
+    ///
+    /// The server calls this only **after** the corresponding data has been accepted into the
+    /// per-channel application buffer, so a stuck channel withholds its own grant and
+    /// backpressures only itself, instead of blocking the shared session loop. The emitted
+    /// packet goes into `self.write` and is flushed by the normal session-loop flush path
+    /// (consistent with rekey gating); callers must not assume it has hit the wire yet.
+    pub fn maybe_grant_recv_window(
+        &mut self,
+        channel: ChannelId,
+        target: u32,
+    ) -> Result<bool, crate::Error> {
+        if let Some(channel) = self.channels.get_mut(&channel) {
             if channel.sender_window_size < target / 2 {
                 debug!(
                     "sender_window_size {:?}, target {:?}",
