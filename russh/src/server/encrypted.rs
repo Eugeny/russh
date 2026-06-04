@@ -986,27 +986,46 @@ impl Session {
             msg::CHANNEL_CLOSE => {
                 let channel_num = map_err!(ChannelId::decode(r))?;
                 map_err!(ensure_end(r))?;
-                if let Some(ref mut enc) = self.common.encrypted {
-                    enc.channels.remove(&channel_num);
+                // Queue the Close in-order behind any pending inbound data so that already-queued
+                // data is delivered before teardown. On the fast path the Close reaches the channel
+                // buffer immediately, so the `channel_close` callback + teardown run now; when it is
+                // queued, both are deferred to `pump_inbound`'s Close branch (in FIFO order, after
+                // any data ahead of it).
+                match self.deliver_inbound(channel_num, InboundItem::Close) {
+                    InboundDelivery::Queued => {
+                        // channel_close callback + finalize deferred to pump_inbound.
+                    }
+                    // Delivered (buffer had room) / Overflow / ChannelGone: nothing further will be
+                    // queued, so fire the callback and tear the channel down now.
+                    InboundDelivery::Delivered
+                    | InboundDelivery::Overflow
+                    | InboundDelivery::ChannelGone => {
+                        debug!("handler.channel_close {channel_num:?}");
+                        handler.channel_close(channel_num, self).await?;
+                        self.finalize_close(channel_num);
+                    }
                 }
-                // Forward the close to the channel before removing it, so that
-                // consumers waiting on `Channel::wait()` receive an explicit
-                // `ChannelMsg::Close` instead of just seeing `None`.
-                if let Some(chan) = self.channels.get(&channel_num) {
-                    chan.send(ChannelMsg::Close).await.unwrap_or(())
-                }
-                self.channels.remove(&channel_num);
-                debug!("handler.channel_close {channel_num:?}");
-                handler.channel_close(channel_num, self).await
+                Ok(())
             }
             msg::CHANNEL_EOF => {
                 let channel_num = map_err!(ChannelId::decode(r))?;
                 map_err!(ensure_end(r))?;
-                if let Some(chan) = self.channels.get(&channel_num) {
-                    chan.send(ChannelMsg::Eof).await.unwrap_or(())
+                // Eof carries no bytes, so it never overflows; it is delivered in FIFO order.
+                match self.deliver_inbound(channel_num, InboundItem::Eof) {
+                    InboundDelivery::Queued => {
+                        // channel_eof callback deferred to pump_inbound (after any queued data).
+                    }
+                    // Delivered: queued into the app buffer. ChannelGone: no app stream retained
+                    // (handler-callback-only server, or receiver dropped). Either way fire the
+                    // callback now, matching the pre-refactor unconditional `handler.channel_eof`.
+                    // (Eof carries no bytes, so Overflow never occurs.)
+                    InboundDelivery::Delivered | InboundDelivery::ChannelGone => {
+                        debug!("handler.channel_eof {channel_num:?}");
+                        handler.channel_eof(channel_num, self).await?;
+                    }
+                    InboundDelivery::Overflow => {}
                 }
-                debug!("handler.channel_eof {channel_num:?}");
-                handler.channel_eof(channel_num, self).await
+                Ok(())
             }
             msg::CHANNEL_EXTENDED_DATA | msg::CHANNEL_DATA => {
                 let channel_num = map_err!(ChannelId::decode(r))?;
@@ -1019,35 +1038,57 @@ impl Session {
                 trace!("handler.data {ext:?} {channel_num:?}");
                 let data = map_err!(Bytes::decode(r))?;
                 map_err!(ensure_end(r))?;
-                let target = self.target_window_size;
 
-                if let Some(ref mut enc) = self.common.encrypted {
-                    if enc.adjust_window_size(channel_num, &data, target)? {
-                        let window = handler.adjust_window(channel_num, self.target_window_size);
-                        if window > 0 {
-                            self.target_window_size = window
+                // I1: consume the inbound receive window now (bytes are off the wire). The grant
+                // (I2) is deferred to delivery time so a backpressured channel withholds its own
+                // window and isolates the slow consumer instead of stalling the session loop.
+                if let Some(enc) = self.common.encrypted.as_mut() {
+                    enc.consume_recv_window(channel_num, data.len());
+                }
+
+                let item = if let Some(ext) = ext {
+                    InboundItem::ExtendedData {
+                        ext,
+                        data: data.clone(),
+                    }
+                } else {
+                    InboundItem::Data(data.clone())
+                };
+                match self.deliver_inbound(channel_num, item) {
+                    InboundDelivery::Delivered | InboundDelivery::ChannelGone => {
+                        // Delivered: the data is in the per-channel application buffer.
+                        // ChannelGone: no application-side `Channel` stream is retained — the very
+                        // common handler-callback-only server pattern (the server drops the
+                        // `Channel` and works purely through `Handler::data`), or the receiver was
+                        // dropped. There is no app buffer to backpressure, so behave like the
+                        // pre-refactor path: grant window and fire the handler callback
+                        // unconditionally (the old code always called `handler.data` after a
+                        // best-effort `chan.send().await.unwrap_or(())`). Skipping the callback here
+                        // wedges every such server (no echo / no progress).
+                        self.maybe_grant_after_delivery(channel_num, handler)?;
+                        if let Some(ext) = ext {
+                            handler.extended_data(channel_num, ext, &data, self).await?;
+                        } else {
+                            handler.data(channel_num, &data, self).await?;
                         }
                     }
-                }
-                self.flush()?;
-                if let Some(ext) = ext {
-                    if let Some(chan) = self.channels.get(&channel_num) {
-                        chan.send(ChannelMsg::ExtendedData {
-                            ext,
-                            data: data.clone(),
-                        })
-                        .await
-                        .unwrap_or(())
+                    InboundDelivery::Queued => {
+                        // Grant withheld (per-channel backpressure); the handler callback is
+                        // deferred to pump_inbound so it never fires before the data is buffered.
                     }
-                    handler.extended_data(channel_num, ext, &data, self).await
-                } else {
-                    if let Some(chan) = self.channels.get(&channel_num) {
-                        chan.send(ChannelMsg::Data { data: data.clone() })
-                            .await
-                            .unwrap_or(())
+                    InboundDelivery::Overflow => {
+                        // Protocol violation: the peer ignored its advertised window. Send a wire
+                        // CHANNEL_CLOSE for this channel, drop its queue, and remove local state —
+                        // close this one channel only, never the session.
+                        log::warn!(
+                            "inbound pending cap exceeded for channel {channel_num:?}; closing channel (peer ignored window)"
+                        );
+                        self.close(channel_num)?;
+                        self.teardown_inbound_channel(channel_num);
+                        self.channels.remove(&channel_num);
                     }
-                    handler.data(channel_num, &data, self).await
                 }
+                Ok(())
             }
 
             msg::CHANNEL_WINDOW_ADJUST => {
