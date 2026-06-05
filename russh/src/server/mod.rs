@@ -349,32 +349,43 @@ pub trait Handler: Sized {
         async { Ok(()) }
     }
 
-    /// Called when a new session channel is created.
-    /// Return value indicates whether the channel request should be granted.
+    /// Called when a new session channel is requested by the client.
+    ///
+    /// The handler receives a [`ChannelOpenHandle`] that must be used to accept or
+    /// reject the request. Dropping the handle without calling either method
+    /// automatically rejects the channel.
     #[allow(unused_variables)]
     fn channel_open_session(
         &mut self,
         channel: Channel<Msg>,
+        reply: ChannelOpenHandle,
         session: &mut Session,
-    ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
-        async { Ok(false) }
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
-    /// Called when a new X11 channel is created.
-    /// Return value indicates whether the channel request should be granted.
+    /// Called when a new X11 channel is requested by the client.
+    ///
+    /// The handler receives a [`ChannelOpenHandle`] that must be used to accept or
+    /// reject the request. Dropping the handle without calling either method
+    /// automatically rejects the channel.
     #[allow(unused_variables)]
     fn channel_open_x11(
         &mut self,
         channel: Channel<Msg>,
         originator_address: &str,
         originator_port: u32,
+        reply: ChannelOpenHandle,
         session: &mut Session,
-    ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
-        async { Ok(false) }
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
-    /// Called when a new direct TCP/IP ("local TCP forwarding") channel is opened.
-    /// Return value indicates whether the channel request should be granted.
+    /// Called when a new direct TCP/IP ("local TCP forwarding") channel is requested.
+    ///
+    /// The handler receives a [`ChannelOpenHandle`] that must be used to accept or
+    /// reject the request. Dropping the handle without calling either method
+    /// automatically rejects the channel.
     #[allow(unused_variables)]
     fn channel_open_direct_tcpip(
         &mut self,
@@ -383,12 +394,17 @@ pub trait Handler: Sized {
         port_to_connect: u32,
         originator_address: &str,
         originator_port: u32,
+        reply: ChannelOpenHandle,
         session: &mut Session,
-    ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
-        async { Ok(false) }
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// Called when a new remote forwarded TCP connection comes in.
+    ///
+    /// The handler receives a [`ChannelOpenHandle`] that must be used to accept or
+    /// reject the request. Dropping the handle without calling either method
+    /// automatically rejects the channel.
     ///
     /// <https://www.rfc-editor.org/rfc/rfc4254#section-7>
     #[allow(unused_variables)]
@@ -399,21 +415,26 @@ pub trait Handler: Sized {
         port_to_connect: u32,
         originator_address: &str,
         originator_port: u32,
+        reply: ChannelOpenHandle,
         session: &mut Session,
-    ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
-        async { Ok(false) }
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
-    /// Called when a new direct-streamlocal ("local UNIX socket forwarding") channel is created.
-    /// Return value indicates whether the channel request should be granted.
+    /// Called when a new direct-streamlocal ("local UNIX socket forwarding") channel is requested.
+    ///
+    /// The handler receives a [`ChannelOpenHandle`] that must be used to accept or
+    /// reject the request. Dropping the handle without calling either method
+    /// automatically rejects the channel.
     #[allow(unused_variables)]
     fn channel_open_direct_streamlocal(
         &mut self,
         channel: Channel<Msg>,
         socket_path: &str,
+        reply: ChannelOpenHandle,
         session: &mut Session,
-    ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
-        async { Ok(false) }
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// Called when the client confirmed our request to open a

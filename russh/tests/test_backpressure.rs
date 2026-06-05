@@ -126,9 +126,11 @@ impl russh::server::Handler for Server {
     async fn channel_open_session(
         &mut self,
         mut channel: Channel<Msg>,
+        reply: server::ChannelOpenHandle,
         _session: &mut Session,
-    ) -> Result<bool, Self::Error> {
+    ) -> Result<(), Self::Error> {
         let mut rx = self.rx.take().unwrap();
+        reply.accept().await;
         tokio::spawn(async move {
             while let Ok(_) = rx.changed().await {
                 match channel.wait().await {
@@ -139,7 +141,7 @@ impl russh::server::Handler for Server {
             }
         });
 
-        Ok(true)
+        Ok(())
     }
 }
 

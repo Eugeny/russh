@@ -113,13 +113,15 @@ mod compress {
         async fn channel_open_session(
             &mut self,
             channel: Channel<Msg>,
+            reply: server::ChannelOpenHandle,
             session: &mut Session,
-        ) -> Result<bool, Self::Error> {
+        ) -> Result<(), Self::Error> {
             {
                 let mut clients = self.clients.lock().unwrap();
                 clients.insert((self.id, channel.id()), session.handle());
             }
-            Ok(true)
+            reply.accept().await;
+            Ok(())
         }
         async fn auth_publickey(
             &mut self,
@@ -366,13 +368,15 @@ mod channels {
             async fn channel_open_session(
                 &mut self,
                 channel: Channel<server::Msg>,
+                reply: server::ChannelOpenHandle,
                 _session: &mut server::Session,
-            ) -> Result<bool, Self::Error> {
+            ) -> Result<(), Self::Error> {
                 if let Some(a) = self.channel.take() {
                     println!("channel open session {a:?}");
                     a.send(channel).unwrap();
                 }
-                Ok(true)
+                reply.accept().await;
+                Ok(())
             }
         }
 
@@ -450,8 +454,10 @@ mod channels {
             async fn channel_open_session(
                 &mut self,
                 mut channel: Channel<server::Msg>,
+                reply: server::ChannelOpenHandle,
                 _session: &mut Session,
-            ) -> Result<bool, Self::Error> {
+            ) -> Result<(), Self::Error> {
+                reply.accept().await;
                 tokio::spawn(async move {
                     while let Some(msg) = channel.wait().await {
                         match msg {
@@ -464,7 +470,7 @@ mod channels {
                         }
                     }
                 });
-                Ok(true)
+                Ok(())
             }
         }
 
@@ -534,12 +540,14 @@ mod channels {
             async fn channel_open_session(
                 &mut self,
                 channel: Channel<server::Msg>,
+                reply: server::ChannelOpenHandle,
                 _session: &mut server::Session,
-            ) -> Result<bool, Self::Error> {
+            ) -> Result<(), Self::Error> {
                 if let Some(tx) = self.channel.take() {
                     tx.send(channel).unwrap();
                 }
-                Ok(true)
+                reply.accept().await;
+                Ok(())
             }
         }
 
@@ -614,13 +622,15 @@ mod channels {
             async fn channel_open_session(
                 &mut self,
                 channel: Channel<server::Msg>,
+                reply: server::ChannelOpenHandle,
                 _session: &mut server::Session,
-            ) -> Result<bool, Self::Error> {
+            ) -> Result<(), Self::Error> {
                 if let Some(a) = self.channel.take() {
                     println!("channel open session {a:?}");
                     a.send(channel).unwrap();
                 }
-                Ok(true)
+                reply.accept().await;
+                Ok(())
             }
         }
 
@@ -1142,10 +1152,12 @@ pub(crate) mod raw_no_crypto {
         async fn channel_open_session(
             &mut self,
             _channel: Channel<server::Msg>,
+            reply: server::ChannelOpenHandle,
             _session: &mut server::Session,
-        ) -> Result<bool, Self::Error> {
+        ) -> Result<(), Self::Error> {
             self.record("channel_open_session");
-            Ok(true)
+            reply.accept().await;
+            Ok(())
         }
 
         async fn pty_request(
@@ -1353,10 +1365,11 @@ mod future_certificate {
                 async fn channel_open_session(
                     &mut self,
                     channel: crate::Channel<server::Msg>,
+                    _reply: server::ChannelOpenHandle,
                     _session: &mut Session,
-                ) -> Result<bool, Self::Error> {
+                ) -> Result<(), Self::Error> {
                     drop(channel);
-                    Ok(true)
+                    Ok(())
                 }
             }
 

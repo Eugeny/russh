@@ -37,13 +37,15 @@ mod tests {
         async fn channel_open_session(
             &mut self,
             channel: crate::channels::Channel<server::Msg>,
+            reply: server::ChannelOpenHandle,
             session: &mut Session,
-        ) -> Result<bool, Self::Error> {
+        ) -> Result<(), Self::Error> {
             {
                 let mut clients = self.clients.lock().unwrap();
                 clients.insert((self.id, channel.id()), session.handle());
             }
-            Ok(true)
+            reply.accept().await;
+            Ok(())
         }
 
         async fn auth_publickey(
