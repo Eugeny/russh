@@ -24,23 +24,22 @@ pub fn decode_pkcs8(
         doc
     };
 
-    match doc.decode_msg::<sec1::EcPrivateKey>() {
-        Ok(key) => {
-            // X9.62 EC private key
-            let Some(curve) = key.parameters.and_then(|x| x.named_curve()) else {
-                return Err(Error::CouldNotReadKey);
-            };
-            let kp = ec_key_data_into_keypair(curve, key)?;
-            Ok(PrivateKey::new(KeypairData::Ecdsa(kp), "")?)
-        }
-        Err(_) => {
-            // ASN.1 key
-            Ok(
-                pkcs8_pki_into_keypair_data(doc.decode_msg::<PrivateKeyInfoRef<'_>>()?)?
-                    .try_into()?,
-            )
-        }
+    if let Ok(key) = doc.decode_msg::<sec1::EcPrivateKey>() {
+        // X9.62 EC private key
+        let Some(curve) = key.parameters.and_then(|x| x.named_curve()) else {
+            return Err(Error::CouldNotReadKey);
+        };
+        let kp = ec_key_data_into_keypair(curve, key)?;
+        return Ok(PrivateKey::new(KeypairData::Ecdsa(kp), "")?);
     }
+
+    // SEC1 key with full domain parameters (not a named curve OID)
+    if let Ok(kp) = explicit_curve_params::decode_sec1_with_full_domain_params(ciphertext) {
+        return Ok(PrivateKey::new(KeypairData::Ecdsa(kp), "")?);
+    }
+
+    // ASN.1 key (PKCS#8)
+    Ok(pkcs8_pki_into_keypair_data(doc.decode_msg::<PrivateKeyInfoRef<'_>>()?)?.try_into()?)
 }
 
 fn pkcs8_pki_into_keypair_data(pki: PrivateKeyInfoRef<'_>) -> Result<KeypairData, Error> {
@@ -110,6 +109,105 @@ where
         }
         oid => return Err(Error::UnknownAlgorithm(oid)),
     })
+}
+
+mod explicit_curve_params {
+    use super::*;
+
+    use der::{
+        Reader, SliceReader, Tag, TagNumber, Tagged,
+        asn1::{AnyRef, ContextSpecific, UintRef},
+    };
+
+    /// Try to parse an SEC1 EC key with full domain parameters.
+    ///
+    /// Some key generators (e.g. OpenSSL with certain options) produce SEC1 keys
+    /// where the `[0]` parameters field contains full EC domain parameters instead
+    /// of a named curve OID. The `sec1` crate does not support this format.
+    pub fn decode_sec1_with_full_domain_params(der_bytes: &[u8]) -> Result<EcdsaKeypair, Error> {
+        let mut reader = SliceReader::new(der_bytes)?;
+        reader.sequence(|seq| {
+            let version: u8 = seq.decode()?;
+            if version < 1 {
+                return Err(Error::CouldNotReadKey);
+            }
+
+            let priv_key: AnyRef = seq.decode()?;
+            priv_key.tag().assert_eq(Tag::OctetString)?;
+
+            let params = ContextSpecific::<AnyRef>::decode_explicit(seq, TagNumber(0))?
+                .ok_or(Error::CouldNotReadKey)?;
+
+            let curve_oid = extract_curve_from_domain_params(params.value)?;
+
+            let keypair = build_ec_keypair_from_bytes(curve_oid, priv_key.value())?;
+
+            // Drain any remaining optional fields (e.g. [1] publicKey) so finish() succeeds
+            seq.drain(seq.remaining_len())?;
+            Ok(keypair)
+        })
+    }
+
+    /// Extract the named curve OID from full EC domain parameters.
+    /// Handles two formats:
+    /// 1. Standard ECParameters: SEQUENCE { FieldID, Curve, base, order, cofactor }
+    /// 2. Wrapped ECParameters: SEQUENCE { INTEGER version, SEQUENCE { FieldID, ... } }
+    fn extract_curve_from_domain_params(params: AnyRef<'_>) -> Result<ObjectIdentifier, Error> {
+        params.tag().assert_eq(Tag::Sequence)?;
+
+        // Use a standalone SliceReader so we aren't required to consume all of ECParams
+        // (Curve, base, order, cofactor follow FieldID but are irrelevant here).
+        let mut seq = SliceReader::new(params.value())?;
+
+        // Skip optional ECParameters version INTEGER
+        if Tag::peek(&seq)? == Tag::Integer {
+            seq.decode::<u8>()?;
+        }
+
+        // FieldID ::= SEQUENCE { fieldType OID, parameters ANY }
+        seq.sequence(|field_id| {
+            let _field_oid: ObjectIdentifier = field_id.decode()?;
+            // prime INTEGER — as_bytes() strips DER sign-extension leading zero
+            let prime: UintRef = field_id.decode()?;
+            Ok(match prime.as_bytes().len() {
+                32 => NistP256::OID,
+                48 => NistP384::OID,
+                66 => NistP521::OID,
+                _ => return Err(Error::CouldNotReadKey),
+            })
+        })
+    }
+
+    /// Build an EcdsaKeypair from raw private key bytes and a curve OID.
+    fn build_ec_keypair_from_bytes(
+        curve_oid: ObjectIdentifier,
+        private_key_bytes: &[u8],
+    ) -> Result<EcdsaKeypair, Error> {
+        if curve_oid == NistP256::OID {
+            let sk = p256::SecretKey::from_slice(private_key_bytes)
+                .map_err(|_| Error::CouldNotReadKey)?;
+            Ok(EcdsaKeypair::NistP256 {
+                public: sk.public_key().into(),
+                private: sk.into(),
+            })
+        } else if curve_oid == NistP384::OID {
+            let sk = p384::SecretKey::from_slice(private_key_bytes)
+                .map_err(|_| Error::CouldNotReadKey)?;
+            Ok(EcdsaKeypair::NistP384 {
+                public: sk.public_key().into(),
+                private: sk.into(),
+            })
+        } else if curve_oid == NistP521::OID {
+            let sk = p521::SecretKey::from_slice(private_key_bytes)
+                .map_err(|_| Error::CouldNotReadKey)?;
+            Ok(EcdsaKeypair::NistP521 {
+                public: sk.public_key().into(),
+                private: sk.into(),
+            })
+        } else {
+            Err(Error::UnknownAlgorithm(curve_oid))
+        }
+    }
 }
 
 /// Encode into a password-protected PKCS#8-encoded private key.
