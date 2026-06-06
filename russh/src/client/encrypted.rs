@@ -24,7 +24,7 @@ use ssh_key::Algorithm;
 use super::IncomingSshPacket;
 use crate::auth::AuthRequest;
 use crate::cert::PublicKeyOrCertificate;
-use crate::client::{Handler, Msg, Prompt, Reply, Session};
+use crate::client::{ChannelOpenHandle, Handler, Msg, Prompt, Reply, Session};
 use crate::helpers::{AlgorithmExt, EncodedExt, NameList, sign_with_hash_alg};
 use crate::keys::key::parse_public_key;
 use crate::parsing::{ChannelOpenConfirmation, ChannelType, OpenChannelMessage, ensure_end};
@@ -432,7 +432,7 @@ impl Session {
                 debug!("channel_open_failure");
                 let channel_num = map_err!(ChannelId::decode(&mut r))?;
                 let reason_code = ChannelOpenFailure::from_u32(map_err!(u32::decode(&mut r))?)
-                    .unwrap_or(ChannelOpenFailure::Unknown);
+                    .unwrap_or(ChannelOpenFailure::AdministrativelyProhibited);
                 let descr = map_err!(String::decode(&mut r))?;
                 let language = map_err!(String::decode(&mut r))?;
                 map_err!(ensure_end(&r))?;
@@ -441,7 +441,7 @@ impl Session {
                 }
 
                 if let Some(sender) = self.channels.remove(&channel_num) {
-                    let _ = sender.send(ChannelMsg::OpenFailure(reason_code)).await;
+                    let _ = sender.send(ChannelMsg::OpenFailure(reason_code.clone())).await;
                 }
 
                 let _ = self.sender.send(Reply::ChannelOpenFailure);
@@ -677,127 +677,129 @@ impl Session {
             Some((&msg::CHANNEL_OPEN, mut r)) => {
                 let msg = OpenChannelMessage::parse(&mut r)?;
 
-                if let Some(ref mut enc) = self.common.encrypted {
-                    let id = enc.new_channel_id();
-                    let channel = ChannelParams {
-                        recipient_channel: msg.recipient_channel,
-                        sender_channel: id,
-                        recipient_window_size: msg.recipient_window_size,
-                        sender_window_size: self.common.config.window_size,
-                        recipient_maximum_packet_size: msg.recipient_maximum_packet_size,
-                        sender_maximum_packet_size: self.common.config.maximum_packet_size,
-                        confirmed: true,
-                        wants_reply: false,
-                        pending_data: std::collections::VecDeque::new(),
-                        pending_eof: false,
-                        pending_close: false,
-                    };
+                let id = if let Some(ref mut enc) = self.common.encrypted {
+                    enc.new_channel_id()
+                } else {
+                    return Err(crate::Error::Inconsistent.into());
+                };
 
-                    let confirm = || {
-                        debug!("confirming channel: {msg:?}");
-                        map_err!(msg.confirm(
-                            &mut enc.write,
-                            id.0,
-                            channel.sender_window_size,
-                            channel.sender_maximum_packet_size,
-                        ))?;
-                        enc.channels.insert(id, channel);
-                        Ok(())
-                    };
+                let channel_params = ChannelParams {
+                    recipient_channel: msg.recipient_channel,
+                    sender_channel: id,
+                    recipient_window_size: msg.recipient_window_size,
+                    sender_window_size: self.common.config.window_size,
+                    recipient_maximum_packet_size: msg.recipient_maximum_packet_size,
+                    sender_maximum_packet_size: self.common.config.maximum_packet_size,
+                    confirmed: true,
+                    wants_reply: false,
+                    pending_data: std::collections::VecDeque::new(),
+                    pending_eof: false,
+                    pending_close: false,
+                };
 
-                    match &msg.typ {
-                        ChannelType::Session => {
-                            confirm()?;
-                            let channel = self.accept_server_initiated_channel(id, &msg);
-                            client.server_channel_open_session(channel, self).await?
-                        }
-                        ChannelType::DirectTcpip(d) => {
-                            confirm()?;
-                            let channel = self.accept_server_initiated_channel(id, &msg);
-                            client
-                                .server_channel_open_direct_tcpip(
-                                    channel,
-                                    &d.host_to_connect,
-                                    d.port_to_connect,
-                                    &d.originator_address,
-                                    d.originator_port,
-                                    self,
-                                )
-                                .await?
-                        }
-                        ChannelType::DirectStreamLocal(d) => {
-                            confirm()?;
-                            let channel = self.accept_server_initiated_channel(id, &msg);
-                            client
-                                .server_channel_open_direct_streamlocal(
-                                    channel,
-                                    &d.socket_path,
-                                    self,
-                                )
-                                .await?
-                        }
-                        ChannelType::X11 {
-                            originator_address,
-                            originator_port,
-                        } => {
-                            confirm()?;
-                            let channel = self.accept_server_initiated_channel(id, &msg);
-                            client
-                                .server_channel_open_x11(
-                                    channel,
-                                    originator_address,
-                                    *originator_port,
-                                    self,
-                                )
-                                .await?
-                        }
-                        ChannelType::ForwardedTcpIp(d) => {
-                            confirm()?;
-                            let channel = self.accept_server_initiated_channel(id, &msg);
-                            client
-                                .server_channel_open_forwarded_tcpip(
-                                    channel,
-                                    &d.host_to_connect,
-                                    d.port_to_connect,
-                                    &d.originator_address,
-                                    d.originator_port,
-                                    self,
-                                )
-                                .await?
-                        }
-                        ChannelType::ForwardedStreamLocal(d) => {
-                            confirm()?;
-                            let channel = self.accept_server_initiated_channel(id, &msg);
-                            client
-                                .server_channel_open_forwarded_streamlocal(
-                                    channel,
-                                    &d.socket_path,
-                                    self,
-                                )
-                                .await?;
-                        }
-                        ChannelType::AgentForward => {
-                            confirm()?;
-                            let channel = self.accept_server_initiated_channel(id, &msg);
-                            client
-                                .server_channel_open_agent_forward(channel, self)
-                                .await?
-                        }
-                        ChannelType::Unknown { typ } => {
-                            if client.should_accept_unknown_server_channel(id, typ).await {
-                                confirm()?;
-                                let channel = self.accept_server_initiated_channel(id, &msg);
-                                client.server_channel_open_unknown(channel, self).await?;
-                            } else {
-                                debug!("unknown channel type: {typ}");
+                let (channel, channel_ref) = Channel::new(
+                    id,
+                    self.inbound_channel_sender.clone(),
+                    channel_params.recipient_maximum_packet_size,
+                    channel_params.recipient_window_size,
+                    self.common.config.channel_buffer_size,
+                );
+
+                let pending = crate::PendingChannelOpen {
+                    recipient_channel: msg.recipient_channel,
+                    sender_channel: id,
+                    window_size: self.common.config.window_size,
+                    packet_size: self.common.config.maximum_packet_size,
+                    channel_ref,
+                    channel_params,
+                };
+                let reply = ChannelOpenHandle::new(
+                    self.inbound_channel_sender.clone(),
+                    pending,
+                    |pending, result| Msg::ServerChannelOpenReply { pending, result },
+                );
+
+                match &msg.typ {
+                    ChannelType::Session => {
+                        client.server_channel_open_session(channel, reply, self).await?
+                    }
+                    ChannelType::DirectTcpip(d) => {
+                        client
+                            .server_channel_open_direct_tcpip(
+                                channel,
+                                &d.host_to_connect,
+                                d.port_to_connect,
+                                &d.originator_address,
+                                d.originator_port,
+                                reply,
+                                self,
+                            )
+                            .await?
+                    }
+                    ChannelType::DirectStreamLocal(d) => {
+                        client
+                            .server_channel_open_direct_streamlocal(
+                                channel,
+                                &d.socket_path,
+                                reply,
+                                self,
+                            )
+                            .await?
+                    }
+                    ChannelType::X11 {
+                        originator_address,
+                        originator_port,
+                    } => {
+                        client
+                            .server_channel_open_x11(
+                                channel,
+                                originator_address,
+                                *originator_port,
+                                reply,
+                                self,
+                            )
+                            .await?
+                    }
+                    ChannelType::ForwardedTcpIp(d) => {
+                        client
+                            .server_channel_open_forwarded_tcpip(
+                                channel,
+                                &d.host_to_connect,
+                                d.port_to_connect,
+                                &d.originator_address,
+                                d.originator_port,
+                                reply,
+                                self,
+                            )
+                            .await?
+                    }
+                    ChannelType::ForwardedStreamLocal(d) => {
+                        client
+                            .server_channel_open_forwarded_streamlocal(
+                                channel,
+                                &d.socket_path,
+                                reply,
+                                self,
+                            )
+                            .await?
+                    }
+                    ChannelType::AgentForward => {
+                        client
+                            .server_channel_open_agent_forward(channel, reply, self)
+                            .await?
+                    }
+                    ChannelType::Unknown { typ } => {
+                        if client.should_accept_unknown_server_channel(id, typ).await {
+                            client.server_channel_open_unknown(channel, reply, self).await?;
+                        } else {
+                            debug!("unknown channel type: {typ}");
+                            if let Some(ref mut enc) = self.common.encrypted {
                                 msg.unknown_type(&mut enc.write)?;
                             }
                         }
-                    };
-                    Ok(())
-                } else {
-                    Err(crate::Error::Inconsistent.into())
-                }
+                    }
+                };
+                Ok(())
             }
             Some((&msg::REQUEST_SUCCESS, mut r)) => {
                 trace!("Global Request Success");
@@ -892,24 +894,6 @@ impl Session {
                 Ok(())
             }
         }
-    }
-
-    fn accept_server_initiated_channel(
-        &mut self,
-        id: ChannelId,
-        msg: &OpenChannelMessage,
-    ) -> Channel<Msg> {
-        let (channel, channel_ref) = Channel::new(
-            id,
-            self.inbound_channel_sender.clone(),
-            msg.recipient_maximum_packet_size,
-            msg.recipient_window_size,
-            self.common.config.channel_buffer_size,
-        );
-
-        self.channels.insert(id, channel_ref);
-
-        channel
     }
 
     pub(crate) fn write_auth_request_if_needed(

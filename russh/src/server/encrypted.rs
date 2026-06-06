@@ -31,7 +31,6 @@ use super::super::*;
 use super::*;
 use crate::helpers::NameList;
 use crate::map_err;
-use crate::msg::SSH_OPEN_ADMINISTRATIVELY_PROHIBITED;
 use crate::parsing::{ChannelOpenConfirmation, ChannelType, OpenChannelMessage, ensure_end};
 
 impl Session {
@@ -981,8 +980,7 @@ impl Session {
         match msg {
             msg::CHANNEL_OPEN => self
                 .server_handle_channel_open(handler, r)
-                .await
-                .map(|_| ()),
+                .await,
             msg::CHANNEL_CLOSE => {
                 let channel_num = map_err!(ChannelId::decode(r))?;
                 map_err!(ensure_end(r))?;
@@ -1448,7 +1446,7 @@ impl Session {
                 debug!("channel_open_failure");
                 let channel_num = map_err!(ChannelId::decode(r))?;
                 let reason = ChannelOpenFailure::from_u32(map_err!(u32::decode(r))?)
-                    .unwrap_or(ChannelOpenFailure::Unknown);
+                    .unwrap_or(ChannelOpenFailure::AdministrativelyProhibited);
                 let description = map_err!(String::decode(r))?;
                 let language_tag = map_err!(String::decode(r))?;
                 map_err!(ensure_end(r))?;
@@ -1547,7 +1545,7 @@ impl Session {
         &mut self,
         handler: &mut H,
         r: &mut R,
-    ) -> Result<bool, H::Error> {
+    ) -> Result<(), H::Error> {
         let msg = OpenChannelMessage::parse(r)?;
 
         let sender_channel = if let Some(ref mut enc) = self.common.encrypted {
@@ -1572,7 +1570,7 @@ impl Session {
             pending_close: false,
         };
 
-        let (channel, reference) = Channel::new(
+        let (channel, channel_ref) = Channel::new(
             sender_channel,
             self.sender.sender.clone(),
             channel_params.recipient_maximum_packet_size,
@@ -1580,71 +1578,62 @@ impl Session {
             self.common.config.channel_buffer_size,
         );
 
+        let pending = PendingChannelOpen {
+            recipient_channel: msg.recipient_channel,
+            sender_channel,
+            window_size: self.common.config.window_size,
+            packet_size: self.common.config.maximum_packet_size,
+            channel_ref,
+            channel_params,
+        };
+        let reply = ChannelOpenHandle::new(
+            self.sender.sender.clone(),
+            pending,
+            |pending, result| Msg::ChannelOpenReply { pending, result },
+        );
+
         match &msg.typ {
             ChannelType::Session => {
-                let mut result = handler.channel_open_session(channel, self).await;
-                if let Ok(allowed) = &mut result {
-                    self.channels.insert(sender_channel, reference);
-                    self.finalize_channel_open(&msg, channel_params, *allowed)?;
-                }
-                result
+                handler.channel_open_session(channel, reply, self).await
             }
             ChannelType::X11 {
                 originator_address,
                 originator_port,
             } => {
-                let mut result = handler
-                    .channel_open_x11(channel, originator_address, *originator_port, self)
-                    .await;
-                if let Ok(allowed) = &mut result {
-                    self.channels.insert(sender_channel, reference);
-                    self.finalize_channel_open(&msg, channel_params, *allowed)?;
-                }
-                result
+                handler
+                    .channel_open_x11(channel, originator_address, *originator_port, reply, self)
+                    .await
             }
             ChannelType::DirectTcpip(d) => {
-                let mut result = handler
+                handler
                     .channel_open_direct_tcpip(
                         channel,
                         &d.host_to_connect,
                         d.port_to_connect,
                         &d.originator_address,
                         d.originator_port,
+                        reply,
                         self,
                     )
-                    .await;
-                if let Ok(allowed) = &mut result {
-                    self.channels.insert(sender_channel, reference);
-                    self.finalize_channel_open(&msg, channel_params, *allowed)?;
-                }
-                result
+                    .await
             }
             ChannelType::ForwardedTcpIp(d) => {
-                let mut result = handler
+                handler
                     .channel_open_forwarded_tcpip(
                         channel,
                         &d.host_to_connect,
                         d.port_to_connect,
                         &d.originator_address,
                         d.originator_port,
+                        reply,
                         self,
                     )
-                    .await;
-                if let Ok(allowed) = &mut result {
-                    self.channels.insert(sender_channel, reference);
-                    self.finalize_channel_open(&msg, channel_params, *allowed)?;
-                }
-                result
+                    .await
             }
             ChannelType::DirectStreamLocal(d) => {
-                let mut result = handler
-                    .channel_open_direct_streamlocal(channel, &d.socket_path, self)
-                    .await;
-                if let Ok(allowed) = &mut result {
-                    self.channels.insert(sender_channel, reference);
-                    self.finalize_channel_open(&msg, channel_params, *allowed)?;
-                }
-                result
+                handler
+                    .channel_open_direct_streamlocal(channel, &d.socket_path, reply, self)
+                    .await
             }
             ChannelType::ForwardedStreamLocal(_) => {
                 if let Some(ref mut enc) = self.common.encrypted {
@@ -1654,7 +1643,7 @@ impl Session {
                         b"Unsupported channel type",
                     )?;
                 }
-                Ok(false)
+                Ok(())
             }
             ChannelType::AgentForward => {
                 if let Some(ref mut enc) = self.common.encrypted {
@@ -1664,41 +1653,15 @@ impl Session {
                         b"Unsupported channel type",
                     )?;
                 }
-                Ok(false)
+                Ok(())
             }
             ChannelType::Unknown { typ } => {
                 debug!("unknown channel type: {typ}");
                 if let Some(ref mut enc) = self.common.encrypted {
                     msg.unknown_type(&mut enc.write)?;
                 }
-                Ok(false)
+                Ok(())
             }
         }
-    }
-
-    fn finalize_channel_open(
-        &mut self,
-        open: &OpenChannelMessage,
-        channel: ChannelParams,
-        allowed: bool,
-    ) -> Result<(), Error> {
-        if let Some(ref mut enc) = self.common.encrypted {
-            if allowed {
-                open.confirm(
-                    &mut enc.write,
-                    channel.sender_channel.0,
-                    channel.sender_window_size,
-                    channel.sender_maximum_packet_size,
-                )?;
-                enc.channels.insert(channel.sender_channel, channel);
-            } else {
-                open.fail(
-                    &mut enc.write,
-                    SSH_OPEN_ADMINISTRATIVELY_PROHIBITED,
-                    b"Rejected",
-                )?;
-            }
-        }
-        Ok(())
     }
 }

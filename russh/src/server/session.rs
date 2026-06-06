@@ -13,7 +13,7 @@ use super::*;
 use crate::channels::{Channel, ChannelMsg, ChannelReadHalf, ChannelRef, ChannelWriteHalf};
 use crate::helpers::NameList;
 use crate::kex::{EXTENSION_SUPPORT_AS_CLIENT, KexCause, SessionKexState};
-use crate::{map_err, msg};
+use crate::{ChannelOpenFailure, map_err, msg};
 
 /// A connected server session. This type is unique to a client.
 #[derive(Debug)]
@@ -82,6 +82,10 @@ pub enum Msg {
         language_tag: String,
     },
     Channel(ChannelId, ChannelMsg),
+    ChannelOpenReply {
+        pending: PendingChannelOpen,
+        result: Result<(), ChannelOpenFailure>,
+    },
 }
 
 impl From<(ChannelId, ChannelMsg)> for Msg {
@@ -89,6 +93,16 @@ impl From<(ChannelId, ChannelMsg)> for Msg {
         Msg::Channel(id, msg)
     }
 }
+
+pub use crate::PendingChannelOpen;
+
+/// A handle passed to channel-open callbacks that the handler uses to
+/// accept or reject the incoming channel request.
+///
+/// Dropping the handle without calling [`accept`](ChannelOpenHandle::accept) or
+/// [`reject`](ChannelOpenHandle::reject) automatically sends an
+/// `AdministrativelyProhibited` rejection to the client.
+pub type ChannelOpenHandle = crate::ChannelOpenHandleInner<Msg>;
 
 #[derive(Clone, Debug)]
 /// Handle to a session, used to send messages to a client outside of
@@ -629,6 +643,9 @@ impl Session {
                         Some(Msg::Disconnect {reason, description, language_tag}) => {
                             self.common.disconnect(reason, &description, &language_tag)?;
                         }
+                        Some(Msg::ChannelOpenReply { pending, result }) => {
+                            self.finalize_channel_open_reply(pending, result)?;
+                        }
                         Some(_) => {
                             // should be unreachable, since the receiver only gets
                             // messages from methods implemented within russh
@@ -870,6 +887,40 @@ impl Session {
         Ok(())
     }
 
+    fn finalize_channel_open_reply(
+        &mut self,
+        pending: PendingChannelOpen,
+        result: Result<(), ChannelOpenFailure>,
+    ) -> Result<(), Error> {
+        if let Some(ref mut enc) = self.common.encrypted {
+            match result {
+                Ok(()) => {
+                    push_packet!(enc.write, {
+                        msg::CHANNEL_OPEN_CONFIRMATION.encode(&mut enc.write)?;
+                        pending.recipient_channel.encode(&mut enc.write)?;
+                        pending.sender_channel.0.encode(&mut enc.write)?;
+                        pending.window_size.encode(&mut enc.write)?;
+                        pending.packet_size.encode(&mut enc.write)?;
+                    });
+                    enc.channels
+                        .insert(pending.sender_channel, pending.channel_params);
+                    self.channels
+                        .insert(pending.sender_channel, pending.channel_ref);
+                }
+                Err(reason) => {
+                    push_packet!(enc.write, {
+                        msg::CHANNEL_OPEN_FAILURE.encode(&mut enc.write)?;
+                        pending.recipient_channel.encode(&mut enc.write)?;
+                        reason.code().encode(&mut enc.write)?;
+                        reason.description().encode(&mut enc.write)?;
+                        "en".encode(&mut enc.write)?;
+                    });
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Send a "failure" reply to a request to open a channel open.
     pub fn channel_open_failure(
         &mut self,
@@ -882,7 +933,7 @@ impl Session {
             push_packet!(enc.write, {
                 enc.write.push(msg::CHANNEL_OPEN_FAILURE);
                 channel.encode(&mut enc.write)?;
-                (reason as u32).encode(&mut enc.write)?;
+                reason.code().encode(&mut enc.write)?;
                 description.encode(&mut enc.write)?;
                 language.encode(&mut enc.write)?;
             })

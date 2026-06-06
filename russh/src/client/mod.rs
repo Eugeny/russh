@@ -48,7 +48,7 @@ use futures::task::{Context, Poll};
 use kex::ClientKex;
 use log::{debug, error, trace, warn};
 use russh_util::time::Instant;
-use ssh_encoding::Decode;
+use ssh_encoding::{Decode, Encode};
 use ssh_key::{Algorithm, Certificate, HashAlg, PrivateKey, PublicKey};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadHalf, WriteHalf};
 use tokio::pin;
@@ -195,6 +195,10 @@ pub enum Msg {
         language_tag: String,
     },
     Channel(ChannelId, ChannelMsg),
+    ServerChannelOpenReply {
+        pending: crate::PendingChannelOpen,
+        result: Result<(), ChannelOpenFailure>,
+    },
     Rekey,
     AwaitExtensionInfo {
         extension_name: String,
@@ -220,6 +224,15 @@ impl From<(ChannelId, ChannelMsg)> for Msg {
         Msg::Channel(id, msg)
     }
 }
+
+/// Internal state for a server-initiated channel-open request awaiting accept or reject.
+/// A handle passed to `server_channel_open_*` callbacks that the handler uses to
+/// accept or reject the server's channel request.
+///
+/// Dropping the handle without calling [`accept`](ChannelOpenHandle::accept) or
+/// [`reject`](ChannelOpenHandle::reject) automatically sends an
+/// `AdministrativelyProhibited` rejection to the server.
+pub type ChannelOpenHandle = crate::ChannelOpenHandleInner<Msg>;
 
 #[derive(Debug)]
 pub enum KeyboardInteractiveAuthResponse {
@@ -1497,10 +1510,47 @@ impl Session {
             Msg::NoMoreSessions { want_reply } => {
                 let _ = self.no_more_sessions(want_reply);
             }
+            Msg::ServerChannelOpenReply { pending, result } => {
+                self.finalize_server_channel_open_reply(pending, result)?;
+            }
             msg => {
                 // should be unreachable, since the receiver only gets
                 // messages from methods implemented within russh
                 unimplemented!("unimplemented (server-only?) message: {:?}", msg)
+            }
+        }
+        Ok(())
+    }
+
+    fn finalize_server_channel_open_reply(
+        &mut self,
+        pending: crate::PendingChannelOpen,
+        result: Result<(), ChannelOpenFailure>,
+    ) -> Result<(), crate::Error> {
+        if let Some(ref mut enc) = self.common.encrypted {
+            match result {
+                Ok(()) => {
+                    push_packet!(enc.write, {
+                        msg::CHANNEL_OPEN_CONFIRMATION.encode(&mut enc.write)?;
+                        pending.recipient_channel.encode(&mut enc.write)?;
+                        pending.sender_channel.encode(&mut enc.write)?;
+                        pending.window_size.encode(&mut enc.write)?;
+                        pending.packet_size.encode(&mut enc.write)?;
+                    });
+                    enc.channels
+                        .insert(pending.sender_channel, pending.channel_params);
+                    self.channels
+                        .insert(pending.sender_channel, pending.channel_ref);
+                }
+                Err(reason) => {
+                    push_packet!(enc.write, {
+                        msg::CHANNEL_OPEN_FAILURE.encode(&mut enc.write)?;
+                        pending.recipient_channel.encode(&mut enc.write)?;
+                        reason.code().encode(&mut enc.write)?;
+                        reason.description().encode(&mut enc.write)?;
+                        "en".encode(&mut enc.write)?;
+                    });
+                }
             }
         }
         Ok(())
@@ -1689,10 +1739,7 @@ mod tests {
     impl Handler for TestHandler {
         type Error = crate::Error;
 
-        async fn check_server_key(
-            &mut self,
-            _: &ssh_key::PublicKey,
-        ) -> Result<bool, Self::Error> {
+        async fn check_server_key(&mut self, _: &ssh_key::PublicKey) -> Result<bool, Self::Error> {
             Ok(true)
         }
     }
@@ -2202,8 +2249,13 @@ pub trait Handler: Sized + Send {
         async { Ok(()) }
     }
 
-    /// Called when the server opens a channel for a new remote port forwarding connection
+    /// Called when the server opens a channel for a new remote port forwarding connection.
+    ///
+    /// Call [`reply.accept().await`](ChannelOpenHandle::accept) to confirm, or
+    /// [`reply.reject(reason).await`](ChannelOpenHandle::reject) to decline.
+    /// Dropping `reply` automatically rejects.
     #[allow(unused_variables)]
+    #[allow(clippy::too_many_arguments)]
     fn server_channel_open_forwarded_tcpip(
         &mut self,
         channel: Channel<Msg>,
@@ -2211,30 +2263,50 @@ pub trait Handler: Sized + Send {
         connected_port: u32,
         originator_address: &str,
         originator_port: u32,
+        reply: ChannelOpenHandle,
         session: &mut Session,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        async { Ok(()) }
+        async move {
+            reply.accept().await;
+            Ok(())
+        }
     }
 
-    // Called when the server opens a channel for a new remote UDS forwarding connection
+    /// Called when the server opens a channel for a new remote UDS forwarding connection.
+    ///
+    /// Call [`reply.accept().await`](ChannelOpenHandle::accept) to confirm, or
+    /// [`reply.reject(reason).await`](ChannelOpenHandle::reject) to decline.
+    /// Dropping `reply` automatically rejects.
     #[allow(unused_variables)]
     fn server_channel_open_forwarded_streamlocal(
         &mut self,
         channel: Channel<Msg>,
         socket_path: &str,
+        reply: ChannelOpenHandle,
         session: &mut Session,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        async { Ok(()) }
+        async move {
+            reply.accept().await;
+            Ok(())
+        }
     }
 
-    /// Called when the server opens an agent forwarding channel
+    /// Called when the server opens an agent forwarding channel.
+    ///
+    /// Call [`reply.accept().await`](ChannelOpenHandle::accept) to confirm, or
+    /// [`reply.reject(reason).await`](ChannelOpenHandle::reject) to decline.
+    /// Dropping `reply` automatically rejects.
     #[allow(unused_variables)]
     fn server_channel_open_agent_forward(
         &mut self,
         channel: Channel<Msg>,
+        reply: ChannelOpenHandle,
         session: &mut Session,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        async { Ok(()) }
+        async move {
+            reply.accept().await;
+            Ok(())
+        }
     }
 
     /// Called when the server attempts to open a channel of unknown type. It may return `true`,
@@ -2250,28 +2322,48 @@ pub trait Handler: Sized + Send {
         async { false }
     }
 
-    /// Called when the server opens an unknown channel.
+    /// Called when the server opens an unknown channel (after
+    /// [`should_accept_unknown_server_channel`](Handler::should_accept_unknown_server_channel)
+    /// returned `true`).
+    ///
+    /// Call [`reply.accept().await`](ChannelOpenHandle::accept) to confirm, or
+    /// [`reply.reject(reason).await`](ChannelOpenHandle::reject) to decline.
+    /// Dropping `reply` automatically rejects.
     #[allow(unused_variables)]
     fn server_channel_open_unknown(
         &mut self,
         channel: Channel<Msg>,
+        reply: ChannelOpenHandle,
         session: &mut Session,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
         async { Ok(()) }
     }
 
     /// Called when the server opens a session channel.
+    ///
+    /// Call [`reply.accept().await`](ChannelOpenHandle::accept) to confirm, or
+    /// [`reply.reject(reason).await`](ChannelOpenHandle::reject) to decline.
+    /// Dropping `reply` automatically rejects.
     #[allow(unused_variables)]
     fn server_channel_open_session(
         &mut self,
         channel: Channel<Msg>,
+        reply: ChannelOpenHandle,
         session: &mut Session,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        async { Ok(()) }
+        async move {
+            reply.accept().await;
+            Ok(())
+        }
     }
 
     /// Called when the server opens a direct tcp/ip channel (non-standard).
+    ///
+    /// Call [`reply.accept().await`](ChannelOpenHandle::accept) to confirm, or
+    /// [`reply.reject(reason).await`](ChannelOpenHandle::reject) to decline.
+    /// Dropping `reply` automatically rejects.
     #[allow(unused_variables)]
+    #[allow(clippy::too_many_arguments)]
     fn server_channel_open_direct_tcpip(
         &mut self,
         channel: Channel<Msg>,
@@ -2279,32 +2371,52 @@ pub trait Handler: Sized + Send {
         port_to_connect: u32,
         originator_address: &str,
         originator_port: u32,
+        reply: ChannelOpenHandle,
         session: &mut Session,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        async { Ok(()) }
+        async move {
+            reply.accept().await;
+            Ok(())
+        }
     }
 
     /// Called when the server opens a direct-streamlocal channel (non-standard).
+    ///
+    /// Call [`reply.accept().await`](ChannelOpenHandle::accept) to confirm, or
+    /// [`reply.reject(reason).await`](ChannelOpenHandle::reject) to decline.
+    /// Dropping `reply` automatically rejects.
     #[allow(unused_variables)]
     fn server_channel_open_direct_streamlocal(
         &mut self,
         channel: Channel<Msg>,
         socket_path: &str,
+        reply: ChannelOpenHandle,
         session: &mut Session,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        async { Ok(()) }
+        async move {
+            reply.accept().await;
+            Ok(())
+        }
     }
 
     /// Called when the server opens an X11 channel.
+    ///
+    /// Call [`reply.accept().await`](ChannelOpenHandle::accept) to confirm, or
+    /// [`reply.reject(reason).await`](ChannelOpenHandle::reject) to decline.
+    /// Dropping `reply` automatically rejects.
     #[allow(unused_variables)]
     fn server_channel_open_x11(
         &mut self,
         channel: Channel<Msg>,
         originator_address: &str,
         originator_port: u32,
+        reply: ChannelOpenHandle,
         session: &mut Session,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        async { Ok(()) }
+        async move {
+            reply.accept().await;
+            Ok(())
+        }
     }
 
     /// Called when the server sends us data. The `extended_code`

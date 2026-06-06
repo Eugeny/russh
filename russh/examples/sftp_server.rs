@@ -59,13 +59,15 @@ impl russh::server::Handler for SshSession {
     async fn channel_open_session(
         &mut self,
         channel: Channel<Msg>,
+        reply: russh::server::ChannelOpenHandle,
         _session: &mut Session,
-    ) -> Result<bool, Self::Error> {
+    ) -> Result<(), Self::Error> {
         {
             let mut clients = self.clients.lock().await;
             clients.insert(channel.id(), channel);
         }
-        Ok(true)
+        reply.accept().await;
+        Ok(())
     }
 
     async fn channel_eof(
