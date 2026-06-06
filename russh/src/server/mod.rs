@@ -387,6 +387,7 @@ pub trait Handler: Sized {
     /// reject the request. Dropping the handle without calling either method
     /// automatically rejects the channel.
     #[allow(unused_variables)]
+    #[allow(clippy::too_many_arguments)]
     fn channel_open_direct_tcpip(
         &mut self,
         channel: Channel<Msg>,
@@ -408,6 +409,7 @@ pub trait Handler: Sized {
     ///
     /// <https://www.rfc-editor.org/rfc/rfc4254#section-7>
     #[allow(unused_variables)]
+    #[allow(clippy::too_many_arguments)]
     fn channel_open_forwarded_tcpip(
         &mut self,
         channel: Channel<Msg>,

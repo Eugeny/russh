@@ -69,8 +69,8 @@ use crate::session::{CommonSession, EncryptedState, GlobalRequestResponse, NewKe
 use crate::ssh_read::SshRead;
 use crate::sshbuffer::{IncomingSshPacket, PacketWriter, SSHBuffer, SshId};
 use crate::{
-    ChannelId, ChannelOpenFailure, Disconnect, Error, Limits, MethodSet, Sig, auth,
-    map_err, msg, negotiation,
+    ChannelId, ChannelOpenFailure, Disconnect, Error, Limits, MethodSet, Sig, auth, map_err, msg,
+    negotiation,
 };
 
 mod encrypted;
@@ -1539,7 +1539,8 @@ impl Session {
                     });
                     enc.channels
                         .insert(pending.sender_channel, pending.channel_params);
-                    self.channels.insert(pending.sender_channel, pending.channel_ref);
+                    self.channels
+                        .insert(pending.sender_channel, pending.channel_ref);
                 }
                 Err(reason) => {
                     push_packet!(enc.write, {
@@ -1738,10 +1739,7 @@ mod tests {
     impl Handler for TestHandler {
         type Error = crate::Error;
 
-        async fn check_server_key(
-            &mut self,
-            _: &ssh_key::PublicKey,
-        ) -> Result<bool, Self::Error> {
+        async fn check_server_key(&mut self, _: &ssh_key::PublicKey) -> Result<bool, Self::Error> {
             Ok(true)
         }
     }
@@ -2257,6 +2255,7 @@ pub trait Handler: Sized + Send {
     /// [`reply.reject(reason).await`](ChannelOpenHandle::reject) to decline.
     /// Dropping `reply` automatically rejects.
     #[allow(unused_variables)]
+    #[allow(clippy::too_many_arguments)]
     fn server_channel_open_forwarded_tcpip(
         &mut self,
         channel: Channel<Msg>,
@@ -2267,7 +2266,10 @@ pub trait Handler: Sized + Send {
         reply: ChannelOpenHandle,
         session: &mut Session,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        async move { reply.accept().await; Ok(()) }
+        async move {
+            reply.accept().await;
+            Ok(())
+        }
     }
 
     /// Called when the server opens a channel for a new remote UDS forwarding connection.
@@ -2283,7 +2285,10 @@ pub trait Handler: Sized + Send {
         reply: ChannelOpenHandle,
         session: &mut Session,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        async move { reply.accept().await; Ok(()) }
+        async move {
+            reply.accept().await;
+            Ok(())
+        }
     }
 
     /// Called when the server opens an agent forwarding channel.
@@ -2298,7 +2303,10 @@ pub trait Handler: Sized + Send {
         reply: ChannelOpenHandle,
         session: &mut Session,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        async move { reply.accept().await; Ok(()) }
+        async move {
+            reply.accept().await;
+            Ok(())
+        }
     }
 
     /// Called when the server attempts to open a channel of unknown type. It may return `true`,
@@ -2343,7 +2351,10 @@ pub trait Handler: Sized + Send {
         reply: ChannelOpenHandle,
         session: &mut Session,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        async move { reply.accept().await; Ok(()) }
+        async move {
+            reply.accept().await;
+            Ok(())
+        }
     }
 
     /// Called when the server opens a direct tcp/ip channel (non-standard).
@@ -2352,6 +2363,7 @@ pub trait Handler: Sized + Send {
     /// [`reply.reject(reason).await`](ChannelOpenHandle::reject) to decline.
     /// Dropping `reply` automatically rejects.
     #[allow(unused_variables)]
+    #[allow(clippy::too_many_arguments)]
     fn server_channel_open_direct_tcpip(
         &mut self,
         channel: Channel<Msg>,
@@ -2362,7 +2374,10 @@ pub trait Handler: Sized + Send {
         reply: ChannelOpenHandle,
         session: &mut Session,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        async move { reply.accept().await; Ok(()) }
+        async move {
+            reply.accept().await;
+            Ok(())
+        }
     }
 
     /// Called when the server opens a direct-streamlocal channel (non-standard).
@@ -2378,7 +2393,10 @@ pub trait Handler: Sized + Send {
         reply: ChannelOpenHandle,
         session: &mut Session,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        async move { reply.accept().await; Ok(()) }
+        async move {
+            reply.accept().await;
+            Ok(())
+        }
     }
 
     /// Called when the server opens an X11 channel.
@@ -2395,7 +2413,10 @@ pub trait Handler: Sized + Send {
         reply: ChannelOpenHandle,
         session: &mut Session,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        async move { reply.accept().await; Ok(()) }
+        async move {
+            reply.accept().await;
+            Ok(())
+        }
     }
 
     /// Called when the server sends us data. The `extended_code`
