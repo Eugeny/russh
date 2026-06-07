@@ -125,6 +125,8 @@ This is a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Éti
   * Uses `russh::server` to allow Git operations over SSH. 
 * [Calagopus](https://github.com/calagopus/wings) - Fast, Efficient and Scalable Game hosting - built for everyone.
   * Uses `russh::server` for efficiently implementing SSH shells and SFTP file management.
+* [Oryxis](https://github.com/wilsonglasser/oryxis) - Rust-native SSH client with an encrypted vault, P2P sync and an embedded terminal.
+  * Uses `russh::client` for connections, jump hosts, SOCKS/HTTP/command proxies and SFTP.
 
 ## Contributors ✨
 
