@@ -65,10 +65,13 @@ impl PageantStream {
                 Some(PSTR(name_buf.as_mut_ptr())),
                 &mut name_length,
             ) {
-                // Pageant falls back to GetUserNameA here,
-                // but as far as I can tell, all Versions of Windows supported by Rust today
-                // should be able to answer the UserNameEx request - the comments in Pageant source
-                // point to Windows XP and earlier compatibility...
+                // GetUserNameExA can fail on non-domain-joined machines where UPN
+                // (NameUserPrincipal) is not configured. Fall back to the USERNAME
+                // environment variable, matching the behavior of the original PuTTY Pageant.
+                if let Ok(name) = std::env::var("USERNAME") {
+                    debug!("GetUserNameExA failed, using USERNAME env var fallback: {name}");
+                    return Ok(name);
+                }
                 return Err(Error::from_win32());
             }
 
