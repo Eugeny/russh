@@ -6,7 +6,7 @@ use channels::WindowSizeRef;
 use kex::ServerKex;
 use log::debug;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
-use tokio::sync::mpsc::{Receiver, Sender, channel};
+use tokio::sync::mpsc::{Receiver, Sender, channel, error::TryRecvError};
 use tokio::sync::oneshot;
 
 use super::*;
@@ -525,6 +525,136 @@ impl Session {
         while !self.common.disconnected {
             self.common.received_data = false;
             let mut sent_keepalive = false;
+
+            // BSSH FIX: Process pending messages before entering select!
+            // This ensures messages sent via Handle::data() from spawned tasks
+            // are processed even when select! doesn't wake up for them.
+            // Critical for interactive PTY sessions where shell I/O runs in a separate task.
+            //
+            // We limit the number of messages processed per batch to ensure client input
+            // (e.g., Ctrl+C) is handled promptly even during high-throughput output.
+            const MAX_MESSAGES_PER_BATCH: usize = 64;
+            let mut processed_count = 0usize;
+            if !self.kex.active() {
+                loop {
+                    if processed_count >= MAX_MESSAGES_PER_BATCH {
+                        // Yield to select! to check for client input
+                        break;
+                    }
+                    match self.receiver.try_recv() {
+                        Ok(Msg::Channel(id, ChannelMsg::Data { data })) => {
+                            self.data(id, data)?;
+                            processed_count += 1;
+                        }
+                        Ok(Msg::Channel(id, ChannelMsg::ExtendedData { ext, data })) => {
+                            self.extended_data(id, ext, data)?;
+                            processed_count += 1;
+                        }
+                        Ok(Msg::Channel(id, ChannelMsg::Eof)) => {
+                            self.eof(id)?;
+                            processed_count += 1;
+                        }
+                        Ok(Msg::Channel(id, ChannelMsg::Close)) => {
+                            self.close(id)?;
+                            processed_count += 1;
+                        }
+                        Ok(Msg::Channel(id, ChannelMsg::Success)) => {
+                            self.channel_success(id)?;
+                            processed_count += 1;
+                        }
+                        Ok(Msg::Channel(id, ChannelMsg::Failure)) => {
+                            self.channel_failure(id)?;
+                            processed_count += 1;
+                        }
+                        Ok(Msg::Channel(id, ChannelMsg::XonXoff { client_can_do })) => {
+                            self.xon_xoff_request(id, client_can_do)?;
+                            processed_count += 1;
+                        }
+                        Ok(Msg::Channel(id, ChannelMsg::ExitStatus { exit_status })) => {
+                            self.exit_status_request(id, exit_status)?;
+                            processed_count += 1;
+                        }
+                        Ok(Msg::Channel(id, ChannelMsg::ExitSignal { signal_name, core_dumped, error_message, lang_tag })) => {
+                            self.exit_signal_request(id, signal_name, core_dumped, &error_message, &lang_tag)?;
+                            processed_count += 1;
+                        }
+                        Ok(Msg::Channel(id, ChannelMsg::WindowAdjusted { new_size })) => {
+                            debug!("window adjusted to {new_size:?} for channel {id:?}");
+                            processed_count += 1;
+                        }
+                        Ok(Msg::ChannelOpenAgent { channel_ref }) => {
+                            let id = self.channel_open_agent()?;
+                            self.channels.insert(id, channel_ref);
+                            processed_count += 1;
+                        }
+                        Ok(Msg::ChannelOpenSession { channel_ref }) => {
+                            let id = self.channel_open_session()?;
+                            self.channels.insert(id, channel_ref);
+                            processed_count += 1;
+                        }
+                        Ok(Msg::ChannelOpenDirectTcpIp { host_to_connect, port_to_connect, originator_address, originator_port, channel_ref }) => {
+                            let id = self.channel_open_direct_tcpip(&host_to_connect, port_to_connect, &originator_address, originator_port)?;
+                            self.channels.insert(id, channel_ref);
+                            processed_count += 1;
+                        }
+                        Ok(Msg::ChannelOpenDirectStreamLocal { socket_path, channel_ref }) => {
+                            let id = self.channel_open_direct_streamlocal(&socket_path)?;
+                            self.channels.insert(id, channel_ref);
+                            processed_count += 1;
+                        }
+                        Ok(Msg::ChannelOpenForwardedTcpIp { connected_address, connected_port, originator_address, originator_port, channel_ref }) => {
+                            let id = self.channel_open_forwarded_tcpip(&connected_address, connected_port, &originator_address, originator_port)?;
+                            self.channels.insert(id, channel_ref);
+                            processed_count += 1;
+                        }
+                        Ok(Msg::ChannelOpenForwardedStreamLocal { server_socket_path, channel_ref }) => {
+                            let id = self.channel_open_forwarded_streamlocal(&server_socket_path)?;
+                            self.channels.insert(id, channel_ref);
+                            processed_count += 1;
+                        }
+                        Ok(Msg::ChannelOpenX11 { originator_address, originator_port, channel_ref }) => {
+                            let id = self.channel_open_x11(&originator_address, originator_port)?;
+                            self.channels.insert(id, channel_ref);
+                            processed_count += 1;
+                        }
+                        Ok(Msg::TcpIpForward { address, port, reply_channel }) => {
+                            self.tcpip_forward(&address, port, reply_channel)?;
+                            processed_count += 1;
+                        }
+                        Ok(Msg::CancelTcpIpForward { address, port, reply_channel }) => {
+                            self.cancel_tcpip_forward(&address, port, reply_channel)?;
+                            processed_count += 1;
+                        }
+                        Ok(Msg::Disconnect { reason, description, language_tag }) => {
+                            self.common.disconnect(reason, &description, &language_tag)?;
+                            processed_count += 1;
+                        }
+                        Ok(_) => {
+                            // should be unreachable
+                            processed_count += 1;
+                        }
+                        Err(TryRecvError::Empty) => {
+                            // No more pending messages, proceed to select!
+                            break;
+                        }
+                        Err(TryRecvError::Disconnected) => {
+                            debug!("receiver disconnected");
+                            break;
+                        }
+                    }
+                }
+                // Only flush if we actually processed messages
+                if processed_count > 0 {
+                    self.flush()?;
+                    map_err!(
+                        self.common
+                            .packet_writer
+                            .flush_into(&mut stream_write)
+                            .await
+                    )?;
+                }
+            }
+
             tokio::select! {
                 r = &mut reading => {
                     let (stream_read, mut buffer, mut opening_cipher) = match r {
@@ -674,22 +804,20 @@ impl Session {
                 // data from it.
                 self.common.alive_timeouts = 0;
             }
-            if self.common.received_data || sent_keepalive {
-                if let (futures::future::Either::Right(ref mut sleep), Some(d)) = (
+            if (self.common.received_data || sent_keepalive)
+                && let (futures::future::Either::Right(ref mut sleep), Some(d)) = (
                     keepalive_timer.as_mut().as_pin_mut(),
                     self.common.config.keepalive_interval,
                 ) {
                     sleep.as_mut().reset(tokio::time::Instant::now() + d);
                 }
-            }
-            if !sent_keepalive {
-                if let (futures::future::Either::Right(ref mut sleep), Some(d)) = (
+            if !sent_keepalive
+                && let (futures::future::Either::Right(ref mut sleep), Some(d)) = (
                     inactivity_timer.as_mut().as_pin_mut(),
                     self.common.config.inactivity_timeout,
                 ) {
                     sleep.as_mut().reset(tokio::time::Instant::now() + d);
                 }
-            }
         }
         debug!("disconnected");
         // Shutdown
@@ -718,38 +846,35 @@ impl Session {
     }
 
     pub fn writable_packet_size(&self, channel: &ChannelId) -> u32 {
-        if let Some(ref enc) = self.common.encrypted {
-            if let Some(channel) = enc.channels.get(channel) {
+        if let Some(ref enc) = self.common.encrypted
+            && let Some(channel) = enc.channels.get(channel) {
                 return channel
                     .sender_window_size
                     .min(channel.sender_maximum_packet_size);
             }
-        }
         0
     }
 
     pub fn window_size(&self, channel: &ChannelId) -> u32 {
-        if let Some(ref enc) = self.common.encrypted {
-            if let Some(channel) = enc.channels.get(channel) {
+        if let Some(ref enc) = self.common.encrypted
+            && let Some(channel) = enc.channels.get(channel) {
                 return channel.sender_window_size;
             }
-        }
         0
     }
 
     pub fn max_packet_size(&self, channel: &ChannelId) -> u32 {
-        if let Some(ref enc) = self.common.encrypted {
-            if let Some(channel) = enc.channels.get(channel) {
+        if let Some(ref enc) = self.common.encrypted
+            && let Some(channel) = enc.channels.get(channel) {
                 return channel.sender_maximum_packet_size;
             }
-        }
         0
     }
 
     /// Flush the session, i.e. encrypt the pending buffer.
     pub fn flush(&mut self) -> Result<(), Error> {
-        if let Some(ref mut enc) = self.common.encrypted {
-            if enc.flush(
+        if let Some(ref mut enc) = self.common.encrypted
+            && enc.flush(
                 &self.common.config.as_ref().limits,
                 &mut self.common.packet_writer,
             )? && self.kex == SessionKexState::Idle
@@ -759,7 +884,6 @@ impl Session {
                     self.begin_rekey()?;
                 }
             }
-        }
         Ok(())
     }
 
@@ -834,12 +958,11 @@ impl Session {
     /// cancelling). Always call this function if the request was
     /// successful (it checks whether the client expects an answer).
     pub fn request_success(&mut self) {
-        if self.common.wants_reply {
-            if let Some(ref mut enc) = self.common.encrypted {
+        if self.common.wants_reply
+            && let Some(ref mut enc) = self.common.encrypted {
                 self.common.wants_reply = false;
                 push_packet!(enc.write, enc.write.push(msg::REQUEST_SUCCESS))
             }
-        }
     }
 
     /// Send a "failure" reply to a global request.
@@ -854,8 +977,8 @@ impl Session {
     /// function if the request was successful (it checks whether the
     /// client expects an answer).
     pub fn channel_success(&mut self, channel: ChannelId) -> Result<(), crate::Error> {
-        if let Some(ref mut enc) = self.common.encrypted {
-            if let Some(channel) = enc.channels.get_mut(&channel) {
+        if let Some(ref mut enc) = self.common.encrypted
+            && let Some(channel) = enc.channels.get_mut(&channel) {
                 assert!(channel.confirmed);
                 if channel.wants_reply {
                     channel.wants_reply = false;
@@ -866,14 +989,13 @@ impl Session {
                     })
                 }
             }
-        }
         Ok(())
     }
 
     /// Send a "failure" reply to a global request.
     pub fn channel_failure(&mut self, channel: ChannelId) -> Result<(), crate::Error> {
-        if let Some(ref mut enc) = self.common.encrypted {
-            if let Some(channel) = enc.channels.get_mut(&channel) {
+        if let Some(ref mut enc) = self.common.encrypted
+            && let Some(channel) = enc.channels.get_mut(&channel) {
                 assert!(channel.confirmed);
                 if channel.wants_reply {
                     channel.wants_reply = false;
@@ -883,7 +1005,6 @@ impl Session {
                     })
                 }
             }
-        }
         Ok(())
     }
 
@@ -1010,8 +1131,8 @@ impl Session {
         channel: ChannelId,
         client_can_do: bool,
     ) -> Result<(), Error> {
-        if let Some(ref mut enc) = self.common.encrypted {
-            if let Some(channel) = enc.channels.get(&channel) {
+        if let Some(ref mut enc) = self.common.encrypted
+            && let Some(channel) = enc.channels.get(&channel) {
                 assert!(channel.confirmed);
                 push_packet!(enc.write, {
                     msg::CHANNEL_REQUEST.encode(&mut enc.write)?;
@@ -1022,7 +1143,6 @@ impl Session {
                     (client_can_do as u8).encode(&mut enc.write)?;
                 })
             }
-        }
         Ok(())
     }
 
@@ -1062,8 +1182,8 @@ impl Session {
         channel: ChannelId,
         exit_status: u32,
     ) -> Result<(), Error> {
-        if let Some(ref mut enc) = self.common.encrypted {
-            if let Some(channel) = enc.channels.get(&channel) {
+        if let Some(ref mut enc) = self.common.encrypted
+            && let Some(channel) = enc.channels.get(&channel) {
                 assert!(channel.confirmed);
                 push_packet!(enc.write, {
                     msg::CHANNEL_REQUEST.encode(&mut enc.write)?;
@@ -1074,7 +1194,6 @@ impl Session {
                     exit_status.encode(&mut enc.write)?;
                 })
             }
-        }
         Ok(())
     }
 
@@ -1087,8 +1206,8 @@ impl Session {
         error_message: &str,
         language_tag: &str,
     ) -> Result<(), Error> {
-        if let Some(ref mut enc) = self.common.encrypted {
-            if let Some(channel) = enc.channels.get(&channel) {
+        if let Some(ref mut enc) = self.common.encrypted
+            && let Some(channel) = enc.channels.get(&channel) {
                 assert!(channel.confirmed);
                 push_packet!(enc.write, {
                     msg::CHANNEL_REQUEST.encode(&mut enc.write)?;
@@ -1102,7 +1221,6 @@ impl Session {
                     language_tag.encode(&mut enc.write)?;
                 })
             }
-        }
         Ok(())
     }
 
