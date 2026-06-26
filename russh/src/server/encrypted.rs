@@ -430,9 +430,11 @@ mod tests {
         };
         let config = Arc::new(config);
         let (sender, receiver) = tokio::sync::mpsc::channel(1);
+        let drain_notify = Arc::new(tokio::sync::Notify::new());
         let handle = Handle {
             sender,
             channel_buffer_size: config.channel_buffer_size,
+            drain_notify: drain_notify.clone(),
         };
 
         Session {
@@ -458,6 +460,8 @@ mod tests {
             pending_reads: Vec::new(),
             pending_len: 0,
             channels: std::collections::HashMap::new(),
+            backlog: crate::channels::ChannelBacklog::default(),
+            drain_notify,
             open_global_requests: std::collections::VecDeque::new(),
             kex: SessionKexState::Idle,
         }
@@ -989,20 +993,17 @@ impl Session {
                 }
                 // Forward the close to the channel before removing it, so that
                 // consumers waiting on `Channel::wait()` receive an explicit
-                // `ChannelMsg::Close` instead of just seeing `None`.
-                if let Some(chan) = self.channels.get(&channel_num) {
-                    chan.send(ChannelMsg::Close).await.unwrap_or(())
-                }
-                self.channels.remove(&channel_num);
+                // `ChannelMsg::Close` instead of just seeing `None`. Removal
+                // is deferred until any backlog has drained so a slow consumer
+                // does not lose buffered Data/Eof/ExitStatus.
+                self.close_channel(channel_num, ChannelMsg::Close);
                 debug!("handler.channel_close {channel_num:?}");
                 handler.channel_close(channel_num, self).await
             }
             msg::CHANNEL_EOF => {
                 let channel_num = map_err!(ChannelId::decode(r))?;
                 map_err!(ensure_end(r))?;
-                if let Some(chan) = self.channels.get(&channel_num) {
-                    chan.send(ChannelMsg::Eof).await.unwrap_or(())
-                }
+                self.forward_channel_msg(channel_num, ChannelMsg::Eof);
                 debug!("handler.channel_eof {channel_num:?}");
                 handler.channel_eof(channel_num, self).await
             }
@@ -1017,35 +1018,43 @@ impl Session {
                 trace!("handler.data {ext:?} {channel_num:?}");
                 let data = map_err!(Bytes::decode(r))?;
                 map_err!(ensure_end(r))?;
-                let target = self.target_window_size;
 
+                // Debit the receive window now (RFC 4254 §5.2), but defer
+                // WINDOW_ADJUST until we know the application has capacity:
+                // a slow consumer should see its peer's window drain to zero
+                // instead of stalling the whole session loop.
                 if let Some(ref mut enc) = self.common.encrypted {
-                    if enc.adjust_window_size(channel_num, &data, target)? {
-                        let window = handler.adjust_window(channel_num, self.target_window_size);
-                        if window > 0 {
-                            self.target_window_size = window
-                        }
+                    enc.record_received_data(channel_num, &data);
+                }
+
+                // try_send to the Channel mpsc; never `.await` here. If the
+                // buffer is full the message is queued on the session and the
+                // window is *not* re-opened, so the client throttles this one
+                // channel while the loop stays live for other channels and
+                // keepalives.
+                let msg = match ext {
+                    None => ChannelMsg::Data { data: data.clone() },
+                    Some(ext) => ChannelMsg::ExtendedData {
+                        ext,
+                        data: data.clone(),
+                    },
+                };
+                let delivered = self.forward_channel_msg(channel_num, msg);
+
+                if let Some(ext) = ext {
+                    handler.extended_data(channel_num, ext, &data, self).await?;
+                } else {
+                    handler.data(channel_num, &data, self).await?;
+                }
+
+                if delivered && self.replenish_receive_window(channel_num)? {
+                    let window = handler.adjust_window(channel_num, self.target_window_size);
+                    if window > 0 {
+                        self.target_window_size = window
                     }
                 }
                 self.flush()?;
-                if let Some(ext) = ext {
-                    if let Some(chan) = self.channels.get(&channel_num) {
-                        chan.send(ChannelMsg::ExtendedData {
-                            ext,
-                            data: data.clone(),
-                        })
-                        .await
-                        .unwrap_or(())
-                    }
-                    handler.extended_data(channel_num, ext, &data, self).await
-                } else {
-                    if let Some(chan) = self.channels.get(&channel_num) {
-                        chan.send(ChannelMsg::Data { data: data.clone() })
-                            .await
-                            .unwrap_or(())
-                    }
-                    handler.data(channel_num, &data, self).await
-                }
+                Ok(())
             }
 
             msg::CHANNEL_WINDOW_ADJUST => {
@@ -1069,11 +1078,8 @@ impl Session {
                 }
                 if let Some(chan) = self.channels.get(&channel_num) {
                     chan.window_size().update(new_size).await;
-                    // Use try_send to avoid blocking the session loop when channel buffer is full.
-                    // WindowAdjusted is informational - the critical side effect (updating
-                    // WindowSizeRef and notifying ChannelTx) already happens in update().
-                    let _ = chan.try_send(ChannelMsg::WindowAdjusted { new_size });
                 }
+                self.forward_channel_msg(channel_num, ChannelMsg::WindowAdjusted { new_size });
                 debug!("handler.window_adjusted {channel_num:?}");
                 handler.window_adjusted(channel_num, new_size, self).await
             }
@@ -1095,15 +1101,15 @@ impl Session {
                     return Err(Error::Inconsistent.into());
                 };
 
-                if let Some(channel) = self.channels.get(&local_id) {
-                    channel
-                        .send(ChannelMsg::Open {
+                if self.channels.contains_key(&local_id) {
+                    self.forward_channel_msg(
+                        local_id,
+                        ChannelMsg::Open {
                             id: local_id,
                             max_packet_size: msg.maximum_packet_size,
                             window_size: msg.initial_window_size,
-                        })
-                        .await
-                        .unwrap_or(());
+                        },
+                    );
                 } else {
                     error!("no channel for id {local_id:?}");
                 }
@@ -1173,19 +1179,18 @@ impl Session {
                         }
                         map_err!(ensure_end(r))?;
 
-                        if let Some(chan) = self.channels.get(&channel_num) {
-                            let _ = chan
-                                .send(ChannelMsg::RequestPty {
-                                    want_reply: true,
-                                    term: term.clone(),
-                                    col_width,
-                                    row_height,
-                                    pix_width,
-                                    pix_height,
-                                    terminal_modes: modes.into(),
-                                })
-                                .await;
-                        }
+                        self.forward_channel_msg(
+                            channel_num,
+                            ChannelMsg::RequestPty {
+                                want_reply: true,
+                                term: term.clone(),
+                                col_width,
+                                row_height,
+                                pix_width,
+                                pix_height,
+                                terminal_modes: modes.into(),
+                            },
+                        );
 
                         debug!("handler.pty_request {channel_num:?}");
                         #[allow(clippy::indexing_slicing)] // `modes` length checked
@@ -1209,17 +1214,16 @@ impl Session {
                         let x11_screen_number = map_err!(u32::decode(r))?;
                         map_err!(ensure_end(r))?;
 
-                        if let Some(chan) = self.channels.get(&channel_num) {
-                            let _ = chan
-                                .send(ChannelMsg::RequestX11 {
-                                    want_reply: true,
-                                    single_connection,
-                                    x11_authentication_cookie: x11_auth_cookie.clone(),
-                                    x11_authentication_protocol: x11_auth_protocol.clone(),
-                                    x11_screen_number,
-                                })
-                                .await;
-                        }
+                        self.forward_channel_msg(
+                            channel_num,
+                            ChannelMsg::RequestX11 {
+                                want_reply: true,
+                                single_connection,
+                                x11_authentication_cookie: x11_auth_cookie.clone(),
+                                x11_authentication_protocol: x11_auth_protocol.clone(),
+                                x11_screen_number,
+                            },
+                        );
                         debug!("handler.x11_request {channel_num:?}");
                         handler
                             .x11_request(
@@ -1237,15 +1241,14 @@ impl Session {
                         let env_value = map_err!(String::decode(r))?;
                         map_err!(ensure_end(r))?;
 
-                        if let Some(chan) = self.channels.get(&channel_num) {
-                            let _ = chan
-                                .send(ChannelMsg::SetEnv {
-                                    want_reply: true,
-                                    variable_name: env_variable.clone(),
-                                    variable_value: env_value.clone(),
-                                })
-                                .await;
-                        }
+                        self.forward_channel_msg(
+                            channel_num,
+                            ChannelMsg::SetEnv {
+                                want_reply: true,
+                                variable_name: env_variable.clone(),
+                                variable_value: env_value.clone(),
+                            },
+                        );
 
                         debug!("handler.env_request {channel_num:?}");
                         handler
@@ -1254,21 +1257,19 @@ impl Session {
                     }
                     "shell" => {
                         map_err!(ensure_end(r))?;
-                        if let Some(chan) = self.channels.get(&channel_num) {
-                            let _ = chan
-                                .send(ChannelMsg::RequestShell { want_reply: true })
-                                .await;
-                        }
+                        self.forward_channel_msg(
+                            channel_num,
+                            ChannelMsg::RequestShell { want_reply: true },
+                        );
                         debug!("handler.shell_request {channel_num:?}");
                         handler.shell_request(channel_num, self).await
                     }
                     "auth-agent-req@openssh.com" => {
                         map_err!(ensure_end(r))?;
-                        if let Some(chan) = self.channels.get(&channel_num) {
-                            let _ = chan
-                                .send(ChannelMsg::AgentForward { want_reply: true })
-                                .await;
-                        }
+                        self.forward_channel_msg(
+                            channel_num,
+                            ChannelMsg::AgentForward { want_reply: true },
+                        );
                         debug!("handler.agent_request {channel_num:?}");
 
                         let response = handler.agent_request(channel_num, self).await?;
@@ -1282,14 +1283,13 @@ impl Session {
                     "exec" => {
                         let req = map_err!(Bytes::decode(r))?;
                         map_err!(ensure_end(r))?;
-                        if let Some(chan) = self.channels.get(&channel_num) {
-                            let _ = chan
-                                .send(ChannelMsg::Exec {
-                                    want_reply: true,
-                                    command: req.to_vec(),
-                                })
-                                .await;
-                        }
+                        self.forward_channel_msg(
+                            channel_num,
+                            ChannelMsg::Exec {
+                                want_reply: true,
+                                command: req.to_vec(),
+                            },
+                        );
                         debug!("handler.exec_request {channel_num:?}");
                         handler.exec_request(channel_num, &req, self).await
                     }
@@ -1297,14 +1297,13 @@ impl Session {
                         let name = map_err!(String::decode(r))?;
                         map_err!(ensure_end(r))?;
 
-                        if let Some(chan) = self.channels.get(&channel_num) {
-                            let _ = chan
-                                .send(ChannelMsg::RequestSubsystem {
-                                    want_reply: true,
-                                    name: name.clone(),
-                                })
-                                .await;
-                        }
+                        self.forward_channel_msg(
+                            channel_num,
+                            ChannelMsg::RequestSubsystem {
+                                want_reply: true,
+                                name: name.clone(),
+                            },
+                        );
                         debug!("handler.subsystem_request {channel_num:?}");
                         handler.subsystem_request(channel_num, &name, self).await
                     }
@@ -1315,16 +1314,15 @@ impl Session {
                         let pix_height = map_err!(u32::decode(r))?;
                         map_err!(ensure_end(r))?;
 
-                        if let Some(chan) = self.channels.get(&channel_num) {
-                            let _ = chan
-                                .send(ChannelMsg::WindowChange {
-                                    col_width,
-                                    row_height,
-                                    pix_width,
-                                    pix_height,
-                                })
-                                .await;
-                        }
+                        self.forward_channel_msg(
+                            channel_num,
+                            ChannelMsg::WindowChange {
+                                col_width,
+                                row_height,
+                                pix_width,
+                                pix_height,
+                            },
+                        );
 
                         debug!("handler.window_change {channel_num:?}");
                         handler
@@ -1341,13 +1339,12 @@ impl Session {
                     "signal" => {
                         let signal = Sig::from_name(&map_err!(String::decode(r))?);
                         map_err!(ensure_end(r))?;
-                        if let Some(chan) = self.channels.get(&channel_num) {
-                            chan.send(ChannelMsg::Signal {
+                        self.forward_channel_msg(
+                            channel_num,
+                            ChannelMsg::Signal {
                                 signal: signal.clone(),
-                            })
-                            .await
-                            .unwrap_or(())
-                        }
+                            },
+                        );
                         debug!("handler.signal {channel_num:?} {signal:?}");
                         handler.signal(channel_num, signal, self).await
                     }
@@ -1458,12 +1455,7 @@ impl Session {
                     enc.channels.remove(&channel_num);
                 }
 
-                if let Some(channel_sender) = self.channels.remove(&channel_num) {
-                    channel_sender
-                        .send(ChannelMsg::OpenFailure(reason))
-                        .await
-                        .map_err(|_| crate::Error::SendError)?;
-                }
+                self.close_channel(channel_num, ChannelMsg::OpenFailure(reason));
 
                 Ok(())
             }
@@ -1576,6 +1568,7 @@ impl Session {
             channel_params.recipient_maximum_packet_size,
             channel_params.recipient_window_size,
             self.common.config.channel_buffer_size,
+            self.drain_notify.clone(),
         );
 
         let pending = PendingChannelOpen {

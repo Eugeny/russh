@@ -11,6 +11,7 @@ use super::{ChannelMsg, ChannelReadHalf};
 pub struct ChannelRx<R> {
     channel: R,
     buffer: Option<(ChannelMsg, usize)>,
+    eof: bool,
 
     ext: Option<u32>,
 }
@@ -20,6 +21,7 @@ impl<R> ChannelRx<R> {
         Self {
             channel,
             buffer: None,
+            eof: false,
             ext,
         }
     }
@@ -34,12 +36,21 @@ where
         cx: &mut Context<'_>,
         buf: &mut tokio::io::ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
+        if self.eof {
+            return Poll::Ready(Ok(()));
+        }
         let (msg, mut idx) = match self.buffer.take() {
             Some(msg) => msg,
-            None => match ready!(self.channel.borrow_mut().receiver.poll_recv(cx)) {
-                Some(msg) => (msg, 0),
-                None => return Poll::Ready(Ok(())),
-            },
+            None => {
+                let read_half = self.channel.borrow_mut();
+                match ready!(read_half.receiver.poll_recv(cx)) {
+                    Some(msg) => {
+                        read_half.notify_drained();
+                        (msg, 0)
+                    }
+                    None => return Poll::Ready(Ok(())),
+                }
+            }
         };
 
         match (&msg, self.ext) {
@@ -72,8 +83,10 @@ where
                 Poll::Ready(Ok(()))
             }
             (ChannelMsg::Eof, _) => {
-                self.channel.borrow_mut().receiver.close();
-
+                // Latch EOF locally rather than closing the receiver, so any
+                // backlog (ExitStatus/Close) can still be drained into the
+                // mpsc and read via `Channel::wait()` afterwards.
+                self.eof = true;
                 Poll::Ready(Ok(()))
             }
             _ => {

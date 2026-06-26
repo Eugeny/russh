@@ -1,10 +1,9 @@
-use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::sync::Arc;
+mod common;
 
-use russh::keys::PrivateKeyWithHashAlg;
+use std::net::SocketAddr;
+
 use russh::server::{self, Auth, Msg, Server as _, Session};
 use russh::{Channel, ChannelMsg, client};
-use ssh_key::PrivateKey;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 pub const WINDOW_SIZE: u32 = 8 * 2048;
@@ -92,51 +91,22 @@ async fn test_channel_halves() -> Result<(), anyhow::Error> {
     run_test(ChannelHalves).await
 }
 
-async fn run_test(test: impl ChannelDataCopy) -> Result<(), anyhow::Error> {
+async fn run_test(mut test: impl ChannelDataCopy) -> Result<(), anyhow::Error> {
     static INIT: std::sync::Once = std::sync::Once::new();
     INIT.call_once(env_logger::init);
 
-    let addr = addr();
+    let addr = common::addr();
     let data = data();
 
     tokio::spawn(Server::run(addr));
+    common::wait_for_server(addr).await;
 
-    // Wait until the server is started
-    while TcpStream::connect(addr).is_err() {
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    }
+    let session = common::connect(addr).await?;
+    let channel = session.channel_open_session().await?;
 
-    stream(addr, &data, test).await?;
-
-    Ok(())
-}
-
-async fn stream(
-    addr: SocketAddr,
-    data: &[u8],
-    mut test: impl ChannelDataCopy,
-) -> Result<(), anyhow::Error> {
-    let config = Arc::new(client::Config::default());
-    let key = Arc::new(PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap());
-
-    let mut session = russh::client::connect(config, addr, Client).await?;
-    let channel = match session
-        .authenticate_publickey(
-            "user",
-            PrivateKeyWithHashAlg::new(
-                key,
-                session.best_supported_rsa_hash().await.unwrap().flatten(),
-            ),
-        )
-        .await
-        .map(|x| x.success())
-    {
-        Ok(true) => session.channel_open_session().await?,
-        Ok(false) => panic!("Authentication failed"),
-        Err(err) => return Err(err.into()),
-    };
-
-    let buf = test.copy_data_through_channel(channel, data).await?;
+    let buf = test
+        .copy_data_through_channel(channel, data.as_slice())
+        .await?;
     assert_eq!(data, buf);
 
     Ok(())
@@ -149,24 +119,13 @@ fn data() -> Vec<u8> {
     data
 }
 
-/// Find a unused local address to bind our server to
-fn addr() -> SocketAddr {
-    TcpListener::bind(("127.0.0.1", 0))
-        .unwrap()
-        .local_addr()
-        .unwrap()
-}
-
 #[derive(Clone)]
 struct Server;
 
 impl Server {
     async fn run(addr: SocketAddr) {
-        let config = Arc::new(server::Config {
-            keys: vec![PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap()],
-            window_size: WINDOW_SIZE,
-            ..Default::default()
-        });
+        let config =
+            common::server_config(WINDOW_SIZE, server::Config::default().channel_buffer_size);
         let mut sh = Server {};
 
         sh.run_on_address(config, addr).await.unwrap();
@@ -211,15 +170,5 @@ impl russh::server::Handler for Server {
         });
 
         Ok(())
-    }
-}
-
-struct Client;
-
-impl russh::client::Handler for Client {
-    type Error = anyhow::Error;
-
-    async fn check_server_key(&mut self, _: &ssh_key::PublicKey) -> Result<bool, Self::Error> {
-        Ok(true)
     }
 }

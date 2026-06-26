@@ -55,11 +55,12 @@ use tokio::pin;
 use tokio::sync::mpsc::{
     Receiver, Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel,
 };
-use tokio::sync::oneshot;
+use tokio::sync::{Notify, oneshot};
 
 pub use crate::auth::AuthResult;
 use crate::channels::{
-    Channel, ChannelMsg, ChannelReadHalf, ChannelRef, ChannelWriteHalf, WindowSizeRef,
+    Channel, ChannelBacklog, ChannelMsg, ChannelReadHalf, ChannelRef, ChannelWriteHalf,
+    WindowSizeRef,
 };
 use crate::cipher::{self, OpeningKey, clear};
 use crate::kex::{KexAlgorithmImplementor, KexCause, KexProgress, SessionKexState};
@@ -92,6 +93,11 @@ pub struct Session {
     receiver: Receiver<Msg>,
     sender: UnboundedSender<Reply>,
     channels: HashMap<ChannelId, ChannelRef>,
+    /// See [`ChannelBacklog`].
+    backlog: ChannelBacklog,
+    /// Signalled by [`ChannelReadHalf`] consumers; wakes the session loop to
+    /// drain `backlog` and re-open receive windows.
+    drain_notify: Arc<Notify>,
     target_window_size: u32,
     pending_reads: Vec<Vec<u8>>,
     pending_len: u32,
@@ -103,7 +109,11 @@ pub struct Session {
 
 impl Drop for Session {
     fn drop(&mut self) {
-        debug!("drop session")
+        debug!("drop session");
+        // Best-effort: push whatever fits into each channel mpsc so consumers
+        // can read the tail after the sender drops. The graceful-exit path
+        // already awaited `flush_into` for full delivery.
+        let _ = self.backlog.drain(&mut self.channels);
     }
 }
 
@@ -277,6 +287,7 @@ pub struct Handle<H: Handler> {
     receiver: UnboundedReceiver<Reply>,
     join: russh_util::runtime::JoinHandle<Result<(), H::Error>>,
     channel_buffer_size: usize,
+    drain_notify: Arc<Notify>,
 }
 
 impl<H: Handler> Drop for Handle<H> {
@@ -584,11 +595,12 @@ impl<H: Handler> Handle<H> {
     /// Wait for confirmation that a channel is open
     async fn wait_channel_confirmation(
         &self,
-        mut receiver: Receiver<ChannelMsg>,
+        receiver: Receiver<ChannelMsg>,
         window_size_ref: WindowSizeRef,
     ) -> Result<Channel<Msg>, crate::Error> {
+        let mut read_half = ChannelReadHalf::new(receiver, self.drain_notify.clone());
         loop {
-            match receiver.recv().await {
+            match read_half.wait().await {
                 Some(ChannelMsg::Open {
                     id,
                     max_packet_size,
@@ -603,7 +615,7 @@ impl<H: Handler> Handle<H> {
                             max_packet_size,
                             window_size: window_size_ref,
                         },
-                        read_half: ChannelReadHalf { receiver },
+                        read_half,
                     });
                 }
                 Some(ChannelMsg::OpenFailure(reason)) => {
@@ -1022,6 +1034,7 @@ where
         );
     }
     let channel_buffer_size = config.channel_buffer_size;
+    let drain_notify = Arc::new(Notify::new());
     let mut session = Session::new(
         config.window_size,
         CommonSession {
@@ -1042,6 +1055,7 @@ where
         },
         session_receiver,
         session_sender,
+        drain_notify.clone(),
     );
     session.begin_rekey()?;
     let (kex_done_signal, kex_done_signal_rx) = oneshot::channel();
@@ -1060,6 +1074,7 @@ where
         receiver: handle_receiver,
         join,
         channel_buffer_size,
+        drain_notify,
     })
 }
 
@@ -1099,6 +1114,7 @@ impl Session {
         common: CommonSession<Arc<Config>>,
         receiver: Receiver<Msg>,
         sender: UnboundedSender<Reply>,
+        drain_notify: Arc<Notify>,
     ) -> Self {
         let (inbound_channel_sender, inbound_channel_receiver) = channel(10);
         Self {
@@ -1110,10 +1126,32 @@ impl Session {
             inbound_channel_sender,
             inbound_channel_receiver,
             channels: HashMap::new(),
+            backlog: ChannelBacklog::default(),
+            drain_notify,
             pending_reads: Vec::new(),
             pending_len: 0,
             open_global_requests: VecDeque::new(),
             server_sig_algs: None,
+        }
+    }
+
+    /// See [`ChannelBacklog::forward`].
+    pub(crate) fn forward_channel_msg(&mut self, id: ChannelId, msg: ChannelMsg) -> bool {
+        self.backlog.forward(&self.channels, id, msg)
+    }
+
+    /// See [`ChannelBacklog::close_with`].
+    pub(crate) fn close_channel(&mut self, id: ChannelId, msg: ChannelMsg) {
+        self.backlog.close_with(&mut self.channels, id, msg)
+    }
+
+    /// Re-open the SSH receive window for `id` if it has dropped below half
+    /// the target. Only call this when the channel is not backed up.
+    pub(crate) fn replenish_receive_window(&mut self, id: ChannelId) -> Result<bool, Error> {
+        if let Some(ref mut enc) = self.common.encrypted {
+            enc.replenish_receive_window(id, self.target_window_size)
+        } else {
+            Ok(false)
         }
     }
 
@@ -1240,6 +1278,19 @@ impl Session {
                 () = &mut inactivity_timer => {
                     debug!("timeout");
                     return Err(crate::Error::InactivityTimeout.into());
+                }
+                _ = self.drain_notify.notified(),
+                    if !self.backlog.is_empty() && !self.kex.active() =>
+                {
+                    for id in self.backlog.drain(&mut self.channels) {
+                        if self.replenish_receive_window(id)? {
+                            let next_window =
+                                handler.adjust_window(id, self.target_window_size);
+                            if next_window > 0 {
+                                self.target_window_size = next_window;
+                            }
+                        }
+                    }
                 }
                 msg = self.receiver.recv(), if !self.kex.active() => {
                     match msg {
@@ -1796,6 +1847,7 @@ mod tests {
             },
             receiver,
             reply_sender,
+            Arc::new(Notify::new()),
         );
         (session, sender, reply_receiver)
     }
@@ -1844,6 +1896,7 @@ mod tests {
             },
             receiver,
             reply_sender,
+            Arc::new(Notify::new()),
         );
         session.open_global_requests = VecDeque::new();
         let _ = receiver_sender;

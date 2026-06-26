@@ -31,7 +31,7 @@ async fn main() -> anyhow::Result<()> {
 
 #[derive(Clone)]
 struct Server {
-    clients: Arc<Mutex<HashMap<(usize, ChannelId), Channel<Msg>>>>,
+    clients: Arc<Mutex<HashMap<(usize, ChannelId), ChannelWriteHalf<Msg>>>>,
     id: usize,
 }
 
@@ -56,8 +56,12 @@ impl server::Handler for Server {
     ) -> Result<(), Self::Error> {
         {
             debug!("channel open session");
+            // Only the write half is stored: data is consumed via the
+            // `Handler::data` callback below, so the read half is dropped to
+            // keep the SSH receive window open.
+            let (_read, write) = channel.split();
             let mut clients = self.clients.lock().unwrap();
-            clients.insert((self.id, channel.id()), channel);
+            clients.insert((self.id, write.id()), write);
         }
         reply.accept().await;
         Ok(())

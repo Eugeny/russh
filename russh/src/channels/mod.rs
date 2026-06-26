@@ -1,7 +1,9 @@
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
 use bytes::Bytes;
 use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::{Mutex, Notify};
 
@@ -143,6 +145,10 @@ impl WindowSizeRef {
 /// Allows you to read from a channel without borrowing the session
 pub struct ChannelReadHalf {
     pub(crate) receiver: Receiver<ChannelMsg>,
+    /// Shared with the session loop. Notified whenever a message is taken from
+    /// `receiver`, so the session can drain any per-channel overflow and
+    /// re-open the SSH receive window. See [`forward_channel_msg`].
+    pub(crate) drain_notify: Arc<Notify>,
 }
 
 impl std::fmt::Debug for ChannelReadHalf {
@@ -151,10 +157,36 @@ impl std::fmt::Debug for ChannelReadHalf {
     }
 }
 
+impl Drop for ChannelReadHalf {
+    fn drop(&mut self) {
+        // Close the receiver before notifying so the session's drain() sees
+        // `TrySendError::Closed` (not `Full`), discards any backlog for this
+        // channel, and re-opens its receive window for `Handler::data()`-only
+        // consumers.
+        self.receiver.close();
+        self.drain_notify.notify_one();
+    }
+}
+
 impl ChannelReadHalf {
+    pub(crate) fn new(receiver: Receiver<ChannelMsg>, drain_notify: Arc<Notify>) -> Self {
+        Self {
+            receiver,
+            drain_notify,
+        }
+    }
+
+    pub(crate) fn notify_drained(&self) {
+        self.drain_notify.notify_one();
+    }
+
     /// Awaits an incoming [`ChannelMsg`], this method returns [`None`] if the channel has been closed.
     pub async fn wait(&mut self) -> Option<ChannelMsg> {
-        self.receiver.recv().await
+        let msg = self.receiver.recv().await;
+        if msg.is_some() {
+            self.notify_drained();
+        }
+        msg
     }
 
     /// Make a reader for the [`Channel`] to receive [`ChannelMsg::Data`]
@@ -465,10 +497,11 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + Sync + 'static> Channel<S> {
         max_packet_size: u32,
         window_size: u32,
         channel_buffer_size: usize,
+        drain_notify: Arc<Notify>,
     ) -> (Self, ChannelRef) {
         let (tx, rx) = tokio::sync::mpsc::channel(channel_buffer_size);
         let window_size = WindowSizeRef::new(window_size);
-        let read_half = ChannelReadHalf { receiver: rx };
+        let read_half = ChannelReadHalf::new(rx, drain_notify);
         let write_half = ChannelWriteHalf {
             id,
             sender,
@@ -697,6 +730,143 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + Sync + 'static> Channel<S> {
     }
 }
 
+#[derive(Debug, Default)]
+struct ChannelQueue {
+    queue: VecDeque<ChannelMsg>,
+    /// Set once a terminal message (`Close`/`OpenFailure`) has been queued.
+    /// Further forwards are dropped, and [`ChannelBacklog::drain`] removes
+    /// the channel (without re-opening its receive window) once this drains.
+    closing: bool,
+}
+
+/// Per-channel overflow for [`ChannelMsg`]s that could not be delivered to
+/// the [`Channel`] mpsc without blocking, plus deferred-close bookkeeping.
+///
+/// The session loop dispatches every incoming SSH packet serially. A
+/// `chan.send().await` would park the whole connection — including keepalives
+/// and every other channel — whenever a single channel's consumer falls
+/// behind. Instead we `try_send`, and on `Full` queue the message here. The
+/// caller withholds `WINDOW_ADJUST` for any channel with a non-empty queue,
+/// which lets the SSH window drain to zero so the *peer* stops sending on
+/// that channel while the loop stays live for everything else.
+///
+/// The queue is bounded by the SSH receive window for compliant peers
+/// (`WINDOW_ADJUST` is withheld while a backlog exists, so the peer's
+/// in-flight data cannot exceed `window_size`). A peer that ignores flow
+/// control can grow it without limit; that is the same exposure as any other
+/// resource an authenticated peer can consume, and is preferred over
+/// silently dropping messages.
+#[derive(Debug, Default)]
+pub(crate) struct ChannelBacklog {
+    backed_up: HashMap<ChannelId, ChannelQueue>,
+}
+
+impl ChannelBacklog {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.backed_up.is_empty()
+    }
+
+    /// Forward `msg` to the [`Channel`] for `id` without blocking.
+    ///
+    /// Returns `true` if the channel has no backlog after this call (the only
+    /// state in which it is safe to re-open the SSH receive window). Once a
+    /// backlog exists, this method only appends — draining and the
+    /// corresponding window replenishment are owned by [`Self::drain`], so
+    /// every transition from backed-up to drained goes through a single
+    /// caller that also re-opens the window.
+    pub(crate) fn forward(
+        &mut self,
+        channels: &HashMap<ChannelId, ChannelRef>,
+        id: ChannelId,
+        msg: ChannelMsg,
+    ) -> bool {
+        let Some(chan) = channels.get(&id) else {
+            return true;
+        };
+        // WindowAdjusted is purely informational — the load-bearing side
+        // effect (updating WindowSizeRef) happens before this call. Never
+        // let it occupy backlog where it could displace real payload.
+        if matches!(msg, ChannelMsg::WindowAdjusted { .. }) {
+            if !self.backed_up.contains_key(&id) {
+                let _ = chan.try_send(msg);
+                return true;
+            }
+            return false;
+        }
+        if let Some(q) = self.backed_up.get_mut(&id) {
+            if !q.closing {
+                q.queue.push_back(msg);
+            }
+            return false;
+        }
+        match chan.try_send(msg) {
+            Ok(()) => true,
+            Err(TrySendError::Full(m)) => {
+                self.backed_up
+                    .entry(id)
+                    .or_default()
+                    .queue
+                    .push_back(m);
+                false
+            }
+            Err(TrySendError::Closed(_)) => true,
+        }
+    }
+
+    /// Forward a terminal message (`Close` or `OpenFailure`) and tear down
+    /// the channel. If it is delivered immediately the channel is removed
+    /// from `channels` now; otherwise removal is deferred to [`Self::drain`]
+    /// so a slow consumer still receives every queued message before the
+    /// sender is dropped.
+    pub(crate) fn close_with(
+        &mut self,
+        channels: &mut HashMap<ChannelId, ChannelRef>,
+        id: ChannelId,
+        msg: ChannelMsg,
+    ) {
+        if self.forward(channels, id, msg) {
+            channels.remove(&id);
+        } else if let Some(q) = self.backed_up.get_mut(&id) {
+            q.closing = true;
+        }
+    }
+
+    /// Flush every backed-up channel into its mpsc. Called when a
+    /// [`ChannelReadHalf`] signals it has freed a slot (via the shared
+    /// `drain_notify`). Returns the ids that fully drained and are *not*
+    /// closing, so the caller can re-open their SSH receive windows; closing
+    /// channels are removed from `channels` here instead.
+    pub(crate) fn drain(
+        &mut self,
+        channels: &mut HashMap<ChannelId, ChannelRef>,
+    ) -> Vec<ChannelId> {
+        let mut drained = Vec::new();
+        self.backed_up.retain(|id, q| {
+            let Some(chan) = channels.get(id) else {
+                return false;
+            };
+            while let Some(front) = q.queue.pop_front() {
+                match chan.try_send(front) {
+                    Ok(()) => {}
+                    Err(TrySendError::Full(m)) => {
+                        q.queue.push_front(m);
+                        return true;
+                    }
+                    Err(TrySendError::Closed(_)) => break,
+                }
+            }
+            if q.closing {
+                channels.remove(id);
+            } else {
+                drained.push(*id);
+            }
+            false
+        });
+        drained
+    }
+
+}
+
 #[cfg(test)]
 mod tests {
     use tokio::sync::mpsc;
@@ -825,11 +995,151 @@ mod tests {
         assert!(receiver.try_recv().is_err());
     }
 
+    fn data_msg(b: &'static [u8]) -> ChannelMsg {
+        ChannelMsg::Data {
+            data: Bytes::from_static(b),
+        }
+    }
+
+    fn recv_data(rx: &mut mpsc::Receiver<ChannelMsg>) -> Bytes {
+        match rx.try_recv() {
+            Ok(ChannelMsg::Data { data }) => data,
+            other => unreachable!("expected Data, got {other:?}"),
+        }
+    }
+
+    fn dispatch(
+        id: ChannelId,
+        cap: usize,
+    ) -> (
+        ChannelBacklog,
+        HashMap<ChannelId, ChannelRef>,
+        mpsc::Receiver<ChannelMsg>,
+    ) {
+        let (tx, rx) = mpsc::channel(cap);
+        let mut channels = HashMap::new();
+        channels.insert(id, ChannelRef::new(tx));
+        (ChannelBacklog::default(), channels, rx)
+    }
+
+    fn fwd(
+        b: &mut ChannelBacklog,
+        channels: &HashMap<ChannelId, ChannelRef>,
+        id: ChannelId,
+        msg: ChannelMsg,
+    ) -> bool {
+        b.forward(channels, id, msg)
+    }
+
+    fn queue_len(b: &ChannelBacklog, id: ChannelId) -> Option<usize> {
+        b.backed_up.get(&id).map(|q| q.queue.len())
+    }
+
+    #[test]
+    fn backlog_forward_queues_on_full_and_preserves_order() {
+        let id = ChannelId(1);
+        let (mut b, mut channels, mut rx) = dispatch(id, 1);
+
+        assert!(fwd(&mut b, &channels, id, data_msg(b"1")));
+        assert!(!fwd(&mut b, &channels, id, data_msg(b"2")));
+        assert!(!fwd(&mut b, &channels, id, data_msg(b"3")));
+        assert_eq!(queue_len(&b, id), Some(2));
+
+        // forward() never drains an existing backlog; that is owned by drain()
+        // so window replenishment has a single owner.
+        assert_eq!(recv_data(&mut rx).as_ref(), b"1");
+        assert!(!fwd(&mut b, &channels, id, data_msg(b"4")));
+        assert_eq!(queue_len(&b, id), Some(3));
+
+        assert!(b.drain(&mut channels).is_empty());
+        assert_eq!(recv_data(&mut rx).as_ref(), b"2");
+        assert!(b.drain(&mut channels).is_empty());
+        assert_eq!(recv_data(&mut rx).as_ref(), b"3");
+        assert_eq!(b.drain(&mut channels), vec![id]);
+        assert_eq!(recv_data(&mut rx).as_ref(), b"4");
+        assert!(b.is_empty());
+
+        assert!(fwd(&mut b, &channels, id, data_msg(b"5")));
+        assert_eq!(recv_data(&mut rx).as_ref(), b"5");
+    }
+
+    #[test]
+    fn backlog_drain_reports_closed_receiver_as_drained() {
+        let id = ChannelId(3);
+        let (mut b, mut channels, rx) = dispatch(id, 1);
+
+        assert!(fwd(&mut b, &channels, id, data_msg(b"a")));
+        assert!(!fwd(&mut b, &channels, id, data_msg(b"b")));
+        drop(rx);
+
+        // Closed receiver: the Handler::data() trait path is the consumer, so
+        // drain treats this as delivered for window-replenishment purposes.
+        assert_eq!(b.drain(&mut channels), vec![id]);
+        assert!(b.is_empty());
+        assert!(fwd(&mut b, &channels, id, ChannelMsg::Eof));
+    }
+
+    #[test]
+    fn backlog_close_defers_removal_until_drained() {
+        let id = ChannelId(4);
+        let (mut b, mut channels, mut rx) = dispatch(id, 1);
+
+        assert!(fwd(&mut b, &channels, id, data_msg(b"a")));
+        assert!(!fwd(&mut b, &channels, id, data_msg(b"b")));
+        assert!(!fwd(&mut b, &channels, id, ChannelMsg::Eof));
+        b.close_with(&mut channels, id, ChannelMsg::Close);
+
+        // Close is queued behind the backlog; the channel must stay registered
+        // so the sender lives until everything is delivered.
+        assert!(channels.contains_key(&id));
+        assert_eq!(queue_len(&b, id), Some(3));
+        // Further forwards after close are dropped.
+        assert!(!fwd(&mut b, &channels, id, data_msg(b"late")));
+        assert_eq!(queue_len(&b, id), Some(3));
+
+        for expect in [&b"a"[..], b"b"] {
+            assert!(b.drain(&mut channels).is_empty());
+            assert_eq!(recv_data(&mut rx).as_ref(), expect);
+        }
+        assert!(b.drain(&mut channels).is_empty());
+        assert!(matches!(rx.try_recv(), Ok(ChannelMsg::Eof)));
+        // Closing channel is removed but not returned for replenishment.
+        assert!(b.drain(&mut channels).is_empty());
+        assert!(matches!(rx.try_recv(), Ok(ChannelMsg::Close)));
+
+        assert!(!channels.contains_key(&id));
+        assert!(b.is_empty());
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn backlog_never_queues_window_adjusted() {
+        let id = ChannelId(5);
+        let (mut b, channels, _rx) = dispatch(id, 1);
+
+        assert!(fwd(&mut b, &channels, id, ChannelMsg::Success));
+        assert!(!fwd(&mut b, &channels, id, ChannelMsg::Success));
+        // WindowAdjusted is never queued.
+        assert!(!fwd(
+            &mut b,
+            &channels,
+            id,
+            ChannelMsg::WindowAdjusted { new_size: 1 }
+        ));
+        assert_eq!(queue_len(&b, id), Some(1));
+    }
+
     #[tokio::test]
     async fn channel_data_bytes_forwards_to_write_half() {
         let (sender, mut receiver) = mpsc::channel(8);
-        let (channel, _reference) =
-            Channel::<(ChannelId, ChannelMsg)>::new(ChannelId(9), sender, 1024, 1024, 8);
+        let (channel, _reference) = Channel::<(ChannelId, ChannelMsg)>::new(
+            ChannelId(9),
+            sender,
+            1024,
+            1024,
+            8,
+            Arc::new(Notify::new()),
+        );
 
         channel.data_bytes(Bytes::from_static(b"channel")).await.unwrap();
 

@@ -6,11 +6,14 @@ use channels::WindowSizeRef;
 use kex::ServerKex;
 use log::debug;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
+use tokio::sync::Notify;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 use tokio::sync::oneshot;
 
 use super::*;
-use crate::channels::{Channel, ChannelMsg, ChannelReadHalf, ChannelRef, ChannelWriteHalf};
+use crate::channels::{
+    Channel, ChannelBacklog, ChannelMsg, ChannelReadHalf, ChannelRef, ChannelWriteHalf,
+};
 use crate::helpers::NameList;
 use crate::kex::{EXTENSION_SUPPORT_AS_CLIENT, KexCause, SessionKexState};
 use crate::{ChannelOpenFailure, map_err, msg};
@@ -25,8 +28,25 @@ pub struct Session {
     pub(crate) pending_reads: Vec<Vec<u8>>,
     pub(crate) pending_len: u32,
     pub(crate) channels: HashMap<ChannelId, ChannelRef>,
+    /// Per-channel overflow for [`ChannelMsg`]s that could not be delivered
+    /// to the [`Channel`] mpsc without blocking. Bounded by the SSH receive
+    /// window: we withhold `WINDOW_ADJUST` while a channel is present here.
+    /// See [`ChannelBacklog`].
+    pub(crate) backlog: ChannelBacklog,
+    /// Signalled by [`ChannelReadHalf`] consumers; wakes the session loop to
+    /// drain `backlog` and re-open receive windows.
+    pub(crate) drain_notify: Arc<Notify>,
     pub(crate) open_global_requests: VecDeque<GlobalRequestResponse>,
     pub(crate) kex: SessionKexState<ServerKex>,
+}
+
+impl Drop for Session {
+    fn drop(&mut self) {
+        // Best-effort: push whatever fits into each channel mpsc so consumers
+        // can read the tail after the sender drops. The graceful-exit path
+        // already awaited `flush_into` for full delivery.
+        let _ = self.backlog.drain(&mut self.channels);
+    }
 }
 
 #[derive(Debug)]
@@ -110,6 +130,7 @@ pub type ChannelOpenHandle = crate::ChannelOpenHandleInner<Msg>;
 pub struct Handle {
     pub(crate) sender: Sender<Msg>,
     pub(crate) channel_buffer_size: usize,
+    pub(crate) drain_notify: Arc<Notify>,
 }
 
 impl Handle {
@@ -392,11 +413,12 @@ impl Handle {
 
     async fn wait_channel_confirmation(
         &self,
-        mut receiver: Receiver<ChannelMsg>,
+        receiver: Receiver<ChannelMsg>,
         window_size_ref: WindowSizeRef,
     ) -> Result<Channel<Msg>, Error> {
+        let mut read_half = ChannelReadHalf::new(receiver, self.drain_notify.clone());
         loop {
-            match receiver.recv().await {
+            match read_half.wait().await {
                 Some(ChannelMsg::Open {
                     id,
                     max_packet_size,
@@ -411,7 +433,7 @@ impl Handle {
                             max_packet_size,
                             window_size: window_size_ref,
                         },
-                        read_half: ChannelReadHalf { receiver },
+                        read_half,
                     });
                 }
                 Some(ChannelMsg::OpenFailure(reason)) => {
@@ -574,6 +596,19 @@ impl Session {
                     debug!("timeout");
                     return Err(crate::Error::InactivityTimeout.into());
                 }
+                _ = self.drain_notify.notified(),
+                    if !self.backlog.is_empty() && !self.kex.active() =>
+                {
+                    for id in self.backlog.drain(&mut self.channels) {
+                        if self.replenish_receive_window(id)? {
+                            let next_window =
+                                handler.adjust_window(id, self.target_window_size);
+                            if next_window > 0 {
+                                self.target_window_size = next_window;
+                            }
+                        }
+                    }
+                }
                 msg = self.receiver.recv(), if !self.kex.active() => {
                     match msg {
                         Some(Msg::Channel(id, ChannelMsg::Data { data })) => {
@@ -715,6 +750,26 @@ impl Session {
     /// Get a handle to this session.
     pub fn handle(&self) -> Handle {
         self.sender.clone()
+    }
+
+    /// See [`ChannelBacklog::forward`].
+    pub(crate) fn forward_channel_msg(&mut self, id: ChannelId, msg: ChannelMsg) -> bool {
+        self.backlog.forward(&self.channels, id, msg)
+    }
+
+    /// See [`ChannelBacklog::close_with`].
+    pub(crate) fn close_channel(&mut self, id: ChannelId, msg: ChannelMsg) {
+        self.backlog.close_with(&mut self.channels, id, msg)
+    }
+
+    /// Re-open the SSH receive window for `id` if it has dropped below half
+    /// the target. Only call this when the channel is not backed up.
+    pub(crate) fn replenish_receive_window(&mut self, id: ChannelId) -> Result<bool, Error> {
+        if let Some(ref mut enc) = self.common.encrypted {
+            enc.replenish_receive_window(id, self.target_window_size)
+        } else {
+            Ok(false)
+        }
     }
 
     pub fn writable_packet_size(&self, channel: &ChannelId) -> u32 {
@@ -1392,9 +1447,11 @@ mod tests {
     fn authenticated_session() -> Session {
         let config = Arc::new(crate::server::Config::default());
         let (sender, receiver) = tokio::sync::mpsc::channel(config.event_buffer_size);
+        let drain_notify = Arc::new(Notify::new());
         let handle = Handle {
             sender,
             channel_buffer_size: config.channel_buffer_size,
+            drain_notify: drain_notify.clone(),
         };
 
         Session {
@@ -1439,6 +1496,8 @@ mod tests {
             pending_reads: Vec::new(),
             pending_len: 0,
             channels: HashMap::new(),
+            backlog: ChannelBacklog::default(),
+            drain_notify,
             open_global_requests: VecDeque::new(),
             kex: SessionKexState::Idle,
         }

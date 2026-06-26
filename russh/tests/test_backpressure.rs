@@ -1,11 +1,10 @@
-use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::sync::Arc;
+mod common;
+
+use std::net::SocketAddr;
 
 use futures::FutureExt;
-use russh::keys::PrivateKeyWithHashAlg;
 use russh::server::{self, Auth, Msg, Server as _, Session};
-use russh::{Channel, ChannelMsg, client};
-use ssh_key::PrivateKey;
+use russh::{Channel, ChannelMsg};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::watch;
 use tokio::time::sleep;
@@ -17,55 +16,27 @@ pub const CHANNEL_BUFFER_SIZE: usize = 10;
 async fn test_backpressure() -> Result<(), anyhow::Error> {
     env_logger::init();
 
-    let addr = addr();
+    let addr = common::addr();
     let data = data();
     let (tx, rx) = watch::channel(());
 
     tokio::spawn(Server::run(addr, rx));
+    common::wait_for_server(addr).await;
 
-    // Wait until the server is started
-    while TcpStream::connect(addr).is_err() {
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    }
-
-    stream(addr, &data, tx).await?;
-
-    Ok(())
-}
-
-async fn stream(addr: SocketAddr, data: &[u8], tx: watch::Sender<()>) -> Result<(), anyhow::Error> {
-    let config = Arc::new(client::Config::default());
-    let key = Arc::new(PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap());
-
-    let mut session = russh::client::connect(config, addr, Client).await?;
-    let channel = match session
-        .authenticate_publickey(
-            "user",
-            PrivateKeyWithHashAlg::new(
-                key,
-                session.best_supported_rsa_hash().await.unwrap().flatten(),
-            ),
-        )
-        .await
-        .map(|x| x.success())
-    {
-        Ok(true) => session.channel_open_session().await?,
-        Ok(false) => panic!("Authentication failed"),
-        Err(err) => return Err(err.into()),
-    };
-
+    let session = common::connect(addr).await?;
+    let channel = session.channel_open_session().await?;
     let mut writer = channel.make_writer();
 
     // TCP listener will buffer one extra message
     for _ in 0..=CHANNEL_BUFFER_SIZE {
-        assert!(writer.write(data).await.is_ok());
+        assert!(writer.write(&data).await.is_ok());
     }
-    let pending_write = async { writer.write(data).await.unwrap() };
+    let pending_write = async { writer.write(&data).await.unwrap() };
     sleep(std::time::Duration::from_millis(100)).await;
     assert_eq!(pending_write.now_or_never(), None);
     // Make space on the buffer
     tx.send(()).unwrap();
-    assert!(writer.write(data).await.is_ok());
+    assert!(writer.write(&data).await.is_ok());
 
     Ok(())
 }
@@ -77,14 +48,6 @@ fn data() -> Vec<u8> {
     data
 }
 
-/// Find a unused local address to bind our server to
-fn addr() -> SocketAddr {
-    TcpListener::bind(("127.0.0.1", 0))
-        .unwrap()
-        .local_addr()
-        .unwrap()
-}
-
 #[derive(Clone)]
 struct Server {
     rx: Option<watch::Receiver<()>>,
@@ -92,12 +55,7 @@ struct Server {
 
 impl Server {
     async fn run(addr: SocketAddr, rx: watch::Receiver<()>) {
-        let config = Arc::new(server::Config {
-            keys: vec![PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap()],
-            window_size: WINDOW_SIZE as u32,
-            channel_buffer_size: CHANNEL_BUFFER_SIZE,
-            ..Default::default()
-        });
+        let config = common::server_config(WINDOW_SIZE as u32, CHANNEL_BUFFER_SIZE);
         let mut sh = Server { rx: Some(rx) };
 
         sh.run_on_address(config, addr).await.unwrap();
@@ -142,15 +100,5 @@ impl russh::server::Handler for Server {
         });
 
         Ok(())
-    }
-}
-
-struct Client;
-
-impl russh::client::Handler for Client {
-    type Error = anyhow::Error;
-
-    async fn check_server_key(&mut self, _: &ssh_key::PublicKey) -> Result<bool, Self::Error> {
-        Ok(true)
     }
 }

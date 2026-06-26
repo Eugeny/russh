@@ -20,7 +20,7 @@ use std::num::Wrapping;
 
 use bytes::Bytes;
 use byteorder::{BigEndian, ByteOrder};
-use log::{debug, trace};
+use log::{debug, trace, warn};
 use ssh_encoding::Encode;
 use tokio::sync::oneshot;
 
@@ -282,22 +282,42 @@ impl Encrypted {
         }
     }
 
-    pub fn adjust_window_size(
+    /// Debit `data.len()` from the channel's local receive window, without
+    /// emitting a `WINDOW_ADJUST`. Call this on every received
+    /// `CHANNEL_DATA`/`CHANNEL_EXTENDED_DATA` packet.
+    ///
+    /// Data that exceeds the remaining window is still delivered for interop
+    /// with off-by-one peers; the window saturates to zero so the next
+    /// [`Self::replenish_receive_window`] re-opens it instead of stalling.
+    pub fn record_received_data(&mut self, channel: ChannelId, data: &[u8]) {
+        let Some(channel) = self.channels.get_mut(&channel) else {
+            return;
+        };
+        let len = data.len() as u32;
+        if len > channel.sender_window_size {
+            warn!(
+                "channel {}: peer sent {} bytes exceeding receive window {}",
+                channel.sender_channel, len, channel.sender_window_size
+            );
+        }
+        channel.sender_window_size = channel.sender_window_size.saturating_sub(len);
+    }
+
+    /// Send `CHANNEL_WINDOW_ADJUST` if the channel's local receive window has
+    /// dropped below `target/2`, restoring it to `target`. Call this once the
+    /// application has consumed (or buffered with capacity for) the data —
+    /// not on receipt — so that a slow consumer naturally throttles its peer
+    /// instead of the session loop.
+    pub fn replenish_receive_window(
         &mut self,
         channel: ChannelId,
-        data: &[u8],
         target: u32,
     ) -> Result<bool, crate::Error> {
         if let Some(channel) = self.channels.get_mut(&channel) {
             trace!(
-                "adjust_window_size, channel = {}, size = {},",
+                "replenish_receive_window, channel = {}, size = {},",
                 channel.sender_channel, target
             );
-            // Ignore extra data.
-            // https://tools.ietf.org/html/rfc4254#section-5.2
-            if data.len() as u32 <= channel.sender_window_size {
-                channel.sender_window_size -= data.len() as u32;
-            }
             if channel.sender_window_size < target / 2 {
                 debug!(
                     "sender_window_size {:?}, target {:?}",
