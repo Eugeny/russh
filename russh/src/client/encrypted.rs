@@ -441,7 +441,9 @@ impl Session {
                 }
 
                 if let Some(sender) = self.channels.remove(&channel_num) {
-                    let _ = sender.send(ChannelMsg::OpenFailure(reason_code.clone())).await;
+                    let _ = sender
+                        .send(ChannelMsg::OpenFailure(reason_code.clone()))
+                        .await;
                 }
 
                 let _ = self.sender.send(Reply::ChannelOpenFailure);
@@ -714,14 +716,16 @@ impl Session {
                     channel_params,
                 };
                 let reply = ChannelOpenHandle::new(
-                    self.inbound_channel_sender.clone(),
+                    self.priority_sender.clone(),
                     pending,
                     |pending, result| Msg::ServerChannelOpenReply { pending, result },
                 );
 
                 match &msg.typ {
                     ChannelType::Session => {
-                        client.server_channel_open_session(channel, reply, self).await?
+                        client
+                            .server_channel_open_session(channel, reply, self)
+                            .await?
                     }
                     ChannelType::DirectTcpip(d) => {
                         client
@@ -790,7 +794,9 @@ impl Session {
                     }
                     ChannelType::Unknown { typ } => {
                         if client.should_accept_unknown_server_channel(id, typ).await {
-                            client.server_channel_open_unknown(channel, reply, self).await?;
+                            client
+                                .server_channel_open_unknown(channel, reply, self)
+                                .await?;
                         } else {
                             debug!("unknown channel type: {typ}");
                             if let Some(ref mut enc) = self.common.encrypted {

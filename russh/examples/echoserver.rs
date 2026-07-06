@@ -87,7 +87,7 @@ impl server::Handler for Server {
             let mut clients = self.clients.lock().await;
             clients.insert(self.id, (channel.id(), session.handle()));
         }
-        reply.accept().await;
+        reply.accept();
         Ok(())
     }
 

@@ -8,12 +8,12 @@ mod tests {
     use tokio::net::TcpListener;
 
     // Import client types directly since we're in the client module
+    use crate::Error;
     use crate::client::{Config, Handler, connect};
     use crate::keys::PrivateKeyWithHashAlg;
-    use rand::rng;
     use crate::server::{self, Auth, Handler as ServerHandler, Server, Session};
     use crate::{ChannelId, SshId}; // Import directly from crate root
-    use crate::Error;
+    use rand::rng;
 
     #[derive(Clone)]
     struct TestServer {
@@ -44,7 +44,7 @@ mod tests {
                 let mut clients = self.clients.lock().unwrap();
                 clients.insert((self.id, channel.id()), session.handle());
             }
-            reply.accept().await;
+            reply.accept();
             Ok(())
         }
 

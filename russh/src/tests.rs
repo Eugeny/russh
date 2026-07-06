@@ -120,7 +120,7 @@ mod compress {
                 let mut clients = self.clients.lock().unwrap();
                 clients.insert((self.id, channel.id()), session.handle());
             }
-            reply.accept().await;
+            reply.accept();
             Ok(())
         }
         async fn auth_publickey(
@@ -375,7 +375,7 @@ mod channels {
                     println!("channel open session {a:?}");
                     a.send(channel).unwrap();
                 }
-                reply.accept().await;
+                reply.accept();
                 Ok(())
             }
         }
@@ -457,7 +457,7 @@ mod channels {
                 reply: server::ChannelOpenHandle,
                 _session: &mut Session,
             ) -> Result<(), Self::Error> {
-                reply.accept().await;
+                reply.accept();
                 tokio::spawn(async move {
                     while let Some(msg) = channel.wait().await {
                         match msg {
@@ -546,7 +546,7 @@ mod channels {
                 if let Some(tx) = self.channel.take() {
                     tx.send(channel).unwrap();
                 }
-                reply.accept().await;
+                reply.accept();
                 Ok(())
             }
         }
@@ -629,7 +629,7 @@ mod channels {
                     println!("channel open session {a:?}");
                     a.send(channel).unwrap();
                 }
-                reply.accept().await;
+                reply.accept();
                 Ok(())
             }
         }
@@ -1156,7 +1156,7 @@ pub(crate) mod raw_no_crypto {
             _session: &mut server::Session,
         ) -> Result<(), Self::Error> {
             self.record("channel_open_session");
-            reply.accept().await;
+            reply.accept();
             Ok(())
         }
 

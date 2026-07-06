@@ -175,7 +175,7 @@ impl server::Handler for EchoServer {
         reply: server::ChannelOpenHandle,
         _session: &mut server::Session,
     ) -> Result<(), Self::Error> {
-        reply.accept().await;
+        reply.accept();
         Ok(())
     }
 

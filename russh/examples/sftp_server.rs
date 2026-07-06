@@ -66,7 +66,7 @@ impl russh::server::Handler for SshSession {
             let mut clients = self.clients.lock().await;
             clients.insert(channel.id(), channel);
         }
-        reply.accept().await;
+        reply.accept();
         Ok(())
     }
 

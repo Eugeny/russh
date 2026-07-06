@@ -95,6 +95,8 @@ pub struct Session {
     target_window_size: u32,
     pending_reads: Vec<Vec<u8>>,
     pending_len: u32,
+    priority_sender: UnboundedSender<Msg>,
+    priority_receiver: UnboundedReceiver<Msg>,
     inbound_channel_sender: Sender<Msg>,
     inbound_channel_receiver: Receiver<Msg>,
     open_global_requests: VecDeque<GlobalRequestResponse>,
@@ -1100,6 +1102,7 @@ impl Session {
         receiver: Receiver<Msg>,
         sender: UnboundedSender<Reply>,
     ) -> Self {
+        let (priority_sender, priority_receiver) = unbounded_channel();
         let (inbound_channel_sender, inbound_channel_receiver) = channel(10);
         Self {
             common,
@@ -1107,6 +1110,8 @@ impl Session {
             sender,
             kex: SessionKexState::Idle,
             target_window_size,
+            priority_sender,
+            priority_receiver,
             inbound_channel_sender,
             inbound_channel_receiver,
             channels: HashMap::new(),
@@ -1134,6 +1139,7 @@ impl Session {
             .await;
         trace!("disconnected");
         self.receiver.close();
+        self.priority_receiver.close();
         self.inbound_channel_receiver.close();
         map_err!(stream_write.shutdown().await)?;
         match result {
@@ -1253,6 +1259,20 @@ impl Session {
                     // eagerly take all outgoing messages so writes are batched
                     while !self.kex.active() {
                         match self.receiver.try_recv() {
+                            Ok(next) => self.handle_msg(next)?,
+                            Err(_) => break
+                        }
+                    }
+                }
+                msg = self.priority_receiver.recv(), if !self.kex.active() => {
+                    match msg {
+                        Some(msg) => self.handle_msg(msg)?,
+                        None => (),
+                    }
+
+                    // eagerly take all outgoing messages so writes are batched
+                    while !self.kex.active() {
+                        match self.priority_receiver.try_recv() {
                             Ok(next) => self.handle_msg(next)?,
                             Err(_) => break
                         }
@@ -2266,10 +2286,8 @@ pub trait Handler: Sized + Send {
         reply: ChannelOpenHandle,
         session: &mut Session,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        async move {
-            reply.accept().await;
-            Ok(())
-        }
+        reply.accept();
+        async move { Ok(()) }
     }
 
     /// Called when the server opens a channel for a new remote UDS forwarding connection.
@@ -2285,10 +2303,8 @@ pub trait Handler: Sized + Send {
         reply: ChannelOpenHandle,
         session: &mut Session,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        async move {
-            reply.accept().await;
-            Ok(())
-        }
+        reply.accept();
+        async move { Ok(()) }
     }
 
     /// Called when the server opens an agent forwarding channel.
@@ -2303,10 +2319,8 @@ pub trait Handler: Sized + Send {
         reply: ChannelOpenHandle,
         session: &mut Session,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        async move {
-            reply.accept().await;
-            Ok(())
-        }
+        reply.accept();
+        async move { Ok(()) }
     }
 
     /// Called when the server attempts to open a channel of unknown type. It may return `true`,
@@ -2351,10 +2365,8 @@ pub trait Handler: Sized + Send {
         reply: ChannelOpenHandle,
         session: &mut Session,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        async move {
-            reply.accept().await;
-            Ok(())
-        }
+        reply.accept();
+        async move { Ok(()) }
     }
 
     /// Called when the server opens a direct tcp/ip channel (non-standard).
@@ -2374,10 +2386,8 @@ pub trait Handler: Sized + Send {
         reply: ChannelOpenHandle,
         session: &mut Session,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        async move {
-            reply.accept().await;
-            Ok(())
-        }
+        reply.accept();
+        async move { Ok(()) }
     }
 
     /// Called when the server opens a direct-streamlocal channel (non-standard).
@@ -2393,10 +2403,8 @@ pub trait Handler: Sized + Send {
         reply: ChannelOpenHandle,
         session: &mut Session,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        async move {
-            reply.accept().await;
-            Ok(())
-        }
+        reply.accept();
+        async move { Ok(()) }
     }
 
     /// Called when the server opens an X11 channel.
@@ -2413,10 +2421,8 @@ pub trait Handler: Sized + Send {
         reply: ChannelOpenHandle,
         session: &mut Session,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        async move {
-            reply.accept().await;
-            Ok(())
-        }
+        reply.accept();
+        async move { Ok(()) }
     }
 
     /// Called when the server sends us data. The `extended_code`
