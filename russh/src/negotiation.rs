@@ -224,10 +224,14 @@ pub(crate) trait Select {
         let _remote_kexes_no_ext = kex_list
             .iter()
             .filter(|k| {
+                // Keep unknown algorithm names: they can't be selected, but they must
+                // still count towards the client's *first* choice so that an optimistic
+                // `first_kex_packet_follows` guess for an algorithm we don't implement is
+                // correctly judged as wrong (kex_both_first == false). See issue #733.
                 kex::Name::try_from(k.as_str())
                     .ok()
                     .map(|k| !KEX_EXTENSION_NAMES.contains(&k))
-                    .unwrap_or(false)
+                    .unwrap_or(true)
             })
             .collect::<Vec<_>>();
         let (kex_both_first, kex_algorithm) = Self::select(
@@ -512,4 +516,82 @@ pub(crate) fn write_kex(
         0u32.encode(w)?; // reserved
         Ok(())
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use ssh_encoding::Encode;
+
+    use super::*;
+    use crate::helpers::NameList;
+
+    /// Build a minimal KEXINIT payload with a custom kex name-list and
+    /// `first_kex_packet_follows` flag. All other lists come from the default
+    /// preferences so negotiation succeeds.
+    fn build_kexinit(kex_names: &[&str], follows: bool) -> Vec<u8> {
+        let pref = Preferred::DEFAULT;
+        let mut buf = vec![msg::KEXINIT];
+        buf.extend_from_slice(&[0u8; 16]); // cookie
+        let names = |v: Vec<String>| NameList(v);
+        names(kex_names.iter().map(|s| s.to_string()).collect())
+            .encode(&mut buf)
+            .unwrap();
+        names(pref.key.iter().map(ToString::to_string).collect())
+            .encode(&mut buf)
+            .unwrap();
+        for _ in 0..2 {
+            names(pref.cipher.iter().map(|x| x.as_ref().to_string()).collect())
+                .encode(&mut buf)
+                .unwrap();
+        }
+        for _ in 0..2 {
+            names(pref.mac.iter().map(|x| x.as_ref().to_string()).collect())
+                .encode(&mut buf)
+                .unwrap();
+        }
+        for _ in 0..2 {
+            names(
+                pref.compression
+                    .iter()
+                    .map(|x| x.as_ref().to_string())
+                    .collect(),
+            )
+            .encode(&mut buf)
+            .unwrap();
+        }
+        Vec::<String>::new().encode(&mut buf).unwrap(); // lang c2s
+        Vec::<String>::new().encode(&mut buf).unwrap(); // lang s2c
+        (follows as u8).encode(&mut buf).unwrap();
+        0u32.encode(&mut buf).unwrap();
+        buf
+    }
+
+    /// Regression test for #733: a client that optimistically guesses a kex
+    /// algorithm russh does not implement (`sntrup761x25519-sha512`) — while
+    /// listing russh's own first choice (`mlkem768x25519-sha256`) second —
+    /// must have its guessed packet ignored, not consumed as the negotiated key.
+    #[test]
+    fn wrong_guess_for_unknown_kex_is_ignored() {
+        let buf = build_kexinit(
+            &[
+                "sntrup761x25519-sha512",
+                "mlkem768x25519-sha256",
+                "curve25519-sha256",
+            ],
+            true,
+        );
+        let names =
+            Server::read_kex(&buf, &Preferred::DEFAULT, None, &KexCause::Initial).unwrap();
+        assert_eq!(names.kex, kex::MLKEM768X25519_SHA256);
+        assert!(names.ignore_guessed, "wrong guess must be ignored");
+    }
+
+    /// A correct guess (client's first == server's first) must NOT be ignored.
+    #[test]
+    fn correct_guess_is_not_ignored() {
+        let buf = build_kexinit(&["mlkem768x25519-sha256", "curve25519-sha256"], true);
+        let names =
+            Server::read_kex(&buf, &Preferred::DEFAULT, None, &KexCause::Initial).unwrap();
+        assert!(!names.ignore_guessed, "correct guess must be honored");
+    }
 }
