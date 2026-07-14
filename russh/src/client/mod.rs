@@ -130,6 +130,14 @@ enum Reply {
         instructions: String,
         prompts: Vec<Prompt>,
     },
+    AuthGssapiResponse {
+        selected_mechanism: Vec<u8>,
+        mic_data: Vec<u8>,
+    },
+    AuthGssapiToken {
+        token: Vec<u8>,
+        mic_data: Vec<u8>,
+    },
 }
 
 #[derive(Debug)]
@@ -141,6 +149,16 @@ pub enum Msg {
     },
     AuthInfoResponse {
         responses: Vec<String>,
+    },
+    AuthGssapiToken {
+        token: Vec<u8>,
+    },
+    AuthGssapiMic {
+        token: Option<Vec<u8>>,
+        mic: Vec<u8>,
+    },
+    AuthGssapiExchangeComplete {
+        token: Option<Vec<u8>>,
     },
     Signed {
         data: Vec<u8>,
@@ -517,6 +535,86 @@ impl<H: Handler> Handle<H> {
                 _ => {}
             }
         }
+    }
+
+    /// Authenticate using GSSAPI with MIC (RFC 4462).
+    ///
+    /// `mechanism_oids` contains DER-encoded GSSAPI mechanism OIDs advertised to
+    /// the server. The provided authenticator owns the platform- or
+    /// application-specific GSSAPI implementation and returns continuation
+    /// tokens and, once complete, the MIC over russh's SSH userauth data.
+    pub async fn authenticate_gssapi_with_mic<U: Into<String>, G: auth::GssapiAuthenticator>(
+        &mut self,
+        user: U,
+        mechanism_oids: Vec<Vec<u8>>,
+        authenticator: &mut G,
+    ) -> Result<AuthResult, G::Error> {
+        let user = user.into();
+        if self
+            .sender
+            .send(Msg::Authenticate {
+                user,
+                method: auth::Method::GssapiWithMic { mechanism_oids },
+            })
+            .await
+            .is_err()
+        {
+            return Err((crate::SendError {}).into());
+        }
+        loop {
+            let reply = self.receiver.recv().await;
+            match reply {
+                Some(Reply::AuthSuccess) => return Ok(AuthResult::Success),
+                Some(Reply::AuthFailure {
+                    proceed_with_methods: remaining_methods,
+                    partial_success,
+                }) => {
+                    return Ok(AuthResult::Failure {
+                        remaining_methods,
+                        partial_success,
+                    });
+                }
+                Some(Reply::AuthGssapiResponse {
+                    selected_mechanism,
+                    mic_data,
+                }) => {
+                    let step = authenticator
+                        .gssapi_step(selected_mechanism, None, mic_data)
+                        .await?;
+                    self.send_gssapi_step(step).await?;
+                }
+                Some(Reply::AuthGssapiToken { token, mic_data }) => {
+                    let step = authenticator
+                        .gssapi_step(Vec::new(), Some(token), mic_data)
+                        .await?;
+                    self.send_gssapi_step(step).await?;
+                }
+                None => {
+                    return Ok(AuthResult::Failure {
+                        remaining_methods: MethodSet::empty(),
+                        partial_success: false,
+                    });
+                }
+                _ => {}
+            }
+        }
+    }
+
+    async fn send_gssapi_step(&mut self, step: auth::GssapiStep) -> Result<(), crate::SendError> {
+        let msg = match step {
+            auth::GssapiStep::Continue { token } => Msg::AuthGssapiToken { token },
+            auth::GssapiStep::Complete {
+                token,
+                mic: Some(mic),
+            } => Msg::AuthGssapiMic { token, mic },
+            auth::GssapiStep::Complete { token, mic: None } => {
+                Msg::AuthGssapiExchangeComplete { token }
+            }
+        };
+        self.sender
+            .send(msg)
+            .await
+            .map_err(|_| crate::SendError {})
     }
 
     /// Authenticate using a certificate with a custom signer that implements the
@@ -1342,6 +1440,21 @@ impl Session {
             }
             Msg::Signed { .. } => {}
             Msg::AuthInfoResponse { .. } => {}
+            Msg::AuthGssapiToken { token } => {
+                if let Some(ref mut enc) = self.common.encrypted {
+                    enc.client_send_gssapi_token(&token)?;
+                }
+            }
+            Msg::AuthGssapiMic { token, mic } => {
+                if let Some(ref mut enc) = self.common.encrypted {
+                    enc.client_send_gssapi_mic(token.as_deref(), &mic)?;
+                }
+            }
+            Msg::AuthGssapiExchangeComplete { token } => {
+                if let Some(ref mut enc) = self.common.encrypted {
+                    enc.client_send_gssapi_exchange_complete(token.as_deref())?;
+                }
+            }
             Msg::ChannelOpenSession { channel_ref } => {
                 let id = self.channel_open_session()?;
                 self.channels.insert(id, channel_ref);

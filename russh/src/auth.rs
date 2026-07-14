@@ -33,6 +33,7 @@ pub enum MethodKind {
     PublicKey,
     HostBased,
     KeyboardInteractive,
+    GssapiWithMic,
 }
 
 impl From<&MethodKind> for &'static str {
@@ -43,6 +44,7 @@ impl From<&MethodKind> for &'static str {
             MethodKind::PublicKey => "publickey",
             MethodKind::HostBased => "hostbased",
             MethodKind::KeyboardInteractive => "keyboard-interactive",
+            MethodKind::GssapiWithMic => "gssapi-with-mic",
         }
     }
 }
@@ -55,6 +57,7 @@ impl FromStr for MethodKind {
             "publickey" => Ok(MethodKind::PublicKey),
             "hostbased" => Ok(MethodKind::HostBased),
             "keyboard-interactive" => Ok(MethodKind::KeyboardInteractive),
+            "gssapi-with-mic" => Ok(MethodKind::GssapiWithMic),
             _ => Err(()),
         }
     }
@@ -119,6 +122,7 @@ impl MethodSet {
             MethodKind::PublicKey,
             MethodKind::HostBased,
             MethodKind::KeyboardInteractive,
+            MethodKind::GssapiWithMic,
         ])
     }
 
@@ -162,6 +166,29 @@ pub trait Signer: Sized {
         hash_alg: Option<HashAlg>,
         to_sign: Vec<u8>,
     ) -> impl Future<Output = Result<Vec<u8>, Self::Error>> + Send;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GssapiStep {
+    Continue {
+        token: Vec<u8>,
+    },
+    Complete {
+        token: Option<Vec<u8>>,
+        mic: Option<Vec<u8>>,
+    },
+}
+
+#[cfg_attr(feature = "async-trait", async_trait::async_trait)]
+pub trait GssapiAuthenticator: Sized {
+    type Error: From<crate::SendError>;
+
+    fn gssapi_step(
+        &mut self,
+        selected_mechanism: Vec<u8>,
+        input_token: Option<Vec<u8>>,
+        mic_data: Vec<u8>,
+    ) -> impl Future<Output = Result<GssapiStep, Self::Error>> + Send;
 }
 
 #[derive(Debug, Error)]
@@ -220,6 +247,9 @@ pub enum Method {
     KeyboardInteractive {
         submethods: String,
     },
+    GssapiWithMic {
+        mechanism_oids: Vec<Vec<u8>>,
+    },
     // Hostbased,
 }
 
@@ -258,6 +288,7 @@ pub enum CurrentRequest {
         #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
         submethods: String,
     },
+    GssapiWithMic,
 }
 
 impl AuthRequest {
@@ -281,6 +312,14 @@ impl AuthRequest {
                 current: Some(CurrentRequest::KeyboardInteractive {
                     submethods: submethods.to_string(),
                 }),
+                principal: None,
+                rejection_count: 0,
+            },
+            Method::GssapiWithMic { .. } => Self {
+                initial_methods: MethodSet::all(),
+                methods: MethodSet::all(),
+                partial_success: false,
+                current: Some(CurrentRequest::GssapiWithMic),
                 principal: None,
                 rejection_count: 0,
             },
