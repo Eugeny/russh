@@ -131,7 +131,7 @@ impl server::Handler for TestServer {
         reply: server::ChannelOpenHandle,
         _session: &mut server::Session,
     ) -> Result<(), Self::Error> {
-        reply.accept();
+        reply.accept().await;
         Ok(())
     }
 

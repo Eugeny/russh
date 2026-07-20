@@ -130,7 +130,7 @@ impl russh::server::Handler for Server {
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
         let mut rx = self.rx.take().unwrap();
-        reply.accept();
+        reply.accept().await;
         tokio::spawn(async move {
             while let Ok(_) = rx.changed().await {
                 match channel.wait().await {

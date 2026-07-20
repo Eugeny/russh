@@ -166,7 +166,7 @@ impl Handler for AppServer {
         let mut clients = self.clients.lock().await;
         clients.insert(self.id, terminal);
 
-        reply.accept();
+        reply.accept().await;
         Ok(())
     }
 

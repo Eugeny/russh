@@ -120,7 +120,7 @@ mod compress {
                 let mut clients = self.clients.lock().unwrap();
                 clients.insert((self.id, channel.id()), session.handle());
             }
-            reply.accept();
+            reply.accept().await;
             Ok(())
         }
         async fn auth_publickey(
@@ -375,7 +375,7 @@ mod channels {
                     println!("channel open session {a:?}");
                     a.send(channel).unwrap();
                 }
-                reply.accept();
+                reply.accept().await;
                 Ok(())
             }
         }
@@ -457,7 +457,7 @@ mod channels {
                 reply: server::ChannelOpenHandle,
                 _session: &mut Session,
             ) -> Result<(), Self::Error> {
-                reply.accept();
+                reply.accept().await;
                 tokio::spawn(async move {
                     while let Some(msg) = channel.wait().await {
                         match msg {
@@ -546,7 +546,7 @@ mod channels {
                 if let Some(tx) = self.channel.take() {
                     tx.send(channel).unwrap();
                 }
-                reply.accept();
+                reply.accept().await;
                 Ok(())
             }
         }
@@ -629,7 +629,7 @@ mod channels {
                     println!("channel open session {a:?}");
                     a.send(channel).unwrap();
                 }
-                reply.accept();
+                reply.accept().await;
                 Ok(())
             }
         }
@@ -841,16 +841,15 @@ pub(crate) mod raw_no_crypto {
             let server_events = events.clone();
             let server_task = tokio::spawn(async move {
                 let (socket, _) = listener.accept().await.unwrap();
-                let running =
-                    server::run_stream(
-                        no_crypto_server_config(),
-                        socket,
-                        MalformedInputServer {
-                            events: server_events,
-                        },
-                    )
-                    .await
-                    .unwrap();
+                let running = server::run_stream(
+                    no_crypto_server_config(),
+                    socket,
+                    MalformedInputServer {
+                        events: server_events,
+                    },
+                )
+                .await
+                .unwrap();
                 running.await
             });
 
@@ -1114,7 +1113,11 @@ pub(crate) mod raw_no_crypto {
                 Ok(ServerSignal::Closed { .. } | ServerSignal::ProtocolError { .. })
             ),
             "{message}: {result:?}; handler events: {:?}",
-            result.as_ref().ok().map(ServerSignal::events).unwrap_or(&[])
+            result
+                .as_ref()
+                .ok()
+                .map(ServerSignal::events)
+                .unwrap_or(&[])
         );
     }
 
@@ -1156,7 +1159,7 @@ pub(crate) mod raw_no_crypto {
             _session: &mut server::Session,
         ) -> Result<(), Self::Error> {
             self.record("channel_open_session");
-            reply.accept();
+            reply.accept().await;
             Ok(())
         }
 
@@ -1215,18 +1218,14 @@ mod future_certificate {
     use std::process::Stdio;
     use std::sync::Arc;
 
-    use ssh_key::{certificate, PrivateKey};
+    use ssh_key::{PrivateKey, certificate};
 
     use crate::keys::agent::client::AgentClient;
-    use crate::{client, server};
     use crate::server::Session;
+    use crate::{client, server};
 
     /// Helper to spawn an ssh-agent
-    async fn spawn_agent() -> (
-        tokio::process::Child,
-        std::path::PathBuf,
-        tempfile::TempDir,
-    ) {
+    async fn spawn_agent() -> (tokio::process::Child, std::path::PathBuf, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let agent_path = dir.path().join("agent");
         let agent = tokio::process::Command::new("ssh-agent")
@@ -1358,7 +1357,10 @@ mod future_certificate {
                     if cert.key_id() == "test-user-cert" {
                         Ok(server::Auth::Accept)
                     } else {
-                        Ok(server::Auth::Reject { proceed_with_methods: None, partial_success: false })
+                        Ok(server::Auth::Reject {
+                            proceed_with_methods: None,
+                            partial_success: false,
+                        })
                     }
                 }
 
@@ -1409,10 +1411,16 @@ mod future_certificate {
             .unwrap();
 
         // 7. Verify authentication succeeded
-        assert!(auth_result.success(), "Certificate authentication should succeed");
+        assert!(
+            auth_result.success(),
+            "Certificate authentication should succeed"
+        );
 
         // Clean up
-        session.disconnect(crate::Disconnect::ByApplication, "", "").await.unwrap();
+        session
+            .disconnect(crate::Disconnect::ByApplication, "", "")
+            .await
+            .unwrap();
         drop(session);
         server_join.abort();
         agent.kill().await.unwrap();

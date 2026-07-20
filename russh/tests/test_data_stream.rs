@@ -198,7 +198,7 @@ impl russh::server::Handler for Server {
         reply: server::ChannelOpenHandle,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
-        reply.accept();
+        reply.accept().await;
         tokio::spawn(async move {
             let (mut writer, mut reader) =
                 (channel.make_writer(), channel.make_reader_ext(Some(1)));

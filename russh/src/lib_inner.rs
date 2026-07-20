@@ -575,14 +575,14 @@ impl<M: Send> ChannelOpenHandleInner<M> {
     }
 
     /// Accept the channel open request.
-    pub fn accept(mut self) {
+    pub async fn accept(mut self) {
         if let Some(pending) = self.inner.take() {
             let _ = self.sender.send((self.make_msg)(pending, Ok(())));
         }
     }
 
     /// Reject the channel open request with a reason.
-    pub fn reject(mut self, reason: ChannelOpenFailure) {
+    pub async fn reject(mut self, reason: ChannelOpenFailure) {
         if let Some(pending) = self.inner.take() {
             let _ = self.sender.send((self.make_msg)(pending, Err(reason)));
         }

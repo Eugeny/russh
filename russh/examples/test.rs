@@ -59,7 +59,7 @@ impl server::Handler for Server {
             let mut clients = self.clients.lock().unwrap();
             clients.insert((self.id, channel.id()), channel);
         }
-        reply.accept();
+        reply.accept().await;
         Ok(())
     }
 

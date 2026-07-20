@@ -2286,8 +2286,10 @@ pub trait Handler: Sized + Send {
         reply: ChannelOpenHandle,
         session: &mut Session,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        reply.accept();
-        async move { Ok(()) }
+        async move {
+            reply.accept().await;
+            Ok(())
+        }
     }
 
     /// Called when the server opens a channel for a new remote UDS forwarding connection.
@@ -2303,8 +2305,10 @@ pub trait Handler: Sized + Send {
         reply: ChannelOpenHandle,
         session: &mut Session,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        reply.accept();
-        async move { Ok(()) }
+        async move {
+            reply.accept().await;
+            Ok(())
+        }
     }
 
     /// Called when the server opens an agent forwarding channel.
@@ -2319,8 +2323,10 @@ pub trait Handler: Sized + Send {
         reply: ChannelOpenHandle,
         session: &mut Session,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        reply.accept();
-        async move { Ok(()) }
+        async move {
+            reply.accept().await;
+            Ok(())
+        }
     }
 
     /// Called when the server attempts to open a channel of unknown type. It may return `true`,
@@ -2365,8 +2371,10 @@ pub trait Handler: Sized + Send {
         reply: ChannelOpenHandle,
         session: &mut Session,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        reply.accept();
-        async move { Ok(()) }
+        async move {
+            reply.accept().await;
+            Ok(())
+        }
     }
 
     /// Called when the server opens a direct tcp/ip channel (non-standard).
@@ -2386,8 +2394,10 @@ pub trait Handler: Sized + Send {
         reply: ChannelOpenHandle,
         session: &mut Session,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        reply.accept();
-        async move { Ok(()) }
+        async move {
+            reply.accept().await;
+            Ok(())
+        }
     }
 
     /// Called when the server opens a direct-streamlocal channel (non-standard).
@@ -2403,8 +2413,10 @@ pub trait Handler: Sized + Send {
         reply: ChannelOpenHandle,
         session: &mut Session,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        reply.accept();
-        async move { Ok(()) }
+        async move {
+            reply.accept().await;
+            Ok(())
+        }
     }
 
     /// Called when the server opens an X11 channel.
@@ -2421,8 +2433,10 @@ pub trait Handler: Sized + Send {
         reply: ChannelOpenHandle,
         session: &mut Session,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        reply.accept();
-        async move { Ok(()) }
+        async move {
+            reply.accept().await;
+            Ok(())
+        }
     }
 
     /// Called when the server sends us data. The `extended_code`
