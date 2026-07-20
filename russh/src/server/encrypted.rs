@@ -150,10 +150,9 @@ mod tests {
     use std::num::Wrapping;
     use std::sync::Arc;
 
-    use bytes::BytesMut;
     use crate::compression::{Compression, Decompress};
     use crate::helpers::sign_with_hash_alg;
-    use crate::kex::{SessionKexState, KEXES, NONE as KEX_NONE};
+    use crate::kex::{KEXES, NONE as KEX_NONE, SessionKexState};
     use crate::keys::PrivateKeyWithHashAlg;
     use crate::tests::raw_no_crypto::{
         MSG_SERVICE_REQUEST, MSG_USERAUTH_FAILURE, MSG_USERAUTH_REQUEST, RawSession,
@@ -161,6 +160,7 @@ mod tests {
         raw_auth_request_signal, raw_channel_request_signal, raw_service_request_signal,
         read_packet, timeout,
     };
+    use bytes::BytesMut;
 
     #[tokio::test]
     async fn malformed_pty_req_truncated_modes_rejected_by_server() {
@@ -372,11 +372,17 @@ mod tests {
 
         let probe = publickey_probe_packet("alice", &pk_ok_key);
         let mut probe = BytesMut::from(probe.as_slice());
-        session.process_packet(&mut handler, &mut probe).await.unwrap();
+        session
+            .process_packet(&mut handler, &mut probe)
+            .await
+            .unwrap();
 
         let signed = publickey_signed_packet("alice", Arc::new(signed_private), &signed_key);
         let mut signed = BytesMut::from(signed.as_slice());
-        session.process_packet(&mut handler, &mut signed).await.unwrap();
+        session
+            .process_packet(&mut handler, &mut signed)
+            .await
+            .unwrap();
 
         assert!(
             !handler.final_auth_reached_for_signed_key,
@@ -429,8 +435,10 @@ mod tests {
             compression: Cow::Owned(vec![compression::NONE]),
         };
         let config = Arc::new(config);
+        let (priority_sender, priority_receiver) = tokio::sync::mpsc::unbounded_channel();
         let (sender, receiver) = tokio::sync::mpsc::channel(1);
         let handle = Handle {
+            priority_sender,
             sender,
             channel_buffer_size: config.channel_buffer_size,
         };
@@ -453,6 +461,7 @@ mod tests {
                 received_data: false,
                 remote_sshid: Vec::new(),
             },
+            priority_receiver,
             receiver,
             sender: handle,
             pending_reads: Vec::new(),
@@ -978,9 +987,7 @@ impl Session {
         r: &mut R,
     ) -> Result<(), H::Error> {
         match msg {
-            msg::CHANNEL_OPEN => self
-                .server_handle_channel_open(handler, r)
-                .await,
+            msg::CHANNEL_OPEN => self.server_handle_channel_open(handler, r).await,
             msg::CHANNEL_CLOSE => {
                 let channel_num = map_err!(ChannelId::decode(r))?;
                 map_err!(ensure_end(r))?;
@@ -1588,15 +1595,13 @@ impl Session {
             channel_params,
         };
         let reply = ChannelOpenHandle::new(
-            self.sender.sender.clone(),
+            self.sender.priority_sender.clone(),
             pending,
             |pending, result| Msg::ChannelOpenReply { pending, result },
         );
 
         match &msg.typ {
-            ChannelType::Session => {
-                handler.channel_open_session(channel, reply, self).await
-            }
+            ChannelType::Session => handler.channel_open_session(channel, reply, self).await,
             ChannelType::X11 {
                 originator_address,
                 originator_port,

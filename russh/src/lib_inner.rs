@@ -556,14 +556,14 @@ pub struct PendingChannelOpen {
 /// [`reject`](ChannelOpenHandle::reject) automatically sends an
 /// `AdministrativelyProhibited` rejection.
 pub struct ChannelOpenHandleInner<M: Send> {
-    sender: tokio::sync::mpsc::Sender<M>,
+    sender: tokio::sync::mpsc::UnboundedSender<M>,
     inner: Option<PendingChannelOpen>,
     make_msg: fn(PendingChannelOpen, Result<(), ChannelOpenFailure>) -> M,
 }
 
 impl<M: Send> ChannelOpenHandleInner<M> {
     pub(crate) fn new(
-        sender: tokio::sync::mpsc::Sender<M>,
+        sender: tokio::sync::mpsc::UnboundedSender<M>,
         pending: PendingChannelOpen,
         make_msg: fn(PendingChannelOpen, Result<(), ChannelOpenFailure>) -> M,
     ) -> Self {
@@ -574,32 +574,28 @@ impl<M: Send> ChannelOpenHandleInner<M> {
         }
     }
 
-    fn try_send_reply(&mut self, result: Result<(), ChannelOpenFailure>) {
-        if let Some(pending) = self.inner.take() {
-            let _ = self.sender.try_send((self.make_msg)(pending, result));
-        }
-    }
-
     /// Accept the channel open request.
     pub async fn accept(mut self) {
         if let Some(pending) = self.inner.take() {
-            let _ = self.sender.send((self.make_msg)(pending, Ok(()))).await;
+            let _ = self.sender.send((self.make_msg)(pending, Ok(())));
         }
     }
 
     /// Reject the channel open request with a reason.
     pub async fn reject(mut self, reason: ChannelOpenFailure) {
         if let Some(pending) = self.inner.take() {
-            let _ = self
-                .sender
-                .send((self.make_msg)(pending, Err(reason)))
-                .await;
+            let _ = self.sender.send((self.make_msg)(pending, Err(reason)));
         }
     }
 }
 
 impl<M: Send> Drop for ChannelOpenHandleInner<M> {
     fn drop(&mut self) {
-        self.try_send_reply(Err(ChannelOpenFailure::AdministrativelyProhibited));
+        if let Some(pending) = self.inner.take() {
+            let _ = self.sender.send((self.make_msg)(
+                pending,
+                Err(ChannelOpenFailure::AdministrativelyProhibited),
+            ));
+        }
     }
 }
