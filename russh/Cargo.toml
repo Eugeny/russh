@@ -137,7 +137,7 @@ ratatui = "0.30"
 tempfile = "3.14.0"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-russh-sftp = "2.1.0"
+russh-sftp = "2.3.0"
 tokio.workspace = true
 tokio-stream.workspace = true
 
