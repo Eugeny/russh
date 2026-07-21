@@ -9,7 +9,7 @@ license = "Apache-2.0"
 name = "russh"
 readme = "../README.md"
 repository = "https://github.com/warp-tech/russh"
-version = "0.62.2"
+version = "0.62.3"
 rust-version = "1.85"
 
 [features]
@@ -38,7 +38,7 @@ bytes.workspace = true
 cbc = { version = "0.2" }
 cipher = "0.5.1" # only pinned due to a cargo-minimal-versions failure in 0.5.0
 ctr = "0.10"
-curve25519-dalek = "=5.0.0-rc.1"
+curve25519-dalek = "5"
 crypto-bigint = { version = "0.7.3", features = ["alloc"] }
 data-encoding = "2.3"
 delegate.workspace = true
@@ -46,7 +46,7 @@ digest.workspace = true
 der = "0.8"
 des = { version = "0.9", optional = true }
 ecdsa = "0.17"
-ed25519-dalek = { version = "=3.0.0-rc.1", features = ["alloc", "rand_core", "pkcs8"] }
+ed25519-dalek = { version = "3", features = ["alloc", "rand_core", "pkcs8"] }
 elliptic-curve = { version = "0.14", features = ["ecdh"] }
 enum_dispatch = "0.3.13"
 flate2 = { version = "1.0.15", optional = true }
@@ -68,9 +68,9 @@ module-lattice = "0.2"
 num-bigint = { package = "internal-russh-num-bigint", version = "=0.5.0", features = ["rand_0_10"] }
 num_bigint_0_4 = { package = "num-bigint", version = "0.4.6" }
 # num-integer = "0.1"
-p256 = { version = "=0.14.0-rc.15", features = ["ecdh"] }
-p384 = { version = "=0.14.0-rc.15", features = ["ecdh"] }
-p521 = { version = "=0.14.0-rc.15", features = ["ecdh"] }
+p256 = { version = "0.14", features = ["ecdh"] }
+p384 = { version = "0.14", features = ["ecdh"] }
+p521 = { version = "0.14", features = ["ecdh"] }
 pbkdf2 = "0.13"
 pkcs1 = { version = "=0.8.0-rc.4", optional = true }
 pkcs5 = "0.8"
@@ -89,7 +89,7 @@ scrypt = "0.12.0"
 sec1 = { version = "0.8", features = ["der"] }
 sha1.workspace = true
 sha2.workspace = true
-sha3 = "0.11.0"
+sha3 = "0.12.0"
 signature.workspace = true
 spki = "0.8"
 ssh-encoding.workspace = true
@@ -137,7 +137,7 @@ ratatui = "0.30"
 tempfile = "3.14.0"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-russh-sftp = "2.1.0"
+russh-sftp = "2.3.0"
 tokio.workspace = true
 tokio-stream.workspace = true
 
