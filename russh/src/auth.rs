@@ -207,6 +207,10 @@ pub enum Method {
         key: Arc<PrivateKey>,
         cert: Certificate,
     },
+    OpenSshCertificateWithHashAlg {
+        key: PrivateKeyWithHashAlg,
+        cert: Certificate,
+    },
     FuturePublicKey {
         key: ssh_key::PublicKey,
         hash_alg: Option<HashAlg>,
