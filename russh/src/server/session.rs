@@ -733,6 +733,13 @@ impl Session {
                     }
                     reading.set(start_reading(stream_read, buffer, opening_cipher));
                 }
+                t = handler.trigger() => {
+                    debug!("handler trigger is invoked");
+                    match t {
+                        Ok(d) => handler.process(d,&mut self).await?,
+                        Err(e) => return Err(e)
+                    }
+                }
                 () = &mut keepalive_timer => {
                     self.common.alive_timeouts = self.common.alive_timeouts.saturating_add(1);
                     if self.common.config.keepalive_max != 0 && self.common.alive_timeouts > self.common.config.keepalive_max {
@@ -1485,6 +1492,7 @@ mod tests {
 
     impl crate::server::Handler for TestHandler {
         type Error = crate::Error;
+        type Data = ();
     }
 
     fn authenticated_session() -> Session {
