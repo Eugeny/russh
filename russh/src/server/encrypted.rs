@@ -1154,12 +1154,14 @@ impl Session {
                                 #[allow(clippy::indexing_slicing)] // length checked
                                 let num = BigEndian::read_u32(&mode_bytes[1..5]);
                                 debug!("code = {code:?}");
+                                if i >= modes.len() {
+                                    error!("pty-req: too many pty codes");
+                                    return Err(Error::Inconsistent.into());
+                                }
                                 if let Some(code) = Pty::from_u8(code) {
-                                    #[allow(clippy::indexing_slicing)] // length checked
-                                    if i < 130 {
+                                    #[allow(clippy::indexing_slicing)] // i < modes.len() checked above
+                                    {
                                         modes[i] = (code, num);
-                                    } else {
-                                        error!("pty-req: too many pty codes");
                                     }
                                 } else {
                                     info!("pty-req: unknown pty code {code:?}");
