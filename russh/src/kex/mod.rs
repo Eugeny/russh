@@ -478,6 +478,10 @@ pub(crate) fn encode_mpint<W: Writer>(s: &[u8], w: &mut W) -> Result<(), Error> 
     while i < s.len() && s[i] == 0 {
         i += 1
     }
+    if i == s.len() {
+        0u32.encode(w)?;
+        return Ok(());
+    }
     // If the first non-zero is >= 128, write its length (u32, BE), followed by 0.
     if s[i] & 0x80 != 0 {
         ((s.len() - i + 1) as u32).encode(w)?;
@@ -487,4 +491,20 @@ pub(crate) fn encode_mpint<W: Writer>(s: &[u8], w: &mut W) -> Result<(), Error> 
     }
     w.write(&s[i..])?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::encode_mpint;
+    use crate::CryptoVec;
+
+    // Regression: an all-zero shared secret (attacker-controlled all-zero
+    // Curve25519 point) used to index s[s.len()] and panic. RFC 4251 §5: the
+    // mpint 0 encodes as a zero-length string (4-byte length prefix, no body).
+    #[test]
+    fn encode_mpint_all_zero_is_empty_mpint() {
+        let mut w = CryptoVec::new();
+        encode_mpint(&[0u8; 32], &mut w).unwrap();
+        assert_eq!(&w[..], &[0, 0, 0, 0]);
+    }
 }
