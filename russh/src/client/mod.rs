@@ -445,6 +445,27 @@ impl<H: Handler> Handle<H> {
         self.wait_recv_reply().await
     }
 
+    /// Perform public key-based SSH authentication without first probing
+    /// whether the server accepts the key.
+    ///
+    /// This sends the signed authentication request directly. It can be used
+    /// with servers that reject the optional unsigned public key probe.
+    pub async fn authenticate_publickey_direct<U: Into<String>>(
+        &mut self,
+        user: U,
+        key: PrivateKeyWithHashAlg,
+    ) -> Result<AuthResult, crate::Error> {
+        let user = user.into();
+        self.sender
+            .send(Msg::Authenticate {
+                user,
+                method: auth::Method::PublicKeyDirect { key },
+            })
+            .await
+            .map_err(|_| crate::Error::SendError)?;
+        self.wait_recv_reply().await
+    }
+
     /// Perform public OpenSSH Certificate-based SSH authentication
     pub async fn authenticate_openssh_cert<U: Into<String>>(
         &mut self,
