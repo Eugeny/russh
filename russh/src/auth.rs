@@ -203,6 +203,9 @@ pub enum Method {
     PublicKey {
         key: PrivateKeyWithHashAlg,
     },
+    PublicKeyDirect {
+        key: PrivateKeyWithHashAlg,
+    },
     OpenSshCertificate {
         key: Arc<PrivateKey>,
         cert: Certificate,
