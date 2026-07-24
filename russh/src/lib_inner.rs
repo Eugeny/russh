@@ -32,6 +32,7 @@ mod ssh_read;
 mod sshbuffer;
 
 pub use negotiation::{Names, Preferred};
+pub use auth::{GssapiAuthenticator, GssapiStep};
 
 mod pty;
 

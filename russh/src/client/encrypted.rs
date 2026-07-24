@@ -145,7 +145,24 @@ impl Session {
                             }
                         }
                         Some((&msg::USERAUTH_INFO_REQUEST_OR_USERAUTH_PK_OK, mut r)) => {
-                            if let Some(auth::CurrentRequest::PublicKey {
+                            if let Some(auth::CurrentRequest::GssapiWithMic) =
+                                auth_request.current
+                            {
+                                debug!("userauth_gssapi_response");
+                                let selected_mechanism = map_err!(Bytes::decode(&mut r))?.to_vec();
+                                map_err!(ensure_end(&r))?;
+                                let mic_data = enc.client_make_gssapi_mic_data(
+                                    &self.common.auth_user,
+                                    &mut self.common.buffer,
+                                )?;
+                                self.sender
+                                    .send(Reply::AuthGssapiResponse {
+                                        selected_mechanism,
+                                        mic_data,
+                                    })
+                                    .map_err(|_| crate::Error::SendError)?;
+                                return Ok(());
+                            } else if let Some(auth::CurrentRequest::PublicKey {
                                 ref mut sent_pk_ok,
                                 ..
                             }) = auth_request.current
@@ -297,6 +314,51 @@ impl Session {
                                 }
                                 _ => {}
                             }
+                        }
+                        Some((&msg::USERAUTH_GSSAPI_TOKEN, mut r)) => {
+                            if let Some(auth::CurrentRequest::GssapiWithMic) =
+                                auth_request.current
+                            {
+                                debug!("userauth_gssapi_token");
+                                let token = map_err!(Bytes::decode(&mut r))?.to_vec();
+                                map_err!(ensure_end(&r))?;
+                                let mic_data = enc.client_make_gssapi_mic_data(
+                                    &self.common.auth_user,
+                                    &mut self.common.buffer,
+                                )?;
+                                self.sender
+                                    .send(Reply::AuthGssapiToken { token, mic_data })
+                                    .map_err(|_| crate::Error::SendError)?;
+                                return Ok(());
+                            }
+                            return Err(crate::Error::Inconsistent.into());
+                        }
+                        Some((&msg::USERAUTH_GSSAPI_ERROR, mut r)) => {
+                            if let Some(auth::CurrentRequest::GssapiWithMic) =
+                                auth_request.current
+                            {
+                                let major_status = map_err!(u32::decode(&mut r))?;
+                                let minor_status = map_err!(u32::decode(&mut r))?;
+                                let message = map_err!(String::decode(&mut r))?;
+                                let _language_tag = map_err!(String::decode(&mut r))?;
+                                map_err!(ensure_end(&r))?;
+                                debug!(
+                                    "userauth_gssapi_error major={major_status} minor={minor_status}: {message}"
+                                );
+                                return Ok(());
+                            }
+                            return Err(crate::Error::Inconsistent.into());
+                        }
+                        Some((&msg::USERAUTH_GSSAPI_ERRTOK, mut r)) => {
+                            if let Some(auth::CurrentRequest::GssapiWithMic) =
+                                auth_request.current
+                            {
+                                let _token = map_err!(Bytes::decode(&mut r))?;
+                                map_err!(ensure_end(&r))?;
+                                debug!("userauth_gssapi_errtok");
+                                return Ok(());
+                            }
+                            return Err(crate::Error::Inconsistent.into());
                         }
                         Some((&msg::EXT_INFO, mut r)) => {
                             return self.handle_ext_info(&mut r).map_err(Into::into);
@@ -936,6 +998,160 @@ impl Session {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::num::Wrapping;
+
+    use byteorder::{BigEndian, ByteOrder};
+    use ssh_encoding::{Decode, Encode};
+
+    use super::*;
+    use crate::compression::{Compression, Decompress};
+    use crate::kex::{KEXES, NONE};
+    use crate::session::Exchange;
+    use crate::{CryptoVec, MethodKind};
+
+    fn test_encrypted() -> Encrypted {
+        Encrypted {
+            state: EncryptedState::Authenticated,
+            exchange: Some(Exchange::default()),
+            kex: KEXES.get(&NONE).unwrap().make(),
+            key: 0,
+            client_mac: crate::mac::NONE,
+            server_mac: crate::mac::NONE,
+            session_id: CryptoVec::from(&b"session-id"[..]),
+            channels: HashMap::new(),
+            last_channel_id: Wrapping(0),
+            write: Vec::new(),
+            write_cursor: 0,
+            last_rekey: russh_util::time::Instant::now(),
+            server_compression: Compression::None,
+            client_compression: Compression::None,
+            decompress: Decompress::None,
+            rekey_wanted: false,
+            received_extensions: Vec::new(),
+            extension_info_awaiters: HashMap::new(),
+        }
+    }
+
+    fn payloads(buf: &[u8]) -> Vec<&[u8]> {
+        let mut payloads = Vec::new();
+        let mut cursor = 0;
+        while cursor < buf.len() {
+            let packet_len = BigEndian::read_u32(&buf[cursor..cursor + 4]) as usize;
+            let payload_start = cursor + 4;
+            let payload_end = payload_start + packet_len;
+            payloads.push(&buf[payload_start..payload_end]);
+            cursor = payload_end;
+        }
+        payloads
+    }
+
+    #[test]
+    fn method_kind_parses_gssapi_with_mic() {
+        assert_eq!(
+            "gssapi-with-mic".parse::<MethodKind>(),
+            Ok(MethodKind::GssapiWithMic)
+        );
+        assert_eq!(<&str>::from(&MethodKind::GssapiWithMic), "gssapi-with-mic");
+    }
+
+    #[test]
+    fn write_auth_request_encodes_gssapi_with_mic() {
+        let krb5_oid = b"\x06\x09\x2a\x86\x48\x86\xf7\x12\x01\x02\x02".to_vec();
+        let mut encrypted = test_encrypted();
+        let wrote = encrypted
+            .write_auth_request(
+                "alice",
+                &auth::Method::GssapiWithMic {
+                    mechanism_oids: vec![krb5_oid.clone()],
+                },
+            )
+            .unwrap();
+        assert!(wrote);
+
+        let payloads = payloads(&encrypted.write);
+        assert_eq!(payloads.len(), 1);
+        let mut r = payloads[0];
+        assert_eq!(u8::decode(&mut r).unwrap(), msg::USERAUTH_REQUEST);
+        assert_eq!(String::decode(&mut r).unwrap(), "alice");
+        assert_eq!(String::decode(&mut r).unwrap(), "ssh-connection");
+        assert_eq!(String::decode(&mut r).unwrap(), "gssapi-with-mic");
+        assert_eq!(u32::decode(&mut r).unwrap(), 1);
+        assert_eq!(Vec::<u8>::decode(&mut r).unwrap(), krb5_oid);
+        ensure_end(&r).unwrap();
+    }
+
+    #[test]
+    fn client_make_gssapi_mic_data_matches_rfc_4462() {
+        let mut encrypted = test_encrypted();
+        let mut got = Vec::new();
+        let mic_data = encrypted
+            .client_make_gssapi_mic_data("alice", &mut got)
+            .unwrap();
+
+        let mut expected = Vec::new();
+        b"session-id".as_slice().encode(&mut expected).unwrap();
+        expected.push(msg::USERAUTH_REQUEST);
+        "alice".encode(&mut expected).unwrap();
+        "ssh-connection".encode(&mut expected).unwrap();
+        "gssapi-with-mic".encode(&mut expected).unwrap();
+        assert_eq!(mic_data, expected);
+        assert_eq!(got, expected);
+    }
+
+    #[test]
+    fn client_send_gssapi_mic_sends_optional_token_before_mic() {
+        let mut encrypted = test_encrypted();
+        encrypted
+            .client_send_gssapi_mic(Some(b"context-token"), b"mic")
+            .unwrap();
+
+        let payloads = payloads(&encrypted.write);
+        assert_eq!(payloads.len(), 2);
+
+        let mut token = payloads[0];
+        assert_eq!(u8::decode(&mut token).unwrap(), msg::USERAUTH_GSSAPI_TOKEN);
+        assert_eq!(
+            Vec::<u8>::decode(&mut token).unwrap(),
+            b"context-token".to_vec()
+        );
+        ensure_end(&token).unwrap();
+
+        let mut mic = payloads[1];
+        assert_eq!(u8::decode(&mut mic).unwrap(), msg::USERAUTH_GSSAPI_MIC);
+        assert_eq!(Vec::<u8>::decode(&mut mic).unwrap(), b"mic".to_vec());
+        ensure_end(&mic).unwrap();
+    }
+
+    #[test]
+    fn client_send_gssapi_exchange_complete_sends_optional_token_first() {
+        let mut encrypted = test_encrypted();
+        encrypted
+            .client_send_gssapi_exchange_complete(Some(b"context-token"))
+            .unwrap();
+
+        let payloads = payloads(&encrypted.write);
+        assert_eq!(payloads.len(), 2);
+
+        let mut token = payloads[0];
+        assert_eq!(u8::decode(&mut token).unwrap(), msg::USERAUTH_GSSAPI_TOKEN);
+        assert_eq!(
+            Vec::<u8>::decode(&mut token).unwrap(),
+            b"context-token".to_vec()
+        );
+        ensure_end(&token).unwrap();
+
+        let mut complete = payloads[1];
+        assert_eq!(
+            u8::decode(&mut complete).unwrap(),
+            msg::USERAUTH_GSSAPI_EXCHANGE_COMPLETE
+        );
+        ensure_end(&complete).unwrap();
+    }
+}
+
 impl Encrypted {
     fn write_auth_request(
         &mut self,
@@ -1020,8 +1236,75 @@ impl Encrypted {
                     submethods.as_bytes().encode(&mut self.write)?;
                     true
                 }
+                auth::Method::GssapiWithMic {
+                    ref mechanism_oids,
+                } => {
+                    user.as_bytes().encode(&mut self.write)?;
+                    "ssh-connection".encode(&mut self.write)?;
+                    "gssapi-with-mic".encode(&mut self.write)?;
+                    (mechanism_oids.len().try_into().unwrap_or(0) as u32)
+                        .encode(&mut self.write)?;
+                    for oid in mechanism_oids {
+                        oid.as_slice().encode(&mut self.write)?;
+                    }
+                    true
+                }
             }
         }))
+    }
+
+    fn client_make_gssapi_mic_data(
+        &mut self,
+        user: &str,
+        buffer: &mut Vec<u8>,
+    ) -> Result<Vec<u8>, crate::Error> {
+        buffer.clear();
+        self.session_id.as_ref().encode(buffer)?;
+        buffer.push(msg::USERAUTH_REQUEST);
+        user.encode(buffer)?;
+        "ssh-connection".encode(buffer)?;
+        "gssapi-with-mic".encode(buffer)?;
+        Ok(buffer.clone())
+    }
+
+    pub(crate) fn client_send_gssapi_token(&mut self, token: &[u8]) -> Result<(), crate::Error> {
+        push_packet!(self.write, {
+            msg::USERAUTH_GSSAPI_TOKEN.encode(&mut self.write)?;
+            token.encode(&mut self.write)?;
+        });
+        Ok(())
+    }
+
+    pub(crate) fn client_send_gssapi_mic(
+        &mut self,
+        token: Option<&[u8]>,
+        mic: &[u8],
+    ) -> Result<(), crate::Error> {
+        if let Some(token) = token
+            && !token.is_empty()
+        {
+            self.client_send_gssapi_token(token)?;
+        }
+        push_packet!(self.write, {
+            msg::USERAUTH_GSSAPI_MIC.encode(&mut self.write)?;
+            mic.encode(&mut self.write)?;
+        });
+        Ok(())
+    }
+
+    pub(crate) fn client_send_gssapi_exchange_complete(
+        &mut self,
+        token: Option<&[u8]>,
+    ) -> Result<(), crate::Error> {
+        if let Some(token) = token
+            && !token.is_empty()
+        {
+            self.client_send_gssapi_token(token)?;
+        }
+        push_packet!(self.write, {
+            msg::USERAUTH_GSSAPI_EXCHANGE_COMPLETE.encode(&mut self.write)?;
+        });
+        Ok(())
     }
 
     fn client_make_to_sign(
