@@ -861,8 +861,8 @@ impl RunningServerHandle {
 }
 
 pub struct RunningServer<F: Future<Output = std::io::Result<()>> + Unpin + Send> {
-    inner: F,
-    shutdown_tx: broadcast::Sender<String>,
+    pub inner: F,
+    pub shutdown_tx: broadcast::Sender<String>,
 }
 
 impl<F: Future<Output = std::io::Result<()>> + Unpin + Send> RunningServer<F> {
