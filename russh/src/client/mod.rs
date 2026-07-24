@@ -95,6 +95,8 @@ pub struct Session {
     target_window_size: u32,
     pending_reads: Vec<Vec<u8>>,
     pending_len: u32,
+    priority_sender: UnboundedSender<Msg>,
+    priority_receiver: UnboundedReceiver<Msg>,
     inbound_channel_sender: Sender<Msg>,
     inbound_channel_receiver: Receiver<Msg>,
     open_global_requests: VecDeque<GlobalRequestResponse>,
@@ -1100,6 +1102,7 @@ impl Session {
         receiver: Receiver<Msg>,
         sender: UnboundedSender<Reply>,
     ) -> Self {
+        let (priority_sender, priority_receiver) = unbounded_channel();
         let (inbound_channel_sender, inbound_channel_receiver) = channel(10);
         Self {
             common,
@@ -1107,6 +1110,8 @@ impl Session {
             sender,
             kex: SessionKexState::Idle,
             target_window_size,
+            priority_sender,
+            priority_receiver,
             inbound_channel_sender,
             inbound_channel_receiver,
             channels: HashMap::new(),
@@ -1134,6 +1139,7 @@ impl Session {
             .await;
         trace!("disconnected");
         self.receiver.close();
+        self.priority_receiver.close();
         self.inbound_channel_receiver.close();
         map_err!(stream_write.shutdown().await)?;
         match result {
@@ -1253,6 +1259,20 @@ impl Session {
                     // eagerly take all outgoing messages so writes are batched
                     while !self.kex.active() {
                         match self.receiver.try_recv() {
+                            Ok(next) => self.handle_msg(next)?,
+                            Err(_) => break
+                        }
+                    }
+                }
+                msg = self.priority_receiver.recv(), if !self.kex.active() => {
+                    match msg {
+                        Some(msg) => self.handle_msg(msg)?,
+                        None => (),
+                    }
+
+                    // eagerly take all outgoing messages so writes are batched
+                    while !self.kex.active() {
+                        match self.priority_receiver.try_recv() {
                             Ok(next) => self.handle_msg(next)?,
                             Err(_) => break
                         }
