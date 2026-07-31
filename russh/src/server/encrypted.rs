@@ -384,6 +384,95 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn channel_request_for_unconfirmed_server_open_does_not_call_handler() {
+        let mut session = test_authenticated_session();
+        let channel = insert_unconfirmed_server_open(&mut session);
+        let mut handler = ChannelCallbackProbe::default();
+
+        let mut packet = channel_request_payload(channel.0, b"exec");
+        encode_string(&mut packet, b"protected");
+        session.process_packet(&mut handler, &packet).await.unwrap();
+
+        assert!(
+            !handler.exec_called,
+            "exec_request was called before server-open channel confirmation"
+        );
+    }
+
+    #[tokio::test]
+    async fn window_adjust_for_unconfirmed_server_open_does_not_call_handler() {
+        let mut session = test_authenticated_session();
+        let channel = insert_unconfirmed_server_open(&mut session);
+        let mut handler = ChannelCallbackProbe::default();
+
+        let mut packet = Vec::new();
+        packet.push(msg::CHANNEL_WINDOW_ADJUST);
+        channel.encode(&mut packet).unwrap();
+        123u32.encode(&mut packet).unwrap();
+        session.process_packet(&mut handler, &packet).await.unwrap();
+
+        assert!(
+            !handler.window_adjusted_called,
+            "window_adjusted was called before server-open channel confirmation"
+        );
+    }
+
+    #[derive(Default)]
+    struct ChannelCallbackProbe {
+        exec_called: bool,
+        window_adjusted_called: bool,
+    }
+
+    impl Handler for ChannelCallbackProbe {
+        type Error = Error;
+
+        async fn exec_request(
+            &mut self,
+            _channel: ChannelId,
+            _data: &[u8],
+            _session: &mut Session,
+        ) -> Result<(), Self::Error> {
+            self.exec_called = true;
+            Ok(())
+        }
+
+        async fn window_adjusted(
+            &mut self,
+            _channel: ChannelId,
+            _new_size: u32,
+            _session: &mut Session,
+        ) -> Result<(), Self::Error> {
+            self.window_adjusted_called = true;
+            Ok(())
+        }
+    }
+
+    fn test_authenticated_session() -> Session {
+        let mut session = test_auth_session();
+        if let Some(enc) = session.common.encrypted.as_mut() {
+            enc.state = EncryptedState::Authenticated;
+        }
+        session
+    }
+
+    fn insert_unconfirmed_server_open(session: &mut Session) -> ChannelId {
+        let channel = session
+            .common
+            .encrypted
+            .as_mut()
+            .expect("test session has encrypted state")
+            .new_channel(
+                session.common.config.window_size,
+                session.common.config.maximum_packet_size,
+            );
+        let (sender, _receiver) = tokio::sync::mpsc::channel(1);
+        session
+            .channels
+            .insert(channel, crate::channels::ChannelRef::new(sender));
+        channel
+    }
+
     fn publickey_probe_packet(user: &str, public_key: &PublicKey) -> Vec<u8> {
         let mut packet = Vec::new();
         packet.push(msg::USERAUTH_REQUEST);
@@ -971,6 +1060,22 @@ async fn reply_userauth_info_response(
 }
 
 impl Session {
+    /// Channel-scoped messages (`CHANNEL_REQUEST`, `CHANNEL_DATA`,
+    /// `CHANNEL_EOF`, `CHANNEL_CLOSE`, ...) operate on an already-open channel.
+    /// An authenticated peer must not be able to drive channel callbacks
+    /// (`exec_request`, `data`, `channel_close`, ...) for a recipient id that
+    /// was never opened, whose open the application denied, or whose local open
+    /// is still waiting for peer confirmation. The encrypted channel table is
+    /// authoritative for the SSH protocol state; `self.channels` may already
+    /// contain local stream handles for unconfirmed server-initiated opens.
+    fn is_established_channel(&self, channel: ChannelId) -> bool {
+        self.common
+            .encrypted
+            .as_ref()
+            .and_then(|enc| enc.channels.get(&channel))
+            .is_some_and(|channel| channel.confirmed)
+    }
+
     async fn server_read_authenticated<H: Handler + Send, R: Reader>(
         &mut self,
         handler: &mut H,
@@ -984,6 +1089,9 @@ impl Session {
             msg::CHANNEL_CLOSE => {
                 let channel_num = map_err!(ChannelId::decode(r))?;
                 map_err!(ensure_end(r))?;
+                if !self.is_established_channel(channel_num) {
+                    return Ok(());
+                }
                 if let Some(ref mut enc) = self.common.encrypted {
                     // Reply with CHANNEL_CLOSE per RFC 4254 Section 5.3.
                     enc.close(channel_num)?;
@@ -1001,6 +1109,9 @@ impl Session {
             msg::CHANNEL_EOF => {
                 let channel_num = map_err!(ChannelId::decode(r))?;
                 map_err!(ensure_end(r))?;
+                if !self.is_established_channel(channel_num) {
+                    return Ok(());
+                }
                 if let Some(chan) = self.channels.get(&channel_num) {
                     chan.send(ChannelMsg::Eof).await.unwrap_or(())
                 }
@@ -1009,6 +1120,9 @@ impl Session {
             }
             msg::CHANNEL_EXTENDED_DATA | msg::CHANNEL_DATA => {
                 let channel_num = map_err!(ChannelId::decode(r))?;
+                if !self.is_established_channel(channel_num) {
+                    return Ok(());
+                }
 
                 let ext = if msg == msg::CHANNEL_DATA {
                     None
@@ -1053,14 +1167,17 @@ impl Session {
                 let channel_num = map_err!(ChannelId::decode(r))?;
                 let amount = map_err!(u32::decode(r))?;
                 map_err!(ensure_end(r))?;
+                if !self.is_established_channel(channel_num) {
+                    return Ok(());
+                }
                 let mut new_size = 0;
                 if let Some(ref mut enc) = self.common.encrypted {
-                    if let Some(channel) = enc.channels.get_mut(&channel_num) {
-                        new_size = channel.recipient_window_size.saturating_add(amount);
-                        channel.recipient_window_size = new_size;
-                    } else {
-                        return Ok(());
-                    }
+                    let channel = enc
+                        .channels
+                        .get_mut(&channel_num)
+                        .ok_or(Error::Inconsistent)?;
+                    new_size = channel.recipient_window_size.saturating_add(amount);
+                    channel.recipient_window_size = new_size;
                 }
                 let common = &mut self.common;
                 if let Some(enc) = common.encrypted.as_mut() {
@@ -1126,6 +1243,11 @@ impl Session {
                     if let Some(channel) = enc.channels.get_mut(&channel_num) {
                         channel.wants_reply = wants_reply != 0;
                     }
+                }
+                if !self.is_established_channel(channel_num) {
+                    // Request for a channel that was never opened (or whose open
+                    // was denied): drop it without invoking any handler callback.
+                    return Ok(());
                 }
                 match req_type.as_str() {
                     "pty-req" => {
