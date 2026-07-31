@@ -1195,6 +1195,11 @@ impl Session {
         while !self.common.disconnected {
             self.common.received_data = false;
             let mut sent_keepalive = false;
+            // Keep reading the network for window adjustments, but leave
+            // application output in its bounded receivers while a channel is
+            // window-blocked.
+            let can_receive_outbound =
+                !self.kex.active() && !self.common.has_any_pending_data();
             tokio::select! {
                 r = &mut reading => {
                     let (stream_read, mut buffer, mut opening_cipher) = match r {
@@ -1241,7 +1246,7 @@ impl Session {
                     debug!("timeout");
                     return Err(crate::Error::InactivityTimeout.into());
                 }
-                msg = self.receiver.recv(), if !self.kex.active() => {
+                msg = self.receiver.recv(), if can_receive_outbound => {
                     match msg {
                         Some(msg) => self.handle_msg(msg)?,
                         None => {
@@ -1251,21 +1256,21 @@ impl Session {
                     };
 
                     // eagerly take all outgoing messages so writes are batched
-                    while !self.kex.active() {
+                    while !self.kex.active() && !self.common.has_any_pending_data() {
                         match self.receiver.try_recv() {
                             Ok(next) => self.handle_msg(next)?,
                             Err(_) => break
                         }
                     }
                 }
-                msg = self.inbound_channel_receiver.recv(), if !self.kex.active() => {
+                msg = self.inbound_channel_receiver.recv(), if can_receive_outbound => {
                     match msg {
                         Some(msg) => self.handle_msg(msg)?,
                         None => (),
                     }
 
                     // eagerly take all outgoing messages so writes are batched
-                    while !self.kex.active() {
+                    while !self.kex.active() && !self.common.has_any_pending_data() {
                         match self.inbound_channel_receiver.try_recv() {
                             Ok(next) => self.handle_msg(next)?,
                             Err(_) => break
