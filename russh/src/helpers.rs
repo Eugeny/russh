@@ -87,6 +87,16 @@ mod name_list {
             if value.is_empty() {
                 return Ok(Self(Vec::new()));
             }
+
+            // Some legacy SSH implementations append a comma to name-lists.
+            // OpenSSH accepts this, so tolerate exactly one trailing comma for
+            // interoperability while continuing to reject all other empty
+            // entries.
+            let value = value
+                .strip_suffix(',')
+                .filter(|value| !value.is_empty())
+                .unwrap_or(value);
+
             Ok(Self(value.split(',').try_fold(
                 Vec::new(),
                 |mut list, name| {
@@ -150,6 +160,19 @@ mod name_list {
             // An empty entry mid-list (",,") is still invalid — only
             // the zero-length whole-list case is allowed.
             assert!(NameList::from_encoded_string("a,,b").is_err());
+        }
+
+        #[test]
+        fn name_list_accepts_single_trailing_comma() {
+            let nl = NameList::from_encoded_string("a,b,").unwrap();
+            assert_eq!(nl.0, vec!["a", "b"]);
+            assert_eq!(nl.as_encoded_string(), "a,b");
+        }
+
+        #[test]
+        fn name_list_rejects_other_empty_trailing_entries() {
+            assert!(NameList::from_encoded_string(",").is_err());
+            assert!(NameList::from_encoded_string("a,,").is_err());
         }
     }
 }
