@@ -29,3 +29,6 @@ wasm-bindgen-test = "0.3.46"
 
 [features]
 ssh-encoding = ["dep:ssh-encoding"]
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("motor"))'] }
