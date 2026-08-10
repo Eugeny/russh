@@ -106,6 +106,12 @@ pub(crate) struct InboundQueue {
     generation: u64,
     /// At most one `reserve_owned()` future is in flight per channel at a time.
     reserving: bool,
+    /// An `Eof` is already queued. `pending_bytes` counts payload bytes only, so zero-byte
+    /// items are invisible to the cap; a compliant peer sends Eof at most once, so a repeat
+    /// while one is still queued is dropped instead of growing the queue without bound.
+    eof_queued: bool,
+    /// Same, for `Close`.
+    close_queued: bool,
 }
 
 /// Outcome of [`Session::deliver_inbound`].
@@ -646,6 +652,19 @@ impl Session {
 
         let cap = self.common.config.max_pending_inbound_bytes;
 
+        // A payload item with no payload delivers nothing: drop it rather than buffer it. The
+        // pending cap counts payload bytes only, so without this a peer could park a channel
+        // (fill its app buffer) and then queue an unbounded number of zero-byte DATA packets
+        // the cap never sees. Nothing is lost — and delivering one is not even desirable, as a
+        // zero-length read on the app stream reads as EOF to `AsyncRead` consumers.
+        match &item {
+            InboundItem::Data(data) if data.is_empty() => return InboundDelivery::Delivered,
+            InboundItem::ExtendedData { data, .. } if data.is_empty() => {
+                return InboundDelivery::Delivered
+            }
+            _ => {}
+        }
+
         // Already backpressured for this channel: preserve FIFO by queueing behind existing items.
         if let Some(q) = self.inbound.get(&id) {
             if !q.queue.is_empty() || q.reserving {
@@ -654,12 +673,22 @@ impl Session {
                     Some(q) => q,
                     None => return InboundDelivery::ChannelGone,
                 };
+                // Eof/Close are the other zero-byte hole in the cap: a compliant peer sends
+                // each at most once, so while one is still queued a repeat is dropped, not
+                // queued. Reported as Queued so callers defer to the queued original.
+                match &item {
+                    InboundItem::Eof if q.eof_queued => return InboundDelivery::Queued,
+                    InboundItem::Close if q.close_queued => return InboundDelivery::Queued,
+                    _ => {}
+                }
                 if q.pending_bytes.saturating_add(item.byte_len()) > cap {
                     return InboundDelivery::Overflow;
                 }
                 // Window grant is withheld while backpressured (per-channel backpressure, I2/I4).
                 let needs_reserve = !q.reserving;
                 q.pending_bytes = q.pending_bytes.saturating_add(item.byte_len());
+                q.eof_queued |= matches!(item, InboundItem::Eof);
+                q.close_queued |= matches!(item, InboundItem::Close);
                 q.queue.push_back(item);
                 if needs_reserve {
                     q.reserving = true;
@@ -687,6 +716,8 @@ impl Session {
                 }
                 let q = self.inbound.entry(id).or_default();
                 q.pending_bytes = q.pending_bytes.saturating_add(len);
+                q.eof_queued |= matches!(item, InboundItem::Eof);
+                q.close_queued |= matches!(item, InboundItem::Close);
                 q.queue.push_back(item);
                 q.reserving = true;
                 self.inbound_needs_reserve.push(id);
@@ -749,8 +780,22 @@ impl Session {
         let permit = match res {
             Ok(p) => p,
             Err(()) => {
-                // Application dropped its receiver while we were reserving.
-                self.teardown_inbound_channel(id);
+                // Application dropped its receiver while we were reserving. If the peer's
+                // `Close` is sitting in the queue, its teardown was deferred onto delivery —
+                // and delivery can no longer happen. Dropping the queue alone would drop that
+                // deferred teardown with it: `handler.channel_close` never fires and the
+                // `self.channels` entry (whose enc-side twin was already removed when the
+                // CLOSE arrived) leaks for the life of the session. Finalize now instead.
+                let close_queued = self
+                    .inbound
+                    .get(&id)
+                    .is_some_and(|q| q.close_queued);
+                if close_queued {
+                    handler.channel_close(id, self).await?;
+                    self.finalize_close(id);
+                } else {
+                    self.teardown_inbound_channel(id);
+                }
                 return Ok(());
             }
         };
@@ -2595,5 +2640,206 @@ mod tests {
             InboundDelivery::Delivered
         ));
         assert!(!session.inbound.contains_key(&other));
+    }
+
+    /// A peer CLOSE for a server-initiated open that is still awaiting OPEN_CONFIRMATION must be
+    /// ignored (upstream 7c5659f), not treated as "the peer acked our close". Running the
+    /// teardown there removed the unconfirmed enc entry, so the confirmation still in flight hit
+    /// the unknown-channel arm of CHANNEL_OPEN_CONFIRMATION and killed the entire session with
+    /// `Error::Inconsistent` — a hostile peer could do this to any multiplexed connection.
+    #[tokio::test]
+    async fn peer_close_before_open_confirmation_is_ignored() {
+        let mut session = authenticated_session();
+        // Server-initiated open: enc entry exists but is NOT confirmed yet.
+        let id = insert_encrypted_channel(&mut session, 1024);
+        let (_tx, _rx) = insert_test_channel(&mut session, id, 8);
+
+        let mut handler = TestHandler;
+        let mut pkt = vec![crate::msg::CHANNEL_CLOSE];
+        pkt.extend_from_slice(&id.0.to_be_bytes());
+        session
+            .server_read_authenticated(&mut handler, crate::msg::CHANNEL_CLOSE, &mut &pkt[1..])
+            .await
+            .unwrap();
+
+        // The premature CLOSE must not have torn anything down.
+        assert!(
+            session
+                .common
+                .encrypted
+                .as_ref()
+                .unwrap()
+                .channel_exists(id),
+            "premature peer CLOSE must not remove the unconfirmed enc entry"
+        );
+        assert!(session.channels.contains_key(&id));
+
+        // The confirmation that was already in flight must still be accepted.
+        let mut pkt = vec![crate::msg::CHANNEL_OPEN_CONFIRMATION];
+        pkt.extend_from_slice(&id.0.to_be_bytes()); // recipient_channel (our id)
+        pkt.extend_from_slice(&7u32.to_be_bytes()); // sender_channel (peer's id)
+        pkt.extend_from_slice(&2_097_152u32.to_be_bytes()); // initial_window_size
+        pkt.extend_from_slice(&32768u32.to_be_bytes()); // maximum_packet_size
+        session
+            .server_read_authenticated(
+                &mut handler,
+                crate::msg::CHANNEL_OPEN_CONFIRMATION,
+                &mut &pkt[1..],
+            )
+            .await
+            .expect("confirmation after a premature peer CLOSE must not kill the session");
+        assert!(
+            session
+                .common
+                .encrypted
+                .as_ref()
+                .unwrap()
+                .channels
+                .get(&id)
+                .unwrap()
+                .confirmed,
+            "the channel must end up established"
+        );
+    }
+
+    /// The inbound pending cap counts payload bytes, so zero-byte items are invisible to it.
+    /// While a channel is backpressured, empty DATA is dropped outright and repeated Eof/Close
+    /// queue at most one each — otherwise a hostile peer could grow the queue without bound
+    /// through items the cap never sees.
+    #[tokio::test]
+    async fn zero_byte_items_cannot_grow_queue_unboundedly() {
+        let mut session = authenticated_session();
+        let id = ChannelId(1);
+        let (_tx, _rx) = insert_test_channel(&mut session, id, 1);
+
+        // Fill the buffer, then backpressure with one real payload item.
+        assert!(matches!(
+            session.deliver_inbound(id, InboundItem::Data(Bytes::from_static(b"a"))),
+            InboundDelivery::Delivered
+        ));
+        assert!(matches!(
+            session.deliver_inbound(id, InboundItem::Data(Bytes::from_static(b"bb"))),
+            InboundDelivery::Queued
+        ));
+
+        // Empty DATA delivers nothing: dropped, never queued.
+        for _ in 0..64 {
+            assert!(matches!(
+                session.deliver_inbound(id, InboundItem::Data(Bytes::new())),
+                InboundDelivery::Delivered
+            ));
+            assert!(matches!(
+                session.deliver_inbound(
+                    id,
+                    InboundItem::ExtendedData {
+                        ext: 1,
+                        data: Bytes::new()
+                    }
+                ),
+                InboundDelivery::Delivered
+            ));
+        }
+        assert_eq!(session.inbound.get(&id).unwrap().queue.len(), 1);
+
+        // Eof and Close queue once each; repeats are dropped (reported Queued so callers defer).
+        for _ in 0..64 {
+            assert!(matches!(
+                session.deliver_inbound(id, InboundItem::Eof),
+                InboundDelivery::Queued
+            ));
+        }
+        for _ in 0..64 {
+            assert!(matches!(
+                session.deliver_inbound(id, InboundItem::Close),
+                InboundDelivery::Queued
+            ));
+        }
+        let q = session.inbound.get(&id).unwrap();
+        assert_eq!(q.queue.len(), 3, "bb + one Eof + one Close, nothing else");
+        assert_eq!(q.pending_bytes, 2);
+    }
+
+    /// If the application bare-drops its channel receiver while a peer `Close` is queued behind
+    /// data, the deferred teardown must still run: the reserve resolves `Err`, and dropping just
+    /// the queue would leak the `self.channels` entry (its enc twin is already gone) and skip
+    /// `handler.channel_close` for the rest of the session.
+    #[tokio::test]
+    async fn receiver_drop_with_queued_close_still_finalizes() {
+        struct CloseRec(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+        impl crate::server::Handler for CloseRec {
+            type Error = crate::Error;
+            async fn channel_close(
+                &mut self,
+                _channel: ChannelId,
+                _session: &mut Session,
+            ) -> Result<(), Self::Error> {
+                self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(())
+            }
+        }
+
+        let closes = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut handler = CloseRec(closes.clone());
+        let mut session = authenticated_session();
+        let id = ChannelId(1);
+        let (_tx, rx) = insert_test_channel(&mut session, id, 1);
+
+        // Backpressure the channel, then queue the peer's Close behind the data.
+        assert!(matches!(
+            session.deliver_inbound(id, InboundItem::Data(Bytes::from_static(b"a"))),
+            InboundDelivery::Delivered
+        ));
+        assert!(matches!(
+            session.deliver_inbound(id, InboundItem::Data(Bytes::from_static(b"bb"))),
+            InboundDelivery::Queued
+        ));
+        assert!(matches!(
+            session.deliver_inbound(id, InboundItem::Close),
+            InboundDelivery::Queued
+        ));
+
+        // App bare-drops the receiver; the in-flight reserve resolves Err.
+        drop(rx);
+        let generation = session.inbound.get(&id).unwrap().generation;
+        session
+            .pump_inbound(id, generation, Err(()), &mut handler)
+            .await
+            .unwrap();
+
+        assert!(
+            !session.channels.contains_key(&id),
+            "queued Close must still tear down the app-side entry"
+        );
+        assert!(!session.inbound.contains_key(&id));
+        assert_eq!(closes.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    /// Contrast: a bare receiver drop with no Close queued keeps the app-side entry (the peer may
+    /// still close later, and that path — try_send returning Closed — cleans it up then).
+    #[tokio::test]
+    async fn receiver_drop_without_queued_close_only_drops_queue() {
+        let mut session = authenticated_session();
+        let id = ChannelId(1);
+        let (_tx, rx) = insert_test_channel(&mut session, id, 1);
+
+        assert!(matches!(
+            session.deliver_inbound(id, InboundItem::Data(Bytes::from_static(b"a"))),
+            InboundDelivery::Delivered
+        ));
+        assert!(matches!(
+            session.deliver_inbound(id, InboundItem::Data(Bytes::from_static(b"bb"))),
+            InboundDelivery::Queued
+        ));
+
+        drop(rx);
+        let generation = session.inbound.get(&id).unwrap().generation;
+        let mut handler = TestHandler;
+        session
+            .pump_inbound(id, generation, Err(()), &mut handler)
+            .await
+            .unwrap();
+
+        assert!(session.channels.contains_key(&id));
+        assert!(!session.inbound.contains_key(&id));
     }
 }

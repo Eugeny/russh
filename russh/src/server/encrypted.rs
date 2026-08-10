@@ -1103,7 +1103,21 @@ impl Session {
                     // `handler.channel_close`. Finish that teardown here, in FIFO order behind
                     // any inbound data still queued. An id we never opened has no entry on
                     // either side and is still ignored, which is what the guard is for.
-                    if self.channels.contains_key(&channel_num) {
+                    //
+                    // "We closed first" is recognisable as the enc entry being *absent*. An enc
+                    // entry that exists but is unconfirmed is a server-initiated open still
+                    // awaiting the peer's OPEN_CONFIRMATION; the peer does not get to tear that
+                    // down with a premature CLOSE. Running the teardown for it would remove the
+                    // unconfirmed enc entry, and the confirmation still in flight would then hit
+                    // the "unknown channel" arm of CHANNEL_OPEN_CONFIRMATION and kill the whole
+                    // session with `Error::Inconsistent`. Keep ignoring such a CLOSE (upstream
+                    // behaviour, 7c5659f).
+                    let we_closed_first = self
+                        .common
+                        .encrypted
+                        .as_ref()
+                        .is_some_and(|enc| !enc.channel_exists(channel_num));
+                    if we_closed_first && self.channels.contains_key(&channel_num) {
                         match self.deliver_inbound(channel_num, InboundItem::Close) {
                             InboundDelivery::Queued => {
                                 // Deferred to pump_inbound, after the queued data.
