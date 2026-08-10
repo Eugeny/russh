@@ -1079,7 +1079,7 @@ impl Session {
             .is_some_and(|channel| channel.confirmed)
     }
 
-    async fn server_read_authenticated<H: Handler + Send, R: Reader>(
+    pub(crate) async fn server_read_authenticated<H: Handler + Send, R: Reader>(
         &mut self,
         handler: &mut H,
         msg: u8,
@@ -1093,6 +1093,30 @@ impl Session {
                 let channel_num = map_err!(ChannelId::decode(r))?;
                 map_err!(ensure_end(r))?;
                 if !self.is_established_channel(channel_num) {
+                    // We may have closed this channel ourselves: `Encrypted::close` drops the
+                    // protocol entry as soon as it writes CHANNEL_CLOSE, so the peer's mandatory
+                    // reply arrives with no encrypted-side channel and fails the guard above.
+                    // The application-side entry in `self.channels` is still registered, and
+                    // nothing else ever removes it — so on a long-lived connection that churns
+                    // channels (a proxy closing one per finished upstream) this leaks a
+                    // `ChannelRef` per close, and the app never sees `Close` or
+                    // `handler.channel_close`. Finish that teardown here, in FIFO order behind
+                    // any inbound data still queued. An id we never opened has no entry on
+                    // either side and is still ignored, which is what the guard is for.
+                    if self.channels.contains_key(&channel_num) {
+                        match self.deliver_inbound(channel_num, InboundItem::Close) {
+                            InboundDelivery::Queued => {
+                                // Deferred to pump_inbound, after the queued data.
+                            }
+                            InboundDelivery::Delivered
+                            | InboundDelivery::Overflow
+                            | InboundDelivery::ChannelGone => {
+                                debug!("handler.channel_close {channel_num:?} (peer ack of our close)");
+                                handler.channel_close(channel_num, self).await?;
+                                self.finalize_close(channel_num);
+                            }
+                        }
+                    }
                     return Ok(());
                 }
                 // Reply with CHANNEL_CLOSE per RFC 4254 Section 5.3, now, discarding any

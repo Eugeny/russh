@@ -2173,6 +2173,46 @@ mod tests {
             });
     }
 
+    /// Server-initiated close: `Encrypted::close` removes the protocol entry immediately, so
+    /// the peer's mandatory CHANNEL_CLOSE reply fails `is_established_channel`. Before the fix
+    /// the reply was simply ignored, leaving the `self.channels` entry registered forever —
+    /// a per-closed-channel leak on any long-lived connection that churns channels.
+    #[tokio::test]
+    async fn server_initiated_close_is_cleaned_up_by_peer_reply() {
+        let mut session = authenticated_session();
+        let id = insert_encrypted_channel(&mut session, 1024);
+        confirm_test_channel(&mut session, id, 1024);
+        let (_tx, _rx) = insert_test_channel(&mut session, id, 8);
+
+        // We close first: protocol entry goes away, application entry stays.
+        session.close(id).unwrap();
+        assert!(!session
+            .common
+            .encrypted
+            .as_ref()
+            .unwrap()
+            .channel_exists(id));
+        assert!(
+            session.channels.contains_key(&id),
+            "precondition: app-side entry outlives our own close"
+        );
+
+        // The peer's reply must complete the teardown rather than being dropped by the guard.
+        let mut handler = TestHandler;
+        let mut pkt = Vec::new();
+        pkt.push(crate::msg::CHANNEL_CLOSE);
+        pkt.extend_from_slice(&id.0.to_be_bytes());
+        session
+            .server_read_authenticated(&mut handler, crate::msg::CHANNEL_CLOSE, &mut &pkt[1..])
+            .await
+            .unwrap();
+
+        assert!(
+            !session.channels.contains_key(&id),
+            "peer's close reply must release the application-side channel entry"
+        );
+    }
+
     /// D6: a `Handler` callback writes through `Session::data` directly, never through the run
     /// loop's message dispatch. Enforcing the outbound cap only at the dispatch sites left that
     /// path completely unbounded — an echo-style handler against a zero peer window could grow

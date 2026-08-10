@@ -663,7 +663,12 @@ impl Encrypted {
     ) -> Result<(), crate::Error> {
         let buf0 = buf0.into();
         if let Some(channel) = self.channels.get_mut(&channel) {
-            assert!(channel.confirmed);
+            // A write to a channel the peer has not confirmed is a caller error, not a reason
+            // to abort the process: this runs on the shared session task, so panicking here
+            // would take down every other channel on the connection too.
+            if !channel.confirmed {
+                return Err(crate::Error::WrongChannel);
+            }
             if !channel.pending_data.is_empty() || is_rekeying {
                 channel.pending_data.push_back((buf0, None, 0));
                 return Ok(());
@@ -687,7 +692,12 @@ impl Encrypted {
     ) -> Result<(), crate::Error> {
         let buf0 = buf0.into();
         if let Some(channel) = self.channels.get_mut(&channel) {
-            assert!(channel.confirmed);
+            // A write to a channel the peer has not confirmed is a caller error, not a reason
+            // to abort the process: this runs on the shared session task, so panicking here
+            // would take down every other channel on the connection too.
+            if !channel.confirmed {
+                return Err(crate::Error::WrongChannel);
+            }
             if !channel.pending_data.is_empty() || is_rekeying {
                 channel.pending_data.push_back((buf0, None, 0));
                 return Ok(());
@@ -716,7 +726,12 @@ impl Encrypted {
     ) -> Result<(), crate::Error> {
         let buf0 = buf0.into();
         if let Some(channel) = self.channels.get_mut(&channel) {
-            assert!(channel.confirmed);
+            // A write to a channel the peer has not confirmed is a caller error, not a reason
+            // to abort the process: this runs on the shared session task, so panicking here
+            // would take down every other channel on the connection too.
+            if !channel.confirmed {
+                return Err(crate::Error::WrongChannel);
+            }
             if !channel.pending_data.is_empty() || is_rekeying {
                 channel.pending_data.push_back((buf0, Some(ext), 0));
                 return Ok(());
@@ -739,7 +754,12 @@ impl Encrypted {
     ) -> Result<(), crate::Error> {
         let buf0 = buf0.into();
         if let Some(channel) = self.channels.get_mut(&channel) {
-            assert!(channel.confirmed);
+            // A write to a channel the peer has not confirmed is a caller error, not a reason
+            // to abort the process: this runs on the shared session task, so panicking here
+            // would take down every other channel on the connection too.
+            if !channel.confirmed {
+                return Err(crate::Error::WrongChannel);
+            }
             if !channel.pending_data.is_empty() || is_rekeying {
                 channel.pending_data.push_back((buf0, Some(ext), 0));
                 return Ok(());
