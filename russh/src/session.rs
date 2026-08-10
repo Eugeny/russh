@@ -503,24 +503,31 @@ impl Encrypted {
         }
     }
 
-    /// The first channel whose un-transmitted outbound backlog exceeds `cap` bytes, if any.
+    /// Bytes still queued for transmission on `channel` (0 if it has none, or is gone).
     ///
-    /// Producers that reserve window before enqueueing (`ChannelWriteHalf`, i.e. `Channel::data`
-    /// and `make_writer`) can never push a channel past its window, so their backlog stays empty
-    /// and this never fires. It exists as a last-resort valve for producers that bypass that
-    /// accounting — `Handle::data` / `Handle::extended_data`, which enqueue unconditionally — so
-    /// that one runaway channel is dropped instead of growing `pending_data` without bound.
-    pub(crate) fn first_channel_over_pending_cap(&self, cap: usize) -> Option<ChannelId> {
+    /// Hot path: called once per dispatched message for the *one* channel that message targets,
+    /// so it must stay cheap. The deque is empty for producers that reserve window before
+    /// enqueueing (`ChannelWriteHalf`, i.e. `Channel::data` / `make_writer`), which is the
+    /// steady state, making this O(1) in practice.
+    pub(crate) fn pending_data_bytes(&self, channel: ChannelId) -> usize {
         self.channels
-            .iter()
-            .find(|(_, c)| {
+            .get(&channel)
+            .map(|c| {
                 c.pending_data
                     .iter()
                     .map(|(buf, _, from)| buf.len().saturating_sub(*from))
                     .sum::<usize>()
-                    > cap
             })
-            .map(|(id, _)| *id)
+            .unwrap_or(0)
+    }
+
+    /// Whether the channel still exists in the protocol state.
+    ///
+    /// Callers must not conflate "gone" with "drained": [`Self::has_pending_data`] returns
+    /// `false` for both, and treating a removed channel as drained would signal *success* to a
+    /// producer whose data was actually discarded.
+    pub(crate) fn channel_exists(&self, channel: ChannelId) -> bool {
+        self.channels.contains_key(&channel)
     }
 
     /// Push the largest amount of `&buf0[from..]` that can fit into

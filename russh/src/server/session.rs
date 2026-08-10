@@ -848,22 +848,28 @@ impl Session {
         if self.outbound_acks.is_empty() {
             return;
         }
-        let drained: Vec<ChannelId> = self
-            .outbound_acks
-            .keys()
-            .copied()
-            .filter(|id| {
-                !self
-                    .common
-                    .encrypted
-                    .as_ref()
-                    .is_some_and(|enc| enc.has_pending_data(*id))
-            })
-            .collect();
-        for id in drained {
+        let Some(enc) = self.common.encrypted.as_ref() else {
+            return;
+        };
+        // "Channel gone" is NOT "backlog drained". A channel torn down by
+        // `close_discarding_pending` (peer close, or inbound overflow) threw its queued bytes
+        // away; signalling success there would tell the producer its data was sent. Drop those
+        // acks instead, which wakes the producer with an error.
+        let mut settled: Vec<(ChannelId, bool)> = Vec::new();
+        for id in self.outbound_acks.keys().copied() {
+            if !enc.channel_exists(id) {
+                settled.push((id, false));
+            } else if !enc.has_pending_data(id) {
+                settled.push((id, true));
+            }
+        }
+        for (id, delivered) in settled {
             if let Some(acks) = self.outbound_acks.remove(&id) {
                 for ack in acks {
-                    let _ = ack.send(());
+                    if delivered {
+                        let _ = ack.send(());
+                    }
+                    // else: dropped, so the producer's `await` resolves to Err.
                 }
             }
         }
@@ -882,14 +888,14 @@ impl Session {
     /// Producers that reserve window before enqueueing (`Channel::data` / `make_writer`) cannot
     /// exceed their window and so never reach the cap; it is `Handle::data` and
     /// `Handle::extended_data`, which enqueue unconditionally, that this contains.
-    pub(crate) fn enforce_outbound_cap(&mut self) -> Result<(), crate::Error> {
+    pub(crate) fn enforce_outbound_cap(&mut self, id: ChannelId) -> Result<(), crate::Error> {
         let cap = self.common.config.max_pending_outbound_bytes;
         let Some(enc) = self.common.encrypted.as_mut() else {
             return Ok(());
         };
-        let Some(id) = enc.first_channel_over_pending_cap(cap) else {
+        if enc.pending_data_bytes(id) <= cap {
             return Ok(());
-        };
+        }
         log::warn!(
             "outbound pending cap exceeded for channel {id:?}; closing channel (peer window stalled and producer bypassed window accounting)"
         );
@@ -950,13 +956,17 @@ impl Session {
     /// Dispatch a single message received on the session's internal channel
     /// (sent via [`Handle`]). Shared by the `select!` receiver arm and the
     /// pre-`select!` backlog drain so the two can't drift apart.
-    fn dispatch_msg(&mut self, msg: Msg) -> Result<(), Error> {
+    /// Returns the channel whose outbound backlog this message may have grown, so the caller can
+    /// check just that one against the per-channel cap instead of scanning every channel.
+    fn dispatch_msg(&mut self, msg: Msg) -> Result<Option<ChannelId>, Error> {
         match msg {
             Msg::Channel(id, ChannelMsg::Data { data }) => {
                 self.data(id, data)?;
+                return Ok(Some(id));
             }
             Msg::Channel(id, ChannelMsg::ExtendedData { ext, data }) => {
                 self.extended_data(id, ext, data)?;
+                return Ok(Some(id));
             }
             Msg::ChannelDataAcked { id, ext, data, ack } => {
                 match ext {
@@ -976,6 +986,7 @@ impl Session {
                 } else {
                     let _ = ack.send(());
                 }
+                return Ok(Some(id));
             }
             Msg::Channel(id, ChannelMsg::Eof) => {
                 self.eof(id)?;
@@ -1099,7 +1110,8 @@ impl Session {
                 unimplemented!("unimplemented (client-only?) message: {other:?}")
             }
         }
-        Ok(())
+        // No outbound channel payload was queued by this message.
+        Ok(None)
     }
 
     pub(crate) async fn run<H, R>(
@@ -1169,9 +1181,10 @@ impl Session {
                     let Ok(msg) = self.receiver.try_recv() else {
                         break;
                     };
-                    self.dispatch_msg(msg)?;
+                    if let Some(id) = self.dispatch_msg(msg)? {
+                        self.enforce_outbound_cap(id)?;
+                    }
                     drained += 1;
-                    self.enforce_outbound_cap()?;
                 }
                 if drained > 0 {
                     self.flush()?;
@@ -1252,8 +1265,9 @@ impl Session {
                 msg = self.receiver.recv(), if !self.kex.active() => {
                     match msg {
                         Some(msg) => {
-                            self.dispatch_msg(msg)?;
-                            self.enforce_outbound_cap()?;
+                            if let Some(id) = self.dispatch_msg(msg)? {
+                                self.enforce_outbound_cap(id)?;
+                            }
                         }
                         None => {
                             debug!("self.receiver: received None");
@@ -2191,6 +2205,50 @@ mod tests {
                 .sender_window_size(id),
             target as usize
         );
+    }
+
+    /// A producer parked in `Handle::data` whose channel is torn down (peer close / inbound
+    /// overflow both discard the outbound backlog) must be woken with an **error**. Reporting
+    /// success would tell the caller its bytes were sent when they were thrown away — and
+    /// `has_pending_data` alone cannot tell "gone" from "drained", since it returns false for
+    /// both.
+    #[tokio::test]
+    async fn discarded_producer_is_woken_with_error_not_success() {
+        let mut session = authenticated_session();
+        let id = insert_encrypted_channel(&mut session, 0);
+
+        let (ack, acked) = oneshot::channel();
+        session.outbound_acks.entry(id).or_default().push_back(ack);
+
+        // Channel torn down with its backlog discarded, exactly as peer-close does.
+        session
+            .common
+            .encrypted
+            .as_mut()
+            .unwrap()
+            .close_discarding_pending(id)
+            .unwrap();
+
+        session.release_outbound_acks();
+
+        assert!(
+            acked.await.is_err(),
+            "discarded data must not be reported as delivered"
+        );
+    }
+
+    /// The ordinary path still reports success: channel alive, backlog drained.
+    #[tokio::test]
+    async fn drained_producer_is_woken_with_success() {
+        let mut session = authenticated_session();
+        let id = insert_encrypted_channel(&mut session, 1024);
+
+        let (ack, acked) = oneshot::channel();
+        session.outbound_acks.entry(id).or_default().push_back(ack);
+
+        session.release_outbound_acks();
+
+        assert!(acked.await.is_ok());
     }
 
     /// Once a channel is backpressured, further items queue in FIFO order across kinds (Data before

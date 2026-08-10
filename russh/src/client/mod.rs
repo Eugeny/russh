@@ -1249,8 +1249,9 @@ impl Session {
                 msg = self.receiver.recv(), if can_receive_outbound => {
                     match msg {
                         Some(msg) => {
-                            self.handle_msg(msg)?;
-                            self.enforce_outbound_cap()?;
+                            if let Some(id) = self.handle_msg(msg)? {
+                                self.enforce_outbound_cap(id)?;
+                            }
                         }
                         None => {
                             self.common.disconnected = true;
@@ -1262,8 +1263,9 @@ impl Session {
                     while !self.kex.active() {
                         match self.receiver.try_recv() {
                             Ok(next) => {
-                                self.handle_msg(next)?;
-                                self.enforce_outbound_cap()?;
+                                if let Some(id) = self.handle_msg(next)? {
+                                    self.enforce_outbound_cap(id)?;
+                                }
                             }
                             Err(_) => break
                         }
@@ -1272,8 +1274,9 @@ impl Session {
                 msg = self.inbound_channel_receiver.recv(), if can_receive_outbound => {
                     match msg {
                         Some(msg) => {
-                            self.handle_msg(msg)?;
-                            self.enforce_outbound_cap()?;
+                            if let Some(id) = self.handle_msg(msg)? {
+                                self.enforce_outbound_cap(id)?;
+                            }
                         }
                         None => (),
                     }
@@ -1282,8 +1285,9 @@ impl Session {
                     while !self.kex.active() {
                         match self.inbound_channel_receiver.try_recv() {
                             Ok(next) => {
-                                self.handle_msg(next)?;
-                                self.enforce_outbound_cap()?;
+                                if let Some(id) = self.handle_msg(next)? {
+                                    self.enforce_outbound_cap(id)?;
+                                }
                             }
                             Err(_) => break
                         }
@@ -1352,7 +1356,9 @@ impl Session {
         })
     }
 
-    fn handle_msg(&mut self, msg: Msg) -> Result<(), crate::Error> {
+    /// Returns the channel whose outbound backlog this message may have grown, so the caller
+    /// can check just that one against the per-channel cap instead of scanning every channel.
+    fn handle_msg(&mut self, msg: Msg) -> Result<Option<ChannelId>, crate::Error> {
         match msg {
             Msg::Authenticate { user, method } => {
                 self.write_auth_request_if_needed(&user, method)?;
@@ -1416,12 +1422,16 @@ impl Session {
                 description,
                 language_tag,
             } => self.disconnect(reason, &description, &language_tag)?,
-            Msg::Channel(id, ChannelMsg::Data { data }) => self.data(id, data)?,
+            Msg::Channel(id, ChannelMsg::Data { data }) => {
+                self.data(id, data)?;
+                return Ok(Some(id));
+            }
             Msg::Channel(id, ChannelMsg::Eof) => {
                 self.eof(id)?;
             }
             Msg::Channel(id, ChannelMsg::ExtendedData { data, ext }) => {
                 self.extended_data(id, ext, data)?;
+                return Ok(Some(id));
             }
             Msg::Channel(
                 id,
@@ -1536,7 +1546,8 @@ impl Session {
                 unimplemented!("unimplemented (server-only?) message: {:?}", msg)
             }
         }
-        Ok(())
+        // No outbound channel payload was queued by this message.
+        Ok(None)
     }
 
     fn finalize_server_channel_open_reply(
@@ -1599,14 +1610,14 @@ impl Session {
     /// Replaces upstream's session-wide `has_any_pending_data()` gate, which bounded the same
     /// backlog by halting outbound dispatch for *every* channel as soon as *any* channel was
     /// window-blocked. See the server-side `Session::enforce_outbound_cap`.
-    fn enforce_outbound_cap(&mut self) -> Result<(), crate::Error> {
+    fn enforce_outbound_cap(&mut self, id: ChannelId) -> Result<(), crate::Error> {
         let cap = self.common.config.max_pending_outbound_bytes;
         let Some(enc) = self.common.encrypted.as_mut() else {
             return Ok(());
         };
-        let Some(id) = enc.first_channel_over_pending_cap(cap) else {
+        if enc.pending_data_bytes(id) <= cap {
             return Ok(());
-        };
+        }
         log::warn!(
             "outbound pending cap exceeded for channel {id:?}; closing channel (peer window stalled and producer bypassed window accounting)"
         );
