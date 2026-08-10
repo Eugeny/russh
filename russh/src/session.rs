@@ -303,26 +303,6 @@ impl Encrypted {
         }
     }
 
-    /// Receive-time inbound flow-control: consume the window for the received bytes and
-    /// immediately grant more once it drops below `target/2`.
-    ///
-    /// This is the historical, receive-time-grant behaviour. It is still used by the **client**
-    /// inbound path (`client/encrypted.rs`). The **server** inbound path now splits this into
-    /// [`Self::consume_recv_window`] (at receive) + [`Self::maybe_grant_recv_window`] (after the
-    /// data is accepted into the per-channel application buffer) to fix cross-channel
-    /// head-of-line blocking — see `RC2_HOL_FIX_DESIGN.md`. Do not change this wrapper's
-    /// behaviour without also updating the client path.
-    pub fn adjust_window_size(
-        &mut self,
-        channel: ChannelId,
-        data: &[u8],
-        target: u32,
-    ) -> Result<bool, crate::Error> {
-        self.consume_recv_window(channel, data.len());
-        // The client path delivers synchronously, so nothing is ever queued undelivered.
-        self.maybe_grant_recv_window(channel, target, 0)
-    }
-
     /// I1: consume the inbound receive window for `len` received bytes. The bytes are already off
     /// the wire, so the peer's send allowance is genuinely used up regardless of when (or
     /// whether) they are delivered to the application buffer. Never grants more window.
@@ -804,18 +784,20 @@ impl Encrypted {
             return Ok(false);
         }
 
-        // zfc fork: disable *server-initiated* rekey on the data-volume / time
-        // thresholds. In an inbound-proxy deployment, when `begin_rekey()` fires
-        // mid-bulk-transfer the run loop's channel-data receiver branch is gated
-        // off for the whole key exchange (`msg = self.receiver.recv(), if
-        // !self.kex.active()` in `server/session.rs`). Under a saturated download
-        // this stops the per-channel `ChannelTx` queues from draining, the
-        // re-exchange never completes, and the entire session wedges permanently
-        // (reproduced at the default 1 GiB `rekey_write_limit`, on the 2nd
-        // back-to-back speedtest). Client-initiated rekey (an incoming KEXINIT,
-        // handled in `server/mod.rs`) is unaffected, as is `rekey_wanted`.
-        let _ = (limits, &self.last_rekey);
-        Ok(replace(&mut self.rekey_wanted, false))
+        // Volume/time-based rekey initiation (shared by client and server). The zfc fork had
+        // this disabled as a workaround while inbound delivery still blocked the session loop:
+        // a rekey firing mid-bulk-transfer could park the loop in a per-channel
+        // `chan.send().await` with the receiver arm gated for the whole exchange, wedging the
+        // session permanently (reproduced at the default 1 GiB `rekey_write_limit`). Both
+        // loops now deliver inbound data without blocking (Scheme C, `pending_inbound.rs`), so
+        // the loop always keeps reading the socket and a re-exchange always completes;
+        // `tests/test_rekey_under_load.rs` holds the line. Deployments that still want no
+        // volume/time rekey can set `Limits` to effectively-infinite thresholds.
+        let now = russh_util::time::Instant::now();
+        let dur = now.duration_since(self.last_rekey);
+        Ok(replace(&mut self.rekey_wanted, false)
+            || writer.buffer().bytes >= limits.rekey_write_limit
+            || dur >= limits.rekey_time_limit)
     }
 
     pub fn new_channel_id(&mut self) -> ChannelId {

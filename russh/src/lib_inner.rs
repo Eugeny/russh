@@ -61,6 +61,7 @@ mod channels;
 pub use channels::{Channel, ChannelMsg, ChannelReadHalf, ChannelStream, ChannelWriteHalf};
 
 mod parsing;
+mod pending_inbound;
 mod session;
 
 /// Server side of this library.

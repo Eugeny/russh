@@ -44,6 +44,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::Future;
+use futures::StreamExt;
+use futures::stream::FuturesUnordered;
 use futures::task::{Context, Poll};
 use kex::ClientKex;
 use log::{debug, error, trace, warn};
@@ -58,6 +60,9 @@ use tokio::sync::mpsc::{
 use tokio::sync::oneshot;
 
 pub use crate::auth::AuthResult;
+use crate::pending_inbound::{
+    self, BoxReserve, DeferredCallback, InboundDelivery, InboundItem, InboundQueue,
+};
 use crate::channels::{
     Channel, ChannelMsg, ChannelReadHalf, ChannelRef, ChannelWriteHalf, WindowSizeRef,
 };
@@ -92,6 +97,12 @@ pub struct Session {
     receiver: Receiver<Msg>,
     sender: UnboundedSender<Reply>,
     channels: HashMap<ChannelId, ChannelRef>,
+    /// Per-channel inbound backpressure queues (Scheme C). Present only for channels that are
+    /// currently backpressured (their app buffer filled up). Mirrors the server session.
+    inbound: HashMap<ChannelId, InboundQueue>,
+    /// Channels that have a pending item but no in-flight `reserve_owned()` future yet; the run
+    /// loop drains this into its `FuturesUnordered` after each inbound packet.
+    inbound_needs_reserve: Vec<ChannelId>,
     /// Producers parked in [`Handle::data`], keyed by the channel whose backlog they wait on.
     outbound_acks: HashMap<ChannelId, std::collections::VecDeque<tokio::sync::oneshot::Sender<()>>>,
     target_window_size: u32,
@@ -1151,6 +1162,8 @@ impl Session {
             inbound_channel_sender,
             inbound_channel_receiver,
             channels: HashMap::new(),
+            inbound: HashMap::new(),
+            inbound_needs_reserve: Vec::new(),
             outbound_acks: HashMap::new(),
             pending_reads: Vec::new(),
             pending_len: 0,
@@ -1233,6 +1246,11 @@ impl Session {
         let reading = start_reading(stream_read, buffer, opening_cipher);
         pin!(reading);
 
+        // Scheme C (client): in-flight `reserve_owned()` futures for backpressured channels,
+        // mirroring the server run loop. Each resolution delivers one queued inbound item
+        // without the loop ever blocking on a single channel's slow consumer.
+        let mut inbound_reserves: FuturesUnordered<BoxReserve> = FuturesUnordered::new();
+
         #[allow(clippy::panic)] // false positive in select! macro
         while !self.common.disconnected {
             self.common.received_data = false;
@@ -1268,8 +1286,19 @@ impl Session {
                         }
                     }
 
+                    // Register reserve futures for any channels that became backpressured
+                    // while handling this packet (their app buffer filled up).
+                    self.drain_needs_reserve(&mut inbound_reserves);
+
                     std::mem::swap(&mut opening_cipher, &mut self.common.remote_to_local);
                     reading.set(start_reading(stream_read, buffer, opening_cipher));
+                }
+                Some((cid, generation, res)) = inbound_reserves.next(), if !inbound_reserves.is_empty() && !self.kex.active() => {
+                    // A backpressured channel's application buffer freed a slot: deliver its head
+                    // item and re-arm. The grant for that channel goes out via the flush below —
+                    // never blocking the loop on this channel.
+                    self.pump_inbound(cid, generation, res, handler).await?;
+                    self.drain_needs_reserve(&mut inbound_reserves);
                 }
                 () = &mut keepalive_timer => {
                     if let Some(ref mut enc) = self.common.encrypted {
@@ -1687,6 +1716,175 @@ impl Session {
         }
     }
 
+    /// Deliver one inbound [`InboundItem`] to a channel's application buffer without ever
+    /// blocking the client session loop (Scheme C, mirrored from the server session). This is
+    /// what lets the loop keep reading the socket — and therefore keep driving a key
+    /// re-exchange — while one channel's consumer is slow: the old blocking
+    /// `chan.send().await` here was the client half of the rekey-under-load wedge.
+    pub(crate) fn deliver_inbound(&mut self, id: ChannelId, item: InboundItem) -> InboundDelivery {
+        pending_inbound::deliver_inbound(
+            &self.channels,
+            &mut self.inbound,
+            &mut self.inbound_needs_reserve,
+            self.common.config.max_pending_inbound_bytes,
+            id,
+            item,
+        )
+    }
+
+    /// See the server-side `Session::drain_needs_reserve`.
+    pub(crate) fn drain_needs_reserve(&mut self, reserves: &mut FuturesUnordered<BoxReserve>) {
+        pending_inbound::drain_needs_reserve(
+            &self.channels,
+            &mut self.inbound,
+            &mut self.inbound_needs_reserve,
+            reserves,
+        );
+    }
+
+    /// Resolve one completed `reserve_owned()` future: deliver the head item into the
+    /// application buffer, grant window (I2) if it was payload, fire the deferred client
+    /// callback **after** delivery, finalize a delivered `Close`, and re-arm the next reserve.
+    /// Mirror of the server-side `Session::pump_inbound`.
+    pub(crate) async fn pump_inbound<H: Handler>(
+        &mut self,
+        id: ChannelId,
+        generation: u64,
+        res: Result<tokio::sync::mpsc::OwnedPermit<ChannelMsg>, ()>,
+        client: &mut H,
+    ) -> Result<(), H::Error> {
+        {
+            let q = match self.inbound.get_mut(&id) {
+                Some(q) => q,
+                None => return Ok(()),
+            };
+            if generation != q.generation {
+                // Stale result for a torn-down channel; drop it.
+                return Ok(());
+            }
+            q.reserving = false;
+        }
+
+        let permit = match res {
+            Ok(p) => p,
+            Err(()) => {
+                // Application dropped its receiver while we were reserving. If the peer's
+                // `Close` is sitting in the queue its deferred teardown must still run, or the
+                // `self.channels` entry leaks and `channel_close` never fires — see the
+                // server-side twin of this branch.
+                let close_queued = self.inbound.get(&id).is_some_and(|q| q.close_queued);
+                if close_queued {
+                    client.channel_close(id, self).await?;
+                    self.finalize_close(id);
+                } else {
+                    self.teardown_inbound_channel(id);
+                }
+                return Ok(());
+            }
+        };
+
+        let item = match self.inbound.get_mut(&id).and_then(|q| q.queue.pop_front()) {
+            Some(item) => item,
+            None => return Ok(()),
+        };
+        if let Some(q) = self.inbound.get_mut(&id) {
+            q.pending_bytes = q.pending_bytes.saturating_sub(item.byte_len());
+        }
+        let grants = item.grants_window();
+        // Capture the deferred callback payload before the item is consumed (cheap Bytes
+        // clone). The callback is fired below, after the data is in the application buffer.
+        let callback = DeferredCallback::capture(&item);
+        permit.send(item.into_msg());
+
+        if grants {
+            self.maybe_grant_after_delivery(id, client)?;
+        }
+
+        match callback {
+            DeferredCallback::Data(data) => client.data(id, &data, self).await?,
+            DeferredCallback::ExtendedData { ext, data } => {
+                client.extended_data(id, ext, &data, self).await?
+            }
+            DeferredCallback::Eof => client.channel_eof(id, self).await?,
+            DeferredCallback::Close => {
+                client.channel_close(id, self).await?;
+                self.finalize_close(id);
+                return Ok(());
+            }
+        }
+
+        let more = self
+            .inbound
+            .get(&id)
+            .map(|q| !q.queue.is_empty())
+            .unwrap_or(false);
+        if more {
+            if let Some(q) = self.inbound.get_mut(&id) {
+                q.reserving = true;
+            }
+            self.inbound_needs_reserve.push(id);
+        } else {
+            // Drained: return the channel to the flowing fast path.
+            self.inbound.remove(&id);
+        }
+        Ok(())
+    }
+
+    /// I2: grant more inbound receive window for a channel after its data was accepted into the
+    /// application buffer, leaving the still-undelivered backlog occupying the advertised
+    /// window. Client mirror of the server's `maybe_grant_after_delivery`; the grant target is
+    /// `config.window_size`, matching the client's historical receive-time grant.
+    pub(crate) fn maybe_grant_after_delivery<H: Handler>(
+        &mut self,
+        id: ChannelId,
+        client: &mut H,
+    ) -> Result<(), crate::Error> {
+        let target = self.common.config.window_size;
+        let undelivered = self
+            .inbound
+            .get(&id)
+            .map(|q| q.pending_bytes)
+            .unwrap_or(0)
+            .try_into()
+            .unwrap_or(u32::MAX);
+        let granted = self
+            .common
+            .encrypted
+            .as_mut()
+            .map(|enc| enc.maybe_grant_recv_window(id, target, undelivered))
+            .transpose()?
+            .unwrap_or(false);
+        if granted {
+            let next_window = client.adjust_window(id, self.target_window_size);
+            if next_window > 0 {
+                self.target_window_size = next_window;
+            }
+        }
+        Ok(())
+    }
+
+    /// Deferred CHANNEL_CLOSE teardown, run once the queued `Close` has been delivered (or can
+    /// no longer be). Mirror of the server-side `Session::finalize_close`.
+    pub(crate) fn finalize_close(&mut self, id: ChannelId) {
+        pending_inbound::teardown_inbound(&mut self.inbound, id);
+        self.channels.remove(&id);
+        // Dropping any parked `Handle::data` producers wakes them with an error, which is the
+        // correct signal now that the channel is gone.
+        self.outbound_acks.remove(&id);
+        if let Some(enc) = self.common.encrypted.as_mut() {
+            // Safe to drop unconditionally: every path that reaches `finalize_close` has already
+            // emitted our CHANNEL_CLOSE (via `close_discarding_pending` on peer-close, or
+            // `Encrypted::close` when we closed first), so there is never a parked
+            // `pending_close` left to lose here.
+            enc.channels.remove(&id);
+        }
+    }
+
+    /// Tear down a channel's inbound queue when its application receiver was dropped mid-flight.
+    pub(crate) fn teardown_inbound_channel(&mut self, id: ChannelId) {
+        pending_inbound::teardown_inbound(&mut self.inbound, id);
+    }
+
     fn enforce_outbound_cap(&mut self, id: ChannelId) -> Result<(), crate::Error> {
         let cap = self.common.config.max_pending_outbound_bytes;
         let Some(enc) = self.common.encrypted.as_mut() else {
@@ -1699,7 +1897,10 @@ impl Session {
             "outbound pending cap exceeded for channel {id:?}; closing channel (peer window stalled and producer bypassed window accounting)"
         );
         self.discard_channel_outbound(id)?;
-        self.channels.remove(&id);
+        // Full teardown, not just the channels entry: the inbound queue (and any in-flight
+        // reserve) must go too, or a backpressured channel would keep pumping data and
+        // callbacks for a channel the session already discarded. Mirrors the server twin.
+        self.finalize_close(id);
         Ok(())
     }
 
@@ -2209,6 +2410,13 @@ pub struct Config {
     /// while the peer's receive window is exhausted. Exceeding it closes that one channel,
     /// never the session. See the server-side `Config::max_pending_outbound_bytes`.
     pub max_pending_outbound_bytes: usize,
+    /// Hard safety cap on the number of inbound payload bytes that may be queued per channel
+    /// while its application buffer is full (Scheme C backpressure, mirrored from the server —
+    /// see the server-side `Config::max_pending_inbound_bytes`). With delivery-gated window
+    /// grants a well-behaved peer holds at most ~`window_size` bytes in flight, so this only
+    /// trips when a peer ignores its advertised window; exceeding it closes that one channel,
+    /// never the session.
+    pub max_pending_inbound_bytes: usize,
     /// Lists of preferred algorithms.
     pub preferred: negotiation::Preferred,
     /// Time after which the connection is garbage-collected.
@@ -2239,6 +2447,7 @@ impl Default for Config {
             maximum_packet_size: 32768,
             channel_buffer_size: 100,
             max_pending_outbound_bytes: 8 * 2_000_000,
+            max_pending_inbound_bytes: 8 * 2_000_000,
             preferred: Default::default(),
             inactivity_timeout: None,
             keepalive_interval: None,

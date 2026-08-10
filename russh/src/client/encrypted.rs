@@ -28,6 +28,7 @@ use crate::client::{ChannelOpenHandle, Handler, Msg, Prompt, Reply, Session};
 use crate::helpers::{AlgorithmExt, EncodedExt, NameList, sign_with_hash_alg};
 use crate::keys::key::parse_public_key;
 use crate::parsing::{ChannelOpenConfirmation, ChannelType, OpenChannelMessage, ensure_end};
+use crate::pending_inbound::{InboundDelivery, InboundItem};
 use crate::session::{Encrypted, EncryptedState, GlobalRequestResponse};
 use crate::{
     Channel, ChannelId, ChannelMsg, ChannelOpenFailure, ChannelParams, Error, MethodSet, Sig, auth,
@@ -405,31 +406,68 @@ impl Session {
                 debug!("channel_close");
                 let channel_num = map_err!(ChannelId::decode(&mut r))?;
                 map_err!(ensure_end(&r))?;
-                // The CHANNEL_CLOSE message must be sent to the server at this point or the
-                // session will not be released. Discard anything still queued outbound rather
-                // than parking behind it: the peer has closed the channel, so that data can no
-                // longer be delivered, and plain `close` would hold the mandatory reply until a
-                // `CHANNEL_WINDOW_ADJUST` the closing peer has no reason to send — stranding the
-                // reply and leaking the channel entry for the life of the session. This also
-                // fails any producer parked on that discarded backlog.
-                self.discard_channel_outbound(channel_num)?;
-                // Forward the close to the channel before removing it, so that
-                // consumers waiting on `Channel::wait()` receive an explicit
-                // `ChannelMsg::Close` instead of just seeing `None`.
-                if let Some(chan) = self.channels.get(&channel_num) {
-                    let _ = chan.send(ChannelMsg::Close).await;
+                match self
+                    .common
+                    .encrypted
+                    .as_ref()
+                    .and_then(|enc| enc.channels.get(&channel_num))
+                    .map(|c| c.confirmed)
+                {
+                    Some(false) => {
+                        // A CLOSE for a channel we opened that the peer has not yet
+                        // confirmed or rejected: tearing it down here would remove the
+                        // unconfirmed enc entry, and a subsequently arriving
+                        // OPEN_CONFIRMATION would then kill the whole session as
+                        // `Inconsistent`. Ignore it (same hostile-peer guard as the server).
+                        return Ok(());
+                    }
+                    Some(true) => {
+                        // The peer has torn the channel down. Reply with our mandatory
+                        // CHANNEL_CLOSE now, discarding anything still queued outbound
+                        // rather than parking behind it: that data can no longer be
+                        // delivered, and plain `close` would hold the reply until a
+                        // `CHANNEL_WINDOW_ADJUST` the closing peer will never send. This
+                        // also fails any producer parked on the discarded backlog.
+                        self.discard_channel_outbound(channel_num)?;
+                    }
+                    None if !self.channels.contains_key(&channel_num) => {
+                        // Unknown or already fully torn down: nothing to do.
+                        return Ok(());
+                    }
+                    None => {
+                        // We closed first (`Encrypted::close` already emitted our CLOSE and
+                        // dropped the enc entry); this is the peer's mandatory reply. Finish
+                        // the application-side teardown below.
+                    }
                 }
-                self.channels.remove(&channel_num);
-                client.channel_close(channel_num, self).await
+                // Queue the Close in FIFO order behind any pending inbound data, so queued
+                // data is delivered before teardown; consumers waiting on `Channel::wait()`
+                // then observe an explicit `ChannelMsg::Close` instead of just `None`. When
+                // it is queued, callback + finalize are deferred to `pump_inbound`.
+                match self.deliver_inbound(channel_num, InboundItem::Close) {
+                    InboundDelivery::Queued => Ok(()),
+                    InboundDelivery::Delivered
+                    | InboundDelivery::Overflow
+                    | InboundDelivery::ChannelGone => {
+                        client.channel_close(channel_num, self).await?;
+                        self.finalize_close(channel_num);
+                        Ok(())
+                    }
+                }
             }
             Some((&msg::CHANNEL_EOF, mut r)) => {
                 debug!("channel_eof");
                 let channel_num = map_err!(ChannelId::decode(&mut r))?;
                 map_err!(ensure_end(&r))?;
-                if let Some(chan) = self.channels.get(&channel_num) {
-                    let _ = chan.send(ChannelMsg::Eof).await;
+                // Delivered in FIFO order behind any queued inbound data; the callback is
+                // deferred with it when queued (Eof carries no bytes, so Overflow never
+                // occurs — repeats while one is queued are dropped).
+                match self.deliver_inbound(channel_num, InboundItem::Eof) {
+                    InboundDelivery::Queued | InboundDelivery::Overflow => Ok(()),
+                    InboundDelivery::Delivered | InboundDelivery::ChannelGone => {
+                        client.channel_eof(channel_num, self).await
+                    }
                 }
-                client.channel_eof(channel_num, self).await
             }
             Some((&msg::CHANNEL_OPEN_FAILURE, mut r)) => {
                 debug!("channel_open_failure");
@@ -458,22 +496,30 @@ impl Session {
                 let channel_num = map_err!(ChannelId::decode(&mut r))?;
                 let data = map_err!(Bytes::decode(&mut r))?;
                 map_err!(ensure_end(&r))?;
-                let target = self.common.config.window_size;
-                if let Some(ref mut enc) = self.common.encrypted {
-                    if enc.adjust_window_size(channel_num, &data, target)? {
-                        let next_window =
-                            client.adjust_window(channel_num, self.target_window_size);
-                        if next_window > 0 {
-                            self.target_window_size = next_window
-                        }
+                // I1: consume the inbound receive window now (the bytes are off the wire).
+                // The grant (I2) is deferred to delivery time so a backpressured channel
+                // withholds its own window and the loop keeps reading the socket — this
+                // non-blocking delivery is what lets a key re-exchange proceed while a
+                // channel's consumer is slow (Scheme C, mirrored from the server).
+                if let Some(enc) = self.common.encrypted.as_mut() {
+                    enc.consume_recv_window(channel_num, data.len());
+                }
+                match self.deliver_inbound(channel_num, InboundItem::Data(data.clone())) {
+                    InboundDelivery::Delivered | InboundDelivery::ChannelGone => {
+                        self.maybe_grant_after_delivery(channel_num, client)?;
+                        client.data(channel_num, &data, self).await
+                    }
+                    InboundDelivery::Queued => Ok(()),
+                    InboundDelivery::Overflow => {
+                        warn!(
+                            "inbound pending cap exceeded for channel {channel_num:?}; closing channel (peer ignored window)"
+                        );
+                        self.discard_channel_outbound(channel_num)?;
+                        self.teardown_inbound_channel(channel_num);
+                        self.channels.remove(&channel_num);
+                        Ok(())
                     }
                 }
-
-                if let Some(chan) = self.channels.get(&channel_num) {
-                    let _ = chan.send(ChannelMsg::Data { data: data.clone() }).await;
-                }
-
-                client.data(channel_num, &data, self).await
             }
             Some((&msg::CHANNEL_EXTENDED_DATA, mut r)) => {
                 debug!("channel_extended_data");
@@ -481,29 +527,34 @@ impl Session {
                 let extended_code = map_err!(u32::decode(&mut r))?;
                 let data = map_err!(Bytes::decode(&mut r))?;
                 map_err!(ensure_end(&r))?;
-                let target = self.common.config.window_size;
-                if let Some(ref mut enc) = self.common.encrypted {
-                    if enc.adjust_window_size(channel_num, &data, target)? {
-                        let next_window =
-                            client.adjust_window(channel_num, self.target_window_size);
-                        if next_window > 0 {
-                            self.target_window_size = next_window
-                        }
+                // See the CHANNEL_DATA arm: consume now, grant at delivery (Scheme C).
+                if let Some(enc) = self.common.encrypted.as_mut() {
+                    enc.consume_recv_window(channel_num, data.len());
+                }
+                match self.deliver_inbound(
+                    channel_num,
+                    InboundItem::ExtendedData {
+                        ext: extended_code,
+                        data: data.clone(),
+                    },
+                ) {
+                    InboundDelivery::Delivered | InboundDelivery::ChannelGone => {
+                        self.maybe_grant_after_delivery(channel_num, client)?;
+                        client
+                            .extended_data(channel_num, extended_code, &data, self)
+                            .await
+                    }
+                    InboundDelivery::Queued => Ok(()),
+                    InboundDelivery::Overflow => {
+                        warn!(
+                            "inbound pending cap exceeded for channel {channel_num:?}; closing channel (peer ignored window)"
+                        );
+                        self.discard_channel_outbound(channel_num)?;
+                        self.teardown_inbound_channel(channel_num);
+                        self.channels.remove(&channel_num);
+                        Ok(())
                     }
                 }
-
-                if let Some(chan) = self.channels.get(&channel_num) {
-                    let _ = chan
-                        .send(ChannelMsg::ExtendedData {
-                            ext: extended_code,
-                            data: data.clone(),
-                        })
-                        .await;
-                }
-
-                client
-                    .extended_data(channel_num, extended_code, &data, self)
-                    .await
             }
             Some((&msg::CHANNEL_REQUEST, mut r)) => {
                 let channel_num = map_err!(ChannelId::decode(&mut r))?;

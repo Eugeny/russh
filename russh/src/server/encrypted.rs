@@ -32,6 +32,7 @@ use super::*;
 use crate::helpers::NameList;
 use crate::map_err;
 use crate::parsing::{ChannelOpenConfirmation, ChannelType, OpenChannelMessage, ensure_end};
+use crate::pending_inbound::{InboundDelivery, InboundItem};
 
 impl Session {
     /// Returns false iff a request was rejected.

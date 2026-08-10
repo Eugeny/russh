@@ -465,11 +465,29 @@ impl Session {
     }
 
     pub fn close(&mut self, channel: ChannelId) -> Result<(), crate::Error> {
-        if let Some(ref mut enc) = self.common.encrypted {
-            enc.close(channel)
+        let emitted = if let Some(ref mut enc) = self.common.encrypted {
+            enc.close(channel)?;
+            // `Encrypted::close` drops the protocol entry only when it actually wrote
+            // CHANNEL_CLOSE; otherwise it parked as `pending_close` behind queued data.
+            !enc.channel_exists(channel)
         } else {
             unreachable!()
+        };
+        if emitted {
+            // Mirror of the server-side close: once our CHANNEL_CLOSE is on the wire and
+            // nothing is reading this channel any more (the dominant path — dropping a
+            // `Channel` is what sent the close), release the application-side state now
+            // rather than waiting for a reply a broken or hostile peer may never send. A
+            // still-held read half keeps receiving until the peer's own close.
+            let reader_gone = self
+                .channels
+                .get(&channel)
+                .is_some_and(|c| std::ops::Deref::deref(c).is_closed());
+            if reader_gone {
+                self.finalize_close(channel);
+            }
         }
+        Ok(())
     }
 
     pub fn extended_data(
