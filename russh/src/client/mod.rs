@@ -92,6 +92,8 @@ pub struct Session {
     receiver: Receiver<Msg>,
     sender: UnboundedSender<Reply>,
     channels: HashMap<ChannelId, ChannelRef>,
+    /// Producers parked in [`Handle::data`], keyed by the channel whose backlog they wait on.
+    outbound_acks: HashMap<ChannelId, std::collections::VecDeque<tokio::sync::oneshot::Sender<()>>>,
     target_window_size: u32,
     pending_reads: Vec<Vec<u8>>,
     pending_len: u32,
@@ -195,6 +197,15 @@ pub enum Msg {
         language_tag: String,
     },
     Channel(ChannelId, ChannelMsg),
+    /// Channel payload from [`Handle::data`] / [`Handle::extended_data`], carrying a completion
+    /// signal fired once the bytes are actually in the peer's receive window. See the
+    /// server-side `Msg::ChannelDataAcked` for why this exists.
+    ChannelDataAcked {
+        id: ChannelId,
+        ext: Option<u32>,
+        data: bytes::Bytes,
+        ack: tokio::sync::oneshot::Sender<()>,
+    },
     ServerChannelOpenReply {
         pending: crate::PendingChannelOpen,
         result: Result<(), ChannelOpenFailure>,
@@ -896,19 +907,49 @@ impl<H: Handler> Handle<H> {
     ///
     /// This is useful for server-initiated channels; for channels created by
     /// the client, prefer to use the Channel returned from the `open_*` methods.
+    /// Applies per-channel backpressure: the returned future resolves only once the bytes have
+    /// been written into the peer's receive window, so a peer that stops reading throttles this
+    /// channel's producer without affecting any other channel. Returns `Err` if the channel is
+    /// gone or its queued data was discarded (the payload is returned only when it was never
+    /// handed over).
+    ///
+    /// Do not call this from inside a [`Handler`] callback — those run on the session loop, so
+    /// awaiting window there would prevent the loop from processing the window adjustment that
+    /// would release it.
     pub async fn data(
         &self,
         id: ChannelId,
         data: impl Into<bytes::Bytes>,
     ) -> Result<(), bytes::Bytes> {
-        let data = data.into();
+        self.send_acked(id, None, data.into()).await
+    }
+
+    /// Send extended data to the session referenced by this handler. Backpressures per channel
+    /// exactly like [`Handle::data`]; the same "not from a `Handler` callback" caveat applies.
+    pub async fn extended_data(
+        &self,
+        id: ChannelId,
+        ext: u32,
+        data: impl Into<bytes::Bytes>,
+    ) -> Result<(), bytes::Bytes> {
+        self.send_acked(id, Some(ext), data.into()).await
+    }
+
+    async fn send_acked(
+        &self,
+        id: ChannelId,
+        ext: Option<u32>,
+        data: bytes::Bytes,
+    ) -> Result<(), bytes::Bytes> {
+        let (ack, acked) = tokio::sync::oneshot::channel();
         self.sender
-            .send(Msg::Channel(id, ChannelMsg::Data { data }))
+            .send(Msg::ChannelDataAcked { id, ext, data, ack })
             .await
             .map_err(|e| match e.0 {
-                Msg::Channel(_, ChannelMsg::Data { data, .. }) => data,
+                Msg::ChannelDataAcked { data, .. } => data,
                 _ => unreachable!(),
-            })
+            })?;
+        acked.await.map_err(|_| bytes::Bytes::new())
     }
 
     /// Asynchronously perform a session re-key at the next opportunity
@@ -1110,6 +1151,7 @@ impl Session {
             inbound_channel_sender,
             inbound_channel_receiver,
             channels: HashMap::new(),
+            outbound_acks: HashMap::new(),
             pending_reads: Vec::new(),
             pending_len: 0,
             open_global_requests: VecDeque::new(),
@@ -1248,11 +1290,7 @@ impl Session {
                 }
                 msg = self.receiver.recv(), if can_receive_outbound => {
                     match msg {
-                        Some(msg) => {
-                            if let Some(id) = self.handle_msg(msg)? {
-                                self.enforce_outbound_cap(id)?;
-                            }
-                        }
+                        Some(msg) => self.handle_msg(msg)?,
                         None => {
                             self.common.disconnected = true;
                             break
@@ -1262,33 +1300,21 @@ impl Session {
                     // eagerly take all outgoing messages so writes are batched
                     while !self.kex.active() {
                         match self.receiver.try_recv() {
-                            Ok(next) => {
-                                if let Some(id) = self.handle_msg(next)? {
-                                    self.enforce_outbound_cap(id)?;
-                                }
-                            }
+                            Ok(next) => self.handle_msg(next)?,
                             Err(_) => break
                         }
                     }
                 }
                 msg = self.inbound_channel_receiver.recv(), if can_receive_outbound => {
                     match msg {
-                        Some(msg) => {
-                            if let Some(id) = self.handle_msg(msg)? {
-                                self.enforce_outbound_cap(id)?;
-                            }
-                        }
+                        Some(msg) => self.handle_msg(msg)?,
                         None => (),
                     }
 
                     // eagerly take all outgoing messages so writes are batched
                     while !self.kex.active() {
                         match self.inbound_channel_receiver.try_recv() {
-                            Ok(next) => {
-                                if let Some(id) = self.handle_msg(next)? {
-                                    self.enforce_outbound_cap(id)?;
-                                }
-                            }
+                            Ok(next) => self.handle_msg(next)?,
                             Err(_) => break
                         }
                     }
@@ -1296,6 +1322,7 @@ impl Session {
             };
 
             self.flush()?;
+            self.release_outbound_acks();
             map_err!(self.common.packet_writer.flush_into(stream_write).await)?;
 
             if let Some(ref mut enc) = self.common.encrypted {
@@ -1356,9 +1383,7 @@ impl Session {
         })
     }
 
-    /// Returns the channel whose outbound backlog this message may have grown, so the caller
-    /// can check just that one against the per-channel cap instead of scanning every channel.
-    fn handle_msg(&mut self, msg: Msg) -> Result<Option<ChannelId>, crate::Error> {
+    fn handle_msg(&mut self, msg: Msg) -> Result<(), crate::Error> {
         match msg {
             Msg::Authenticate { user, method } => {
                 self.write_auth_request_if_needed(&user, method)?;
@@ -1424,14 +1449,32 @@ impl Session {
             } => self.disconnect(reason, &description, &language_tag)?,
             Msg::Channel(id, ChannelMsg::Data { data }) => {
                 self.data(id, data)?;
-                return Ok(Some(id));
+            }
+            Msg::ChannelDataAcked { id, ext, data, ack } => {
+                match ext {
+                    None => self.data(id, data)?,
+                    Some(ext) => self.extended_data(id, ext, data)?,
+                }
+                let (exists, pending) = self
+                    .common
+                    .encrypted
+                    .as_ref()
+                    .map(|enc| (enc.channel_exists(id), enc.has_pending_data(id)))
+                    .unwrap_or((false, false));
+                if !exists {
+                    // Channel torn down while this sat in the session queue: `Encrypted::data`
+                    // discarded the payload, so drop the ack rather than reporting success.
+                } else if pending {
+                    self.outbound_acks.entry(id).or_default().push_back(ack);
+                } else {
+                    let _ = ack.send(());
+                }
             }
             Msg::Channel(id, ChannelMsg::Eof) => {
                 self.eof(id)?;
             }
             Msg::Channel(id, ChannelMsg::ExtendedData { data, ext }) => {
                 self.extended_data(id, ext, data)?;
-                return Ok(Some(id));
             }
             Msg::Channel(
                 id,
@@ -1546,8 +1589,7 @@ impl Session {
                 unimplemented!("unimplemented (server-only?) message: {:?}", msg)
             }
         }
-        // No outbound channel payload was queued by this message.
-        Ok(None)
+        Ok(())
     }
 
     fn finalize_server_channel_open_reply(
@@ -1610,6 +1652,41 @@ impl Session {
     /// Replaces upstream's session-wide `has_any_pending_data()` gate, which bounded the same
     /// backlog by halting outbound dispatch for *every* channel as soon as *any* channel was
     /// window-blocked. See the server-side `Session::enforce_outbound_cap`.
+    /// Tear a channel down on the wire, discarding everything queued for it, and fail any
+    /// producers parked on that backlog. See the server-side `discard_channel_outbound`.
+    pub(crate) fn discard_channel_outbound(&mut self, id: ChannelId) -> Result<(), crate::Error> {
+        if let Some(enc) = self.common.encrypted.as_mut() {
+            enc.close_discarding_pending(id)?;
+        }
+        self.outbound_acks.remove(&id);
+        Ok(())
+    }
+
+    /// Release producers parked in [`Handle::data`] for channels whose backlog has drained.
+    /// Channels whose backlog was *discarded* never reach here — `discard_channel_outbound`
+    /// already took their acks.
+    pub(crate) fn release_outbound_acks(&mut self) {
+        if self.outbound_acks.is_empty() {
+            return;
+        }
+        let Some(enc) = self.common.encrypted.as_ref() else {
+            return;
+        };
+        let drained: Vec<ChannelId> = self
+            .outbound_acks
+            .keys()
+            .copied()
+            .filter(|id| !enc.has_pending_data(*id))
+            .collect();
+        for id in drained {
+            if let Some(acks) = self.outbound_acks.remove(&id) {
+                for ack in acks {
+                    let _ = ack.send(());
+                }
+            }
+        }
+    }
+
     fn enforce_outbound_cap(&mut self, id: ChannelId) -> Result<(), crate::Error> {
         let cap = self.common.config.max_pending_outbound_bytes;
         let Some(enc) = self.common.encrypted.as_mut() else {
@@ -1621,7 +1698,7 @@ impl Session {
         log::warn!(
             "outbound pending cap exceeded for channel {id:?}; closing channel (peer window stalled and producer bypassed window accounting)"
         );
-        enc.close_discarding_pending(id)?;
+        self.discard_channel_outbound(id)?;
         self.channels.remove(&id);
         Ok(())
     }

@@ -967,17 +967,13 @@ impl Session {
     /// Dispatch a single message received on the session's internal channel
     /// (sent via [`Handle`]). Shared by the `select!` receiver arm and the
     /// pre-`select!` backlog drain so the two can't drift apart.
-    /// Returns the channel whose outbound backlog this message may have grown, so the caller can
-    /// check just that one against the per-channel cap instead of scanning every channel.
-    fn dispatch_msg(&mut self, msg: Msg) -> Result<Option<ChannelId>, Error> {
+    fn dispatch_msg(&mut self, msg: Msg) -> Result<(), Error> {
         match msg {
             Msg::Channel(id, ChannelMsg::Data { data }) => {
                 self.data(id, data)?;
-                return Ok(Some(id));
             }
             Msg::Channel(id, ChannelMsg::ExtendedData { ext, data }) => {
                 self.extended_data(id, ext, data)?;
-                return Ok(Some(id));
             }
             Msg::ChannelDataAcked { id, ext, data, ack } => {
                 match ext {
@@ -1002,7 +998,6 @@ impl Session {
                     // Fully absorbed by the peer's window.
                     let _ = ack.send(());
                 }
-                return Ok(Some(id));
             }
             Msg::Channel(id, ChannelMsg::Eof) => {
                 self.eof(id)?;
@@ -1126,8 +1121,7 @@ impl Session {
                 unimplemented!("unimplemented (client-only?) message: {other:?}")
             }
         }
-        // No outbound channel payload was queued by this message.
-        Ok(None)
+        Ok(())
     }
 
     pub(crate) async fn run<H, R>(
@@ -1197,9 +1191,7 @@ impl Session {
                     let Ok(msg) = self.receiver.try_recv() else {
                         break;
                     };
-                    if let Some(id) = self.dispatch_msg(msg)? {
-                        self.enforce_outbound_cap(id)?;
-                    }
+                    self.dispatch_msg(msg)?;
                     drained += 1;
                 }
                 if drained > 0 {
@@ -1280,11 +1272,7 @@ impl Session {
                 // would let one stalled channel block outbound progress for all of them.
                 msg = self.receiver.recv(), if !self.kex.active() => {
                     match msg {
-                        Some(msg) => {
-                            if let Some(id) = self.dispatch_msg(msg)? {
-                                self.enforce_outbound_cap(id)?;
-                            }
-                        }
+                        Some(msg) => self.dispatch_msg(msg)?,
                         None => {
                             debug!("self.receiver: received None");
                         }
@@ -1603,10 +1591,14 @@ impl Session {
         let is_rekeying = self.kex.active();
         let common = &mut self.common;
         if let Some(enc) = common.encrypted.as_mut() {
-            enc.data_with_writer(&mut common.packet_writer, channel, data, is_rekeying)
+            enc.data_with_writer(&mut common.packet_writer, channel, data, is_rekeying)?;
         } else {
             unreachable!()
         }
+        // Enforce here rather than at the run loop's dispatch sites: this is the single point
+        // where a channel's outbound backlog grows, and `Handler` callbacks call it directly
+        // while the loop is inside `reply()` — a path no dispatch-site check can see.
+        self.enforce_outbound_cap(channel)
     }
 
     /// Send data to a channel. On session channels, `extended` can be
@@ -1630,10 +1622,12 @@ impl Session {
                 extended,
                 data,
                 is_rekeying,
-            )
+            )?;
         } else {
             unreachable!()
         }
+        // See `Session::data`: enforced here so `Handler`-callback writes are covered too.
+        self.enforce_outbound_cap(channel)
     }
 
     /// Inform the client of whether they may perform
@@ -2158,6 +2152,61 @@ mod tests {
             .as_mut()
             .unwrap()
             .new_channel(window, 32768)
+    }
+
+    /// Confirm a test channel with a zero peer window, so anything written queues as
+    /// `pending_data` (writes require `confirmed`).
+    fn confirm_test_channel(session: &mut Session, id: ChannelId, peer_window: u32) {
+        session
+            .common
+            .encrypted
+            .as_mut()
+            .unwrap()
+            .channels
+            .get_mut(&id)
+            .unwrap()
+            .confirm(&crate::parsing::ChannelOpenConfirmation {
+                recipient_channel: 0,
+                sender_channel: 0,
+                initial_window_size: peer_window,
+                maximum_packet_size: 32768,
+            });
+    }
+
+    /// D6: a `Handler` callback writes through `Session::data` directly, never through the run
+    /// loop's message dispatch. Enforcing the outbound cap only at the dispatch sites left that
+    /// path completely unbounded — an echo-style handler against a zero peer window could grow
+    /// `pending_data` without limit. The cap must be applied at the write itself.
+    #[tokio::test]
+    async fn handler_side_writes_are_capped() {
+        let mut config = crate::server::Config::default();
+        config.max_pending_outbound_bytes = 4096;
+        let mut session = authenticated_session_with(config);
+        let id = insert_encrypted_channel(&mut session, 0);
+        confirm_test_channel(&mut session, id, 0);
+
+        // Peer window is 0, so every write lands in pending_data — exactly the handler-echo
+        // shape. No run-loop dispatch is involved.
+        for _ in 0..8 {
+            if session
+                .common
+                .encrypted
+                .as_ref()
+                .is_some_and(|enc| enc.channel_exists(id))
+            {
+                session.data(id, Bytes::from_static(&[0u8; 1024])).unwrap();
+            }
+        }
+
+        assert!(
+            !session
+                .common
+                .encrypted
+                .as_ref()
+                .unwrap()
+                .channel_exists(id),
+            "handler-side writes must hit the outbound cap and close the runaway channel"
+        );
     }
 
     /// A window grant must never re-authorise the peer for bytes that are off the wire but still

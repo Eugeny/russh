@@ -446,10 +446,14 @@ impl Session {
         let is_rekeying = self.kex.active();
         let common = &mut self.common;
         if let Some(enc) = common.encrypted.as_mut() {
-            enc.data_with_writer(&mut common.packet_writer, channel, data, is_rekeying)
+            enc.data_with_writer(&mut common.packet_writer, channel, data, is_rekeying)?;
         } else {
             unreachable!()
         }
+        // Enforce here rather than at the run loop's dispatch sites: this is the single point
+        // where a channel's outbound backlog grows, and `Handler` callbacks call it directly
+        // while the loop is inside `reply()` — a path no dispatch-site check can see.
+        self.enforce_outbound_cap(channel)
     }
 
     pub fn eof(&mut self, channel: ChannelId) -> Result<(), crate::Error> {
@@ -477,10 +481,12 @@ impl Session {
         let is_rekeying = self.kex.active();
         let common = &mut self.common;
         if let Some(enc) = common.encrypted.as_mut() {
-            enc.extended_data_with_writer(&mut common.packet_writer, channel, ext, data, is_rekeying)
+            enc.extended_data_with_writer(&mut common.packet_writer, channel, ext, data, is_rekeying)?;
         } else {
             unreachable!()
         }
+        // See `Session::data`: enforced here so `Handler`-callback writes are covered too.
+        self.enforce_outbound_cap(channel)
     }
 
     pub fn agent_forward(
