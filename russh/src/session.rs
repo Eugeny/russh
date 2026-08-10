@@ -128,6 +128,12 @@ impl ChannelFlushResult {
 }
 
 impl<C> CommonSession<C> {
+    pub(crate) fn has_any_pending_data(&self) -> bool {
+        self.encrypted
+            .as_ref()
+            .is_some_and(Encrypted::has_any_pending_data)
+    }
+
     pub fn newkeys(&mut self, newkeys: NewKeys) {
         if let Some(ref mut enc) = self.encrypted {
             enc.exchange = Some(newkeys.exchange);
@@ -467,6 +473,22 @@ impl Encrypted {
         } else {
             false
         }
+    }
+
+    /// Does this channel still owe an outbound flush? `close`/`eof` park behind queued
+    /// data as `pending_close`/`pending_eof`, and the parked control message is only
+    /// emitted once `flush_pending` drains the channel. Callers tearing a channel down
+    /// must leave the entry in place while this holds, or the deferred message is lost.
+    pub(crate) fn owes_flush(&self, channel: ChannelId) -> bool {
+        self.channels.get(&channel).is_some_and(|c| {
+            !c.pending_data.is_empty() || c.pending_eof || c.pending_close
+        })
+    }
+
+    pub(crate) fn has_any_pending_data(&self) -> bool {
+        self.channels
+            .values()
+            .any(|channel| !channel.pending_data.is_empty())
     }
 
     /// Push the largest amount of `&buf0[from..]` that can fit into

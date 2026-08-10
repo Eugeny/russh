@@ -51,14 +51,16 @@ impl server::Handler for Server {
     async fn channel_open_session(
         &mut self,
         channel: Channel<Msg>,
+        reply: server::ChannelOpenHandle,
         _session: &mut Session,
-    ) -> Result<bool, Self::Error> {
+    ) -> Result<(), Self::Error> {
         {
             debug!("channel open session");
             let mut clients = self.clients.lock().unwrap();
             clients.insert((self.id, channel.id()), channel);
         }
-        Ok(true)
+        reply.accept().await;
+        Ok(())
     }
 
     /// The client requests a shell.

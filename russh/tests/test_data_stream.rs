@@ -195,8 +195,10 @@ impl russh::server::Handler for Server {
     async fn channel_open_session(
         &mut self,
         mut channel: Channel<Msg>,
+        reply: server::ChannelOpenHandle,
         _session: &mut Session,
-    ) -> Result<bool, Self::Error> {
+    ) -> Result<(), Self::Error> {
+        reply.accept().await;
         tokio::spawn(async move {
             let (mut writer, mut reader) =
                 (channel.make_writer(), channel.make_reader_ext(Some(1)));
@@ -208,7 +210,7 @@ impl russh::server::Handler for Server {
             writer.shutdown().await.expect("Shutdown failed");
         });
 
-        Ok(true)
+        Ok(())
     }
 }
 

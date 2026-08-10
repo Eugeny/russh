@@ -1,7 +1,7 @@
 # Russh
 
 [![Rust](https://github.com/warp-tech/russh/actions/workflows/rust.yml/badge.svg)](https://github.com/warp-tech/russh/actions/workflows/rust.yml)  <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
-[![All Contributors](https://img.shields.io/badge/all_contributors-83-orange.svg?style=flat-square)](#contributors-)
+[![All Contributors](https://img.shields.io/badge/all_contributors-85-orange.svg?style=flat-square)](#contributors-)
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
 
 Low-level Tokio SSH2 client and server implementation.
@@ -125,6 +125,8 @@ This is a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Éti
   * Uses `russh::server` to allow Git operations over SSH. 
 * [Calagopus](https://github.com/calagopus/wings) - Fast, Efficient and Scalable Game hosting - built for everyone.
   * Uses `russh::server` for efficiently implementing SSH shells and SFTP file management.
+* [Oryxis](https://github.com/wilsonglasser/oryxis) - Rust-native SSH client with an encrypted vault, P2P sync and an embedded terminal.
+  * Uses `russh::client` for connections, jump hosts, SOCKS/HTTP/command proxies and SFTP.
 
 ## Contributors ✨
 
@@ -241,6 +243,10 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/wi-adam"><img src="https://avatars.githubusercontent.com/u/127046659?v=4?s=100" width="100px;" alt="wi-adam"/><br /><sub><b>wi-adam</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=wi-adam" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="http://ddtkey.com"><img src="https://avatars.githubusercontent.com/u/26835520?v=4?s=100" width="100px;" alt="Artem Medvedev"/><br /><sub><b>Artem Medvedev</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=DDtKey" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/ztbh"><img src="https://avatars.githubusercontent.com/u/67856492?v=4?s=100" width="100px;" alt="ztbh"/><br /><sub><b>ztbh</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=ztbh" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="http://blog.sakurapuare.com"><img src="https://avatars.githubusercontent.com/u/52142762?v=4?s=100" width="100px;" alt="Moder Steven"/><br /><sub><b>Moder Steven</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=SakuraPuare" title="Code">💻</a></td>
+    </tr>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://jkshin.nubimaru.com"><img src="https://avatars.githubusercontent.com/u/949915?v=4?s=100" width="100px;" alt="Jeongkyu Shin"/><br /><sub><b>Jeongkyu Shin</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=inureyes" title="Code">💻</a></td>
     </tr>
   </tbody>
 </table>

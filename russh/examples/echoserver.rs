@@ -80,13 +80,15 @@ impl server::Handler for Server {
     async fn channel_open_session(
         &mut self,
         channel: Channel<Msg>,
+        reply: server::ChannelOpenHandle,
         session: &mut Session,
-    ) -> Result<bool, Self::Error> {
+    ) -> Result<(), Self::Error> {
         {
             let mut clients = self.clients.lock().await;
             clients.insert(self.id, (channel.id(), session.handle()));
         }
-        Ok(true)
+        reply.accept().await;
+        Ok(())
     }
 
     async fn auth_publickey(

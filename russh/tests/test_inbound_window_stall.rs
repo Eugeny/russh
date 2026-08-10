@@ -342,8 +342,12 @@ impl russh::server::Handler for Server {
     async fn channel_open_session(
         &mut self,
         mut channel: Channel<Msg>,
+        reply: russh::server::ChannelOpenHandle,
         _session: &mut Session,
-    ) -> Result<bool, Self::Error> {
+    ) -> Result<(), Self::Error> {
+        // Confirm the open before any producer starts writing: since channel confirmations
+        // became async upstream, data must not be queued ahead of CHANNEL_OPEN_CONFIRMATION.
+        reply.accept().await;
         // Producer side: flood the channel via the AsyncWrite (`ChannelTx`) path — the exact
         // code zfc's relay copy drives. When the client window is exhausted this parks at
         // `A == 0`; a lost wakeup here is the stall.
@@ -409,7 +413,7 @@ impl russh::server::Handler for Server {
                 }
             }
         });
-        Ok(true)
+        Ok(())
     }
 }
 

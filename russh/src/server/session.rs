@@ -15,7 +15,7 @@ use super::*;
 use crate::channels::{Channel, ChannelMsg, ChannelReadHalf, ChannelRef, ChannelWriteHalf};
 use crate::helpers::NameList;
 use crate::kex::{EXTENSION_SUPPORT_AS_CLIENT, KexCause, SessionKexState};
-use crate::{map_err, msg};
+use crate::{ChannelOpenFailure, map_err, msg};
 
 /// A single inbound message destined for a channel's application buffer. Held in an
 /// [`InboundQueue`] when the channel's bounded buffer is full, so the shared session loop never
@@ -208,6 +208,10 @@ pub enum Msg {
         language_tag: String,
     },
     Channel(ChannelId, ChannelMsg),
+    ChannelOpenReply {
+        pending: PendingChannelOpen,
+        result: Result<(), ChannelOpenFailure>,
+    },
 }
 
 impl From<(ChannelId, ChannelMsg)> for Msg {
@@ -215,6 +219,16 @@ impl From<(ChannelId, ChannelMsg)> for Msg {
         Msg::Channel(id, msg)
     }
 }
+
+pub use crate::PendingChannelOpen;
+
+/// A handle passed to channel-open callbacks that the handler uses to
+/// accept or reject the incoming channel request.
+///
+/// Dropping the handle without calling [`accept`](ChannelOpenHandle::accept) or
+/// [`reject`](ChannelOpenHandle::reject) automatically sends an
+/// `AdministrativelyProhibited` rejection to the client.
+pub type ChannelOpenHandle = crate::ChannelOpenHandleInner<Msg>;
 
 #[derive(Clone, Debug)]
 /// Handle to a session, used to send messages to a client outside of
@@ -784,7 +798,13 @@ impl Session {
         self.inbound.remove(&id);
         self.channels.remove(&id);
         if let Some(enc) = self.common.encrypted.as_mut() {
-            enc.channels.remove(&id);
+            // Keep the protocol-level entry alive while it still owes an outbound flush:
+            // the RFC 4254 CHANNEL_CLOSE reply is parked as `pending_close` behind queued
+            // data, and dropping the entry here would lose it. `flush_pending` removes the
+            // entry itself once the parked close is finally written.
+            if !enc.owes_flush(id) {
+                enc.channels.remove(&id);
+            }
         }
     }
 
@@ -815,6 +835,142 @@ impl Session {
                 seqn: buffer.seqn,
             })
         }
+    }
+
+    /// Dispatch a single message received on the session's internal channel
+    /// (sent via [`Handle`]). Shared by the `select!` receiver arm and the
+    /// pre-`select!` backlog drain so the two can't drift apart.
+    fn dispatch_msg(&mut self, msg: Msg) -> Result<(), Error> {
+        match msg {
+            Msg::Channel(id, ChannelMsg::Data { data }) => {
+                self.data(id, data)?;
+            }
+            Msg::Channel(id, ChannelMsg::ExtendedData { ext, data }) => {
+                self.extended_data(id, ext, data)?;
+            }
+            Msg::Channel(id, ChannelMsg::Eof) => {
+                self.eof(id)?;
+            }
+            Msg::Channel(id, ChannelMsg::Close) => {
+                self.close(id)?;
+            }
+            Msg::Channel(id, ChannelMsg::Success) => {
+                self.channel_success(id)?;
+            }
+            Msg::Channel(id, ChannelMsg::Failure) => {
+                self.channel_failure(id)?;
+            }
+            Msg::Channel(id, ChannelMsg::XonXoff { client_can_do }) => {
+                self.xon_xoff_request(id, client_can_do)?;
+            }
+            Msg::Channel(id, ChannelMsg::ExitStatus { exit_status }) => {
+                self.exit_status_request(id, exit_status)?;
+            }
+            Msg::Channel(
+                id,
+                ChannelMsg::ExitSignal {
+                    signal_name,
+                    core_dumped,
+                    error_message,
+                    lang_tag,
+                },
+            ) => {
+                self.exit_signal_request(id, signal_name, core_dumped, &error_message, &lang_tag)?;
+            }
+            Msg::Channel(id, ChannelMsg::WindowAdjusted { new_size }) => {
+                debug!("window adjusted to {new_size:?} for channel {id:?}");
+            }
+            Msg::ChannelOpenAgent { channel_ref } => {
+                let id = self.channel_open_agent()?;
+                self.channels.insert(id, channel_ref);
+            }
+            Msg::ChannelOpenSession { channel_ref } => {
+                let id = self.channel_open_session()?;
+                self.channels.insert(id, channel_ref);
+            }
+            Msg::ChannelOpenDirectTcpIp {
+                host_to_connect,
+                port_to_connect,
+                originator_address,
+                originator_port,
+                channel_ref,
+            } => {
+                let id = self.channel_open_direct_tcpip(
+                    &host_to_connect,
+                    port_to_connect,
+                    &originator_address,
+                    originator_port,
+                )?;
+                self.channels.insert(id, channel_ref);
+            }
+            Msg::ChannelOpenDirectStreamLocal {
+                socket_path,
+                channel_ref,
+            } => {
+                let id = self.channel_open_direct_streamlocal(&socket_path)?;
+                self.channels.insert(id, channel_ref);
+            }
+            Msg::ChannelOpenForwardedTcpIp {
+                connected_address,
+                connected_port,
+                originator_address,
+                originator_port,
+                channel_ref,
+            } => {
+                let id = self.channel_open_forwarded_tcpip(
+                    &connected_address,
+                    connected_port,
+                    &originator_address,
+                    originator_port,
+                )?;
+                self.channels.insert(id, channel_ref);
+            }
+            Msg::ChannelOpenForwardedStreamLocal {
+                server_socket_path,
+                channel_ref,
+            } => {
+                let id = self.channel_open_forwarded_streamlocal(&server_socket_path)?;
+                self.channels.insert(id, channel_ref);
+            }
+            Msg::ChannelOpenX11 {
+                originator_address,
+                originator_port,
+                channel_ref,
+            } => {
+                let id = self.channel_open_x11(&originator_address, originator_port)?;
+                self.channels.insert(id, channel_ref);
+            }
+            Msg::TcpIpForward {
+                address,
+                port,
+                reply_channel,
+            } => {
+                self.tcpip_forward(&address, port, reply_channel)?;
+            }
+            Msg::CancelTcpIpForward {
+                address,
+                port,
+                reply_channel,
+            } => {
+                self.cancel_tcpip_forward(&address, port, reply_channel)?;
+            }
+            Msg::Disconnect {
+                reason,
+                description,
+                language_tag,
+            } => {
+                self.common.disconnect(reason, &description, &language_tag)?;
+            }
+            Msg::ChannelOpenReply { pending, result } => {
+                self.finalize_channel_open_reply(pending, result)?;
+            }
+            other => {
+                // should be unreachable, since the receiver only gets
+                // messages from methods implemented within russh
+                unimplemented!("unimplemented (client-only?) message: {other:?}")
+            }
+        }
+        Ok(())
     }
 
     pub(crate) async fn run<H, R>(
@@ -858,6 +1014,48 @@ impl Session {
         while !self.common.disconnected {
             self.common.received_data = false;
             let mut sent_keepalive = false;
+
+            // Drain messages already queued on the session channel (e.g. shell
+            // output pushed via `Handle::data()` from a spawned task) before
+            // blocking in `select!`. `select!` only handles one queued message
+            // per loop iteration, so a task producing faster than the loop
+            // drains falls behind. Capped so high-rate output can't starve
+            // client input (Ctrl+C, resize): once the cap is hit we fall through
+            // to `select!`, which picks up any client-side event first. Gated on
+            // `!kex.active()` to match the `select!` receiver arm.
+            const MAX_MESSAGES_PER_BATCH: usize = 64;
+            // Leave application messages in the bounded receiver once a peer's
+            // channel window is exhausted. Network reads remain active so a
+            // window adjustment can release the queued data.
+            if !self.kex.active() && !self.common.has_any_pending_data() {
+                let mut drained = 0;
+                while drained < MAX_MESSAGES_PER_BATCH {
+                    // Only Empty/Disconnected end the drain; both mean "nothing
+                    // more to hand off right now", so treat them the same.
+                    let Ok(msg) = self.receiver.try_recv() else {
+                        break;
+                    };
+                    self.dispatch_msg(msg)?;
+                    drained += 1;
+                    if self.common.has_any_pending_data() {
+                        break;
+                    }
+                }
+                if drained > 0 {
+                    self.flush()?;
+                    map_err!(
+                        self.common
+                            .packet_writer
+                            .flush_into(&mut stream_write)
+                            .await
+                    )?;
+                }
+                // A drained Disconnect sets this; don't block in `select!` after.
+                if self.common.disconnected {
+                    continue;
+                }
+            }
+
             tokio::select! {
                 r = &mut reading => {
                     let (stream_read, mut buffer, mut opening_cipher) = match r {
@@ -917,80 +1115,9 @@ impl Session {
                     debug!("timeout");
                     return Err(crate::Error::InactivityTimeout.into());
                 }
-                msg = self.receiver.recv(), if !self.kex.active() => {
+                msg = self.receiver.recv(), if !self.kex.active() && !self.common.has_any_pending_data() => {
                     match msg {
-                        Some(Msg::Channel(id, ChannelMsg::Data { data })) => {
-                            self.data(id, data)?;
-                        }
-                        Some(Msg::Channel(id, ChannelMsg::ExtendedData { ext, data })) => {
-                            self.extended_data(id, ext, data)?;
-                        }
-                        Some(Msg::Channel(id, ChannelMsg::Eof)) => {
-                            self.eof(id)?;
-                        }
-                        Some(Msg::Channel(id, ChannelMsg::Close)) => {
-                            self.close(id)?;
-                        }
-                        Some(Msg::Channel(id, ChannelMsg::Success)) => {
-                            self.channel_success(id)?;
-                        }
-                        Some(Msg::Channel(id, ChannelMsg::Failure)) => {
-                            self.channel_failure(id)?;
-                        }
-                        Some(Msg::Channel(id, ChannelMsg::XonXoff { client_can_do })) => {
-                            self.xon_xoff_request(id, client_can_do)?;
-                        }
-                        Some(Msg::Channel(id, ChannelMsg::ExitStatus { exit_status })) => {
-                            self.exit_status_request(id, exit_status)?;
-                        }
-                        Some(Msg::Channel(id, ChannelMsg::ExitSignal { signal_name, core_dumped, error_message, lang_tag })) => {
-                            self.exit_signal_request(id, signal_name, core_dumped, &error_message, &lang_tag)?;
-                        }
-                        Some(Msg::Channel(id, ChannelMsg::WindowAdjusted { new_size })) => {
-                            debug!("window adjusted to {new_size:?} for channel {id:?}");
-                        }
-                        Some(Msg::ChannelOpenAgent { channel_ref }) => {
-                            let id = self.channel_open_agent()?;
-                            self.channels.insert(id, channel_ref);
-                        }
-                        Some(Msg::ChannelOpenSession { channel_ref }) => {
-                            let id = self.channel_open_session()?;
-                            self.channels.insert(id, channel_ref);
-                        }
-                        Some(Msg::ChannelOpenDirectTcpIp { host_to_connect, port_to_connect, originator_address, originator_port, channel_ref }) => {
-                            let id = self.channel_open_direct_tcpip(&host_to_connect, port_to_connect, &originator_address, originator_port)?;
-                            self.channels.insert(id, channel_ref);
-                        }
-                        Some(Msg::ChannelOpenDirectStreamLocal { socket_path, channel_ref }) => {
-                            let id = self.channel_open_direct_streamlocal(&socket_path)?;
-                            self.channels.insert(id, channel_ref);
-                        }
-                        Some(Msg::ChannelOpenForwardedTcpIp { connected_address, connected_port, originator_address, originator_port, channel_ref }) => {
-                            let id = self.channel_open_forwarded_tcpip(&connected_address, connected_port, &originator_address, originator_port)?;
-                            self.channels.insert(id, channel_ref);
-                        }
-                        Some(Msg::ChannelOpenForwardedStreamLocal { server_socket_path, channel_ref }) => {
-                            let id = self.channel_open_forwarded_streamlocal(&server_socket_path)?;
-                            self.channels.insert(id, channel_ref);
-                        }
-                        Some(Msg::ChannelOpenX11 { originator_address, originator_port, channel_ref }) => {
-                            let id = self.channel_open_x11(&originator_address, originator_port)?;
-                            self.channels.insert(id, channel_ref);
-                        }
-                        Some(Msg::TcpIpForward { address, port, reply_channel }) => {
-                            self.tcpip_forward(&address, port, reply_channel)?;
-                        }
-                        Some(Msg::CancelTcpIpForward { address, port, reply_channel }) => {
-                            self.cancel_tcpip_forward(&address, port, reply_channel)?;
-                        }
-                        Some(Msg::Disconnect {reason, description, language_tag}) => {
-                            self.common.disconnect(reason, &description, &language_tag)?;
-                        }
-                        Some(_) => {
-                            // should be unreachable, since the receiver only gets
-                            // messages from methods implemented within russh
-                            unimplemented!("unimplemented (client-only?) message: {:?}", msg)
-                        }
+                        Some(msg) => self.dispatch_msg(msg)?,
                         None => {
                             debug!("self.receiver: received None");
                         }
@@ -1226,6 +1353,40 @@ impl Session {
         Ok(())
     }
 
+    fn finalize_channel_open_reply(
+        &mut self,
+        pending: PendingChannelOpen,
+        result: Result<(), ChannelOpenFailure>,
+    ) -> Result<(), Error> {
+        if let Some(ref mut enc) = self.common.encrypted {
+            match result {
+                Ok(()) => {
+                    push_packet!(enc.write, {
+                        msg::CHANNEL_OPEN_CONFIRMATION.encode(&mut enc.write)?;
+                        pending.recipient_channel.encode(&mut enc.write)?;
+                        pending.sender_channel.0.encode(&mut enc.write)?;
+                        pending.window_size.encode(&mut enc.write)?;
+                        pending.packet_size.encode(&mut enc.write)?;
+                    });
+                    enc.channels
+                        .insert(pending.sender_channel, pending.channel_params);
+                    self.channels
+                        .insert(pending.sender_channel, pending.channel_ref);
+                }
+                Err(reason) => {
+                    push_packet!(enc.write, {
+                        msg::CHANNEL_OPEN_FAILURE.encode(&mut enc.write)?;
+                        pending.recipient_channel.encode(&mut enc.write)?;
+                        reason.code().encode(&mut enc.write)?;
+                        reason.description().encode(&mut enc.write)?;
+                        "en".encode(&mut enc.write)?;
+                    });
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Send a "failure" reply to a request to open a channel open.
     pub fn channel_open_failure(
         &mut self,
@@ -1238,7 +1399,7 @@ impl Session {
             push_packet!(enc.write, {
                 enc.write.push(msg::CHANNEL_OPEN_FAILURE);
                 channel.encode(&mut enc.write)?;
-                (reason as u32).encode(&mut enc.write)?;
+                reason.code().encode(&mut enc.write)?;
                 description.encode(&mut enc.write)?;
                 language.encode(&mut enc.write)?;
             })
