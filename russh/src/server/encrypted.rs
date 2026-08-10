@@ -549,6 +549,7 @@ mod tests {
             channels: std::collections::HashMap::new(),
             inbound: std::collections::HashMap::new(),
             inbound_needs_reserve: Vec::new(),
+            outbound_acks: std::collections::HashMap::new(),
             open_global_requests: std::collections::VecDeque::new(),
             kex: SessionKexState::Idle,
         }
@@ -1095,10 +1096,13 @@ impl Session {
                     return Ok(());
                 }
                 if let Some(ref mut enc) = self.common.encrypted {
-                    // Reply with CHANNEL_CLOSE per RFC 4254 Section 5.3. This is a
-                    // protocol-level reply, so it is sent as soon as the peer's close is
-                    // read rather than being gated on application-side backpressure below.
-                    enc.close(channel_num)?;
+                    // Reply with CHANNEL_CLOSE per RFC 4254 Section 5.3, now, discarding any
+                    // outbound data still queued for this channel. The peer has torn the channel
+                    // down, so that data can no longer be delivered; parking the reply behind it
+                    // (plain `close`) would wait on a `CHANNEL_WINDOW_ADJUST` the closing peer
+                    // will never send, stranding the reply and — via the `has_any_pending_data`
+                    // gate on the shared receiver — every other channel's outbound path too.
+                    enc.close_discarding_pending(channel_num)?;
                 }
                 // Queue the Close in-order behind any pending inbound data so that already-queued
                 // data is delivered before teardown. On the fast path the Close reaches the channel
@@ -1204,7 +1208,14 @@ impl Session {
                         log::warn!(
                             "inbound pending cap exceeded for channel {channel_num:?}; closing channel (peer ignored window)"
                         );
-                        self.close(channel_num)?;
+                        // Discard anything queued outbound for this channel rather than parking
+                        // the close behind it: a peer that ignores its window is not a peer we
+                        // can expect a window adjustment from, and a parked close would keep
+                        // `has_any_pending_data` true and stall the whole session's outbound
+                        // path — turning "close this one channel" into a session-wide stall.
+                        if let Some(ref mut enc) = self.common.encrypted {
+                            enc.close_discarding_pending(channel_num)?;
+                        }
                         self.teardown_inbound_channel(channel_num);
                         self.channels.remove(&channel_num);
                     }

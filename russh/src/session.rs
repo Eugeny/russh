@@ -128,12 +128,6 @@ impl ChannelFlushResult {
 }
 
 impl<C> CommonSession<C> {
-    pub(crate) fn has_any_pending_data(&self) -> bool {
-        self.encrypted
-            .as_ref()
-            .is_some_and(Encrypted::has_any_pending_data)
-    }
-
     pub fn newkeys(&mut self, newkeys: NewKeys) {
         if let Some(ref mut enc) = self.encrypted {
             enc.exchange = Some(newkeys.exchange);
@@ -280,6 +274,28 @@ impl Encrypted {
         Ok(())
     }
 
+    /// Tear a channel down immediately, discarding anything still queued for it, and emit
+    /// `CHANNEL_CLOSE` now.
+    ///
+    /// Unlike [`Self::close`], this never parks the close behind queued outbound data. Use it
+    /// when the channel is already dead from the peer's point of view — it sent us
+    /// `CHANNEL_CLOSE`, or it violated its advertised window and we are dropping it. In those
+    /// cases the queued bytes can no longer be delivered to anyone, and `close`'s `pending_close`
+    /// path would hold the mandatory reply until a `CHANNEL_WINDOW_ADJUST` that a closing or
+    /// misbehaving peer has no reason to ever send. That would strand the reply, and because
+    /// `has_any_pending_data` gates the shared session receiver it would also stall every other
+    /// channel's outbound path for the life of the session.
+    pub fn close_discarding_pending(&mut self, channel: ChannelId) -> Result<(), crate::Error> {
+        if let Some(c) = self.channels.get_mut(&channel) {
+            c.pending_data.clear();
+            c.pending_eof = false;
+            c.pending_close = false;
+        }
+        self.byte(channel, msg::CHANNEL_CLOSE)?;
+        self.channels.remove(&channel);
+        Ok(())
+    }
+
     pub fn sender_window_size(&self, channel: ChannelId) -> usize {
         if let Some(channel) = self.channels.get(&channel) {
             channel.sender_window_size as usize
@@ -304,7 +320,8 @@ impl Encrypted {
         target: u32,
     ) -> Result<bool, crate::Error> {
         self.consume_recv_window(channel, data.len());
-        self.maybe_grant_recv_window(channel, target)
+        // The client path delivers synchronously, so nothing is ever queued undelivered.
+        self.maybe_grant_recv_window(channel, target, 0)
     }
 
     /// I1: consume the inbound receive window for `len` received bytes. The bytes are already off
@@ -323,32 +340,43 @@ impl Encrypted {
         }
     }
 
-    /// I2: grant more inbound receive window if it has dropped below `target/2`. Pushes a
-    /// `CHANNEL_WINDOW_ADJUST` (raising the window back to `target`) and returns `true` iff a
-    /// grant was emitted.
+    /// I2: grant more inbound receive window, topping it back up towards `target`. Pushes a
+    /// `CHANNEL_WINDOW_ADJUST` and returns `true` iff a grant was emitted.
     ///
     /// The server calls this only **after** the corresponding data has been accepted into the
     /// per-channel application buffer, so a stuck channel withholds its own grant and
     /// backpressures only itself, instead of blocking the shared session loop. The emitted
     /// packet goes into `self.write` and is flushed by the normal session-loop flush path
     /// (consistent with rekey gating); callers must not assume it has hit the wire yet.
+    ///
+    /// `undelivered` is the number of bytes that are already off the wire but still sitting in
+    /// this channel's pending inbound queue. Those bytes have consumed the peer's send allowance
+    /// but have *not* been handed to the application, so they must keep occupying the advertised
+    /// window: the peer may hold at most `target` bytes of un-consumed window at any time, and
+    /// the most we may advertise is therefore `target - undelivered`. Topping straight back up to
+    /// `target` here would re-authorise the peer for data we have not yet delivered, letting the
+    /// pending queue grow one full window per delivered item until it trips
+    /// `max_pending_inbound_bytes` and a *compliant* peer's channel gets closed as a protocol
+    /// violation. Server callers pass their live `pending_bytes`; the client path passes 0.
     pub fn maybe_grant_recv_window(
         &mut self,
         channel: ChannelId,
         target: u32,
+        undelivered: u32,
     ) -> Result<bool, crate::Error> {
+        let ceiling = target.saturating_sub(undelivered);
         if let Some(channel) = self.channels.get_mut(&channel) {
-            if channel.sender_window_size < target / 2 {
+            if channel.sender_window_size < ceiling / 2 {
                 debug!(
-                    "sender_window_size {:?}, target {:?}",
-                    channel.sender_window_size, target
+                    "sender_window_size {:?}, target {:?}, undelivered {:?}, ceiling {:?}",
+                    channel.sender_window_size, target, undelivered, ceiling
                 );
                 push_packet!(self.write, {
                     self.write.push(msg::CHANNEL_WINDOW_ADJUST);
                     channel.recipient_channel.encode(&mut self.write)?;
-                    (target - channel.sender_window_size).encode(&mut self.write)?;
+                    (ceiling - channel.sender_window_size).encode(&mut self.write)?;
                 });
-                channel.sender_window_size = target;
+                channel.sender_window_size = ceiling;
                 return Ok(true);
             }
         }
@@ -475,20 +503,24 @@ impl Encrypted {
         }
     }
 
-    /// Does this channel still owe an outbound flush? `close`/`eof` park behind queued
-    /// data as `pending_close`/`pending_eof`, and the parked control message is only
-    /// emitted once `flush_pending` drains the channel. Callers tearing a channel down
-    /// must leave the entry in place while this holds, or the deferred message is lost.
-    pub(crate) fn owes_flush(&self, channel: ChannelId) -> bool {
-        self.channels.get(&channel).is_some_and(|c| {
-            !c.pending_data.is_empty() || c.pending_eof || c.pending_close
-        })
-    }
-
-    pub(crate) fn has_any_pending_data(&self) -> bool {
+    /// The first channel whose un-transmitted outbound backlog exceeds `cap` bytes, if any.
+    ///
+    /// Producers that reserve window before enqueueing (`ChannelWriteHalf`, i.e. `Channel::data`
+    /// and `make_writer`) can never push a channel past its window, so their backlog stays empty
+    /// and this never fires. It exists as a last-resort valve for producers that bypass that
+    /// accounting — `Handle::data` / `Handle::extended_data`, which enqueue unconditionally — so
+    /// that one runaway channel is dropped instead of growing `pending_data` without bound.
+    pub(crate) fn first_channel_over_pending_cap(&self, cap: usize) -> Option<ChannelId> {
         self.channels
-            .values()
-            .any(|channel| !channel.pending_data.is_empty())
+            .iter()
+            .find(|(_, c)| {
+                c.pending_data
+                    .iter()
+                    .map(|(buf, _, from)| buf.len().saturating_sub(*from))
+                    .sum::<usize>()
+                    > cap
+            })
+            .map(|(id, _)| *id)
     }
 
     /// Push the largest amount of `&buf0[from..]` that can fit into
@@ -989,6 +1021,44 @@ mod tests {
             packet_types(&encrypted.write),
             vec![msg::CHANNEL_DATA, msg::CHANNEL_EOF]
         );
+    }
+
+    /// A peer-initiated CHANNEL_CLOSE must emit its RFC 4254 reply immediately, discarding the
+    /// outbound backlog, instead of parking it as `pending_close`. Parking waits on a
+    /// CHANNEL_WINDOW_ADJUST the closing peer has no reason to send, which strands the reply and
+    /// leaves the channel entry alive forever.
+    #[test]
+    fn close_discarding_pending_emits_reply_and_drops_channel() {
+        let channel_id = ChannelId(12);
+        let mut encrypted = test_encrypted();
+        // Backlog present, so plain `close()` would defer via `pending_close`.
+        encrypted
+            .channels
+            .insert(channel_id, test_channel(channel_id, 44, false, false));
+        assert!(encrypted.has_pending_data(channel_id));
+
+        encrypted.close_discarding_pending(channel_id).unwrap();
+
+        assert_eq!(packet_types(&encrypted.write), vec![msg::CHANNEL_CLOSE]);
+        assert!(
+            !encrypted.channels.contains_key(&channel_id),
+            "channel must be dropped, not left waiting on a window adjustment"
+        );
+    }
+
+    /// Contrast: plain `close()` still defers behind queued data (the orderly local-close path).
+    #[test]
+    fn close_defers_behind_pending_data() {
+        let channel_id = ChannelId(13);
+        let mut encrypted = test_encrypted();
+        encrypted
+            .channels
+            .insert(channel_id, test_channel(channel_id, 45, false, false));
+
+        encrypted.close(channel_id).unwrap();
+
+        assert!(packet_types(&encrypted.write).is_empty());
+        assert!(encrypted.channels[&channel_id].pending_close);
     }
 
     #[test]

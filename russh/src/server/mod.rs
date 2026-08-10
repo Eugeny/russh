@@ -91,6 +91,15 @@ pub struct Config {
     /// most ~`window_size` bytes in flight, so this only trips when a peer ignores its advertised
     /// window; exceeding it closes that one channel as a protocol violation, never the session.
     pub max_pending_inbound_bytes: usize,
+    /// Hard safety cap on the number of outbound payload bytes that may be queued per channel
+    /// while the peer's receive window is exhausted.
+    ///
+    /// Producers that reserve window before enqueueing (`Channel::data` / `Channel::make_writer`)
+    /// are already backpressured per channel and never reach this. It bounds the producers that
+    /// bypass that accounting — [`Handle::data`] and [`Handle::extended_data`], which enqueue
+    /// unconditionally — so a single runaway channel is closed as a protocol violation instead of
+    /// growing without bound. Exceeding it closes that one channel, never the session.
+    pub max_pending_outbound_bytes: usize,
     /// Lists of preferred algorithms.
     pub preferred: Preferred,
     /// Maximal number of allowed authentication attempts.
@@ -123,6 +132,7 @@ impl Default for Config {
             channel_buffer_size: 100,
             event_buffer_size: 10,
             max_pending_inbound_bytes: 8 * 2_000_000,
+            max_pending_outbound_bytes: 8 * 2_000_000,
             limits: Limits::default(),
             preferred: Default::default(),
             max_auth_attempts: 10,
@@ -151,6 +161,7 @@ impl Debug for Config {
             .field("channel_buffer_size", &self.channel_buffer_size)
             .field("event_buffer_size", &self.event_buffer_size)
             .field("max_pending_inbound_bytes", &self.max_pending_inbound_bytes)
+            .field("max_pending_outbound_bytes", &self.max_pending_outbound_bytes)
             .field("limits", &self.limits)
             .field("preferred", &self.preferred)
             .field("max_auth_attempts", &self.max_auth_attempts)
@@ -1087,6 +1098,7 @@ where
         channels: HashMap::new(),
         inbound: HashMap::new(),
         inbound_needs_reserve: Vec::new(),
+            outbound_acks: std::collections::HashMap::new(),
         open_global_requests: VecDeque::new(),
         kex: SessionKexState::Idle,
     };

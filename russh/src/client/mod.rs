@@ -1195,11 +1195,11 @@ impl Session {
         while !self.common.disconnected {
             self.common.received_data = false;
             let mut sent_keepalive = false;
-            // Keep reading the network for window adjustments, but leave
-            // application output in its bounded receivers while a channel is
-            // window-blocked.
-            let can_receive_outbound =
-                !self.kex.active() && !self.common.has_any_pending_data();
+            // NB: deliberately *not* gated on `has_any_pending_data()` (upstream de96ad1).
+            // That check is session-wide, so one channel whose peer stopped reading would
+            // block outbound progress on every other channel until that peer sent a window
+            // adjustment. Per-channel isolation comes from `enforce_outbound_cap` instead.
+            let can_receive_outbound = !self.kex.active();
             tokio::select! {
                 r = &mut reading => {
                     let (stream_read, mut buffer, mut opening_cipher) = match r {
@@ -1248,7 +1248,10 @@ impl Session {
                 }
                 msg = self.receiver.recv(), if can_receive_outbound => {
                     match msg {
-                        Some(msg) => self.handle_msg(msg)?,
+                        Some(msg) => {
+                            self.handle_msg(msg)?;
+                            self.enforce_outbound_cap()?;
+                        }
                         None => {
                             self.common.disconnected = true;
                             break
@@ -1256,23 +1259,32 @@ impl Session {
                     };
 
                     // eagerly take all outgoing messages so writes are batched
-                    while !self.kex.active() && !self.common.has_any_pending_data() {
+                    while !self.kex.active() {
                         match self.receiver.try_recv() {
-                            Ok(next) => self.handle_msg(next)?,
+                            Ok(next) => {
+                                self.handle_msg(next)?;
+                                self.enforce_outbound_cap()?;
+                            }
                             Err(_) => break
                         }
                     }
                 }
                 msg = self.inbound_channel_receiver.recv(), if can_receive_outbound => {
                     match msg {
-                        Some(msg) => self.handle_msg(msg)?,
+                        Some(msg) => {
+                            self.handle_msg(msg)?;
+                            self.enforce_outbound_cap()?;
+                        }
                         None => (),
                     }
 
                     // eagerly take all outgoing messages so writes are batched
-                    while !self.kex.active() && !self.common.has_any_pending_data() {
+                    while !self.kex.active() {
                         match self.inbound_channel_receiver.try_recv() {
-                            Ok(next) => self.handle_msg(next)?,
+                            Ok(next) => {
+                                self.handle_msg(next)?;
+                                self.enforce_outbound_cap()?;
+                            }
                             Err(_) => break
                         }
                     }
@@ -1578,6 +1590,28 @@ impl Session {
 
         kex.kexinit(&mut self.common.packet_writer)?;
         self.kex = SessionKexState::InProgress(kex);
+        Ok(())
+    }
+
+    /// Bound how much un-transmitted data a single channel may accumulate while its peer's
+    /// receive window is exhausted, closing that one channel if it runs away.
+    ///
+    /// Replaces upstream's session-wide `has_any_pending_data()` gate, which bounded the same
+    /// backlog by halting outbound dispatch for *every* channel as soon as *any* channel was
+    /// window-blocked. See the server-side `Session::enforce_outbound_cap`.
+    fn enforce_outbound_cap(&mut self) -> Result<(), crate::Error> {
+        let cap = self.common.config.max_pending_outbound_bytes;
+        let Some(enc) = self.common.encrypted.as_mut() else {
+            return Ok(());
+        };
+        let Some(id) = enc.first_channel_over_pending_cap(cap) else {
+            return Ok(());
+        };
+        log::warn!(
+            "outbound pending cap exceeded for channel {id:?}; closing channel (peer window stalled and producer bypassed window accounting)"
+        );
+        enc.close_discarding_pending(id)?;
+        self.channels.remove(&id);
         Ok(())
     }
 
@@ -2083,6 +2117,10 @@ pub struct Config {
     pub maximum_packet_size: u32,
     /// Buffer size for each channel (a number of unprocessed messages to store before propagating backpressure to the TCP stream)
     pub channel_buffer_size: usize,
+    /// Hard safety cap on the number of outbound payload bytes that may be queued per channel
+    /// while the peer's receive window is exhausted. Exceeding it closes that one channel,
+    /// never the session. See the server-side `Config::max_pending_outbound_bytes`.
+    pub max_pending_outbound_bytes: usize,
     /// Lists of preferred algorithms.
     pub preferred: negotiation::Preferred,
     /// Time after which the connection is garbage-collected.
@@ -2112,6 +2150,7 @@ impl Default for Config {
             window_size: 2097152,
             maximum_packet_size: 32768,
             channel_buffer_size: 100,
+            max_pending_outbound_bytes: 8 * 2_000_000,
             preferred: Default::default(),
             inactivity_timeout: None,
             keepalive_interval: None,

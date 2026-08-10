@@ -151,6 +151,11 @@ pub struct Session {
     /// Channels that have a pending item but no in-flight `reserve_owned()` future yet; the run
     /// loop drains this into its `FuturesUnordered` after each inbound batch.
     pub(crate) inbound_needs_reserve: Vec<ChannelId>,
+    /// Producers parked in [`Handle::data`] / [`Handle::extended_data`], keyed by the channel
+    /// whose backlog they are waiting to drain. Released by `release_outbound_acks` once that
+    /// channel's `pending_data` empties; dropped (waking the producer with an error) when the
+    /// channel is torn down.
+    pub(crate) outbound_acks: HashMap<ChannelId, VecDeque<oneshot::Sender<()>>>,
     pub(crate) open_global_requests: VecDeque<GlobalRequestResponse>,
     pub(crate) kex: SessionKexState<ServerKex>,
 }
@@ -208,6 +213,21 @@ pub enum Msg {
         language_tag: String,
     },
     Channel(ChannelId, ChannelMsg),
+    /// Channel payload from [`Handle::data`] / [`Handle::extended_data`], carrying a completion
+    /// signal that the session fires once the bytes have actually been written into the peer's
+    /// receive window (rather than parked in `pending_data`).
+    ///
+    /// This is what backpressures those two APIs. `Channel::data` / `Channel::make_writer`
+    /// reserve window *before* enqueueing and so need no such signal; `Handle` has no per-channel
+    /// window state, so without this it would enqueue without bound. Upstream instead throttled
+    /// it by refusing to dispatch any application message while any channel had pending data,
+    /// which backpressures every channel because one is blocked — see `enforce_outbound_cap`.
+    ChannelDataAcked {
+        id: ChannelId,
+        ext: Option<u32>,
+        data: Bytes,
+        ack: oneshot::Sender<()>,
+    },
     ChannelOpenReply {
         pending: PendingChannelOpen,
         result: Result<(), ChannelOpenFailure>,
@@ -240,36 +260,59 @@ pub struct Handle {
 
 impl Handle {
     /// Send data to the session referenced by this handler.
+    ///
+    /// Applies per-channel backpressure: the returned future resolves only once the bytes have
+    /// been written into the peer's receive window, so a peer that stops reading throttles this
+    /// channel's producer without affecting any other channel. Returns `Err` if the channel is
+    /// gone (the payload is returned when it was never handed over).
+    ///
+    /// Do not call this from inside a [`Handler`] callback — those run on the session loop, so
+    /// awaiting window there would prevent the loop from ever processing the window adjustment
+    /// that would release it. Use a spawned task, as the examples do.
     pub async fn data(
         &self,
         id: ChannelId,
         data: impl Into<bytes::Bytes>,
     ) -> Result<(), bytes::Bytes> {
-        let data = data.into();
-        self.sender
-            .send(Msg::Channel(id, ChannelMsg::Data { data }))
-            .await
-            .map_err(|e| match e.0 {
-                Msg::Channel(_, ChannelMsg::Data { data }) => data,
-                _ => unreachable!(),
-            })
+        self.send_acked(id, None, data.into()).await
     }
 
     /// Send data to the session referenced by this handler.
+    ///
+    /// Backpressures per channel exactly like [`Handle::data`]; the same "not from a `Handler`
+    /// callback" caveat applies.
     pub async fn extended_data(
         &self,
         id: ChannelId,
         ext: u32,
         data: impl Into<bytes::Bytes>,
     ) -> Result<(), bytes::Bytes> {
-        let data = data.into();
+        self.send_acked(id, Some(ext), data.into()).await
+    }
+
+    async fn send_acked(
+        &self,
+        id: ChannelId,
+        ext: Option<u32>,
+        data: bytes::Bytes,
+    ) -> Result<(), bytes::Bytes> {
+        let (ack, acked) = oneshot::channel();
         self.sender
-            .send(Msg::Channel(id, ChannelMsg::ExtendedData { ext, data }))
+            .send(Msg::ChannelDataAcked {
+                id,
+                ext,
+                data,
+                ack,
+            })
             .await
             .map_err(|e| match e.0 {
-                Msg::Channel(_, ChannelMsg::ExtendedData { data, .. }) => data,
+                Msg::ChannelDataAcked { data, .. } => data,
                 _ => unreachable!(),
-            })
+            })?;
+        // Resolves when the bytes reach the peer's window; errors if the channel was torn down
+        // first, in which case the payload is already owned by the session and cannot be handed
+        // back.
+        acked.await.map_err(|_| bytes::Bytes::new())
     }
 
     /// Send EOF to the session referenced by this handler.
@@ -772,11 +815,22 @@ impl Session {
         handler: &mut H,
     ) -> Result<(), crate::Error> {
         let target = self.target_window_size;
+        // Bytes still queued undelivered for this channel keep occupying its advertised window;
+        // only the portion already handed to the application may be re-granted. Callers reach
+        // here after `pending_bytes` has been decremented for the item just delivered, so this is
+        // exactly the still-outstanding backlog.
+        let undelivered = self
+            .inbound
+            .get(&id)
+            .map(|q| q.pending_bytes)
+            .unwrap_or(0)
+            .try_into()
+            .unwrap_or(u32::MAX);
         let granted = self
             .common
             .encrypted
             .as_mut()
-            .map(|enc| enc.maybe_grant_recv_window(id, target))
+            .map(|enc| enc.maybe_grant_recv_window(id, target, undelivered))
             .transpose()?
             .unwrap_or(false);
         if granted {
@@ -785,6 +839,62 @@ impl Session {
                 self.target_window_size = w;
             }
         }
+        Ok(())
+    }
+
+    /// Release producers parked in [`Handle::data`] for any channel whose outbound backlog has
+    /// drained. Cheap: only channels with parked producers are examined.
+    pub(crate) fn release_outbound_acks(&mut self) {
+        if self.outbound_acks.is_empty() {
+            return;
+        }
+        let drained: Vec<ChannelId> = self
+            .outbound_acks
+            .keys()
+            .copied()
+            .filter(|id| {
+                !self
+                    .common
+                    .encrypted
+                    .as_ref()
+                    .is_some_and(|enc| enc.has_pending_data(*id))
+            })
+            .collect();
+        for id in drained {
+            if let Some(acks) = self.outbound_acks.remove(&id) {
+                for ack in acks {
+                    let _ = ack.send(());
+                }
+            }
+        }
+    }
+
+    /// Outbound mirror of the inbound `Overflow` path: bound how much un-transmitted data a
+    /// single channel may accumulate while its peer's receive window is exhausted, and close that
+    /// one channel if it runs away.
+    ///
+    /// This replaces upstream's session-wide `has_any_pending_data()` gate. That gate bounded the
+    /// backlog by refusing to dispatch *any* application message while *any* channel had pending
+    /// data, which is correct on memory but converts one stalled peer into a session-wide
+    /// outbound stall. Capping per channel keeps the isolation property the inbound path already
+    /// has: a runaway channel is dropped, everyone else keeps flowing.
+    ///
+    /// Producers that reserve window before enqueueing (`Channel::data` / `make_writer`) cannot
+    /// exceed their window and so never reach the cap; it is `Handle::data` and
+    /// `Handle::extended_data`, which enqueue unconditionally, that this contains.
+    pub(crate) fn enforce_outbound_cap(&mut self) -> Result<(), crate::Error> {
+        let cap = self.common.config.max_pending_outbound_bytes;
+        let Some(enc) = self.common.encrypted.as_mut() else {
+            return Ok(());
+        };
+        let Some(id) = enc.first_channel_over_pending_cap(cap) else {
+            return Ok(());
+        };
+        log::warn!(
+            "outbound pending cap exceeded for channel {id:?}; closing channel (peer window stalled and producer bypassed window accounting)"
+        );
+        enc.close_discarding_pending(id)?;
+        self.finalize_close(id);
         Ok(())
     }
 
@@ -797,14 +907,14 @@ impl Session {
         }
         self.inbound.remove(&id);
         self.channels.remove(&id);
+        // Dropping any parked `Handle::data` producers wakes them with an error, which is the
+        // correct signal now that the channel is gone.
+        self.outbound_acks.remove(&id);
         if let Some(enc) = self.common.encrypted.as_mut() {
-            // Keep the protocol-level entry alive while it still owes an outbound flush:
-            // the RFC 4254 CHANNEL_CLOSE reply is parked as `pending_close` behind queued
-            // data, and dropping the entry here would lose it. `flush_pending` removes the
-            // entry itself once the parked close is finally written.
-            if !enc.owes_flush(id) {
-                enc.channels.remove(&id);
-            }
+            // Safe to drop unconditionally: every path that reaches `finalize_close` has already
+            // emitted the peer's `CHANNEL_CLOSE` reply via `close_discarding_pending`, so there
+            // is never a parked `pending_close` left to lose here.
+            enc.channels.remove(&id);
         }
     }
 
@@ -847,6 +957,25 @@ impl Session {
             }
             Msg::Channel(id, ChannelMsg::ExtendedData { ext, data }) => {
                 self.extended_data(id, ext, data)?;
+            }
+            Msg::ChannelDataAcked { id, ext, data, ack } => {
+                match ext {
+                    None => self.data(id, data)?,
+                    Some(ext) => self.extended_data(id, ext, data)?,
+                }
+                // Fully absorbed by the peer's window: release the producer now. Otherwise park
+                // it until this channel's backlog drains, so `Handle::data` is throttled to the
+                // rate the peer actually grants window — without stalling any other channel.
+                let parked = self
+                    .common
+                    .encrypted
+                    .as_ref()
+                    .is_some_and(|enc| enc.has_pending_data(id));
+                if parked {
+                    self.outbound_acks.entry(id).or_default().push_back(ack);
+                } else {
+                    let _ = ack.send(());
+                }
             }
             Msg::Channel(id, ChannelMsg::Eof) => {
                 self.eof(id)?;
@@ -1024,10 +1153,15 @@ impl Session {
             // to `select!`, which picks up any client-side event first. Gated on
             // `!kex.active()` to match the `select!` receiver arm.
             const MAX_MESSAGES_PER_BATCH: usize = 64;
-            // Leave application messages in the bounded receiver once a peer's
-            // channel window is exhausted. Network reads remain active so a
-            // window adjustment can release the queued data.
-            if !self.kex.active() && !self.common.has_any_pending_data() {
+            // NB: deliberately *not* gated on `has_any_pending_data()` (upstream de96ad1).
+            // That check is session-wide, so a single channel whose peer stopped reading —
+            // leaving its window exhausted and its `pending_data` non-empty — would halt this
+            // drain and the `select!` receiver arm for *every* channel, and only a
+            // CHANNEL_WINDOW_ADJUST from that one stalled peer could restart them. A peer that
+            // never adjusts (or a rekey, which forces all outbound data into `pending_data`)
+            // therefore stalled the whole session's outbound path. Per-channel isolation is
+            // enforced by `enforce_outbound_cap` below instead.
+            if !self.kex.active() {
                 let mut drained = 0;
                 while drained < MAX_MESSAGES_PER_BATCH {
                     // Only Empty/Disconnected end the drain; both mean "nothing
@@ -1037,9 +1171,7 @@ impl Session {
                     };
                     self.dispatch_msg(msg)?;
                     drained += 1;
-                    if self.common.has_any_pending_data() {
-                        break;
-                    }
+                    self.enforce_outbound_cap()?;
                 }
                 if drained > 0 {
                     self.flush()?;
@@ -1115,9 +1247,14 @@ impl Session {
                     debug!("timeout");
                     return Err(crate::Error::InactivityTimeout.into());
                 }
-                msg = self.receiver.recv(), if !self.kex.active() && !self.common.has_any_pending_data() => {
+                // See the batch-drain comment above: gating this arm on `has_any_pending_data()`
+                // would let one stalled channel block outbound progress for all of them.
+                msg = self.receiver.recv(), if !self.kex.active() => {
                     match msg {
-                        Some(msg) => self.dispatch_msg(msg)?,
+                        Some(msg) => {
+                            self.dispatch_msg(msg)?;
+                            self.enforce_outbound_cap()?;
+                        }
                         None => {
                             debug!("self.receiver: received None");
                         }
@@ -1125,6 +1262,7 @@ impl Session {
                 }
             }
             self.flush()?;
+            self.release_outbound_acks();
             map_err!(
                 self.common
                     .packet_writer
@@ -1911,6 +2049,7 @@ mod tests {
             channels: HashMap::new(),
             inbound: HashMap::new(),
             inbound_needs_reserve: Vec::new(),
+            outbound_acks: std::collections::HashMap::new(),
             open_global_requests: VecDeque::new(),
             kex: SessionKexState::Idle,
         }
@@ -1978,6 +2117,80 @@ mod tests {
         let (tx, rx) = tokio::sync::mpsc::channel::<ChannelMsg>(buf);
         session.channels.insert(id, ChannelRef::new(tx.clone()));
         (tx, rx)
+    }
+
+    /// Register a channel in the encrypted state (its inbound window starts at `window`) so
+    /// window accounting has something to act on. Returns the allocated id.
+    fn insert_encrypted_channel(session: &mut Session, window: u32) -> ChannelId {
+        session
+            .common
+            .encrypted
+            .as_mut()
+            .unwrap()
+            .new_channel(window, 32768)
+    }
+
+    /// A window grant must never re-authorise the peer for bytes that are off the wire but still
+    /// queued undelivered. Topping straight back up to `target` did exactly that: one delivered
+    /// item released credit for the whole backlog, so a *compliant* peer could keep refilling the
+    /// queue until `max_pending_inbound_bytes` tripped and its channel was closed as a protocol
+    /// violation.
+    #[tokio::test]
+    async fn window_grant_excludes_undelivered_backlog() {
+        let mut session = authenticated_session();
+        let target = session.target_window_size;
+        let id = insert_encrypted_channel(&mut session, target);
+        let (_tx, _rx) = insert_test_channel(&mut session, id, 1);
+
+        // Peer spends its whole window; only a small part has reached the application.
+        let undelivered = target / 2;
+        {
+            let enc = session.common.encrypted.as_mut().unwrap();
+            enc.consume_recv_window(id, target as usize);
+            assert_eq!(enc.sender_window_size(id), 0);
+        }
+        session.inbound.entry(id).or_default().pending_bytes = undelivered as usize;
+
+        let mut handler = TestHandler;
+        session.maybe_grant_after_delivery(id, &mut handler).unwrap();
+
+        // The advertised window may cover only what the application actually consumed.
+        let enc = session.common.encrypted.as_ref().unwrap();
+        assert_eq!(
+            enc.sender_window_size(id),
+            (target - undelivered) as usize,
+            "grant must leave the undelivered backlog occupying the window"
+        );
+    }
+
+    /// With nothing queued the grant still tops all the way back up to `target`, so the fix above
+    /// costs nothing on the steady-state fast path.
+    #[tokio::test]
+    async fn window_grant_restores_full_target_when_drained() {
+        let mut session = authenticated_session();
+        let target = session.target_window_size;
+        let id = insert_encrypted_channel(&mut session, target);
+        let (_tx, _rx) = insert_test_channel(&mut session, id, 1);
+
+        session
+            .common
+            .encrypted
+            .as_mut()
+            .unwrap()
+            .consume_recv_window(id, target as usize);
+
+        let mut handler = TestHandler;
+        session.maybe_grant_after_delivery(id, &mut handler).unwrap();
+
+        assert_eq!(
+            session
+                .common
+                .encrypted
+                .as_ref()
+                .unwrap()
+                .sender_window_size(id),
+            target as usize
+        );
     }
 
     /// Once a channel is backpressured, further items queue in FIFO order across kinds (Data before
