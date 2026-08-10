@@ -1565,11 +1565,30 @@ impl Session {
 
     /// Close a channel.
     pub fn close(&mut self, channel: ChannelId) -> Result<(), Error> {
-        if let Some(ref mut enc) = self.common.encrypted {
-            enc.close(channel)
+        let emitted = if let Some(ref mut enc) = self.common.encrypted {
+            enc.close(channel)?;
+            // `Encrypted::close` drops the protocol entry only when it actually wrote
+            // CHANNEL_CLOSE; otherwise it parked as `pending_close` behind queued data.
+            !enc.channel_exists(channel)
         } else {
             unreachable!()
+        };
+        if emitted {
+            // The close is on the wire and the peer owes only its mandatory reply. If nothing is
+            // reading this channel any more — the dominant path, since dropping a `Channel` is
+            // what sent the close — release the application-side state now rather than waiting
+            // for that reply, which a broken or hostile peer may never send. If the application
+            // still holds the read half it may legitimately keep receiving until the peer's
+            // close, so teardown is left to the CHANNEL_CLOSE handler in that case.
+            let reader_gone = self
+                .channels
+                .get(&channel)
+                .is_some_and(|c| std::ops::Deref::deref(c).is_closed());
+            if reader_gone {
+                self.finalize_close(channel);
+            }
         }
+        Ok(())
     }
 
     /// Send EOF to a channel
@@ -2210,6 +2229,45 @@ mod tests {
         assert!(
             !session.channels.contains_key(&id),
             "peer's close reply must release the application-side channel entry"
+        );
+    }
+
+    /// The leak must not depend on the peer behaving: once our CHANNEL_CLOSE is on the wire and
+    /// nothing is reading the channel any more, the application-side entry is released
+    /// immediately rather than waiting for a mandatory reply a broken or hostile peer may never
+    /// send.
+    #[tokio::test]
+    async fn server_initiated_close_releases_state_without_peer_reply() {
+        let mut session = authenticated_session();
+        let id = insert_encrypted_channel(&mut session, 1024);
+        confirm_test_channel(&mut session, id, 1024);
+        let (_tx, rx) = insert_test_channel(&mut session, id, 8);
+
+        // Nothing is reading any more — this is what dropping a `Channel` looks like.
+        drop(rx);
+
+        session.close(id).unwrap();
+
+        assert!(
+            !session.channels.contains_key(&id),
+            "state must be released without waiting on the peer"
+        );
+    }
+
+    /// ...but an application that closed the write side while still reading keeps its channel,
+    /// since it may legitimately receive until the peer's own close arrives.
+    #[tokio::test]
+    async fn server_initiated_close_keeps_state_while_app_still_reads() {
+        let mut session = authenticated_session();
+        let id = insert_encrypted_channel(&mut session, 1024);
+        confirm_test_channel(&mut session, id, 1024);
+        let (_tx, _rx) = insert_test_channel(&mut session, id, 8);
+
+        session.close(id).unwrap();
+
+        assert!(
+            session.channels.contains_key(&id),
+            "a live reader must not have its channel torn out from under it"
         );
     }
 

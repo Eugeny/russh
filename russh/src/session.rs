@@ -282,9 +282,8 @@ impl Encrypted {
     /// `CHANNEL_CLOSE`, or it violated its advertised window and we are dropping it. In those
     /// cases the queued bytes can no longer be delivered to anyone, and `close`'s `pending_close`
     /// path would hold the mandatory reply until a `CHANNEL_WINDOW_ADJUST` that a closing or
-    /// misbehaving peer has no reason to ever send. That would strand the reply, and because
-    /// `has_any_pending_data` gates the shared session receiver it would also stall every other
-    /// channel's outbound path for the life of the session.
+    /// misbehaving peer has no reason to ever send — stranding the reply and leaking the channel
+    /// entry for the life of the session.
     pub fn close_discarding_pending(&mut self, channel: ChannelId) -> Result<(), crate::Error> {
         if let Some(c) = self.channels.get_mut(&channel) {
             c.pending_data.clear();

@@ -1232,9 +1232,8 @@ impl Session {
                         );
                         // Discard anything queued outbound for this channel rather than parking
                         // the close behind it: a peer that ignores its window is not a peer we
-                        // can expect a window adjustment from, and a parked close would keep
-                        // `has_any_pending_data` true and stall the whole session's outbound
-                        // path — turning "close this one channel" into a session-wide stall.
+                        // can expect a window adjustment from, so a parked close would strand the
+                        // reply and leak this channel for the rest of the session.
                         self.discard_channel_outbound(channel_num)?;
                         self.teardown_inbound_channel(channel_num);
                         self.channels.remove(&channel_num);
