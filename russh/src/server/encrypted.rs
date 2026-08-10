@@ -1095,15 +1095,13 @@ impl Session {
                 if !self.is_established_channel(channel_num) {
                     return Ok(());
                 }
-                if let Some(ref mut enc) = self.common.encrypted {
-                    // Reply with CHANNEL_CLOSE per RFC 4254 Section 5.3, now, discarding any
-                    // outbound data still queued for this channel. The peer has torn the channel
-                    // down, so that data can no longer be delivered; parking the reply behind it
-                    // (plain `close`) would wait on a `CHANNEL_WINDOW_ADJUST` the closing peer
-                    // will never send, stranding the reply and — via the `has_any_pending_data`
-                    // gate on the shared receiver — every other channel's outbound path too.
-                    enc.close_discarding_pending(channel_num)?;
-                }
+                // Reply with CHANNEL_CLOSE per RFC 4254 Section 5.3, now, discarding any
+                // outbound data still queued for this channel and failing its parked producers.
+                // The peer has torn the channel down, so that data can no longer be delivered;
+                // parking the reply behind it (plain `close`) would wait on a
+                // `CHANNEL_WINDOW_ADJUST` the closing peer will never send, stranding the
+                // mandatory reply and leaking the channel entry.
+                self.discard_channel_outbound(channel_num)?;
                 // Queue the Close in-order behind any pending inbound data so that already-queued
                 // data is delivered before teardown. On the fast path the Close reaches the channel
                 // buffer immediately, so the `channel_close` callback + teardown run now; when it is
@@ -1213,9 +1211,7 @@ impl Session {
                         // can expect a window adjustment from, and a parked close would keep
                         // `has_any_pending_data` true and stall the whole session's outbound
                         // path — turning "close this one channel" into a session-wide stall.
-                        if let Some(ref mut enc) = self.common.encrypted {
-                            enc.close_discarding_pending(channel_num)?;
-                        }
+                        self.discard_channel_outbound(channel_num)?;
                         self.teardown_inbound_channel(channel_num);
                         self.channels.remove(&channel_num);
                     }

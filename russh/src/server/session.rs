@@ -851,25 +851,20 @@ impl Session {
         let Some(enc) = self.common.encrypted.as_ref() else {
             return;
         };
-        // "Channel gone" is NOT "backlog drained". A channel torn down by
-        // `close_discarding_pending` (peer close, or inbound overflow) threw its queued bytes
-        // away; signalling success there would tell the producer its data was sent. Drop those
-        // acks instead, which wakes the producer with an error.
-        let mut settled: Vec<(ChannelId, bool)> = Vec::new();
-        for id in self.outbound_acks.keys().copied() {
-            if !enc.channel_exists(id) {
-                settled.push((id, false));
-            } else if !enc.has_pending_data(id) {
-                settled.push((id, true));
-            }
-        }
-        for (id, delivered) in settled {
+        // Reaching here with no pending data means the backlog went out on the wire: either the
+        // channel drained and is still open, or it drained and was then removed by an orderly
+        // `flush_pending` -> `pending_close`. Both delivered. Channels whose backlog was
+        // *discarded* never appear here — `discard_channel_outbound` already took their acks.
+        let drained: Vec<ChannelId> = self
+            .outbound_acks
+            .keys()
+            .copied()
+            .filter(|id| !enc.has_pending_data(*id))
+            .collect();
+        for id in drained {
             if let Some(acks) = self.outbound_acks.remove(&id) {
                 for ack in acks {
-                    if delivered {
-                        let _ = ack.send(());
-                    }
-                    // else: dropped, so the producer's `await` resolves to Err.
+                    let _ = ack.send(());
                 }
             }
         }
@@ -888,6 +883,22 @@ impl Session {
     /// Producers that reserve window before enqueueing (`Channel::data` / `make_writer`) cannot
     /// exceed their window and so never reach the cap; it is `Handle::data` and
     /// `Handle::extended_data`, which enqueue unconditionally, that this contains.
+    /// Tear a channel down on the wire, discarding everything still queued for it, and fail any
+    /// producers parked on that backlog.
+    ///
+    /// Keeping these two together is the point: the bytes are being thrown away, so the parked
+    /// `Handle::data` callers must resolve to `Err`. Inferring that later from "is the channel
+    /// gone?" cannot work — a channel is also removed after an *orderly* flush, where the bytes
+    /// really were delivered.
+    pub(crate) fn discard_channel_outbound(&mut self, id: ChannelId) -> Result<(), crate::Error> {
+        if let Some(enc) = self.common.encrypted.as_mut() {
+            enc.close_discarding_pending(id)?;
+        }
+        // Dropping the senders resolves each producer's await to Err.
+        self.outbound_acks.remove(&id);
+        Ok(())
+    }
+
     pub(crate) fn enforce_outbound_cap(&mut self, id: ChannelId) -> Result<(), crate::Error> {
         let cap = self.common.config.max_pending_outbound_bytes;
         let Some(enc) = self.common.encrypted.as_mut() else {
@@ -899,7 +910,7 @@ impl Session {
         log::warn!(
             "outbound pending cap exceeded for channel {id:?}; closing channel (peer window stalled and producer bypassed window accounting)"
         );
-        enc.close_discarding_pending(id)?;
+        self.discard_channel_outbound(id)?;
         self.finalize_close(id);
         Ok(())
     }
@@ -973,17 +984,22 @@ impl Session {
                     None => self.data(id, data)?,
                     Some(ext) => self.extended_data(id, ext, data)?,
                 }
-                // Fully absorbed by the peer's window: release the producer now. Otherwise park
-                // it until this channel's backlog drains, so `Handle::data` is throttled to the
-                // rate the peer actually grants window — without stalling any other channel.
-                let parked = self
+                let (exists, pending) = self
                     .common
                     .encrypted
                     .as_ref()
-                    .is_some_and(|enc| enc.has_pending_data(id));
-                if parked {
+                    .map(|enc| (enc.channel_exists(id), enc.has_pending_data(id)))
+                    .unwrap_or((false, false));
+                if !exists {
+                    // The channel was torn down while this message sat in the session queue, so
+                    // `Encrypted::data` silently discarded the payload. Drop the ack rather than
+                    // reporting success for bytes that never reached the peer.
+                } else if pending {
+                    // Park until this channel's backlog drains, so `Handle::data` is throttled to
+                    // the rate the peer grants window — without stalling any other channel.
                     self.outbound_acks.entry(id).or_default().push_back(ack);
                 } else {
+                    // Fully absorbed by the peer's window.
                     let _ = ack.send(());
                 }
                 return Ok(Some(id));
@@ -2221,19 +2237,48 @@ mod tests {
         session.outbound_acks.entry(id).or_default().push_back(ack);
 
         // Channel torn down with its backlog discarded, exactly as peer-close does.
-        session
-            .common
-            .encrypted
-            .as_mut()
-            .unwrap()
-            .close_discarding_pending(id)
-            .unwrap();
+        session.discard_channel_outbound(id).unwrap();
 
         session.release_outbound_acks();
 
         assert!(
             acked.await.is_err(),
             "discarded data must not be reported as delivered"
+        );
+    }
+
+    /// Regression for the opposite error: a channel removed by an *orderly* flush+close
+    /// delivered its bytes, so its parked producer must be told `Ok`. Inferring failure from
+    /// "channel is gone" reported `Err` for data that really was sent.
+    #[tokio::test]
+    async fn producer_is_woken_with_success_after_orderly_flush_and_close() {
+        let mut session = authenticated_session();
+        let id = insert_encrypted_channel(&mut session, 1024);
+
+        let (ack, acked) = oneshot::channel();
+        session.outbound_acks.entry(id).or_default().push_back(ack);
+
+        // Orderly close after the backlog drained: `Encrypted::close` emits and removes the
+        // channel, so it is gone but everything was delivered.
+        session
+            .common
+            .encrypted
+            .as_mut()
+            .unwrap()
+            .close(id)
+            .unwrap();
+        assert!(!session
+            .common
+            .encrypted
+            .as_ref()
+            .unwrap()
+            .channel_exists(id));
+
+        session.release_outbound_acks();
+
+        assert!(
+            acked.await.is_ok(),
+            "delivered data must not be reported as failed"
         );
     }
 

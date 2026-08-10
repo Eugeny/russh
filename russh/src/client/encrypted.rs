@@ -406,9 +406,13 @@ impl Session {
                 let channel_num = map_err!(ChannelId::decode(&mut r))?;
                 map_err!(ensure_end(&r))?;
                 if let Some(ref mut enc) = self.common.encrypted {
-                    // The CHANNEL_CLOSE message must be sent to the server at this point or the session
-                    // will not be released.
-                    enc.close(channel_num)?;
+                    // The CHANNEL_CLOSE message must be sent to the server at this point or the
+                    // session will not be released. Discard anything still queued outbound rather
+                    // than parking behind it: the peer has closed the channel, so that data can no
+                    // longer be delivered, and plain `close` would hold the mandatory reply until a
+                    // `CHANNEL_WINDOW_ADJUST` the closing peer has no reason to send — stranding
+                    // the reply and leaking the channel entry for the life of the session.
+                    enc.close_discarding_pending(channel_num)?;
                 }
                 // Forward the close to the channel before removing it, so that
                 // consumers waiting on `Channel::wait()` receive an explicit
