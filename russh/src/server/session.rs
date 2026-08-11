@@ -810,7 +810,8 @@ impl Session {
     /// Apply every queued channel-open reply. Must run before dispatching any `receiver`
     /// message: a writer's first `Data` for a channel is enqueued strictly after `accept()`
     /// queued that channel's reply, so finalizing replies first guarantees no `Data` is ever
-    /// dispatched against a still-unconfirmed channel (which would fail with `WrongChannel`).
+    /// dispatched against a channel that is not yet registered (such data would be silently
+    /// discarded, since the channel maps have no entry to route it to).
     fn drain_open_replies(&mut self) -> Result<(), Error> {
         while let Ok(msg) = self.open_reply_rx.try_recv() {
             if let Msg::ChannelOpenReply { pending, result } = msg {
@@ -968,9 +969,6 @@ impl Session {
                 language_tag,
             } => {
                 self.common.disconnect(reason, &description, &language_tag)?;
-            }
-            Msg::ChannelOpenReply { pending, result } => {
-                self.finalize_channel_open_reply(pending, result)?;
             }
             other => {
                 // should be unreachable, since the receiver only gets
@@ -1186,14 +1184,15 @@ impl Session {
             }
         }
         debug!("disconnected");
-        // Shutdown. Flush anything still buffered (e.g. our DISCONNECT) before closing the
-        // write half — the in-loop flush arm no longer guarantees an empty buffer at exit.
-        map_err!(
-            self.common
-                .packet_writer
-                .flush_into(&mut stream_write)
-                .await
-        )?;
+        // Shutdown. Try to flush anything still buffered (e.g. our DISCONNECT) before closing
+        // the write half — the in-loop flush arm no longer guarantees an empty buffer at exit.
+        // Best-effort with a deadline: the peer may be gone (write errors) or may have stopped
+        // reading entirely (write blocks); neither may fail or hang the teardown.
+        let _ = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            self.common.packet_writer.flush_into(&mut stream_write),
+        )
+        .await;
         map_err!(stream_write.shutdown().await)?;
         loop {
             if let Some((stream_read, buffer, opening_cipher)) = is_reading.take() {

@@ -1200,10 +1200,15 @@ impl Session {
         trace!("disconnected");
         self.receiver.close();
         self.inbound_channel_receiver.close();
-        // Flush anything still buffered (e.g. our DISCONNECT) before closing the write half —
-        // the in-loop flush arm no longer guarantees an empty buffer at exit. Best-effort: the
-        // peer may already be gone.
-        let _ = self.common.packet_writer.flush_into(&mut stream_write).await;
+        // Try to flush anything still buffered (e.g. our DISCONNECT) before closing the write
+        // half — the in-loop flush arm no longer guarantees an empty buffer at exit.
+        // Best-effort with a deadline: the peer may be gone (write errors) or may have stopped
+        // reading entirely (write blocks); neither may fail or hang the teardown.
+        let _ = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            self.common.packet_writer.flush_into(&mut stream_write),
+        )
+        .await;
         map_err!(stream_write.shutdown().await)?;
         match result {
             Ok(v) => {
@@ -1264,6 +1269,9 @@ impl Session {
         // mirroring the server run loop. Each resolution delivers one queued inbound item
         // without the loop ever blocking on a single channel's slow consumer.
         let mut inbound_reserves: FuturesUnordered<BoxReserve> = FuturesUnordered::new();
+
+        // Cap for the eager per-arm message drains below; mirrors the server's batch drain.
+        const MAX_MESSAGES_PER_BATCH: usize = 64;
 
         #[allow(clippy::panic)] // false positive in select! macro
         while !self.common.disconnected {
@@ -1330,9 +1338,10 @@ impl Session {
                     map_err!(r)?;
                 }
                 // Channel-open replies from handlers that stashed the `ChannelOpenHandle` and
-                // accepted/rejected later from a spawned task. Same kex gate as the receiver
-                // arms: no packets may be written mid-rekey.
-                Some(msg) = self.open_reply_rx.recv(), if can_receive_outbound => {
+                // accepted/rejected later from a spawned task. Kex-gated only (no packets may
+                // be written mid-rekey), NOT watermark-gated: replies are tiny and
+                // latency-sensitive, and the server arm is gated the same way.
+                Some(msg) = self.open_reply_rx.recv(), if !self.kex.active() => {
                     if let Msg::ServerChannelOpenReply { pending, result } = msg {
                         self.finalize_server_channel_open_reply(pending, result)?;
                     }
@@ -1364,12 +1373,16 @@ impl Session {
                         }
                     };
 
-                    // eagerly take all outgoing messages so writes are batched
-                    while !self.kex.active() {
+                    // Eagerly take queued messages so writes are batched. Capped (like the
+                    // server's batch drain) so one arm win can't stage an unbounded burst past
+                    // the watermark, which is only re-checked at the next select entry.
+                    let mut drained = 0;
+                    while drained < MAX_MESSAGES_PER_BATCH && !self.kex.active() {
                         match self.receiver.try_recv() {
                             Ok(next) => self.handle_msg(next)?,
                             Err(_) => break
                         }
+                        drained += 1;
                     }
                 }
                 msg = self.inbound_channel_receiver.recv(), if can_receive_outbound => {
@@ -1378,12 +1391,14 @@ impl Session {
                         None => (),
                     }
 
-                    // eagerly take all outgoing messages so writes are batched
-                    while !self.kex.active() {
+                    // Same capped eager drain as the receiver arm above.
+                    let mut drained = 0;
+                    while drained < MAX_MESSAGES_PER_BATCH && !self.kex.active() {
                         match self.inbound_channel_receiver.try_recv() {
                             Ok(next) => self.handle_msg(next)?,
                             Err(_) => break
                         }
+                        drained += 1;
                     }
                 }
             };
@@ -1454,7 +1469,8 @@ impl Session {
     /// Apply every queued channel-open reply. Must run before dispatching any queued channel
     /// message: a writer's first `Data` for a server-initiated channel is enqueued strictly
     /// after `accept()` queued that channel's reply, so finalizing replies first guarantees no
-    /// `Data` is ever dispatched against a still-unconfirmed channel.
+    /// `Data` is ever dispatched against a channel that is not yet registered (such data would
+    /// be silently discarded, since the channel maps have no entry to route it to).
     fn drain_open_replies(&mut self) -> Result<(), crate::Error> {
         while let Ok(msg) = self.open_reply_rx.try_recv() {
             if let Msg::ServerChannelOpenReply { pending, result } = msg {
@@ -1661,9 +1677,6 @@ impl Session {
             }
             Msg::NoMoreSessions { want_reply } => {
                 let _ = self.no_more_sessions(want_reply);
-            }
-            Msg::ServerChannelOpenReply { pending, result } => {
-                self.finalize_server_channel_open_reply(pending, result)?;
             }
             msg => {
                 // should be unreachable, since the receiver only gets

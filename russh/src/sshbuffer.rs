@@ -361,6 +361,11 @@ pub(crate) struct IncomingSshPacket {
 /// buffer growth now that flushing runs concurrently with packet intake instead of blocking
 /// the loop until the buffer is empty. Must comfortably exceed one maximum-size packet so a
 /// slow-but-draining peer still makes progress.
+///
+/// This is a soft bound: replies generated while processing inbound packets (window adjusts,
+/// channel-open confirmations, request replies) are intentionally not gated — they are small,
+/// strictly peer-packet-driven, and gating them would reintroduce read stalls. Channel data
+/// itself is additionally capped by the peer's advertised windows.
 pub(crate) const OUTBOUND_HIGH_WATERMARK: usize = 128 * 1024;
 
 /// Packet writer for constructing and encrypting outgoing SSH packets.
@@ -579,10 +584,13 @@ impl PacketWriter {
         !self.write_buffer.buffer.is_empty()
     }
 
-    /// Bytes buffered but not yet handed to the socket. Used by the run loops' intake
-    /// high-watermark gate.
+    /// Bytes currently retained in the write buffer. Used by the run loops' intake
+    /// high-watermark gate. Deliberately counts the already-written-but-unflushed prefix
+    /// too: a writer whose `poll_flush` stays pending (e.g. a buffering TLS layer under
+    /// backpressure) retains that memory, so excluding it would let intake refill the
+    /// buffer past the watermark while nothing has actually reached the peer.
     pub fn pending_bytes(&self) -> usize {
-        self.write_buffer.buffer.len().saturating_sub(self.flush_cursor)
+        self.write_buffer.buffer.len()
     }
 
     /// Write the pending buffer out and flush the socket.

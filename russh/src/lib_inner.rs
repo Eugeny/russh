@@ -561,6 +561,10 @@ pub struct PendingChannelOpen {
 /// could wait on a queue that only the (currently blocked) loop itself drains — a permanent
 /// self-deadlock whenever other channels' writers keep that queue full. Unboundedness is safe
 /// because at most one reply exists per peer-initiated CHANNEL_OPEN.
+///
+/// Do not write to or otherwise drive the channel handed to the handler before calling
+/// [`accept`](ChannelOpenHandleInner::accept): the channel is only registered with the session
+/// when the reply is processed, and messages that arrive before then are silently discarded.
 pub struct ChannelOpenHandleInner<M: Send> {
     sender: tokio::sync::mpsc::UnboundedSender<M>,
     inner: Option<PendingChannelOpen>,
