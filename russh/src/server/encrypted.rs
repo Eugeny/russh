@@ -61,6 +61,27 @@ impl Session {
             rejection_wait_until
         };
 
+        if self.common.config.max_auth_attempts > 0
+            // auth request messages
+            && matches!(
+                buf.first(),
+                Some(&(msg::USERAUTH_REQUEST | msg::USERAUTH_INFO_RESPONSE))
+            )
+            // with cap exceeded
+            && matches!(
+                self.common.encrypted.as_ref().map(|e| &e.state),
+                Some(EncryptedState::WaitingAuthRequest(a))
+                    if a.rejection_count >= self.common.config.max_auth_attempts
+            )
+        {
+            self.common.disconnect(
+                Disconnect::NoMoreAuthMethodsAvailable,
+                "Too many authentication attempts",
+                "",
+            )?;
+            return Ok(());
+        }
+
         let Some(enc) = self.common.encrypted.as_mut() else {
             return Err(Error::Inconsistent.into());
         };
@@ -150,10 +171,9 @@ mod tests {
     use std::num::Wrapping;
     use std::sync::Arc;
 
-    use bytes::BytesMut;
     use crate::compression::{Compression, Decompress};
     use crate::helpers::sign_with_hash_alg;
-    use crate::kex::{SessionKexState, KEXES, NONE as KEX_NONE};
+    use crate::kex::{KEXES, NONE as KEX_NONE, SessionKexState};
     use crate::keys::PrivateKeyWithHashAlg;
     use crate::tests::raw_no_crypto::{
         MSG_SERVICE_REQUEST, MSG_USERAUTH_FAILURE, MSG_USERAUTH_REQUEST, RawSession,
@@ -161,6 +181,80 @@ mod tests {
         raw_auth_request_signal, raw_channel_request_signal, raw_service_request_signal,
         read_packet, timeout,
     };
+    use bytes::BytesMut;
+
+    #[tokio::test]
+    async fn auth_attempts_capped_at_max() {
+        let max = Config::default().max_auth_attempts;
+        let password_request = || {
+            let mut auth = vec![MSG_USERAUTH_REQUEST];
+            encode_string(&mut auth, b"test");
+            encode_string(&mut auth, b"ssh-connection");
+            encode_string(&mut auth, b"password");
+            auth.push(0); // change = false
+            encode_string(&mut auth, b"wrong");
+            auth
+        };
+
+        let mut session = RawSession::connect().await;
+        session.service_request().await.unwrap();
+
+        // Each rejected attempt gets a USERAUTH_FAILURE, up to the configured cap.
+        for _ in 0..max {
+            session.send_packet(&password_request()).await.unwrap();
+            let reply = read_packet(&mut session.stream).await.unwrap();
+            assert_eq!(reply.first(), Some(&MSG_USERAUTH_FAILURE));
+        }
+
+        // The next attempt exceeds the cap: the server must refuse it with a
+        // DISCONNECT instead of answering with yet another failure.
+        session.send_packet(&password_request()).await.unwrap();
+        let reply = read_packet(&mut session.stream).await.unwrap();
+        assert_eq!(
+            reply.first(),
+            Some(&crate::msg::DISCONNECT),
+            "server kept accepting auth attempts past max_auth_attempts",
+        );
+    }
+
+    #[tokio::test]
+    async fn publickey_probes_do_not_burn_auth_attempts() {
+        struct Probe {
+            offers: usize,
+        }
+
+        impl Handler for Probe {
+            type Error = Error;
+
+            async fn auth_publickey_offered(
+                &mut self,
+                _user: &str,
+                _public_key: &PublicKey,
+            ) -> Result<Auth, Self::Error> {
+                self.offers += 1;
+                Ok(Auth::Accept)
+            }
+        }
+
+        let private = PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap();
+        let public = private.public_key().clone();
+
+        let mut session = test_auth_session();
+        let max = session.common.config.max_auth_attempts;
+        let mut handler = Probe { offers: 0 };
+
+        // Probes are answered with PK_OK, not USERAUTH_FAILURE, so even max+1 of
+        // them must not trip the cap; each one must still reach the handler.
+        for _ in 0..=max {
+            let probe = publickey_probe_packet("alice", &public);
+            session.process_packet(&mut handler, &probe).await.unwrap();
+        }
+        assert_eq!(
+            handler.offers,
+            max + 1,
+            "publickey probes counted toward max_auth_attempts",
+        );
+    }
 
     #[tokio::test]
     async fn malformed_pty_req_truncated_modes_rejected_by_server() {
@@ -372,11 +466,17 @@ mod tests {
 
         let probe = publickey_probe_packet("alice", &pk_ok_key);
         let mut probe = BytesMut::from(probe.as_slice());
-        session.process_packet(&mut handler, &mut probe).await.unwrap();
+        session
+            .process_packet(&mut handler, &mut probe)
+            .await
+            .unwrap();
 
         let signed = publickey_signed_packet("alice", Arc::new(signed_private), &signed_key);
         let mut signed = BytesMut::from(signed.as_slice());
-        session.process_packet(&mut handler, &mut signed).await.unwrap();
+        session
+            .process_packet(&mut handler, &mut signed)
+            .await
+            .unwrap();
 
         assert!(
             !handler.final_auth_reached_for_signed_key,
@@ -1083,9 +1183,7 @@ impl Session {
         r: &mut R,
     ) -> Result<(), H::Error> {
         match msg {
-            msg::CHANNEL_OPEN => self
-                .server_handle_channel_open(handler, r)
-                .await,
+            msg::CHANNEL_OPEN => self.server_handle_channel_open(handler, r).await,
             msg::CHANNEL_CLOSE => {
                 let channel_num = map_err!(ChannelId::decode(r))?;
                 map_err!(ensure_end(r))?;
@@ -1281,7 +1379,8 @@ impl Session {
                                     return Err(Error::Inconsistent.into());
                                 }
                                 if let Some(code) = Pty::from_u8(code) {
-                                    #[allow(clippy::indexing_slicing)] // i < modes.len() checked above
+                                    #[allow(clippy::indexing_slicing)]
+                                    // i < modes.len() checked above
                                     {
                                         modes[i] = (code, num);
                                     }
@@ -1711,16 +1810,13 @@ impl Session {
             channel_ref,
             channel_params,
         };
-        let reply = ChannelOpenHandle::new(
-            self.sender.sender.clone(),
-            pending,
-            |pending, result| Msg::ChannelOpenReply { pending, result },
-        );
+        let reply =
+            ChannelOpenHandle::new(self.sender.sender.clone(), pending, |pending, result| {
+                Msg::ChannelOpenReply { pending, result }
+            });
 
         match &msg.typ {
-            ChannelType::Session => {
-                handler.channel_open_session(channel, reply, self).await
-            }
+            ChannelType::Session => handler.channel_open_session(channel, reply, self).await,
             ChannelType::X11 {
                 originator_address,
                 originator_port,
