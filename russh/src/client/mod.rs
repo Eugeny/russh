@@ -95,6 +95,8 @@ pub struct Session {
     target_window_size: u32,
     pending_reads: Vec<Vec<u8>>,
     pending_len: u32,
+    priority_sender: UnboundedSender<Msg>,
+    priority_receiver: UnboundedReceiver<Msg>,
     inbound_channel_sender: Sender<Msg>,
     inbound_channel_receiver: Receiver<Msg>,
     open_global_requests: VecDeque<GlobalRequestResponse>,
@@ -1100,6 +1102,7 @@ impl Session {
         receiver: Receiver<Msg>,
         sender: UnboundedSender<Reply>,
     ) -> Self {
+        let (priority_sender, priority_receiver) = unbounded_channel();
         let (inbound_channel_sender, inbound_channel_receiver) = channel(10);
         Self {
             common,
@@ -1107,6 +1110,8 @@ impl Session {
             sender,
             kex: SessionKexState::Idle,
             target_window_size,
+            priority_sender,
+            priority_receiver,
             inbound_channel_sender,
             inbound_channel_receiver,
             channels: HashMap::new(),
@@ -1134,6 +1139,7 @@ impl Session {
             .await;
         trace!("disconnected");
         self.receiver.close();
+        self.priority_receiver.close();
         self.inbound_channel_receiver.close();
         map_err!(stream_write.shutdown().await)?;
         match result {
@@ -1198,8 +1204,7 @@ impl Session {
             // Keep reading the network for window adjustments, but leave
             // application output in its bounded receivers while a channel is
             // window-blocked.
-            let can_receive_outbound =
-                !self.kex.active() && !self.common.has_any_pending_data();
+            let can_receive_outbound = !self.kex.active() && !self.common.has_any_pending_data();
             tokio::select! {
                 r = &mut reading => {
                     let (stream_read, mut buffer, mut opening_cipher) = match r {
@@ -1247,6 +1252,7 @@ impl Session {
                     return Err(crate::Error::InactivityTimeout.into());
                 }
                 msg = self.receiver.recv(), if can_receive_outbound => {
+                    self.drain_priority_msgs()?;
                     match msg {
                         Some(msg) => self.handle_msg(msg)?,
                         None => {
@@ -1257,13 +1263,24 @@ impl Session {
 
                     // eagerly take all outgoing messages so writes are batched
                     while !self.kex.active() && !self.common.has_any_pending_data() {
+                        self.drain_priority_msgs()?;
                         match self.receiver.try_recv() {
                             Ok(next) => self.handle_msg(next)?,
                             Err(_) => break
                         }
                     }
                 }
+                msg = self.priority_receiver.recv(), if !self.kex.active() => {
+                    match msg {
+                        Some(msg) => self.handle_msg(msg)?,
+                        None => (),
+                    }
+
+                    // eagerly take all outgoing messages so writes are batched
+                    self.drain_priority_msgs()?;
+                }
                 msg = self.inbound_channel_receiver.recv(), if can_receive_outbound => {
+                    self.drain_priority_msgs()?;
                     match msg {
                         Some(msg) => self.handle_msg(msg)?,
                         None => (),
@@ -1271,6 +1288,7 @@ impl Session {
 
                     // eagerly take all outgoing messages so writes are batched
                     while !self.kex.active() && !self.common.has_any_pending_data() {
+                        self.drain_priority_msgs()?;
                         match self.inbound_channel_receiver.try_recv() {
                             Ok(next) => self.handle_msg(next)?,
                             Err(_) => break
@@ -1338,6 +1356,21 @@ impl Session {
             message,
             lang_tag,
         })
+    }
+
+    /// Channel open replies must be dispatched before any channel traffic
+    /// queued after them: the bounded receivers may hold data for a channel
+    /// whose confirmation is still sitting in the priority queue, and
+    /// dispatching that data first would silently drop it (the channel is
+    /// only registered when its open reply is processed).
+    fn drain_priority_msgs(&mut self) -> Result<(), crate::Error> {
+        while !self.kex.active() {
+            match self.priority_receiver.try_recv() {
+                Ok(msg) => self.handle_msg(msg)?,
+                Err(_) => break,
+            }
+        }
+        Ok(())
     }
 
     fn handle_msg(&mut self, msg: Msg) -> Result<(), crate::Error> {
@@ -1728,8 +1761,7 @@ mod tests {
     use std::sync::Arc;
 
     use ssh_encoding::Encode;
-    use tokio::sync::mpsc::channel;
-    use tokio::sync::mpsc::unbounded_channel;
+    use tokio::sync::mpsc::{channel, unbounded_channel};
 
     use super::*;
     use crate::auth::{AuthRequest, Method};
