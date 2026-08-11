@@ -768,7 +768,7 @@ impl Session {
                     channel_params,
                 };
                 let reply = ChannelOpenHandle::new(
-                    self.inbound_channel_sender.clone(),
+                    self.open_reply_tx.clone(),
                     pending,
                     |pending, result| Msg::ServerChannelOpenReply { pending, result },
                 );

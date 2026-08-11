@@ -110,6 +110,13 @@ pub struct Session {
     pending_len: u32,
     inbound_channel_sender: Sender<Msg>,
     inbound_channel_receiver: Receiver<Msg>,
+    /// Channel-open replies ([`ChannelOpenHandle::accept`]/`reject` for server-initiated
+    /// channels) arrive here, NOT on the bounded `inbound_channel_receiver`: handlers run
+    /// inline on the run loop, so a bounded send from inside one would deadlock against the
+    /// loop whenever other channels' writers keep that queue full. Unbounded is safe — at
+    /// most one reply per peer CHANNEL_OPEN.
+    open_reply_tx: UnboundedSender<Msg>,
+    open_reply_rx: tokio::sync::mpsc::UnboundedReceiver<Msg>,
     open_global_requests: VecDeque<GlobalRequestResponse>,
     server_sig_algs: Option<Vec<Algorithm>>,
 }
@@ -1153,6 +1160,7 @@ impl Session {
         sender: UnboundedSender<Reply>,
     ) -> Self {
         let (inbound_channel_sender, inbound_channel_receiver) = channel(10);
+        let (open_reply_tx, open_reply_rx) = tokio::sync::mpsc::unbounded_channel();
         Self {
             common,
             receiver,
@@ -1161,6 +1169,8 @@ impl Session {
             target_window_size,
             inbound_channel_sender,
             inbound_channel_receiver,
+            open_reply_tx,
+            open_reply_rx,
             channels: HashMap::new(),
             inbound: HashMap::new(),
             inbound_needs_reserve: Vec::new(),
@@ -1190,6 +1200,10 @@ impl Session {
         trace!("disconnected");
         self.receiver.close();
         self.inbound_channel_receiver.close();
+        // Flush anything still buffered (e.g. our DISCONNECT) before closing the write half —
+        // the in-loop flush arm no longer guarantees an empty buffer at exit. Best-effort: the
+        // peer may already be gone.
+        let _ = self.common.packet_writer.flush_into(&mut stream_write).await;
         map_err!(stream_write.shutdown().await)?;
         match result {
             Ok(v) => {
@@ -1259,7 +1273,14 @@ impl Session {
             // That check is session-wide, so one channel whose peer stopped reading would
             // block outbound progress on every other channel until that peer sent a window
             // adjustment. Per-channel isolation comes from `enforce_outbound_cap` instead.
-            let can_receive_outbound = !self.kex.active();
+            //
+            // The high-watermark gate pairs with the concurrent flush arm in `select!`: bytes
+            // now leave via that arm while the loop keeps reading, so intake of new outbound
+            // work must pause once too much is already buffered, or a slow-draining peer would
+            // grow the write buffer without bound.
+            let can_receive_outbound = !self.kex.active()
+                && self.common.packet_writer.pending_bytes()
+                    < crate::sshbuffer::OUTBOUND_HIGH_WATERMARK;
             tokio::select! {
                 r = &mut reading => {
                     let (stream_read, mut buffer, mut opening_cipher) = match r {
@@ -1299,6 +1320,23 @@ impl Session {
                     // never blocking the loop on this channel.
                     self.pump_inbound(cid, generation, res, handler).await?;
                     self.drain_needs_reserve(&mut inbound_reserves);
+                }
+                // Concurrent outbound flush: pushes pending bytes while the loop stays free to
+                // read, run timers, and take other arms. Cancel-safe (cursor lives in the
+                // writer), so losing the race to another arm never loses write progress. This
+                // is the arm that breaks the full-duplex stall where our blocked write used to
+                // stop our reads, starving the peer whose reads would have unblocked our write.
+                r = self.common.packet_writer.flush_into(stream_write), if self.common.packet_writer.has_pending() => {
+                    map_err!(r)?;
+                }
+                // Channel-open replies from handlers that stashed the `ChannelOpenHandle` and
+                // accepted/rejected later from a spawned task. Same kex gate as the receiver
+                // arms: no packets may be written mid-rekey.
+                Some(msg) = self.open_reply_rx.recv(), if can_receive_outbound => {
+                    if let Msg::ServerChannelOpenReply { pending, result } = msg {
+                        self.finalize_server_channel_open_reply(pending, result)?;
+                    }
+                    self.drain_open_replies()?;
                 }
                 () = &mut keepalive_timer => {
                     if let Some(ref mut enc) = self.common.encrypted {
@@ -1350,9 +1388,10 @@ impl Session {
                 }
             };
 
+            // Stage whatever this iteration produced; the concurrent flush arm above writes it
+            // out next time around without blocking the loop.
             self.flush()?;
             self.release_outbound_acks();
-            map_err!(self.common.packet_writer.flush_into(stream_write).await)?;
 
             if let Some(ref mut enc) = self.common.encrypted {
                 if let EncryptedState::InitCompression = enc.state {
@@ -1412,7 +1451,21 @@ impl Session {
         })
     }
 
+    /// Apply every queued channel-open reply. Must run before dispatching any queued channel
+    /// message: a writer's first `Data` for a server-initiated channel is enqueued strictly
+    /// after `accept()` queued that channel's reply, so finalizing replies first guarantees no
+    /// `Data` is ever dispatched against a still-unconfirmed channel.
+    fn drain_open_replies(&mut self) -> Result<(), crate::Error> {
+        while let Ok(msg) = self.open_reply_rx.try_recv() {
+            if let Msg::ServerChannelOpenReply { pending, result } = msg {
+                self.finalize_server_channel_open_reply(pending, result)?;
+            }
+        }
+        Ok(())
+    }
+
     fn handle_msg(&mut self, msg: Msg) -> Result<(), crate::Error> {
+        self.drain_open_replies()?;
         match msg {
             Msg::Authenticate { user, method } => {
                 self.write_auth_request_if_needed(&user, method)?;

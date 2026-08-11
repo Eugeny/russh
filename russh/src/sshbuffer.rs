@@ -356,12 +356,22 @@ pub(crate) struct IncomingSshPacket {
     pub seqn: Wrapping<u32>,
 }
 
+/// Once at least this many bytes are pending in a session's write buffer, the run loops stop
+/// accepting new outbound work from `Handle` senders until the socket drains below it. Bounds
+/// buffer growth now that flushing runs concurrently with packet intake instead of blocking
+/// the loop until the buffer is empty. Must comfortably exceed one maximum-size packet so a
+/// slow-but-draining peer still makes progress.
+pub(crate) const OUTBOUND_HIGH_WATERMARK: usize = 128 * 1024;
+
 /// Packet writer for constructing and encrypting outgoing SSH packets.
 pub(crate) struct PacketWriter {
     cipher: Box<dyn SealingKey + Send>,
     compress: Compress,
     packet_buffer: Vec<u8>,
     write_buffer: SSHBuffer,
+    /// How many bytes at the front of `write_buffer` have already reached the socket. Lets
+    /// `flush_into` be dropped mid-write (e.g. by `select!`) and resume where it left off.
+    flush_cursor: usize,
 }
 
 impl Debug for PacketWriter {
@@ -385,6 +395,7 @@ impl PacketWriter {
             compress,
             packet_buffer: Vec::new(),
             write_buffer: SSHBuffer::new(),
+            flush_cursor: 0,
         }
     }
 
@@ -563,11 +574,40 @@ impl PacketWriter {
         self.write_buffer.seqn = Wrapping(0);
     }
 
+    /// True if any bytes are waiting (or mid-flight) to be written to the socket.
+    pub fn has_pending(&self) -> bool {
+        !self.write_buffer.buffer.is_empty()
+    }
+
+    /// Bytes buffered but not yet handed to the socket. Used by the run loops' intake
+    /// high-watermark gate.
+    pub fn pending_bytes(&self) -> usize {
+        self.write_buffer.buffer.len().saturating_sub(self.flush_cursor)
+    }
+
+    /// Write the pending buffer out and flush the socket.
+    ///
+    /// Cancel-safe: progress is tracked in `self.flush_cursor`, one socket write per await
+    /// point, so dropping this future (e.g. when another `select!` branch wins) loses nothing
+    /// — the next call resumes exactly where the last one stopped. This is what lets the run
+    /// loops keep reading (and running timers) while a backpressured peer drains us slowly,
+    /// instead of blocking the whole session on an unbounded `write_all`.
     pub async fn flush_into<W: AsyncWrite + Unpin>(&mut self, w: &mut W) -> std::io::Result<()> {
+        while self.flush_cursor < self.write_buffer.buffer.len() {
+            #[allow(clippy::indexing_slicing)] // cursor < len checked by the loop condition
+            let n = w.write(&self.write_buffer.buffer[self.flush_cursor..]).await?;
+            if n == 0 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::WriteZero,
+                    "failed to write whole buffer",
+                ));
+            }
+            self.flush_cursor += n;
+        }
         if !self.write_buffer.buffer.is_empty() {
-            w.write_all(&self.write_buffer.buffer).await?;
             w.flush().await?;
             self.write_buffer.buffer.clear();
+            self.flush_cursor = 0;
         }
         Ok(())
     }

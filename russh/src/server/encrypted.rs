@@ -520,12 +520,15 @@ mod tests {
         };
         let config = Arc::new(config);
         let (sender, receiver) = tokio::sync::mpsc::channel(1);
+        let (open_reply_tx, open_reply_rx) = tokio::sync::mpsc::unbounded_channel();
         let handle = Handle {
             sender,
             channel_buffer_size: config.channel_buffer_size,
         };
 
         Session {
+            open_reply_tx,
+            open_reply_rx,
             target_window_size: config.window_size,
             common: CommonSession {
                 packet_writer: PacketWriter::clear(),
@@ -1806,7 +1809,7 @@ impl Session {
             channel_params,
         };
         let reply = ChannelOpenHandle::new(
-            self.sender.sender.clone(),
+            self.open_reply_tx.clone(),
             pending,
             |pending, result| Msg::ChannelOpenReply { pending, result },
         );

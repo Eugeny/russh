@@ -44,6 +44,12 @@ pub struct Session {
     pub(crate) outbound_acks: HashMap<ChannelId, VecDeque<oneshot::Sender<()>>>,
     pub(crate) open_global_requests: VecDeque<GlobalRequestResponse>,
     pub(crate) kex: SessionKexState<ServerKex>,
+    /// Channel-open replies ([`ChannelOpenHandle::accept`]/`reject`) arrive here, NOT on the
+    /// bounded `receiver`: handlers run inline on the run loop, so a bounded send from inside
+    /// one would deadlock against the loop whenever other channels' writers keep `receiver`
+    /// full. Unbounded is safe — at most one reply per peer CHANNEL_OPEN.
+    pub(crate) open_reply_tx: tokio::sync::mpsc::UnboundedSender<Msg>,
+    pub(crate) open_reply_rx: tokio::sync::mpsc::UnboundedReceiver<Msg>,
 }
 
 #[derive(Debug)]
@@ -801,10 +807,24 @@ impl Session {
         }
     }
 
+    /// Apply every queued channel-open reply. Must run before dispatching any `receiver`
+    /// message: a writer's first `Data` for a channel is enqueued strictly after `accept()`
+    /// queued that channel's reply, so finalizing replies first guarantees no `Data` is ever
+    /// dispatched against a still-unconfirmed channel (which would fail with `WrongChannel`).
+    fn drain_open_replies(&mut self) -> Result<(), Error> {
+        while let Ok(msg) = self.open_reply_rx.try_recv() {
+            if let Msg::ChannelOpenReply { pending, result } = msg {
+                self.finalize_channel_open_reply(pending, result)?;
+            }
+        }
+        Ok(())
+    }
+
     /// Dispatch a single message received on the session's internal channel
     /// (sent via [`Handle`]). Shared by the `select!` receiver arm and the
     /// pre-`select!` backlog drain so the two can't drift apart.
     fn dispatch_msg(&mut self, msg: Msg) -> Result<(), Error> {
+        self.drain_open_replies()?;
         match msg {
             Msg::Channel(id, ChannelMsg::Data { data }) => {
                 self.data(id, data)?;
@@ -1020,7 +1040,15 @@ impl Session {
             // never adjusts (or a rekey, which forces all outbound data into `pending_data`)
             // therefore stalled the whole session's outbound path. Per-channel isolation is
             // enforced by `enforce_outbound_cap` below instead.
-            if !self.kex.active() {
+            //
+            // The high-watermark gate pairs with the concurrent flush arm in `select!`: bytes
+            // now leave via that arm while the loop keeps reading, so intake of new outbound
+            // work must pause once too much is already buffered, or a slow-draining peer would
+            // grow the write buffer without bound.
+            let can_receive_outbound = !self.kex.active()
+                && self.common.packet_writer.pending_bytes()
+                    < crate::sshbuffer::OUTBOUND_HIGH_WATERMARK;
+            if can_receive_outbound {
                 let mut drained = 0;
                 while drained < MAX_MESSAGES_PER_BATCH {
                     // Only Empty/Disconnected end the drain; both mean "nothing
@@ -1033,12 +1061,6 @@ impl Session {
                 }
                 if drained > 0 {
                     self.flush()?;
-                    map_err!(
-                        self.common
-                            .packet_writer
-                            .flush_into(&mut stream_write)
-                            .await
-                    )?;
                 }
                 // A drained Disconnect sets this; don't block in `select!` after.
                 if self.common.disconnected {
@@ -1092,6 +1114,15 @@ impl Session {
                     self.pump_inbound(cid, generation, res, &mut handler).await?;
                     self.drain_needs_reserve(&mut inbound_reserves);
                 }
+                // Channel-open replies from handlers that stashed the `ChannelOpenHandle` and
+                // accepted/rejected later from a spawned task. Same kex gate as the `receiver`
+                // arm: no packets may be written mid-rekey.
+                Some(msg) = self.open_reply_rx.recv(), if !self.kex.active() => {
+                    if let Msg::ChannelOpenReply { pending, result } = msg {
+                        self.finalize_channel_open_reply(pending, result)?;
+                    }
+                    self.drain_open_replies()?;
+                }
                 () = &mut keepalive_timer => {
                     self.common.alive_timeouts = self.common.alive_timeouts.saturating_add(1);
                     if self.common.config.keepalive_max != 0 && self.common.alive_timeouts > self.common.config.keepalive_max {
@@ -1105,9 +1136,17 @@ impl Session {
                     debug!("timeout");
                     return Err(crate::Error::InactivityTimeout.into());
                 }
+                // Concurrent outbound flush: pushes pending bytes while the loop stays free to
+                // read, run timers, and take other arms. Cancel-safe (cursor lives in the
+                // writer), so losing the race to another arm never loses write progress. This
+                // is the arm that breaks the full-duplex stall where our blocked write used to
+                // stop our reads, starving the peer whose reads would have unblocked our write.
+                r = self.common.packet_writer.flush_into(&mut stream_write), if self.common.packet_writer.has_pending() => {
+                    map_err!(r)?;
+                }
                 // See the batch-drain comment above: gating this arm on `has_any_pending_data()`
                 // would let one stalled channel block outbound progress for all of them.
-                msg = self.receiver.recv(), if !self.kex.active() => {
+                msg = self.receiver.recv(), if can_receive_outbound => {
                     match msg {
                         Some(msg) => self.dispatch_msg(msg)?,
                         None => {
@@ -1116,14 +1155,10 @@ impl Session {
                     }
                 }
             }
+            // Stage whatever this iteration produced; the concurrent flush arm above writes it
+            // out next time around without blocking the loop.
             self.flush()?;
             self.release_outbound_acks();
-            map_err!(
-                self.common
-                    .packet_writer
-                    .flush_into(&mut stream_write)
-                    .await
-            )?;
 
             if self.common.received_data {
                 // Reset the number of failed keepalive attempts. We don't
@@ -1151,7 +1186,14 @@ impl Session {
             }
         }
         debug!("disconnected");
-        // Shutdown
+        // Shutdown. Flush anything still buffered (e.g. our DISCONNECT) before closing the
+        // write half — the in-loop flush arm no longer guarantees an empty buffer at exit.
+        map_err!(
+            self.common
+                .packet_writer
+                .flush_into(&mut stream_write)
+                .await
+        )?;
         map_err!(stream_write.shutdown().await)?;
         loop {
             if let Some((stream_read, buffer, opening_cipher)) = is_reading.take() {
@@ -1880,6 +1922,7 @@ mod tests {
     fn authenticated_session_with(config: crate::server::Config) -> Session {
         let config = Arc::new(config);
         let (sender, receiver) = tokio::sync::mpsc::channel(config.event_buffer_size);
+        let (open_reply_tx, open_reply_rx) = tokio::sync::mpsc::unbounded_channel();
         let handle = Handle {
             sender,
             channel_buffer_size: config.channel_buffer_size,
@@ -1932,6 +1975,8 @@ mod tests {
             outbound_acks: std::collections::HashMap::new(),
             open_global_requests: VecDeque::new(),
             kex: SessionKexState::Idle,
+            open_reply_tx,
+            open_reply_rx,
         }
     }
 

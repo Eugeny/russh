@@ -123,7 +123,9 @@ async fn inbound_window_stall_repro() -> Result<(), anyhow::Error> {
     let bidir = env_u32("REPRO_BIDIR", 0) != 0;
     let mut readers = Vec::new();
     for idx in 0..num_channels {
+        eprintln!("CLI opening #{idx}");
         let mut channel = session.channel_open_session().await?;
+        eprintln!("CLI opened  #{idx}");
         let progress = progress.clone();
         let total_bytes = total_bytes.clone();
         // Bidirectional: ONLY the victim (channel 0) floods UPSTREAM (client->server), mimicking
@@ -315,6 +317,10 @@ impl Server {
             window_size: env_u32("REPRO_WINDOW", 2048),
             maximum_packet_size: env_u32("REPRO_PACKET", 2048),
             channel_buffer_size: env_usize("REPRO_CHAN_BUF", 4),
+            // DIAG: session Msg queue capacity (default 10). Raising this to a huge value
+            // discriminates the queue-full self-deadlock theory (hang disappears) from the
+            // flush_into TCP-deadlock theory (hang unaffected or worse).
+            event_buffer_size: env_usize("REPRO_EVENT_BUF", 10),
             ..Default::default()
         });
         Server.run_on_address(config, addr).await.unwrap();
@@ -347,7 +353,11 @@ impl russh::server::Handler for Server {
     ) -> Result<(), Self::Error> {
         // Confirm the open before any producer starts writing: since channel confirmations
         // became async upstream, data must not be queued ahead of CHANNEL_OPEN_CONFIRMATION.
+        static OPEN_SEQ: AtomicU64 = AtomicU64::new(0);
+        let oi = OPEN_SEQ.fetch_add(1, Ordering::Relaxed);
+        eprintln!("SRV open #{oi}: accept enter");
         reply.accept().await;
+        eprintln!("SRV open #{oi}: accept done");
         // Producer side: flood the channel via the AsyncWrite (`ChannelTx`) path — the exact
         // code zfc's relay copy drives. When the client window is exhausted this parks at
         // `A == 0`; a lost wakeup here is the stall.

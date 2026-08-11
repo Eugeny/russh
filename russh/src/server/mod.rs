@@ -1088,6 +1088,7 @@ where
     };
 
     let common = read_ssh_id(config, &mut stream).await?;
+    let (open_reply_tx, open_reply_rx) = tokio::sync::mpsc::unbounded_channel();
     let mut session = Session {
         target_window_size: common.config.window_size,
         common,
@@ -1101,6 +1102,8 @@ where
             outbound_acks: std::collections::HashMap::new(),
         open_global_requests: VecDeque::new(),
         kex: SessionKexState::Idle,
+        open_reply_tx,
+        open_reply_rx,
     };
 
     session.begin_rekey()?;
