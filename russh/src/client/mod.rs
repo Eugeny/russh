@@ -1252,6 +1252,7 @@ impl Session {
                     return Err(crate::Error::InactivityTimeout.into());
                 }
                 msg = self.receiver.recv(), if can_receive_outbound => {
+                    self.drain_priority_msgs()?;
                     match msg {
                         Some(msg) => self.handle_msg(msg)?,
                         None => {
@@ -1262,6 +1263,7 @@ impl Session {
 
                     // eagerly take all outgoing messages so writes are batched
                     while !self.kex.active() && !self.common.has_any_pending_data() {
+                        self.drain_priority_msgs()?;
                         match self.receiver.try_recv() {
                             Ok(next) => self.handle_msg(next)?,
                             Err(_) => break
@@ -1275,14 +1277,10 @@ impl Session {
                     }
 
                     // eagerly take all outgoing messages so writes are batched
-                    while !self.kex.active() {
-                        match self.priority_receiver.try_recv() {
-                            Ok(next) => self.handle_msg(next)?,
-                            Err(_) => break
-                        }
-                    }
+                    self.drain_priority_msgs()?;
                 }
                 msg = self.inbound_channel_receiver.recv(), if can_receive_outbound => {
+                    self.drain_priority_msgs()?;
                     match msg {
                         Some(msg) => self.handle_msg(msg)?,
                         None => (),
@@ -1290,6 +1288,7 @@ impl Session {
 
                     // eagerly take all outgoing messages so writes are batched
                     while !self.kex.active() && !self.common.has_any_pending_data() {
+                        self.drain_priority_msgs()?;
                         match self.inbound_channel_receiver.try_recv() {
                             Ok(next) => self.handle_msg(next)?,
                             Err(_) => break
@@ -1357,6 +1356,21 @@ impl Session {
             message,
             lang_tag,
         })
+    }
+
+    /// Channel open replies must be dispatched before any channel traffic
+    /// queued after them: the bounded receivers may hold data for a channel
+    /// whose confirmation is still sitting in the priority queue, and
+    /// dispatching that data first would silently drop it (the channel is
+    /// only registered when its open reply is processed).
+    fn drain_priority_msgs(&mut self) -> Result<(), crate::Error> {
+        while !self.kex.active() {
+            match self.priority_receiver.try_recv() {
+                Ok(msg) => self.handle_msg(msg)?,
+                Err(_) => break,
+            }
+        }
+        Ok(())
     }
 
     fn handle_msg(&mut self, msg: Msg) -> Result<(), crate::Error> {

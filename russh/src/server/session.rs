@@ -768,6 +768,15 @@ impl Session {
                     }
                 }
                 msg = self.receiver.recv(), if !self.kex.active() && !self.common.has_any_pending_data() => {
+                    // Channel open replies must be dispatched before any
+                    // channel traffic queued after them: `msg` may be data for
+                    // a channel whose confirmation is still sitting in the
+                    // priority queue, and dispatching that data first would
+                    // silently drop it (the channel is only registered when
+                    // its open reply is processed).
+                    while let Ok(reply) = self.priority_receiver.try_recv() {
+                        self.dispatch_msg(reply)?;
+                    }
                     match msg {
                         Some(msg) => self.dispatch_msg(msg)?,
                         None => {
