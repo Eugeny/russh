@@ -108,7 +108,7 @@ impl Default for Config {
                 "_",
                 env!("CARGO_PKG_VERSION")
             ))),
-            methods: auth::MethodSet::all(),
+            methods: auth::MethodSet::server_supported(),
             auth_rejection_time: std::time::Duration::from_secs(1),
             auth_rejection_time_initial: None,
             keys: Vec::new(),
