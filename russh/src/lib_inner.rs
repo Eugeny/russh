@@ -32,7 +32,6 @@ mod ssh_read;
 mod sshbuffer;
 
 pub use negotiation::{Names, Preferred};
-pub use auth::{GssapiAuthenticator, GssapiStep};
 
 mod pty;
 
@@ -292,7 +291,9 @@ impl Default for Limits {
     }
 }
 
-pub use auth::{AgentAuthError, MethodKind, MethodSet, Signer};
+pub use auth::{
+    AgentAuthError, GssapiAuthenticator, GssapiError, GssapiStep, MethodKind, MethodSet, Signer,
+};
 
 /// A reason for disconnection.
 #[allow(missing_docs)] // This should be relatively self-explanatory.

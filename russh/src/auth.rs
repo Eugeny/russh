@@ -126,6 +126,16 @@ impl MethodSet {
         ])
     }
 
+    pub(crate) fn server_supported() -> Self {
+        Self(vec![
+            MethodKind::None,
+            MethodKind::Password,
+            MethodKind::PublicKey,
+            MethodKind::HostBased,
+            MethodKind::KeyboardInteractive,
+        ])
+    }
+
     pub fn remove(&mut self, method: MethodKind) {
         self.0.retain(|x| *x != method);
     }
@@ -168,27 +178,71 @@ pub trait Signer: Sized {
     ) -> impl Future<Output = Result<Vec<u8>, Self::Error>> + Send;
 }
 
+/// One step of a GSSAPI security context exchange, as produced by a
+/// [`GssapiAuthenticator`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GssapiStep {
+    /// The context is not established yet; send `token` to the server and
+    /// wait for its next token.
     Continue {
         token: Vec<u8>,
     },
+    /// The context is established. `token` is the final output token, if any.
+    /// `mic` is the MIC computed over the `mic_data` passed to
+    /// [`GssapiAuthenticator::gssapi_step`]. Implementations MUST produce a
+    /// MIC whenever the established context supports integrity protection
+    /// (RFC 4462, Section 3.5); `None` falls back to
+    /// `SSH_MSG_USERAUTH_GSSAPI_EXCHANGE_COMPLETE`.
     Complete {
         token: Option<Vec<u8>>,
         mic: Option<Vec<u8>>,
     },
 }
 
+/// A GSS-API error reported by the server during `gssapi-with-mic`
+/// authentication. Informational: the server follows up with an
+/// authentication failure.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GssapiError {
+    /// `SSH_MSG_USERAUTH_GSSAPI_ERROR` (RFC 4462, Section 3.8).
+    Status {
+        major_status: u32,
+        minor_status: u32,
+        message: String,
+    },
+    /// `SSH_MSG_USERAUTH_GSSAPI_ERRTOK` (RFC 4462, Section 3.10). May be
+    /// passed to `GSS_Init_sec_context()` to obtain mechanism-specific
+    /// error details.
+    ErrorToken(Vec<u8>),
+}
+
 #[cfg_attr(feature = "async-trait", async_trait::async_trait)]
 pub trait GssapiAuthenticator: Sized {
     type Error: From<crate::SendError>;
 
+    /// Advance the GSSAPI security context.
+    ///
+    /// `selected_mechanism` is `Some` on the first step and carries the
+    /// DER-encoded OID of the mechanism the server selected; implementations
+    /// must verify it is one of the mechanisms they offered (RFC 4462,
+    /// Section 3.3). It is `None` on subsequent steps.
+    ///
+    /// `input_token` is the token received from the server, if any.
+    /// `mic_data` is the data to compute the final MIC over once the context
+    /// is established.
     fn gssapi_step(
         &mut self,
-        selected_mechanism: Vec<u8>,
+        selected_mechanism: Option<Vec<u8>>,
         input_token: Option<Vec<u8>>,
         mic_data: Vec<u8>,
     ) -> impl Future<Output = Result<GssapiStep, Self::Error>> + Send;
+
+    /// Called when the server reports a GSS-API error; the server follows up
+    /// with an authentication failure. The default implementation ignores
+    /// the error.
+    fn gssapi_error(&mut self, _error: GssapiError) -> impl Future<Output = ()> + Send {
+        async {}
+    }
 }
 
 #[derive(Debug, Error)]
@@ -304,33 +358,22 @@ impl AuthRequest {
     }
 
     pub(crate) fn new(method: &Method) -> Self {
-        match method {
-            Method::KeyboardInteractive { submethods } => Self {
-                initial_methods: MethodSet::all(),
-                methods: MethodSet::all(),
-                partial_success: false,
-                current: Some(CurrentRequest::KeyboardInteractive {
+        let current = match method {
+            Method::KeyboardInteractive { submethods } => {
+                Some(CurrentRequest::KeyboardInteractive {
                     submethods: submethods.to_string(),
-                }),
-                principal: None,
-                rejection_count: 0,
-            },
-            Method::GssapiWithMic { .. } => Self {
-                initial_methods: MethodSet::all(),
-                methods: MethodSet::all(),
-                partial_success: false,
-                current: Some(CurrentRequest::GssapiWithMic),
-                principal: None,
-                rejection_count: 0,
-            },
-            _ => Self {
-                initial_methods: MethodSet::all(),
-                methods: MethodSet::all(),
-                partial_success: false,
-                current: None,
-                principal: None,
-                rejection_count: 0,
-            },
+                })
+            }
+            Method::GssapiWithMic { .. } => Some(CurrentRequest::GssapiWithMic),
+            _ => None,
+        };
+        Self {
+            initial_methods: MethodSet::all(),
+            methods: MethodSet::all(),
+            partial_success: false,
+            current,
+            principal: None,
+            rejection_count: 0,
         }
     }
 

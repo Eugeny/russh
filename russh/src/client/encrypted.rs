@@ -342,9 +342,18 @@ impl Session {
                                 let message = map_err!(String::decode(&mut r))?;
                                 let _language_tag = map_err!(String::decode(&mut r))?;
                                 map_err!(ensure_end(&r))?;
-                                debug!(
+                                warn!(
                                     "userauth_gssapi_error major={major_status} minor={minor_status}: {message}"
                                 );
+                                self.sender
+                                    .send(Reply::AuthGssapiError {
+                                        error: auth::GssapiError::Status {
+                                            major_status,
+                                            minor_status,
+                                            message,
+                                        },
+                                    })
+                                    .map_err(|_| crate::Error::SendError)?;
                                 return Ok(());
                             }
                             return Err(crate::Error::Inconsistent.into());
@@ -353,9 +362,14 @@ impl Session {
                             if let Some(auth::CurrentRequest::GssapiWithMic) =
                                 auth_request.current
                             {
-                                let _token = map_err!(Bytes::decode(&mut r))?;
+                                let token = map_err!(Bytes::decode(&mut r))?.to_vec();
                                 map_err!(ensure_end(&r))?;
-                                debug!("userauth_gssapi_errtok");
+                                warn!("userauth_gssapi_errtok ({} bytes)", token.len());
+                                self.sender
+                                    .send(Reply::AuthGssapiError {
+                                        error: auth::GssapiError::ErrorToken(token),
+                                    })
+                                    .map_err(|_| crate::Error::SendError)?;
                                 return Ok(());
                             }
                             return Err(crate::Error::Inconsistent.into());
@@ -1010,7 +1024,7 @@ mod tests {
     use crate::compression::{Compression, Decompress};
     use crate::kex::{KEXES, NONE};
     use crate::session::Exchange;
-    use crate::{CryptoVec, MethodKind};
+    use crate::{CryptoVec, MethodKind, MethodSet};
 
     fn test_encrypted() -> Encrypted {
         Encrypted {
@@ -1150,6 +1164,19 @@ mod tests {
         );
         ensure_end(&complete).unwrap();
     }
+
+    #[test]
+    fn client_send_gssapi_mic_skips_empty_final_token() {
+        let mut encrypted = test_encrypted();
+        encrypted.client_send_gssapi_mic(Some(b""), b"mic").unwrap();
+
+        let payloads = payloads(&encrypted.write);
+        assert_eq!(payloads.len(), 1);
+        let mut mic = payloads[0];
+        assert_eq!(u8::decode(&mut mic).unwrap(), msg::USERAUTH_GSSAPI_MIC);
+        assert_eq!(Vec::<u8>::decode(&mut mic).unwrap(), b"mic".to_vec());
+        ensure_end(&mic).unwrap();
+    }
 }
 
 impl Encrypted {
@@ -1242,8 +1269,7 @@ impl Encrypted {
                     user.as_bytes().encode(&mut self.write)?;
                     "ssh-connection".encode(&mut self.write)?;
                     "gssapi-with-mic".encode(&mut self.write)?;
-                    (mechanism_oids.len().try_into().unwrap_or(0) as u32)
-                        .encode(&mut self.write)?;
+                    (mechanism_oids.len() as u32).encode(&mut self.write)?;
                     for oid in mechanism_oids {
                         oid.as_slice().encode(&mut self.write)?;
                     }
@@ -1280,9 +1306,7 @@ impl Encrypted {
         token: Option<&[u8]>,
         mic: &[u8],
     ) -> Result<(), crate::Error> {
-        if let Some(token) = token
-            && !token.is_empty()
-        {
+        if let Some(token) = token.filter(|t| !t.is_empty()) {
             self.client_send_gssapi_token(token)?;
         }
         push_packet!(self.write, {
@@ -1296,9 +1320,7 @@ impl Encrypted {
         &mut self,
         token: Option<&[u8]>,
     ) -> Result<(), crate::Error> {
-        if let Some(token) = token
-            && !token.is_empty()
-        {
+        if let Some(token) = token.filter(|t| !t.is_empty()) {
             self.client_send_gssapi_token(token)?;
         }
         push_packet!(self.write, {

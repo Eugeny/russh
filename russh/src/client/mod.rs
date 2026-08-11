@@ -138,6 +138,9 @@ enum Reply {
         token: Vec<u8>,
         mic_data: Vec<u8>,
     },
+    AuthGssapiError {
+        error: auth::GssapiError,
+    },
 }
 
 #[derive(Debug)]
@@ -579,15 +582,18 @@ impl<H: Handler> Handle<H> {
                     mic_data,
                 }) => {
                     let step = authenticator
-                        .gssapi_step(selected_mechanism, None, mic_data)
+                        .gssapi_step(Some(selected_mechanism), None, mic_data)
                         .await?;
                     self.send_gssapi_step(step).await?;
                 }
                 Some(Reply::AuthGssapiToken { token, mic_data }) => {
                     let step = authenticator
-                        .gssapi_step(Vec::new(), Some(token), mic_data)
+                        .gssapi_step(None, Some(token), mic_data)
                         .await?;
                     self.send_gssapi_step(step).await?;
+                }
+                Some(Reply::AuthGssapiError { error }) => {
+                    authenticator.gssapi_error(error).await;
                 }
                 None => {
                     return Ok(AuthResult::Failure {
