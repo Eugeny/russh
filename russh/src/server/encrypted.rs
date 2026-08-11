@@ -61,6 +61,27 @@ impl Session {
             rejection_wait_until
         };
 
+        if self.common.config.max_auth_attempts > 0
+            // auth request messages
+            && matches!(
+                buf.first(),
+                Some(&(msg::USERAUTH_REQUEST | msg::USERAUTH_INFO_RESPONSE))
+            )
+            // with cap exceeded
+            && matches!(
+                self.common.encrypted.as_ref().map(|e| &e.state),
+                Some(EncryptedState::WaitingAuthRequest(a))
+                    if a.rejection_count >= self.common.config.max_auth_attempts
+            )
+        {
+            self.common.disconnect(
+                Disconnect::NoMoreAuthMethodsAvailable,
+                "Too many authentication attempts",
+                "",
+            )?;
+            return Ok(());
+        }
+
         let Some(enc) = self.common.encrypted.as_mut() else {
             return Err(Error::Inconsistent.into());
         };
@@ -145,11 +166,13 @@ impl Session {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::borrow::Cow;
     use std::num::Wrapping;
     use std::sync::Arc;
 
+    use bytes::BytesMut;
+
+    use super::*;
     use crate::compression::{Compression, Decompress};
     use crate::helpers::sign_with_hash_alg;
     use crate::kex::{KEXES, NONE as KEX_NONE, SessionKexState};
@@ -160,7 +183,79 @@ mod tests {
         raw_auth_request_signal, raw_channel_request_signal, raw_service_request_signal,
         read_packet, timeout,
     };
-    use bytes::BytesMut;
+
+    #[tokio::test]
+    async fn auth_attempts_capped_at_max() {
+        let max = Config::default().max_auth_attempts;
+        let password_request = || {
+            let mut auth = vec![MSG_USERAUTH_REQUEST];
+            encode_string(&mut auth, b"test");
+            encode_string(&mut auth, b"ssh-connection");
+            encode_string(&mut auth, b"password");
+            auth.push(0); // change = false
+            encode_string(&mut auth, b"wrong");
+            auth
+        };
+
+        let mut session = RawSession::connect().await;
+        session.service_request().await.unwrap();
+
+        // Each rejected attempt gets a USERAUTH_FAILURE, up to the configured cap.
+        for _ in 0..max {
+            session.send_packet(&password_request()).await.unwrap();
+            let reply = read_packet(&mut session.stream).await.unwrap();
+            assert_eq!(reply.first(), Some(&MSG_USERAUTH_FAILURE));
+        }
+
+        // The next attempt exceeds the cap: the server must refuse it with a
+        // DISCONNECT instead of answering with yet another failure.
+        session.send_packet(&password_request()).await.unwrap();
+        let reply = read_packet(&mut session.stream).await.unwrap();
+        assert_eq!(
+            reply.first(),
+            Some(&crate::msg::DISCONNECT),
+            "server kept accepting auth attempts past max_auth_attempts",
+        );
+    }
+
+    #[tokio::test]
+    async fn publickey_probes_do_not_burn_auth_attempts() {
+        struct Probe {
+            offers: usize,
+        }
+
+        impl Handler for Probe {
+            type Error = Error;
+
+            async fn auth_publickey_offered(
+                &mut self,
+                _user: &str,
+                _public_key: &PublicKey,
+            ) -> Result<Auth, Self::Error> {
+                self.offers += 1;
+                Ok(Auth::Accept)
+            }
+        }
+
+        let private = PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap();
+        let public = private.public_key().clone();
+
+        let mut session = test_auth_session();
+        let max = session.common.config.max_auth_attempts;
+        let mut handler = Probe { offers: 0 };
+
+        // Probes are answered with PK_OK, not USERAUTH_FAILURE, so even max+1 of
+        // them must not trip the cap; each one must still reach the handler.
+        for _ in 0..=max {
+            let probe = publickey_probe_packet("alice", &public);
+            session.process_packet(&mut handler, &probe).await.unwrap();
+        }
+        assert_eq!(
+            handler.offers,
+            max + 1,
+            "publickey probes counted toward max_auth_attempts",
+        );
+    }
 
     #[tokio::test]
     async fn malformed_pty_req_truncated_modes_rejected_by_server() {
@@ -388,6 +483,95 @@ mod tests {
             !handler.final_auth_reached_for_signed_key,
             "signed publickey request reused PK_OK state from a different public key"
         );
+    }
+
+    #[tokio::test]
+    async fn channel_request_for_unconfirmed_server_open_does_not_call_handler() {
+        let mut session = test_authenticated_session();
+        let channel = insert_unconfirmed_server_open(&mut session);
+        let mut handler = ChannelCallbackProbe::default();
+
+        let mut packet = channel_request_payload(channel.0, b"exec");
+        encode_string(&mut packet, b"protected");
+        session.process_packet(&mut handler, &packet).await.unwrap();
+
+        assert!(
+            !handler.exec_called,
+            "exec_request was called before server-open channel confirmation"
+        );
+    }
+
+    #[tokio::test]
+    async fn window_adjust_for_unconfirmed_server_open_does_not_call_handler() {
+        let mut session = test_authenticated_session();
+        let channel = insert_unconfirmed_server_open(&mut session);
+        let mut handler = ChannelCallbackProbe::default();
+
+        let mut packet = Vec::new();
+        packet.push(msg::CHANNEL_WINDOW_ADJUST);
+        channel.encode(&mut packet).unwrap();
+        123u32.encode(&mut packet).unwrap();
+        session.process_packet(&mut handler, &packet).await.unwrap();
+
+        assert!(
+            !handler.window_adjusted_called,
+            "window_adjusted was called before server-open channel confirmation"
+        );
+    }
+
+    #[derive(Default)]
+    struct ChannelCallbackProbe {
+        exec_called: bool,
+        window_adjusted_called: bool,
+    }
+
+    impl Handler for ChannelCallbackProbe {
+        type Error = Error;
+
+        async fn exec_request(
+            &mut self,
+            _channel: ChannelId,
+            _data: &[u8],
+            _session: &mut Session,
+        ) -> Result<(), Self::Error> {
+            self.exec_called = true;
+            Ok(())
+        }
+
+        async fn window_adjusted(
+            &mut self,
+            _channel: ChannelId,
+            _new_size: u32,
+            _session: &mut Session,
+        ) -> Result<(), Self::Error> {
+            self.window_adjusted_called = true;
+            Ok(())
+        }
+    }
+
+    fn test_authenticated_session() -> Session {
+        let mut session = test_auth_session();
+        if let Some(enc) = session.common.encrypted.as_mut() {
+            enc.state = EncryptedState::Authenticated;
+        }
+        session
+    }
+
+    fn insert_unconfirmed_server_open(session: &mut Session) -> ChannelId {
+        let channel = session
+            .common
+            .encrypted
+            .as_mut()
+            .expect("test session has encrypted state")
+            .new_channel(
+                session.common.config.window_size,
+                session.common.config.maximum_packet_size,
+            );
+        let (sender, _receiver) = tokio::sync::mpsc::channel(1);
+        session
+            .channels
+            .insert(channel, crate::channels::ChannelRef::new(sender));
+        channel
     }
 
     fn publickey_probe_packet(user: &str, public_key: &PublicKey) -> Vec<u8> {
@@ -980,6 +1164,22 @@ async fn reply_userauth_info_response(
 }
 
 impl Session {
+    /// Channel-scoped messages (`CHANNEL_REQUEST`, `CHANNEL_DATA`,
+    /// `CHANNEL_EOF`, `CHANNEL_CLOSE`, ...) operate on an already-open channel.
+    /// An authenticated peer must not be able to drive channel callbacks
+    /// (`exec_request`, `data`, `channel_close`, ...) for a recipient id that
+    /// was never opened, whose open the application denied, or whose local open
+    /// is still waiting for peer confirmation. The encrypted channel table is
+    /// authoritative for the SSH protocol state; `self.channels` may already
+    /// contain local stream handles for unconfirmed server-initiated opens.
+    fn is_established_channel(&self, channel: ChannelId) -> bool {
+        self.common
+            .encrypted
+            .as_ref()
+            .and_then(|enc| enc.channels.get(&channel))
+            .is_some_and(|channel| channel.confirmed)
+    }
+
     async fn server_read_authenticated<H: Handler + Send, R: Reader>(
         &mut self,
         handler: &mut H,
@@ -991,6 +1191,9 @@ impl Session {
             msg::CHANNEL_CLOSE => {
                 let channel_num = map_err!(ChannelId::decode(r))?;
                 map_err!(ensure_end(r))?;
+                if !self.is_established_channel(channel_num) {
+                    return Ok(());
+                }
                 if let Some(ref mut enc) = self.common.encrypted {
                     // Reply with CHANNEL_CLOSE per RFC 4254 Section 5.3.
                     enc.close(channel_num)?;
@@ -1008,6 +1211,9 @@ impl Session {
             msg::CHANNEL_EOF => {
                 let channel_num = map_err!(ChannelId::decode(r))?;
                 map_err!(ensure_end(r))?;
+                if !self.is_established_channel(channel_num) {
+                    return Ok(());
+                }
                 if let Some(chan) = self.channels.get(&channel_num) {
                     chan.send(ChannelMsg::Eof).await.unwrap_or(())
                 }
@@ -1016,6 +1222,9 @@ impl Session {
             }
             msg::CHANNEL_EXTENDED_DATA | msg::CHANNEL_DATA => {
                 let channel_num = map_err!(ChannelId::decode(r))?;
+                if !self.is_established_channel(channel_num) {
+                    return Ok(());
+                }
 
                 let ext = if msg == msg::CHANNEL_DATA {
                     None
@@ -1060,14 +1269,17 @@ impl Session {
                 let channel_num = map_err!(ChannelId::decode(r))?;
                 let amount = map_err!(u32::decode(r))?;
                 map_err!(ensure_end(r))?;
+                if !self.is_established_channel(channel_num) {
+                    return Ok(());
+                }
                 let mut new_size = 0;
                 if let Some(ref mut enc) = self.common.encrypted {
-                    if let Some(channel) = enc.channels.get_mut(&channel_num) {
-                        new_size = channel.recipient_window_size.saturating_add(amount);
-                        channel.recipient_window_size = new_size;
-                    } else {
-                        return Ok(());
-                    }
+                    let channel = enc
+                        .channels
+                        .get_mut(&channel_num)
+                        .ok_or(Error::Inconsistent)?;
+                    new_size = channel.recipient_window_size.saturating_add(amount);
+                    channel.recipient_window_size = new_size;
                 }
                 let common = &mut self.common;
                 if let Some(enc) = common.encrypted.as_mut() {
@@ -1134,6 +1346,11 @@ impl Session {
                         channel.wants_reply = wants_reply != 0;
                     }
                 }
+                if !self.is_established_channel(channel_num) {
+                    // Request for a channel that was never opened (or whose open
+                    // was denied): drop it without invoking any handler callback.
+                    return Ok(());
+                }
                 match req_type.as_str() {
                     "pty-req" => {
                         let term = map_err!(String::decode(r))?;
@@ -1161,12 +1378,15 @@ impl Session {
                                 #[allow(clippy::indexing_slicing)] // length checked
                                 let num = BigEndian::read_u32(&mode_bytes[1..5]);
                                 debug!("code = {code:?}");
+                                if i >= modes.len() {
+                                    error!("pty-req: too many pty codes");
+                                    return Err(Error::Inconsistent.into());
+                                }
                                 if let Some(code) = Pty::from_u8(code) {
-                                    #[allow(clippy::indexing_slicing)] // length checked
-                                    if i < 130 {
+                                    #[allow(clippy::indexing_slicing)]
+                                    // i < modes.len() checked above
+                                    {
                                         modes[i] = (code, num);
-                                    } else {
-                                        error!("pty-req: too many pty codes");
                                     }
                                 } else {
                                     info!("pty-req: unknown pty code {code:?}");

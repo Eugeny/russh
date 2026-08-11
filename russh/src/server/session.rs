@@ -674,7 +674,10 @@ impl Session {
             // to `select!`, which picks up any client-side event first. Gated on
             // `!kex.active()` to match the `select!` receiver arm.
             const MAX_MESSAGES_PER_BATCH: usize = 64;
-            if !self.kex.active() {
+            // Leave application messages in the bounded receiver once a peer's
+            // channel window is exhausted. Network reads remain active so a
+            // window adjustment can release the queued data.
+            if !self.kex.active() && !self.common.has_any_pending_data() {
                 let mut drained = 0;
                 while drained < MAX_MESSAGES_PER_BATCH {
                     // Only Empty/Disconnected end the drain; both mean "nothing
@@ -688,6 +691,9 @@ impl Session {
                     };
                     self.dispatch_msg(msg)?;
                     drained += 1;
+                    if self.common.has_any_pending_data() {
+                        break;
+                    }
                 }
                 if drained > 0 {
                     self.flush()?;
@@ -761,7 +767,7 @@ impl Session {
                         }
                     }
                 }
-                msg = self.receiver.recv(), if !self.kex.active() => {
+                msg = self.receiver.recv(), if !self.kex.active() && !self.common.has_any_pending_data() => {
                     match msg {
                         Some(msg) => self.dispatch_msg(msg)?,
                         None => {

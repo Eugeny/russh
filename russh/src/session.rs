@@ -128,6 +128,12 @@ impl ChannelFlushResult {
 }
 
 impl<C> CommonSession<C> {
+    pub(crate) fn has_any_pending_data(&self) -> bool {
+        self.encrypted
+            .as_ref()
+            .is_some_and(Encrypted::has_any_pending_data)
+    }
+
     pub fn newkeys(&mut self, newkeys: NewKeys) {
         if let Some(ref mut enc) = self.encrypted {
             enc.exchange = Some(newkeys.exchange);
@@ -433,6 +439,12 @@ impl Encrypted {
         } else {
             false
         }
+    }
+
+    pub(crate) fn has_any_pending_data(&self) -> bool {
+        self.channels
+            .values()
+            .any(|channel| !channel.pending_data.is_empty())
     }
 
     /// Push the largest amount of `&buf0[from..]` that can fit into
