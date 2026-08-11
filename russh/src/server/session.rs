@@ -1194,11 +1194,20 @@ impl Session {
         )
         .await;
         map_err!(stream_write.shutdown().await)?;
+        // Drain the peer's remaining inbound data so the TCP teardown is graceful — but under
+        // the same deadline discipline as the flush above: a peer that never closes its write
+        // half must not pin this session task forever.
+        let drain_deadline = tokio::time::sleep(std::time::Duration::from_secs(5));
+        pin!(drain_deadline);
         loop {
             if let Some((stream_read, buffer, opening_cipher)) = is_reading.take() {
                 reading.set(start_reading(stream_read, buffer, opening_cipher));
             }
-            match (&mut reading).await {
+            let r = tokio::select! {
+                r = &mut reading => r,
+                () = &mut drain_deadline => break,
+            };
+            match r {
                 Ok((0, _, _, _)) => break,
                 Ok((_, r, b, opening_cipher)) => {
                     is_reading = Some((r, b, opening_cipher));
