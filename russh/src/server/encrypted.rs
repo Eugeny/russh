@@ -465,7 +465,7 @@ mod tests {
 
     fn test_auth_encrypted() -> Encrypted {
         Encrypted {
-            state: EncryptedState::WaitingAuthRequest(AuthRequest::server(MethodSet::all())),
+            state: EncryptedState::WaitingAuthRequest(AuthRequest::server(MethodSet::server_supported())),
             exchange: Some(Exchange::default()),
             kex: KEXES.get(&KEX_NONE).expect("none kex").make(),
             key: 0,

@@ -145,8 +145,7 @@ impl Session {
                             }
                         }
                         Some((&msg::USERAUTH_INFO_REQUEST_OR_USERAUTH_PK_OK, mut r)) => {
-                            if let Some(auth::CurrentRequest::GssapiWithMic) =
-                                auth_request.current
+                            if let Some(auth::CurrentRequest::GssapiWithMic) = auth_request.current
                             {
                                 debug!("userauth_gssapi_response");
                                 let selected_mechanism = map_err!(Bytes::decode(&mut r))?.to_vec();
@@ -316,8 +315,7 @@ impl Session {
                             }
                         }
                         Some((&msg::USERAUTH_GSSAPI_TOKEN, mut r)) => {
-                            if let Some(auth::CurrentRequest::GssapiWithMic) =
-                                auth_request.current
+                            if let Some(auth::CurrentRequest::GssapiWithMic) = auth_request.current
                             {
                                 debug!("userauth_gssapi_token");
                                 let token = map_err!(Bytes::decode(&mut r))?.to_vec();
@@ -334,8 +332,7 @@ impl Session {
                             return Err(crate::Error::Inconsistent.into());
                         }
                         Some((&msg::USERAUTH_GSSAPI_ERROR, mut r)) => {
-                            if let Some(auth::CurrentRequest::GssapiWithMic) =
-                                auth_request.current
+                            if let Some(auth::CurrentRequest::GssapiWithMic) = auth_request.current
                             {
                                 let major_status = map_err!(u32::decode(&mut r))?;
                                 let minor_status = map_err!(u32::decode(&mut r))?;
@@ -359,8 +356,7 @@ impl Session {
                             return Err(crate::Error::Inconsistent.into());
                         }
                         Some((&msg::USERAUTH_GSSAPI_ERRTOK, mut r)) => {
-                            if let Some(auth::CurrentRequest::GssapiWithMic) =
-                                auth_request.current
+                            if let Some(auth::CurrentRequest::GssapiWithMic) = auth_request.current
                             {
                                 let token = map_err!(Bytes::decode(&mut r))?.to_vec();
                                 map_err!(ensure_end(&r))?;
@@ -517,7 +513,9 @@ impl Session {
                 }
 
                 if let Some(sender) = self.channels.remove(&channel_num) {
-                    let _ = sender.send(ChannelMsg::OpenFailure(reason_code.clone())).await;
+                    let _ = sender
+                        .send(ChannelMsg::OpenFailure(reason_code.clone()))
+                        .await;
                 }
 
                 let _ = self.sender.send(Reply::ChannelOpenFailure);
@@ -797,7 +795,9 @@ impl Session {
 
                 match &msg.typ {
                     ChannelType::Session => {
-                        client.server_channel_open_session(channel, reply, self).await?
+                        client
+                            .server_channel_open_session(channel, reply, self)
+                            .await?
                     }
                     ChannelType::DirectTcpip(d) => {
                         client
@@ -866,7 +866,9 @@ impl Session {
                     }
                     ChannelType::Unknown { typ } => {
                         if client.should_accept_unknown_server_channel(id, typ).await {
-                            client.server_channel_open_unknown(channel, reply, self).await?;
+                            client
+                                .server_channel_open_unknown(channel, reply, self)
+                                .await?;
                         } else {
                             debug!("unknown channel type: {typ}");
                             if let Some(ref mut enc) = self.common.encrypted {
@@ -1024,7 +1026,7 @@ mod tests {
     use crate::compression::{Compression, Decompress};
     use crate::kex::{KEXES, NONE};
     use crate::session::Exchange;
-    use crate::{CryptoVec, MethodKind, MethodSet};
+    use crate::{CryptoVec, MethodKind};
 
     fn test_encrypted() -> Encrypted {
         Encrypted {
@@ -1263,9 +1265,7 @@ impl Encrypted {
                     submethods.as_bytes().encode(&mut self.write)?;
                     true
                 }
-                auth::Method::GssapiWithMic {
-                    ref mechanism_oids,
-                } => {
+                auth::Method::GssapiWithMic { ref mechanism_oids } => {
                     user.as_bytes().encode(&mut self.write)?;
                     "ssh-connection".encode(&mut self.write)?;
                     "gssapi-with-mic".encode(&mut self.write)?;

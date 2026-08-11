@@ -115,7 +115,7 @@ impl MethodSet {
         Self(Vec::new())
     }
 
-    pub fn all() -> Self {
+    pub fn client_supported() -> Self {
         Self(vec![
             MethodKind::None,
             MethodKind::Password,
@@ -126,7 +126,7 @@ impl MethodSet {
         ])
     }
 
-    pub(crate) fn server_supported() -> Self {
+    pub fn server_supported() -> Self {
         Self(vec![
             MethodKind::None,
             MethodKind::Password,
@@ -368,8 +368,8 @@ impl AuthRequest {
             _ => None,
         };
         Self {
-            initial_methods: MethodSet::all(),
-            methods: MethodSet::all(),
+            initial_methods: MethodSet::client_supported(),
+            methods: MethodSet::client_supported(),
             partial_success: false,
             current,
             principal: None,
