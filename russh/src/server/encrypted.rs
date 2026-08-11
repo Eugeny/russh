@@ -27,7 +27,6 @@ use ssh_encoding::{Decode, Encode, Reader};
 use ssh_key::{PublicKey, Signature};
 use tokio::time::Instant;
 
-use super::super::*;
 use super::*;
 use crate::helpers::NameList;
 use crate::map_err;
