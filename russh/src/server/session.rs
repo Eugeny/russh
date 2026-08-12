@@ -18,6 +18,8 @@ use crate::kex::{EXTENSION_SUPPORT_AS_CLIENT, KexCause, SessionKexState};
 use crate::pending_inbound::{
     self, BoxReserve, DeferredCallback, InboundDelivery, InboundItem, InboundQueue,
 };
+use crate::server::supervisor::{DisconnectCause, RekeyDeadline, WriteWatchdog};
+use crate::session::EncryptedState;
 use crate::{ChannelOpenFailure, map_err, msg};
 
 
@@ -50,6 +52,13 @@ pub struct Session {
     /// full. Unbounded is safe — at most one reply per peer CHANNEL_OPEN.
     pub(crate) open_reply_tx: tokio::sync::mpsc::UnboundedSender<Msg>,
     pub(crate) open_reply_rx: tokio::sync::mpsc::UnboundedReceiver<Msg>,
+    /// Monotonic rekey generation (S1 ConnSupervisor). Bumped on mid-session rekey only.
+    pub(crate) rekey_gen: u64,
+    /// Active rekey deadline registration (generation + wall deadline).
+    pub(crate) rekey_deadline: RekeyDeadline,
+    /// Absolute handshake deadline (banner → initial kex → auth). Set in `run_stream`
+    /// and never restarted mid-handshake.
+    pub(crate) handshake_deadline_at: Option<tokio::time::Instant>,
 }
 
 #[derive(Debug)]
@@ -990,7 +999,26 @@ impl Session {
     {
         self.flush()?;
 
-        map_err!(self.common.packet_writer.flush_into(&mut stream).await)?;
+        // Absolute handshake deadline from run_stream (banner already counted). Fallback
+        // if run() is invoked without run_stream (tests).
+        let handshake_deadline_at = self.handshake_deadline_at.unwrap_or_else(|| {
+            tokio::time::Instant::now() + self.common.config.handshake_deadline
+        });
+
+        // Initial KEX first flush still inside handshake budget.
+        match tokio::time::timeout_at(
+            handshake_deadline_at,
+            self.common.packet_writer.flush_into(&mut stream),
+        )
+        .await
+        {
+            Ok(r) => {
+                let _ = map_err!(r)?;
+            }
+            Err(_) => {
+                return Err(crate::Error::HandshakeTimeout.into());
+            }
+        }
 
         let (stream_read, mut stream_write) = stream.split();
         let buffer = SSHBuffer::new();
@@ -1016,10 +1044,67 @@ impl Session {
         // queued inbound item without the loop ever blocking on a single channel's slow consumer.
         let mut inbound_reserves: FuturesUnordered<BoxReserve> = FuturesUnordered::new();
 
+        // ── S1 ConnSupervisor state (in-loop; no separate task yet) ──────────
+        let mut write_watchdog = WriteWatchdog::new();
+        let mut handshake_done = false;
+        let mut supervisor_cause: Option<DisconnectCause> = None;
+        let write_progress_deadline = self.common.config.write_progress_deadline;
+        let write_min_drain = self.common.config.write_min_drain;
+        let teardown_grace = self.common.config.teardown_grace;
+        let mut drained_seen = self.common.packet_writer.drained_total();
+        #[cfg(feature = "_test_hooks")]
+        let cause_slot = self.common.config.disconnect_cause_slot.clone();
+
+        let record_cause = |cause: DisconnectCause, slot: &mut Option<DisconnectCause>| {
+            if slot.is_none() {
+                *slot = Some(cause);
+                #[cfg(feature = "_test_hooks")]
+                if let Some(ref s) = cause_slot {
+                    s.record(cause);
+                }
+                debug!("supervisor first cause: {cause:?}");
+            }
+        };
+
         #[allow(clippy::panic)] // false positive in macro
         while !self.common.disconnected {
             self.common.received_data = false;
             let mut sent_keepalive = false;
+
+            // Handshake complete once authentication has succeeded.
+            // Auth accept sets `InitCompression` first; `Authenticated` is only entered on
+            // the next post-auth packet (see server/encrypted.rs). Legitimate clients may
+            // sit idle after auth without opening a channel — treat both states as done so
+            // handshake_deadline cannot mis-fire HandshakeTimeout.
+            if !handshake_done {
+                if matches!(
+                    self.common.encrypted.as_ref().map(|e| &e.state),
+                    Some(EncryptedState::InitCompression | EncryptedState::Authenticated)
+                ) {
+                    handshake_done = true;
+                } else if tokio::time::Instant::now() >= handshake_deadline_at {
+                    record_cause(DisconnectCause::HandshakeTimeout, &mut supervisor_cause);
+                    self.common.disconnected = true;
+                    break;
+                }
+            }
+
+            // S1: map sealed ciphertext to wire_eligible; arm/disarm watchdog.
+            let eligible = self.common.packet_writer.pending_bytes() as u64;
+            write_watchdog.observe_eligible(eligible);
+            if let Some(cause) = write_watchdog.poll_timeout(write_progress_deadline, write_min_drain)
+            {
+                record_cause(cause, &mut supervisor_cause);
+                self.common.disconnected = true;
+                break;
+            }
+            // S1: rekey deadline (generation-checked).
+            if let Some(kex_gen) = self.rekey_deadline.poll(self.active_rekey_gen()) {
+                record_cause(DisconnectCause::RekeyTimeout, &mut supervisor_cause);
+                debug!("rekey deadline fired generation={kex_gen}");
+                self.common.disconnected = true;
+                break;
+            }
 
             // Drain messages already queued on the session channel (e.g. shell
             // output pushed via `Handle::data()` from a spawned task) before
@@ -1066,6 +1151,29 @@ impl Session {
                 }
             }
 
+            // Supervisor timer sleeps (recomputed each iteration).
+            // Include min-drain remaining so strategy layer cannot sleep past its window.
+            let wd_sleep = write_watchdog
+                .next_activity_deadline(write_progress_deadline)
+                .unwrap_or(std::time::Duration::from_secs(3600));
+            let min_drain_sleep = write_watchdog
+                .next_min_drain_deadline(write_min_drain)
+                .unwrap_or(std::time::Duration::from_secs(3600));
+            let rekey_sleep = self
+                .rekey_deadline
+                .remaining()
+                .unwrap_or(std::time::Duration::from_secs(3600));
+            let hs_sleep = if handshake_done {
+                std::time::Duration::from_secs(3600)
+            } else {
+                handshake_deadline_at.saturating_duration_since(tokio::time::Instant::now())
+            };
+            let supervisor_sleep = wd_sleep
+                .min(min_drain_sleep)
+                .min(rekey_sleep)
+                .min(hs_sleep)
+                .max(std::time::Duration::from_millis(1));
+
             tokio::select! {
                 r = &mut reading => {
                     let (stream_read, mut buffer, mut opening_cipher) = match r {
@@ -1091,8 +1199,34 @@ impl Session {
                             // TODO it'd be cleaner to just pass cipher to reply()
                             std::mem::swap(&mut opening_cipher, &mut self.common.remote_to_local);
 
-                            match reply(&mut self, &mut handler, &mut pkt).await {
-                                Ok(_) => {},
+                            // S1 3.3: during handshake, bound arm-body awaits so a slow
+                            // handler/kex step cannot stretch the absolute deadline unboundedly.
+                            let reply_result = if !handshake_done {
+                                match tokio::time::timeout_at(
+                                    handshake_deadline_at,
+                                    reply(&mut self, &mut handler, &mut pkt),
+                                )
+                                .await
+                                {
+                                    Ok(r) => r,
+                                    Err(_) => {
+                                        record_cause(
+                                            DisconnectCause::HandshakeTimeout,
+                                            &mut supervisor_cause,
+                                        );
+                                        self.common.disconnected = true;
+                                        std::mem::swap(
+                                            &mut opening_cipher,
+                                            &mut self.common.remote_to_local,
+                                        );
+                                        break;
+                                    }
+                                }
+                            } else {
+                                reply(&mut self, &mut handler, &mut pkt).await
+                            };
+                            match reply_result {
+                                Ok(_) => {}
                                 Err(e) => return Err(e),
                             }
                             // Register reserve futures for any channels that became backpressured
@@ -1134,13 +1268,11 @@ impl Session {
                     debug!("timeout");
                     return Err(crate::Error::InactivityTimeout.into());
                 }
-                // Concurrent outbound flush: pushes pending bytes while the loop stays free to
-                // read, run timers, and take other arms. Cancel-safe (cursor lives in the
-                // writer), so losing the race to another arm never loses write progress. This
-                // is the arm that breaks the full-duplex stall where our blocked write used to
-                // stop our reads, starving the peer whose reads would have unblocked our write.
+                // Concurrent outbound flush: cancel-safe via flush_cursor.
+                // Write progress is observed via drained_total delta *after* select!
+                // so partial Ok(n) is never lost when this future is cancelled.
                 r = self.common.packet_writer.flush_into(&mut stream_write), if self.common.packet_writer.has_pending() => {
-                    map_err!(r)?;
+                    let _ = map_err!(r)?;
                 }
                 // See the batch-drain comment above: gating this arm on `has_any_pending_data()`
                 // would let one stalled channel block outbound progress for all of them.
@@ -1152,7 +1284,21 @@ impl Session {
                         }
                     }
                 }
+                // S1 supervisor poll (write watchdog / min-drain / rekey / handshake).
+                () = tokio::time::sleep(supervisor_sleep) => {
+                    // Re-check on wake; the top-of-loop checks also run.
+                }
             }
+
+            // S1 fix: feed watchdog from persistent drained_total so cancel of
+            // flush_into never drops partial write credit.
+            let drained_now = self.common.packet_writer.drained_total();
+            if drained_now > drained_seen {
+                let delta = (drained_now - drained_seen) as usize;
+                write_watchdog.note_write_ok(delta);
+                drained_seen = drained_now;
+            }
+
             // Stage whatever this iteration produced; the concurrent flush arm above writes it
             // out next time around without blocking the loop.
             self.flush()?;
@@ -1184,38 +1330,55 @@ impl Session {
             }
         }
         debug!("disconnected");
-        // Shutdown. Try to flush anything still buffered (e.g. our DISCONNECT) before closing
-        // the write half — the in-loop flush arm no longer guarantees an empty buffer at exit.
-        // Best-effort with a deadline: the peer may be gone (write errors) or may have stopped
-        // reading entirely (write blocks); neither may fail or hang the teardown.
-        let _ = tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            self.common.packet_writer.flush_into(&mut stream_write),
-        )
-        .await;
-        map_err!(stream_write.shutdown().await)?;
-        // Drain the peer's remaining inbound data so the TCP teardown is graceful — but under
-        // the same deadline discipline as the flush above: a peer that never closes its write
-        // half must not pin this session task forever.
-        let drain_deadline = tokio::time::sleep(std::time::Duration::from_secs(5));
-        pin!(drain_deadline);
-        loop {
-            if let Some((stream_read, buffer, opening_cipher)) = is_reading.take() {
-                reading.set(start_reading(stream_read, buffer, opening_cipher));
-            }
-            let r = tokio::select! {
-                r = &mut reading => r,
-                () = &mut drain_deadline => break,
-            };
-            match r {
-                Ok((0, _, _, _)) => break,
-                Ok((_, r, b, opening_cipher)) => {
-                    is_reading = Some((r, b, opening_cipher));
+
+        // S1: best-effort DISCONNECT on supervisor teardown.
+        if let Some(cause) = supervisor_cause {
+            let _ = self.disconnect(
+                crate::Disconnect::ByApplication,
+                &format!("supervisor: {cause:?}"),
+                "en",
+            );
+            let _ = self.flush();
+        }
+
+        // Single non-stacked grace covering flush + shutdown + drain. On expiry,
+        // drop both stream halves immediately (no unbounded shutdown await).
+        let grace_at = tokio::time::Instant::now() + teardown_grace;
+        let teardown = async {
+            let _ = self
+                .common
+                .packet_writer
+                .flush_into(&mut stream_write)
+                .await;
+            let _ = stream_write.shutdown().await;
+            loop {
+                if let Some((stream_read, buffer, opening_cipher)) = is_reading.take() {
+                    reading.set(start_reading(stream_read, buffer, opening_cipher));
                 }
-                // at this stage of session shutdown, EOF is not unexpected
-                Err(Error::IO(ref e)) if e.kind() == ErrorKind::UnexpectedEof => break,
-                Err(e) => return Err(e.into()),
+                match (&mut reading).await {
+                    Ok((0, _, _, _)) => break,
+                    Ok((_, r, b, opening_cipher)) => {
+                        is_reading = Some((r, b, opening_cipher));
+                    }
+                    Err(Error::IO(ref e)) if e.kind() == ErrorKind::UnexpectedEof => break,
+                    Err(_) => break,
+                }
             }
+        };
+        let _ = tokio::time::timeout_at(grace_at, teardown).await;
+        // Drop stream halves by falling out of scope (cancels any hung IO).
+
+        // Convert supervisor first-cause into a typed Error so callers/tests see it.
+        if let Some(cause) = supervisor_cause {
+            let err = match cause {
+                DisconnectCause::WriteStalled => crate::Error::WriteStalled,
+                DisconnectCause::RekeyTimeout => crate::Error::RekeyTimeout(self.rekey_gen),
+                DisconnectCause::HandshakeTimeout => crate::Error::HandshakeTimeout,
+                DisconnectCause::PeerError | DisconnectCause::LocalShutdown => {
+                    return Ok(());
+                }
+            };
+            return Err(err.into());
         }
 
         Ok(())
@@ -1899,7 +2062,36 @@ impl Session {
 
         kex.kexinit(&mut self.common.packet_writer)?;
         self.kex = SessionKexState::InProgress(kex);
+        // S1: rekey deadline only for mid-session rekeys. Initial KEX (no encrypted
+        // state yet) is covered exclusively by handshake_deadline → HandshakeTimeout.
+        if self.common.encrypted.is_some() {
+            self.rekey_gen = self.rekey_gen.wrapping_add(1);
+            let kex_gen = self.rekey_gen;
+            self.rekey_deadline
+                .register(kex_gen, self.common.config.rekey_deadline);
+            debug!("rekey deadline armed generation={kex_gen}");
+        } else {
+            debug!("initial KEX: rekey deadline not registered (handshake owns this clock)");
+        }
         Ok(())
+    }
+
+    /// Clear rekey deadline when kex returns to Idle (success path).
+    pub(crate) fn clear_rekey_deadline(&mut self) {
+        if let Some(kex_gen) = self.rekey_deadline.generation {
+            self.rekey_deadline.clear_if_generation(kex_gen);
+        } else {
+            self.rekey_deadline.clear();
+        }
+    }
+
+    /// Active rekey generation if currently InKex / Taken, else None.
+    pub(crate) fn active_rekey_gen(&self) -> Option<u64> {
+        if self.kex.active() {
+            self.rekey_deadline.generation.or(Some(self.rekey_gen))
+        } else {
+            None
+        }
     }
 }
 
@@ -1985,6 +2177,9 @@ mod tests {
             kex: SessionKexState::Idle,
             open_reply_tx,
             open_reply_rx,
+            rekey_gen: 0,
+            rekey_deadline: crate::server::supervisor::RekeyDeadline::default(),
+            handshake_deadline_at: None,
         }
     }
 

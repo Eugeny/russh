@@ -82,6 +82,10 @@ mod encrypted;
 mod kex;
 mod session;
 
+/// Test-only rekey fault-injection gates. Available with `--features _test_hooks`.
+#[cfg(feature = "_test_hooks")]
+pub mod test_hooks;
+
 #[cfg(test)]
 mod test;
 
@@ -1246,7 +1250,7 @@ impl Session {
         let mut result: Result<RemoteDisconnectInfo, H::Error> = Err(Error::Disconnect.into());
         self.flush()?;
 
-        map_err!(self.common.packet_writer.flush_into(stream_write).await)?;
+        let _ = map_err!(self.common.packet_writer.flush_into(stream_write).await)?;
 
         let buffer = SSHBuffer::new();
 
@@ -1335,7 +1339,7 @@ impl Session {
                 // is the arm that breaks the full-duplex stall where our blocked write used to
                 // stop our reads, starving the peer whose reads would have unblocked our write.
                 r = self.common.packet_writer.flush_into(stream_write), if self.common.packet_writer.has_pending() => {
-                    map_err!(r)?;
+                    let _ = map_err!(r)?;
                 }
                 // Channel-open replies from handlers that stashed the `ChannelOpenHandle` and
                 // accepted/rejected later from a spawned task. Kex-gated only (no packets may
@@ -2497,6 +2501,11 @@ pub struct Config {
     pub gex: GexParams,
     /// If active, invoke `set_nodelay(true)` on the ssh socket; disabled by default (i.e. Nagle's algorithm is active).
     pub nodelay: bool,
+    /// Test-only per-session rekey hold gate (`--features _test_hooks`).
+    /// When set and armed, the client stalls rekey at NEWKEYS while bulk/window
+    /// traffic continues. Production builds omit this field entirely.
+    #[cfg(feature = "_test_hooks")]
+    pub rekey_hold: Option<std::sync::Arc<test_hooks::RekeyHoldGate>>,
 }
 
 impl Default for Config {
@@ -2521,6 +2530,8 @@ impl Default for Config {
             anonymous: false,
             gex: Default::default(),
             nodelay: false,
+            #[cfg(feature = "_test_hooks")]
+            rekey_hold: None,
         }
     }
 }

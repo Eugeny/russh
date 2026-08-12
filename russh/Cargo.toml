@@ -26,6 +26,9 @@ ring = ["dep:ring"] # Alternative crypto backend.
 rsa = ["dep:rsa", "dep:pkcs1", "ssh-key/rsa"]
 serde = ["ssh-key/serde"]
 _bench = ["dep:criterion"]
+# Test-only fault-injection gates (S0 malicious-client harness). Never enable in
+# production builds. Integration tests that need KEX-only hold use this feature.
+_test_hooks = []
 
 [dependencies]
 aes.workspace = true
@@ -151,3 +154,8 @@ all-features = true
 [[bench]]
 name = "ciphers"
 harness = false
+
+# S0 malicious-client suite needs the KEX-only NEWKEYS hold injection.
+[[test]]
+name = "test_malicious_client_s0"
+required-features = ["_test_hooks"]

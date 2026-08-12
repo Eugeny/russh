@@ -60,6 +60,8 @@ mod kex;
 mod session;
 pub use self::session::*;
 mod encrypted;
+pub mod supervisor;
+pub use self::supervisor::{DisconnectCause, DisconnectCauseSlot, WriteProgress};
 
 /// Configuration of a server.
 pub struct Config {
@@ -112,6 +114,26 @@ pub struct Config {
     pub keepalive_max: usize,
     /// If active, invoke `set_nodelay(true)` on client sockets; disabled by default (i.e. Nagle's algorithm is active).
     pub nodelay: bool,
+    /// ConnSupervisor (§4.2): no socket write progress while wire-eligible for this long
+    /// → `Cancelling(WriteStalled)`. Default 30s.
+    pub write_progress_deadline: std::time::Duration,
+    /// ConnSupervisor strategy layer: while write-watchdog is armed, if fewer than
+    /// `.0` bytes are drained in `.1`, treat as stalled (trickle-read). `None` disables.
+    /// **Default `None`** (opt-in): activity-layer `write_progress_deadline` alone covers
+    /// permanent write stall; a global min-drain default would mis-kill legitimate slow links.
+    pub write_min_drain: Option<(usize, std::time::Duration)>,
+    /// ConnSupervisor: banner + initial kex + auth must complete within this budget.
+    /// Default 30s.
+    pub handshake_deadline: std::time::Duration,
+    /// ConnSupervisor: a rekey (InKex) must complete within this budget or the
+    /// connection is torn down with `RekeyTimeout`. Default 30s.
+    pub rekey_deadline: std::time::Duration,
+    /// Best-effort DISCONNECT + drain grace after Cancelling before hard drop.
+    /// Default 5s (not stacked with other deadlines).
+    pub teardown_grace: std::time::Duration,
+    /// Test-only first-cause slot (S1 harness). Production leaves this `None`.
+    #[cfg(feature = "_test_hooks")]
+    pub disconnect_cause_slot: Option<std::sync::Arc<supervisor::DisconnectCauseSlot>>,
 }
 
 impl Default for Config {
@@ -140,6 +162,16 @@ impl Default for Config {
             keepalive_interval: None,
             keepalive_max: 3,
             nodelay: false,
+            write_progress_deadline: std::time::Duration::from_secs(30),
+            // Strategy layer OFF by default: low throughput is not protocol-malicious
+            // (weak networks / rate-limited downloads). Deployments with a hard min-bandwidth
+            // SLA may opt in via `Some((bytes, window))`. Activity layer remains ON.
+            write_min_drain: None,
+            handshake_deadline: std::time::Duration::from_secs(30),
+            rekey_deadline: std::time::Duration::from_secs(30),
+            teardown_grace: std::time::Duration::from_secs(5),
+            #[cfg(feature = "_test_hooks")]
+            disconnect_cause_slot: None,
         }
     }
 }
@@ -1074,12 +1106,25 @@ where
     H: Handler + Send + 'static,
     R: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
-    // Writing SSH id.
+    // Absolute handshake deadline covers banner write/read + initial kex + auth
+    // (never restarted mid-handshake).
+    let handshake_deadline_at =
+        tokio::time::Instant::now() + config.handshake_deadline;
+
+    // Writing SSH id (inside handshake budget).
     let mut write_buffer = SSHBuffer::new();
     write_buffer.send_ssh_id(&config.as_ref().server_id);
-    map_err!(stream.write_all(&write_buffer.buffer[..]).await)?;
+    match tokio::time::timeout_at(
+        handshake_deadline_at,
+        stream.write_all(&write_buffer.buffer[..]),
+    )
+    .await
+    {
+        Ok(r) => map_err!(r)?,
+        Err(_) => return Err(crate::Error::HandshakeTimeout.into()),
+    }
 
-    // Reading SSH id and allocating a session.
+    // Reading SSH id and allocating a session (inside handshake budget).
     let mut stream = SshRead::new(stream);
     let (sender, receiver) = tokio::sync::mpsc::channel(config.event_buffer_size);
     let handle = server::session::Handle {
@@ -1087,7 +1132,15 @@ where
         channel_buffer_size: config.channel_buffer_size,
     };
 
-    let common = read_ssh_id(config, &mut stream).await?;
+    let common = match tokio::time::timeout_at(
+        handshake_deadline_at,
+        read_ssh_id(config, &mut stream),
+    )
+    .await
+    {
+        Ok(r) => r.map_err(H::Error::from)?,
+        Err(_) => return Err(crate::Error::HandshakeTimeout.into()),
+    };
     let (open_reply_tx, open_reply_rx) = tokio::sync::mpsc::unbounded_channel();
     let mut session = Session {
         target_window_size: common.config.window_size,
@@ -1099,11 +1152,14 @@ where
         channels: HashMap::new(),
         inbound: HashMap::new(),
         inbound_needs_reserve: Vec::new(),
-            outbound_acks: std::collections::HashMap::new(),
+        outbound_acks: std::collections::HashMap::new(),
         open_global_requests: VecDeque::new(),
         kex: SessionKexState::Idle,
         open_reply_tx,
         open_reply_rx,
+        rekey_gen: 0,
+        rekey_deadline: crate::server::supervisor::RekeyDeadline::default(),
+        handshake_deadline_at: Some(handshake_deadline_at),
     };
 
     session.begin_rekey()?;
@@ -1227,6 +1283,8 @@ async fn reply<H: Handler + Send>(
                     }
 
                     session.kex = SessionKexState::Idle;
+                    // S1: rekey completed — unregister deadline (gen-checked).
+                    session.clear_rekey_deadline();
 
                     if session.common.strict_kex {
                         pkt.seqn = Wrapping(0);

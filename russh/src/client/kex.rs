@@ -309,6 +309,26 @@ impl ClientKex {
                     self.cause.session_id(),
                 )?;
 
+                // S0 test hook: hold rekey by suppressing outbound NEWKEYS so the
+                // peer stays in WaitingForNewKeys / kex.active(). Bulk + window
+                // traffic still flows. Feature-gated; zero cost without `_test_hooks`.
+                #[cfg(feature = "_test_hooks")]
+                if let Some(gate) = self.config.rekey_hold.as_ref() {
+                    if gate.should_hold_outbound_newkeys() {
+                        gate.note_held_outbound_newkeys();
+                        debug!("_test_hooks: holding outbound NEWKEYS (rekey stall)");
+                        // Do not reset seqn or emit NEWKEYS; peer stays WaitingForNewKeys.
+                        self.state = ClientKexState::WaitingForNewKeys {
+                            server_host_key,
+                            newkeys,
+                        };
+                        return Ok(KexProgress::NeedsReply {
+                            kex: self,
+                            reset_seqn: false,
+                        });
+                    }
+                }
+
                 output.write_packet(|w| {
                     msg::NEWKEYS.encode(w)?;
                     Ok(())
@@ -342,6 +362,24 @@ impl ClientKex {
                         input.buffer.first()
                     );
                     return Err(Error::Kex);
+                }
+
+                // S0 test hook: drop inbound NEWKEYS so we never install keys /
+                // leave InProgress. Pairs with suppressed outbound NEWKEYS.
+                #[cfg(feature = "_test_hooks")]
+                if let Some(gate) = self.config.rekey_hold.as_ref() {
+                    if gate.should_drop_inbound_newkeys() {
+                        gate.note_dropped_inbound_newkeys();
+                        debug!("_test_hooks: dropping inbound NEWKEYS (rekey stall)");
+                        self.state = ClientKexState::WaitingForNewKeys {
+                            server_host_key,
+                            newkeys,
+                        };
+                        return Ok(KexProgress::NeedsReply {
+                            kex: self,
+                            reset_seqn: false,
+                        });
+                    }
                 }
 
                 #[allow(clippy::indexing_slicing, reason = "length checked")]

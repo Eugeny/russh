@@ -179,6 +179,19 @@ pub enum Error {
     #[error("Inactivity timeout")]
     InactivityTimeout,
 
+    /// ConnSupervisor: write path armed with wire-eligible bytes made no progress
+    /// within `write_progress_deadline` (or failed the `write_min_drain` policy).
+    #[error("Write stalled (supervisor)")]
+    WriteStalled,
+
+    /// ConnSupervisor: key re-exchange did not complete within `rekey_deadline`.
+    #[error("Rekey timeout (supervisor), generation {0}")]
+    RekeyTimeout(u64),
+
+    /// ConnSupervisor: banner / initial kex / auth exceeded `handshake_deadline`.
+    #[error("Handshake timeout (supervisor)")]
+    HandshakeTimeout,
+
     /// Missing authentication method.
     #[error("No authentication method")]
     NoAuthMethod,

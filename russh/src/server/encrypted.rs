@@ -556,6 +556,9 @@ mod tests {
             outbound_acks: std::collections::HashMap::new(),
             open_global_requests: std::collections::VecDeque::new(),
             kex: SessionKexState::Idle,
+            rekey_gen: 0,
+            rekey_deadline: crate::server::supervisor::RekeyDeadline::default(),
+            handshake_deadline_at: None,
         }
     }
 

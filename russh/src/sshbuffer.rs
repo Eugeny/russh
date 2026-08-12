@@ -377,11 +377,18 @@ pub(crate) struct PacketWriter {
     /// How many bytes at the front of `write_buffer` have already reached the socket. Lets
     /// `flush_into` be dropped mid-write (e.g. by `select!`) and resume where it left off.
     flush_cursor: usize,
+    /// Monotonic total of bytes successfully written to the socket across all
+    /// `flush_into` calls (including partials whose future was later cancelled).
+    /// Survives `select!` cancel because each `Ok(n>0)` increments *before* the
+    /// next await — the session loop diffs this counter after every `select!`.
+    drained_total: u64,
 }
 
 impl Debug for PacketWriter {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_struct("PacketWriter").finish()
+        f.debug_struct("PacketWriter")
+            .field("drained_total", &self.drained_total)
+            .finish()
     }
 }
 
@@ -401,7 +408,19 @@ impl PacketWriter {
             packet_buffer: Vec::new(),
             write_buffer: SSHBuffer::new(),
             flush_cursor: 0,
+            drained_total: 0,
         }
+    }
+
+    /// Lifetime total of bytes that reached the socket (monotonic).
+    pub fn drained_total(&self) -> u64 {
+        self.drained_total
+    }
+
+    /// Test helper: stage raw bytes into the write buffer (bypasses sealing).
+    #[cfg(test)]
+    pub(crate) fn test_stage_raw(&mut self, data: &[u8]) {
+        self.write_buffer.buffer.extend_from_slice(data);
     }
 
     fn prepare_packet<F: FnOnce(&mut Vec<u8>) -> Result<(), Error>>(
@@ -597,10 +616,20 @@ impl PacketWriter {
     ///
     /// Cancel-safe: progress is tracked in `self.flush_cursor`, one socket write per await
     /// point, so dropping this future (e.g. when another `select!` branch wins) loses nothing
-    /// — the next call resumes exactly where the last one stopped. This is what lets the run
-    /// loops keep reading (and running timers) while a backpressured peer drains us slowly,
-    /// instead of blocking the whole session on an unbounded `write_all`.
-    pub async fn flush_into<W: AsyncWrite + Unpin>(&mut self, w: &mut W) -> std::io::Result<()> {
+    /// — the next call resumes exactly where the last one stopped.
+    ///
+    /// Each successful `Ok(n>0)` **immediately** increments the persistent
+    /// [`drained_total`](Self::drained_total) counter *before* the next await, so a
+    /// cancelled `flush_into` future still leaves partial write progress observable to
+    /// the write-progress watchdog (S1 fix: select! cancel must not lose write credit).
+    ///
+    /// Returns bytes written in *this* call (local; may under-count if cancelled).
+    /// Prefer `drained_total()` deltas for watchdog input.
+    pub async fn flush_into<W: AsyncWrite + Unpin>(
+        &mut self,
+        w: &mut W,
+    ) -> std::io::Result<usize> {
+        let mut written = 0usize;
         while self.flush_cursor < self.write_buffer.buffer.len() {
             #[allow(clippy::indexing_slicing)] // cursor < len checked by the loop condition
             let n = w.write(&self.write_buffer.buffer[self.flush_cursor..]).await?;
@@ -611,12 +640,92 @@ impl PacketWriter {
                 ));
             }
             self.flush_cursor += n;
+            // Persist before any subsequent await so a select! cancel cannot drop this credit.
+            self.drained_total = self.drained_total.saturating_add(n as u64);
+            written += n;
         }
         if !self.write_buffer.buffer.is_empty() {
             w.flush().await?;
             self.write_buffer.buffer.clear();
             self.flush_cursor = 0;
         }
-        Ok(())
+        Ok(written)
+    }
+}
+
+#[cfg(test)]
+mod drained_total_tests {
+    use super::*;
+    use std::future::Future;
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
+    use tokio::io::AsyncWrite;
+
+    /// First write returns Ok(n); subsequent writes stay Pending (simulates a
+    /// backpressured peer mid-flush).
+    struct PartialThenPend {
+        first_done: bool,
+    }
+
+    impl AsyncWrite for PartialThenPend {
+        fn poll_write(
+            mut self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+            buf: &[u8],
+        ) -> Poll<std::io::Result<usize>> {
+            if !self.first_done {
+                self.first_done = true;
+                let n = buf.len().min(16).max(1);
+                return Poll::Ready(Ok(n));
+            }
+            cx.waker().wake_by_ref();
+            Poll::Pending
+        }
+
+        fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    #[tokio::test]
+    async fn drained_total_survives_select_cancel_after_partial_write() {
+        let mut pw = PacketWriter::clear();
+        pw.test_stage_raw(&[0u8; 64]);
+        assert_eq!(pw.drained_total(), 0);
+        assert!(pw.has_pending());
+
+        let mut w = PartialThenPend { first_done: false };
+        let before = pw.drained_total();
+
+        // Drive flush_into until the first Ok(n>0) is recorded, then cancel by
+        // dropping the future while a subsequent write would stay Pending.
+        {
+            let flush = pw.flush_into(&mut w);
+            tokio::pin!(flush);
+            // Prefer the flush arm, but also have a backup timer so we never hang.
+            tokio::select! {
+                biased;
+                r = &mut flush => {
+                    let _ = r;
+                }
+                () = tokio::time::sleep(std::time::Duration::from_millis(50)) => {
+                    // Cancelled after partial progress.
+                }
+            }
+            // Explicit drop of the pinned future (end of scope).
+        }
+
+        let after = pw.drained_total();
+        assert!(
+            after > before,
+            "partial Ok(n>0) must increment drained_total even if flush_into is cancelled \
+             (before={before} after={after})"
+        );
+        // Buffer still has unflushed bytes (partial only).
+        assert!(pw.has_pending());
     }
 }
