@@ -255,8 +255,8 @@ pub fn query_pageant_direct(cookie: String, msg: &[u8]) -> Result<Vec<u8>, Error
     let char_buffer = CString::new(map_name.as_bytes()).map_err(|_| Error::InvalidCookie)?;
     let cds = COPYDATASTRUCT {
         dwData: _AGENT_COPYDATA_ID as usize,
-        cbData: char_buffer.as_bytes().len() as u32,
-        lpData: char_buffer.as_bytes().as_ptr() as *mut _,
+        cbData: char_buffer.as_bytes_with_nul().len() as u32,
+        lpData: char_buffer.as_bytes_with_nul().as_ptr() as *mut _,
     };
 
     let response = unsafe {
