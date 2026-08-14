@@ -1652,6 +1652,7 @@ async fn reply<H: Handler>(
                 }
                 KexProgress::Done {
                     server_host_key,
+                    server_host_certificate,
                     newkeys,
                 } => {
                     debug!("kex impl has completed");
@@ -1684,7 +1685,16 @@ async fn reply<H: Handler>(
                         session.pending_len = 0;
                     } else {
                         // This is the initial kex
-                        if let Some(server_host_key) = &server_host_key {
+                        // A certificate replaces the key check rather than
+                        // adding to it. The key inside a certificate is not
+                        // something the client was ever told to trust — asking
+                        // about it as well would invite an implementation to
+                        // answer yes to the wrong question.
+                        if let Some(certificate) = &server_host_certificate {
+                            if !handler.check_server_certificate(certificate).await? {
+                                return Err(crate::Error::UnknownKey.into());
+                            }
+                        } else if let Some(server_host_key) = &server_host_key {
                             let check = handler.check_server_key(server_host_key).await?;
                             if !check {
                                 return Err(crate::Error::UnknownKey.into());
@@ -2151,6 +2161,22 @@ pub trait Handler: Sized + Send {
     /// Called to check the server's public key. This is a very important
     /// step to help prevent man-in-the-middle attacks. The default
     /// implementation rejects all keys.
+    #[allow(unused_variables)]
+    /// Called instead of [`Self::check_server_key`] when the server proved its
+    /// identity with a certificate.
+    ///
+    /// Defaults to refusing. A client that has not been taught which
+    /// authorities it trusts cannot answer this question, and answering it
+    /// wrongly accepts any machine whose operator can obtain a certificate from
+    /// anyone at all — so silence has to mean no.
+    #[allow(unused_variables)]
+    fn check_server_certificate(
+        &mut self,
+        certificate: &ssh_key::Certificate,
+    ) -> impl std::future::Future<Output = Result<bool, Self::Error>> + Send {
+        async { Ok(false) }
+    }
+
     #[allow(unused_variables)]
     fn check_server_key(
         &mut self,

@@ -21,7 +21,7 @@ use ssh_encoding::{Decode, Encode};
 use ssh_key::{Algorithm, EcdsaCurve, HashAlg, PrivateKey};
 
 use crate::cipher::CIPHERS;
-use crate::helpers::NameList;
+use crate::helpers::{AlgorithmExt, NameList};
 use crate::kex::{
     EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT, EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER, KexCause,
 };
@@ -68,6 +68,18 @@ pub struct Preferred {
     pub kex: Cow<'static, [kex::Name]>,
     /// Preferred host & public key algorithms.
     pub key: Cow<'static, [Algorithm]>,
+    /// Host-key certificate algorithms to advertise, most preferred first.
+    ///
+    /// A parallel list because [`Algorithm`] cannot represent one: it maps
+    /// `ssh-ed25519-cert-v01@openssh.com` back to `Ed25519`, so a certificate
+    /// placed in `key` would be advertised under the plain name and the server
+    /// would never send a certificate at all.
+    ///
+    /// Empty by default. Advertising a certificate algorithm makes a server
+    /// prove its identity with a certificate instead of a bare key, which a
+    /// client can only act on once it knows which authorities it trusts — so
+    /// turning it on is the caller's decision, never a default.
+    pub host_key_certificates: Cow<'static, [&'static str]>,
     /// Preferred symmetric ciphers.
     pub cipher: Cow<'static, [cipher::Name]>,
     /// Preferred MAC algorithms.
@@ -152,6 +164,7 @@ const COMPRESSION_ORDER: &[compression::Name] = &[
 impl Preferred {
     pub const DEFAULT: Preferred = Preferred {
         kex: Cow::Borrowed(SAFE_KEX_ORDER),
+        host_key_certificates: Cow::Borrowed(&[]),
         key: Cow::Borrowed(&[
             Algorithm::Ed25519,
             Algorithm::Ecdsa {
@@ -178,6 +191,7 @@ impl Preferred {
 
     pub const COMPRESSED: Preferred = Preferred {
         kex: Cow::Borrowed(SAFE_KEX_ORDER),
+        host_key_certificates: Cow::Borrowed(&[]),
         key: Preferred::DEFAULT.key,
         cipher: Cow::Borrowed(CIPHER_ORDER),
         mac: Cow::Borrowed(SAFE_HMAC_ORDER),
@@ -270,8 +284,22 @@ pub(crate) trait Select {
             None => pref.key.iter().map(ToOwned::to_owned).collect::<Vec<_>>(),
         };
 
-        let (key_both_first, key_algorithm) =
-            Self::select(&possible_host_key_algos[..], &key_list, AlgorithmKind::Key)?;
+        // A certificate the server offers wins over a bare key, when this side
+        // asked for one at all. The algorithm kept is the plain one the
+        // certificate contains: that is what signs the exchange, and it is what
+        // every later step needs. Whether a certificate arrived is decided by
+        // reading the blob, not by remembering this choice.
+        let offered_certificate = pref
+            .host_key_certificates
+            .iter()
+            .find(|name| key_list.0.iter().any(|offered| offered == *name));
+        let (key_both_first, key_algorithm) = match offered_certificate {
+            Some(name) => (
+                key_list.0.first().map(|first| first == *name).unwrap_or(false),
+                Algorithm::new_certificate_ext(name).map_err(|_| Error::KexInit)?,
+            ),
+            None => Self::select(&possible_host_key_algos[..], &key_list, AlgorithmKind::Key)?,
+        };
 
         // Cipher
 
@@ -460,7 +488,15 @@ pub(crate) fn write_kex(
             )
             .encode(w)?;
         } else {
-            NameList(prefs.key.iter().map(ToString::to_string).collect()).encode(w)?;
+            NameList(
+                prefs
+                    .host_key_certificates
+                    .iter()
+                    .map(|name| (*name).to_string())
+                    .chain(prefs.key.iter().map(ToString::to_string))
+                    .collect(),
+            )
+            .encode(w)?;
         }
 
         // cipher client to server
@@ -523,7 +559,7 @@ mod tests {
     use ssh_encoding::Encode;
 
     use super::*;
-    use crate::helpers::NameList;
+    use crate::helpers::{AlgorithmExt, NameList};
 
     /// Build a minimal KEXINIT payload with a custom kex name-list and
     /// `first_kex_packet_follows` flag. All other lists come from the default
