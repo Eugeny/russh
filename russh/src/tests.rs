@@ -159,6 +159,7 @@ mod compress {
 
     fn preferred_zlib() -> Preferred {
         Preferred {
+            host_key_certificates: Cow::Borrowed(&[]),
             compression: Cow::Borrowed(&[
                 crate::compression::ZLIB,
                 crate::compression::ZLIB_LEGACY,
@@ -942,6 +943,7 @@ pub(crate) mod raw_no_crypto {
 
     fn no_crypto_preferred() -> Preferred {
         Preferred {
+            host_key_certificates: Cow::Borrowed(&[]),
             kex: Cow::Owned(vec![kex::NONE]),
             key: Cow::Owned(vec![Algorithm::Ed25519]),
             cipher: Cow::Owned(vec![cipher::NONE]),

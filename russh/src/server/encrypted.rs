@@ -511,6 +511,7 @@ mod tests {
     fn test_auth_session() -> Session {
         let mut config = Config::default();
         config.preferred = Preferred {
+            host_key_certificates: Cow::Borrowed(&[]),
             kex: Cow::Owned(vec![KEX_NONE]),
             key: Cow::Owned(vec![ssh_key::Algorithm::Ed25519]),
             cipher: Cow::Owned(vec![cipher::NONE]),
