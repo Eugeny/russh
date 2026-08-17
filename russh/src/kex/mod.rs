@@ -44,7 +44,7 @@ use p521::NistP521;
 use sha1::Sha1;
 use sha2::{Sha256, Sha384, Sha512};
 use ssh_encoding::{Encode, Writer};
-use ssh_key::PublicKey;
+use ssh_key::{Certificate, PublicKey};
 
 use crate::cipher::CIPHERS;
 use crate::client::GexParams;
@@ -121,6 +121,14 @@ pub(crate) enum KexProgress<T> {
     },
     Done {
         server_host_key: Option<PublicKey>,
+        /// The certificate the server presented, when it presented one.
+        ///
+        /// Carried beside the key rather than replacing it: the key exchange is
+        /// signed with the key the certificate contains, so both are needed —
+        /// one to know what signed the handshake, the other to decide whether
+        /// anyone vouches for it. Collapsing them would leave the second
+        /// question unasked.
+        server_host_certificate: Option<Certificate>,
         newkeys: NewKeys,
     },
 }

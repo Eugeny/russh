@@ -21,16 +21,16 @@ use ssh_encoding::{Decode, Encode};
 use ssh_key::{Algorithm, EcdsaCurve, HashAlg, PrivateKey};
 
 use crate::cipher::CIPHERS;
-use crate::helpers::NameList;
+use crate::helpers::{AlgorithmExt, NameList};
 use crate::kex::{
-    EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT, EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER, KexCause,
+    KexCause, EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT, EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER,
 };
 use crate::keys::key::safe_rng;
 use crate::parsing::ensure_end;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::server::Config;
 use crate::sshbuffer::PacketWriter;
-use crate::{AlgorithmKind, Error, cipher, compression, kex, mac, msg};
+use crate::{cipher, compression, kex, mac, msg, AlgorithmKind, Error};
 
 #[cfg(target_arch = "wasm32")]
 /// WASM-only stub
@@ -49,6 +49,8 @@ pub struct Names {
     pub server_compression: compression::Compression,
     pub client_compression: compression::Compression,
     pub ignore_guessed: bool,
+    /// Whether `key` was negotiated as a certificate algorithm or not
+    pub(crate) host_key_is_certificate: bool,
     // Prevent accidentally contructing [Names] without a [KeyCause]
     // as strict kext algo is not sent during a rekey and hence the state
     // of [strict_kex] cannot be known without a [KexCause].
@@ -68,6 +70,22 @@ pub struct Preferred {
     pub kex: Cow<'static, [kex::Name]>,
     /// Preferred host & public key algorithms.
     pub key: Cow<'static, [Algorithm]>,
+    /// Host-key algorithms for which to also advertise the OpenSSH
+    /// certificate variant (`*-cert-v01@openssh.com`), most preferred first.
+    ///
+    /// A list separate from `key` because [`Algorithm`] displays only the
+    /// plain name; the certificate name is derived with
+    /// [`Algorithm::to_certificate_type`]. These are advertised ahead of
+    /// `key`, so a server that has a certificate presents it in preference
+    /// to a bare key.
+    ///
+    /// Empty by default, and only used by the client. Advertising a
+    /// certificate algorithm makes a server prove its identity with a
+    /// certificate instead of a bare key, which a client can only act on
+    /// once it knows which authorities it trusts (see
+    /// [`check_server_certificate`](crate::client::Handler::check_server_certificate))
+    /// — so turning it on is the caller's decision, never a default.
+    pub host_key_certificates: Cow<'static, [Algorithm]>,
     /// Preferred symmetric ciphers.
     pub cipher: Cow<'static, [cipher::Name]>,
     /// Preferred MAC algorithms.
@@ -152,6 +170,7 @@ const COMPRESSION_ORDER: &[compression::Name] = &[
 impl Preferred {
     pub const DEFAULT: Preferred = Preferred {
         kex: Cow::Borrowed(SAFE_KEX_ORDER),
+        host_key_certificates: Cow::Borrowed(&[]),
         key: Cow::Borrowed(&[
             Algorithm::Ed25519,
             Algorithm::Ecdsa {
@@ -178,6 +197,7 @@ impl Preferred {
 
     pub const COMPRESSED: Preferred = Preferred {
         kex: Cow::Borrowed(SAFE_KEX_ORDER),
+        host_key_certificates: Cow::Borrowed(&[]),
         key: Preferred::DEFAULT.key,
         cipher: Cow::Borrowed(CIPHER_ORDER),
         mac: Cow::Borrowed(SAFE_HMAC_ORDER),
@@ -270,8 +290,45 @@ pub(crate) trait Select {
             None => pref.key.iter().map(ToOwned::to_owned).collect::<Vec<_>>(),
         };
 
-        let (key_both_first, key_algorithm) =
-            Self::select(&possible_host_key_algos[..], &key_list, AlgorithmKind::Key)?;
+        // Only the client advertises certificate algorithms (`write_kex`), so
+        // only the client selects over them; a server has no certificate to
+        // present, and its preferences must stay limited to the keys it holds.
+        // Selection runs over the same combined name-list the peer saw —
+        // certificates ahead of plain keys — so `key_both_first` keeps its
+        // meaning for `first_kex_packet_follows`. The algorithm kept for a
+        // certificate is the plain one it contains: that is what signs the
+        // exchange, and it is what every later step needs; that a certificate
+        // was negotiated is recorded separately in [`Names`].
+        let (key_both_first, key_algorithm, host_key_is_certificate) = if !Self::is_server()
+            && !pref.host_key_certificates.is_empty()
+        {
+            let certificate_names = pref
+                .host_key_certificates
+                .iter()
+                .map(Algorithm::to_certificate_type)
+                .collect::<Vec<_>>();
+            let advertised = certificate_names
+                .iter()
+                .cloned()
+                .chain(possible_host_key_algos.iter().map(ToString::to_string))
+                .collect::<Vec<_>>();
+            let (both_first, name) = Self::select(&advertised[..], &key_list, AlgorithmKind::Key)?;
+            let is_certificate = certificate_names.contains(&name);
+            let algorithm = if is_certificate {
+                Algorithm::new_certificate_ext(&name).map_err(|_| Error::KexInit)?
+            } else {
+                possible_host_key_algos
+                    .iter()
+                    .find(|a| a.to_string() == name)
+                    .cloned()
+                    .ok_or(Error::KexInit)?
+            };
+            (both_first, algorithm, is_certificate)
+        } else {
+            let (both_first, algorithm) =
+                Self::select(&possible_host_key_algos[..], &key_list, AlgorithmKind::Key)?;
+            (both_first, algorithm, false)
+        };
 
         // Cipher
 
@@ -342,6 +399,7 @@ pub(crate) trait Select {
             server_mac,
             client_compression,
             server_compression,
+            host_key_is_certificate,
             // Ignore the next packet if (1) it follows and (2) it's not the correct guess.
             ignore_guessed: follows && !(kex_both_first && key_both_first),
             strict_kex: (strict_kex_requested && strict_kex_provided) || cause.is_strict_rekey(),
@@ -460,7 +518,15 @@ pub(crate) fn write_kex(
             )
             .encode(w)?;
         } else {
-            NameList(prefs.key.iter().map(ToString::to_string).collect()).encode(w)?;
+            NameList(
+                prefs
+                    .host_key_certificates
+                    .iter()
+                    .map(Algorithm::to_certificate_type)
+                    .chain(prefs.key.iter().map(ToString::to_string))
+                    .collect(),
+            )
+            .encode(w)?;
         }
 
         // cipher client to server
@@ -525,10 +591,10 @@ mod tests {
     use super::*;
     use crate::helpers::NameList;
 
-    /// Build a minimal KEXINIT payload with a custom kex name-list and
-    /// `first_kex_packet_follows` flag. All other lists come from the default
-    /// preferences so negotiation succeeds.
-    fn build_kexinit(kex_names: &[&str], follows: bool) -> Vec<u8> {
+    /// Build a minimal KEXINIT payload with custom kex and host-key
+    /// name-lists and a `first_kex_packet_follows` flag. All other lists come
+    /// from the default preferences so negotiation succeeds.
+    fn build_kexinit_keys(kex_names: &[&str], key_names: &[&str], follows: bool) -> Vec<u8> {
         let pref = Preferred::DEFAULT;
         let mut buf = vec![msg::KEXINIT];
         buf.extend_from_slice(&[0u8; 16]); // cookie
@@ -536,7 +602,7 @@ mod tests {
         names(kex_names.iter().map(|s| s.to_string()).collect())
             .encode(&mut buf)
             .unwrap();
-        names(pref.key.iter().map(ToString::to_string).collect())
+        names(key_names.iter().map(|s| s.to_string()).collect())
             .encode(&mut buf)
             .unwrap();
         for _ in 0..2 {
@@ -566,6 +632,19 @@ mod tests {
         buf
     }
 
+    fn build_kexinit(kex_names: &[&str], follows: bool) -> Vec<u8> {
+        let keys = Preferred::DEFAULT
+            .key
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+        build_kexinit_keys(
+            kex_names,
+            &keys.iter().map(String::as_str).collect::<Vec<_>>(),
+            follows,
+        )
+    }
+
     /// Regression test for #733: a client that optimistically guesses a kex
     /// algorithm russh does not implement (`sntrup761x25519-sha512`) — while
     /// listing russh's own first choice (`mlkem768x25519-sha256`) second —
@@ -580,8 +659,7 @@ mod tests {
             ],
             true,
         );
-        let names =
-            Server::read_kex(&buf, &Preferred::DEFAULT, None, &KexCause::Initial).unwrap();
+        let names = Server::read_kex(&buf, &Preferred::DEFAULT, None, &KexCause::Initial).unwrap();
         assert_eq!(names.kex, kex::MLKEM768X25519_SHA256);
         assert!(names.ignore_guessed, "wrong guess must be ignored");
     }
@@ -590,8 +668,128 @@ mod tests {
     #[test]
     fn correct_guess_is_not_ignored() {
         let buf = build_kexinit(&["mlkem768x25519-sha256", "curve25519-sha256"], true);
-        let names =
-            Server::read_kex(&buf, &Preferred::DEFAULT, None, &KexCause::Initial).unwrap();
+        let names = Server::read_kex(&buf, &Preferred::DEFAULT, None, &KexCause::Initial).unwrap();
         assert!(!names.ignore_guessed, "correct guess must be honored");
+    }
+
+    const KEX_FIRST: &[&str] = &["mlkem768x25519-sha256"];
+    const ED25519_CERT: &str = "ssh-ed25519-cert-v01@openssh.com";
+
+    fn cert_prefs(certs: &'static [Algorithm]) -> Preferred {
+        Preferred {
+            host_key_certificates: Cow::Borrowed(certs),
+            ..Preferred::DEFAULT
+        }
+    }
+
+    #[test]
+    fn certificate_negotiated_when_advertised() {
+        let buf = build_kexinit_keys(KEX_FIRST, &[ED25519_CERT, "ssh-ed25519"], false);
+        let names = Client::read_kex(
+            &buf,
+            &cert_prefs(&[Algorithm::Ed25519]),
+            None,
+            &KexCause::Initial,
+        )
+        .unwrap();
+        assert!(names.host_key_is_certificate);
+        assert_eq!(names.key, Algorithm::Ed25519);
+    }
+
+    /// The negotiated algorithm for an RSA certificate must keep the hash
+    /// variant: it is what verifies the exchange signature.
+    #[test]
+    fn rsa_certificate_keeps_hash_variant() {
+        let buf = build_kexinit_keys(KEX_FIRST, &["rsa-sha2-512-cert-v01@openssh.com"], false);
+        let names = Client::read_kex(
+            &buf,
+            &cert_prefs(&[Algorithm::Rsa {
+                hash: Some(HashAlg::Sha512),
+            }]),
+            None,
+            &KexCause::Initial,
+        )
+        .unwrap();
+        assert!(names.host_key_is_certificate);
+        assert_eq!(
+            names.key,
+            Algorithm::Rsa {
+                hash: Some(HashAlg::Sha512)
+            }
+        );
+    }
+
+    /// A client that did not opt into certificates must never negotiate one,
+    /// no matter what the server offers.
+    #[test]
+    fn certificate_ignored_when_not_advertised() {
+        let buf = build_kexinit_keys(KEX_FIRST, &[ED25519_CERT, "ssh-ed25519"], false);
+        let names = Client::read_kex(&buf, &Preferred::DEFAULT, None, &KexCause::Initial).unwrap();
+        assert!(!names.host_key_is_certificate);
+        assert_eq!(names.key, Algorithm::Ed25519);
+    }
+
+    /// `host_key_certificates` is client-only: a server has no certificate to
+    /// present, so its negotiation must ignore the field entirely.
+    #[test]
+    fn server_ignores_certificate_preferences() {
+        let buf = build_kexinit_keys(KEX_FIRST, &[ED25519_CERT, "ssh-ed25519"], false);
+        let names = Server::read_kex(
+            &buf,
+            &cert_prefs(&[Algorithm::Ed25519]),
+            None,
+            &KexCause::Initial,
+        )
+        .unwrap();
+        assert!(!names.host_key_is_certificate);
+        assert_eq!(names.key, Algorithm::Ed25519);
+    }
+
+    /// Certificates are advertised ahead of plain keys, so a peer guess that
+    /// matches the certificate is a correct guess…
+    #[test]
+    fn certificate_correct_guess_not_ignored() {
+        let buf = build_kexinit_keys(KEX_FIRST, &[ED25519_CERT, "ssh-ed25519"], true);
+        let names = Client::read_kex(
+            &buf,
+            &cert_prefs(&[Algorithm::Ed25519]),
+            None,
+            &KexCause::Initial,
+        )
+        .unwrap();
+        assert!(names.host_key_is_certificate);
+        assert!(!names.ignore_guessed);
+    }
+
+    /// …while a peer whose first choice is the plain key — or who offers no
+    /// certificate at all — guessed wrong, and the guessed packet must be
+    /// ignored: with certificates enabled the client's own first choice is
+    /// always the certificate.
+    #[test]
+    fn plain_first_choice_with_certificates_enabled_is_wrong_guess() {
+        let buf = build_kexinit_keys(KEX_FIRST, &["ssh-ed25519", ED25519_CERT], true);
+        let names = Client::read_kex(
+            &buf,
+            &cert_prefs(&[Algorithm::Ed25519]),
+            None,
+            &KexCause::Initial,
+        )
+        .unwrap();
+        assert!(
+            names.host_key_is_certificate,
+            "client preference still wins"
+        );
+        assert!(names.ignore_guessed);
+
+        let buf = build_kexinit_keys(KEX_FIRST, &["ssh-ed25519"], true);
+        let names = Client::read_kex(
+            &buf,
+            &cert_prefs(&[Algorithm::Ed25519]),
+            None,
+            &KexCause::Initial,
+        )
+        .unwrap();
+        assert!(!names.host_key_is_certificate);
+        assert!(names.ignore_guessed);
     }
 }

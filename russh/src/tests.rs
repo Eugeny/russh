@@ -17,6 +17,7 @@ mod compress {
 
     use super::server::{Server as _, Session};
     use super::*;
+    use crate::cert::PublicKeyOrCertificate;
     use crate::cipher::MAXIMUM_DECOMPRESSED_PACKET_LEN;
     use crate::server::Msg;
 
@@ -150,7 +151,7 @@ mod compress {
 
         async fn check_server_key(
             &mut self,
-            _server_public_key: &crate::keys::ssh_key::PublicKey,
+            _server_public_key: &PublicKeyOrCertificate,
         ) -> Result<bool, Self::Error> {
             // println!("check_server_key: {:?}", server_public_key);
             Ok(true)
@@ -159,6 +160,7 @@ mod compress {
 
     fn preferred_zlib() -> Preferred {
         Preferred {
+            host_key_certificates: Cow::Borrowed(&[]),
             compression: Cow::Borrowed(&[
                 crate::compression::ZLIB,
                 crate::compression::ZLIB_LEGACY,
@@ -174,6 +176,8 @@ mod channels {
     use server::Session;
     use ssh_key::PrivateKey;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    use crate::cert::PublicKeyOrCertificate;
 
     use super::*;
 
@@ -254,7 +258,7 @@ mod channels {
 
             async fn check_server_key(
                 &mut self,
-                _server_public_key: &crate::keys::ssh_key::PublicKey,
+                _server_public_key: &PublicKeyOrCertificate,
             ) -> Result<bool, Self::Error> {
                 Ok(true)
             }
@@ -334,7 +338,7 @@ mod channels {
 
             async fn check_server_key(
                 &mut self,
-                _server_public_key: &crate::keys::ssh_key::PublicKey,
+                _server_public_key: &PublicKeyOrCertificate,
             ) -> Result<bool, Self::Error> {
                 Ok(true)
             }
@@ -430,7 +434,7 @@ mod channels {
 
             async fn check_server_key(
                 &mut self,
-                _server_public_key: &crate::keys::ssh_key::PublicKey,
+                _server_public_key: &PublicKeyOrCertificate,
             ) -> Result<bool, Self::Error> {
                 Ok(true)
             }
@@ -516,7 +520,7 @@ mod channels {
 
             async fn check_server_key(
                 &mut self,
-                _server_public_key: &crate::keys::ssh_key::PublicKey,
+                _server_public_key: &PublicKeyOrCertificate,
             ) -> Result<bool, Self::Error> {
                 Ok(true)
             }
@@ -588,7 +592,7 @@ mod channels {
 
             async fn check_server_key(
                 &mut self,
-                _server_public_key: &crate::keys::ssh_key::PublicKey,
+                _server_public_key: &PublicKeyOrCertificate,
             ) -> Result<bool, Self::Error> {
                 Ok(true)
             }
@@ -941,6 +945,7 @@ pub(crate) mod raw_no_crypto {
 
     fn no_crypto_preferred() -> Preferred {
         Preferred {
+            host_key_certificates: Cow::Borrowed(&[]),
             kex: Cow::Owned(vec![kex::NONE]),
             key: Cow::Owned(vec![Algorithm::Ed25519]),
             cipher: Cow::Owned(vec![cipher::NONE]),
@@ -1220,6 +1225,7 @@ mod future_certificate {
 
     use ssh_key::{PrivateKey, certificate};
 
+    use crate::cert::PublicKeyOrCertificate;
     use crate::keys::agent::client::AgentClient;
     use crate::server::Session;
     use crate::{client, server};
@@ -1390,7 +1396,7 @@ mod future_certificate {
 
             async fn check_server_key(
                 &mut self,
-                _server_public_key: &ssh_key::PublicKey,
+                _server_public_key: &PublicKeyOrCertificate,
             ) -> Result<bool, Self::Error> {
                 Ok(true)
             }

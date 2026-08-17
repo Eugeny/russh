@@ -2,7 +2,7 @@ use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::Arc;
 
 use futures::FutureExt;
-use russh::keys::PrivateKeyWithHashAlg;
+use russh::keys::{PrivateKeyWithHashAlg, PublicKeyOrCertificate};
 use russh::server::{self, Auth, Msg, Server as _, Session};
 use russh::{Channel, ChannelMsg, client};
 use ssh_key::PrivateKey;
@@ -210,7 +210,7 @@ struct Client;
 impl russh::client::Handler for Client {
     type Error = anyhow::Error;
 
-    async fn check_server_key(&mut self, _: &ssh_key::PublicKey) -> Result<bool, Self::Error> {
+    async fn check_server_key(&mut self, _: &PublicKeyOrCertificate) -> Result<bool, Self::Error> {
         Ok(true)
     }
 }
