@@ -20,7 +20,12 @@ jobs:
       run: cargo build --verbose
 
     - name: Check semver compatibility (russh)
+      id: semver
       uses: obi1kenobi/cargo-semver-checks-action@v2
       continue-on-error: true
       with:
         package: russh
+
+    - name: Warn on semver breakage
+      if: steps.semver.outcome == 'failure'
+      run: echo "::warning title=Semver check failed::cargo-semver-checks reported breaking changes in russh"
