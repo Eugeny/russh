@@ -9,7 +9,7 @@ license = "Apache-2.0"
 name = "russh"
 readme = "../README.md"
 repository = "https://github.com/warp-tech/russh"
-version = "0.62.7"
+version = "0.63.0-beta.1"
 rust-version = "1.85"
 
 [features]
