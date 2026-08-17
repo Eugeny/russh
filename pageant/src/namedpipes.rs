@@ -14,6 +14,7 @@ use windows::Win32::Security::Authentication::Identity::{GetUserNameExA, NameUse
 use windows::Win32::Security::Cryptography::{
     CRYPTPROTECTMEMORY_BLOCK_SIZE, CRYPTPROTECTMEMORY_CROSS_PROCESS, CryptProtectMemory,
 };
+use windows::Win32::System::WindowsProgramming::GetUserNameA;
 use windows_strings::PSTR;
 
 use crate::Error;
@@ -65,14 +66,17 @@ impl PageantStream {
                 Some(PSTR(name_buf.as_mut_ptr())),
                 &mut name_length,
             ) {
-                // GetUserNameExA can fail on non-domain-joined machines where UPN
-                // (NameUserPrincipal) is not configured. Fall back to the USERNAME
-                // environment variable, matching the behavior of the original PuTTY Pageant.
-                if let Ok(name) = std::env::var("USERNAME") {
-                    debug!("GetUserNameExA failed, using USERNAME env var fallback: {name}");
-                    return Ok(name);
-                }
-                return Err(Error::from_win32());
+                // GetUserNameExA fails on non-domain-joined machines, where no UPN
+                // (NameUserPrincipal) is configured. Fall back to GetUserNameA
+                // (the SAM account name), like the original PuTTY Pageant.
+                debug!("GetUserNameExA failed, falling back to GetUserNameA");
+
+                let mut name_length = 0;
+                // don't check result on this, always returns ERROR_INSUFFICIENT_BUFFER
+                let _ = GetUserNameA(None, &mut name_length);
+
+                name_buf = vec![0u8; name_length as usize];
+                GetUserNameA(Some(PSTR(name_buf.as_mut_ptr())), &mut name_length)?;
             }
 
             //remove terminating null
