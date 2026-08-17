@@ -272,7 +272,11 @@ impl ClientKex {
                 // looks like a bad signature and is computed entirely locally,
                 // so there is nothing on the wire to compare against.
                 let server_host_key_blob = Bytes::decode(r)?;
-                let server_host_certificate = Certificate::from_bytes(&server_host_key_blob).ok();
+                let server_host_certificate = if names.host_key_is_certificate {
+                    Some(Certificate::from_bytes(&server_host_key_blob)?)
+                } else {
+                    None
+                };
                 let server_host_key = match &server_host_certificate {
                     // The certificate's own signature is checked by the client
                     // against its trusted authorities, not here; what the key

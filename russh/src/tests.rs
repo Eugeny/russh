@@ -17,7 +17,8 @@ mod compress {
 
     use super::server::{Server as _, Session};
     use super::*;
-    use crate::cipher::MAXIMUM_DECOMPRESSED_PACKET_LEN;
+    use crate::cert::PublicKeyOrCertificate;
+use crate::cipher::MAXIMUM_DECOMPRESSED_PACKET_LEN;
     use crate::server::Msg;
 
     const OVERSIZED_DEBUG_MESSAGE_LEN: usize = MAXIMUM_DECOMPRESSED_PACKET_LEN + 1024;
@@ -150,7 +151,7 @@ mod compress {
 
         async fn check_server_key(
             &mut self,
-            _server_public_key: &crate::keys::ssh_key::PublicKey,
+            _server_public_key: &PublicKeyOrCertificate,
         ) -> Result<bool, Self::Error> {
             // println!("check_server_key: {:?}", server_public_key);
             Ok(true)
@@ -176,7 +177,9 @@ mod channels {
     use ssh_key::PrivateKey;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-    use super::*;
+    use crate::cert::PublicKeyOrCertificate;
+
+use super::*;
 
     async fn test_session<RC, RS, CH, SH, F1, F2>(
         client_handler: CH,
@@ -255,7 +258,7 @@ mod channels {
 
             async fn check_server_key(
                 &mut self,
-                _server_public_key: &crate::keys::ssh_key::PublicKey,
+                _server_public_key: &PublicKeyOrCertificate,
             ) -> Result<bool, Self::Error> {
                 Ok(true)
             }
@@ -335,7 +338,7 @@ mod channels {
 
             async fn check_server_key(
                 &mut self,
-                _server_public_key: &crate::keys::ssh_key::PublicKey,
+                _server_public_key: &PublicKeyOrCertificate,
             ) -> Result<bool, Self::Error> {
                 Ok(true)
             }
@@ -431,7 +434,7 @@ mod channels {
 
             async fn check_server_key(
                 &mut self,
-                _server_public_key: &crate::keys::ssh_key::PublicKey,
+                _server_public_key: &PublicKeyOrCertificate,
             ) -> Result<bool, Self::Error> {
                 Ok(true)
             }
@@ -517,7 +520,7 @@ mod channels {
 
             async fn check_server_key(
                 &mut self,
-                _server_public_key: &crate::keys::ssh_key::PublicKey,
+                _server_public_key: &PublicKeyOrCertificate,
             ) -> Result<bool, Self::Error> {
                 Ok(true)
             }
@@ -589,7 +592,7 @@ mod channels {
 
             async fn check_server_key(
                 &mut self,
-                _server_public_key: &crate::keys::ssh_key::PublicKey,
+                _server_public_key: &PublicKeyOrCertificate,
             ) -> Result<bool, Self::Error> {
                 Ok(true)
             }
@@ -1219,7 +1222,8 @@ mod future_certificate {
 
     use ssh_key::{certificate, PrivateKey};
 
-    use crate::keys::agent::client::AgentClient;
+    use crate::cert::PublicKeyOrCertificate;
+use crate::keys::agent::client::AgentClient;
     use crate::{client, server};
     use crate::server::Session;
 
@@ -1390,7 +1394,7 @@ mod future_certificate {
 
             async fn check_server_key(
                 &mut self,
-                _server_public_key: &ssh_key::PublicKey,
+                _server_public_key: &PublicKeyOrCertificate,
             ) -> Result<bool, Self::Error> {
                 Ok(true)
             }

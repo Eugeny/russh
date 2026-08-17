@@ -9,7 +9,7 @@ use crate::keys::key::PrivateKeyWithHashAlg;
 
 #[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
-pub(crate) enum PublicKeyOrCertificate {
+pub enum PublicKeyOrCertificate {
     PublicKey {
         key: PublicKey,
         hash_alg: Option<HashAlg>,
@@ -26,9 +26,24 @@ impl From<&PrivateKeyWithHashAlg> for PublicKeyOrCertificate {
     }
 }
 
+impl From<Certificate> for PublicKeyOrCertificate {
+    fn from(cert: Certificate) -> Self {
+        PublicKeyOrCertificate::Certificate(cert)
+    }
+}
+
+impl From<PublicKey> for PublicKeyOrCertificate {
+    fn from(key: PublicKey) -> Self {
+        PublicKeyOrCertificate::PublicKey {
+            key,
+            hash_alg: None,
+        }
+    }
+}
+
 impl PublicKeyOrCertificate {
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn decode(pubkey_algo: &str, buf: &[u8]) -> Result<Self, ssh_key::Error> {
+    pub(crate) fn decode(pubkey_algo: &str, buf: &[u8]) -> Result<Self, ssh_key::Error> {
         let mut reader = buf;
         match Algorithm::new_certificate_ext(pubkey_algo) {
             Ok(Algorithm::Other(_)) | Err(ssh_key::Error::Encoding(_)) => {
@@ -41,6 +56,22 @@ impl PublicKeyOrCertificate {
             _ => Ok(PublicKeyOrCertificate::Certificate(Certificate::decode(
                 &mut reader,
             )?)),
+        }
+    }
+
+    pub fn public_key(&self) -> PublicKey {
+        match self {
+            PublicKeyOrCertificate::PublicKey { key, .. } => key.clone(),
+            PublicKeyOrCertificate::Certificate(cert) => {
+                PublicKey::new(cert.public_key().clone(), "")
+            }
+        }
+    }
+
+    pub fn certificate(&self) -> Option<&Certificate> {
+        match self {
+            PublicKeyOrCertificate::PublicKey { .. } => None,
+            PublicKeyOrCertificate::Certificate(cert) => Some(cert),
         }
     }
 }

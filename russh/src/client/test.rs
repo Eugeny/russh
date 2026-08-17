@@ -7,7 +7,8 @@ mod tests {
     use ssh_key::PrivateKey;
     use tokio::net::TcpListener;
 
-    // Import client types directly since we're in the client module
+    use crate::cert::PublicKeyOrCertificate;
+// Import client types directly since we're in the client module
     use crate::client::{Config, Handler, connect};
     use crate::keys::PrivateKeyWithHashAlg;
     use rand::rng;
@@ -74,7 +75,7 @@ mod tests {
     impl Handler for Client {
         type Error = Error;
 
-        async fn check_server_key(&mut self, _: &ssh_key::PublicKey) -> Result<bool, Self::Error> {
+        async fn check_server_key(&mut self, _: &PublicKeyOrCertificate) -> Result<bool, Self::Error> {
             Ok(true)
         }
     }

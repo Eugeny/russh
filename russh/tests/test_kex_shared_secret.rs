@@ -8,7 +8,7 @@
 use std::borrow::Cow;
 use std::sync::{Arc, Mutex};
 
-use russh::keys::PrivateKeyWithHashAlg;
+use russh::keys::{PrivateKeyWithHashAlg, PublicKeyOrCertificate};
 use russh::*;
 use ssh_key::PrivateKey;
 
@@ -401,7 +401,7 @@ impl client::Handler for TestClientWithKexCapture {
 
     async fn check_server_key(
         &mut self,
-        _server_public_key: &ssh_key::PublicKey,
+        _server_public_key: &PublicKeyOrCertificate,
     ) -> Result<bool, Self::Error> {
         Ok(true)
     }
@@ -435,7 +435,7 @@ impl client::Handler for TestClientWithRekeyCapture {
 
     async fn check_server_key(
         &mut self,
-        _server_public_key: &ssh_key::PublicKey,
+        _server_public_key: &PublicKeyOrCertificate,
     ) -> Result<bool, Self::Error> {
         Ok(true)
     }

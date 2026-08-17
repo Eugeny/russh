@@ -86,6 +86,8 @@ pub mod known_hosts;
 #[cfg(not(target_arch = "wasm32"))]
 pub use known_hosts::{check_known_hosts, check_known_hosts_path};
 
+pub use crate::cert::PublicKeyOrCertificate;
+
 #[derive(Debug, Error)]
 pub enum Error {
     /// The key could not be read, for an unknown reason

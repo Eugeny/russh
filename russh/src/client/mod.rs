@@ -58,6 +58,7 @@ use tokio::sync::mpsc::{
 use tokio::sync::oneshot;
 
 pub use crate::auth::AuthResult;
+use crate::cert::PublicKeyOrCertificate;
 use crate::channels::{
     Channel, ChannelMsg, ChannelReadHalf, ChannelRef, ChannelWriteHalf, WindowSizeRef,
 };
@@ -1198,8 +1199,7 @@ impl Session {
             // Keep reading the network for window adjustments, but leave
             // application output in its bounded receivers while a channel is
             // window-blocked.
-            let can_receive_outbound =
-                !self.kex.active() && !self.common.has_any_pending_data();
+            let can_receive_outbound = !self.kex.active() && !self.common.has_any_pending_data();
             tokio::select! {
                 r = &mut reading => {
                     let (stream_read, mut buffer, mut opening_cipher) = match r {
@@ -1690,12 +1690,12 @@ async fn reply<H: Handler>(
                         // something the client was ever told to trust — asking
                         // about it as well would invite an implementation to
                         // answer yes to the wrong question.
-                        if let Some(certificate) = &server_host_certificate {
-                            if !handler.check_server_certificate(certificate).await? {
+                        if let Some(certificate) = server_host_certificate {
+                            if !handler.check_server_key(&certificate.into()).await? {
                                 return Err(crate::Error::UnknownKey.into());
                             }
-                        } else if let Some(server_host_key) = &server_host_key {
-                            let check = handler.check_server_key(server_host_key).await?;
+                        } else if let Some(server_host_key) = server_host_key {
+                            let check = handler.check_server_key(&server_host_key.into()).await?;
                             if !check {
                                 return Err(crate::Error::UnknownKey.into());
                             }
@@ -1754,7 +1754,7 @@ mod tests {
     impl Handler for TestHandler {
         type Error = crate::Error;
 
-        async fn check_server_key(&mut self, _: &ssh_key::PublicKey) -> Result<bool, Self::Error> {
+        async fn check_server_key(&mut self, _: &PublicKeyOrCertificate) -> Result<bool, Self::Error> {
             Ok(true)
         }
     }
@@ -2158,29 +2158,17 @@ pub trait Handler: Sized + Send {
         async { Ok(()) }
     }
 
-    /// Called to check the server's public key. This is a very important
-    /// step to help prevent man-in-the-middle attacks. The default
-    /// implementation rejects all keys.
-    #[allow(unused_variables)]
-    /// Called instead of [`Self::check_server_key`] when the server proved its
-    /// identity with a certificate.
+    /// Called to check the server's public key or certificate.
+    /// This is a very important step to help prevent man-in-the-middle attacks.
+    /// The default implementation rejects all keys, and you must override it.
     ///
-    /// Defaults to refusing. A client that has not been taught which
-    /// authorities it trusts cannot answer this question, and answering it
-    /// wrongly accepts any machine whose operator can obtain a certificate from
-    /// anyone at all — so silence has to mean no.
-    #[allow(unused_variables)]
-    fn check_server_certificate(
-        &mut self,
-        certificate: &ssh_key::Certificate,
-    ) -> impl std::future::Future<Output = Result<bool, Self::Error>> + Send {
-        async { Ok(false) }
-    }
-
+    /// The library verifies the key exchange signature before this call,
+    /// but it's up to the implementation to decide whether the key or certificate
+    /// is trusted.
     #[allow(unused_variables)]
     fn check_server_key(
         &mut self,
-        server_public_key: &ssh_key::PublicKey,
+        server_public_key: &PublicKeyOrCertificate,
     ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
         async { Ok(false) }
     }
