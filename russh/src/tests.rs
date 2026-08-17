@@ -18,7 +18,7 @@ mod compress {
     use super::server::{Server as _, Session};
     use super::*;
     use crate::cert::PublicKeyOrCertificate;
-use crate::cipher::MAXIMUM_DECOMPRESSED_PACKET_LEN;
+    use crate::cipher::MAXIMUM_DECOMPRESSED_PACKET_LEN;
     use crate::server::Msg;
 
     const OVERSIZED_DEBUG_MESSAGE_LEN: usize = MAXIMUM_DECOMPRESSED_PACKET_LEN + 1024;
@@ -179,7 +179,7 @@ mod channels {
 
     use crate::cert::PublicKeyOrCertificate;
 
-use super::*;
+    use super::*;
 
     async fn test_session<RC, RS, CH, SH, F1, F2>(
         client_handler: CH,
@@ -845,16 +845,15 @@ pub(crate) mod raw_no_crypto {
             let server_events = events.clone();
             let server_task = tokio::spawn(async move {
                 let (socket, _) = listener.accept().await.unwrap();
-                let running =
-                    server::run_stream(
-                        no_crypto_server_config(),
-                        socket,
-                        MalformedInputServer {
-                            events: server_events,
-                        },
-                    )
-                    .await
-                    .unwrap();
+                let running = server::run_stream(
+                    no_crypto_server_config(),
+                    socket,
+                    MalformedInputServer {
+                        events: server_events,
+                    },
+                )
+                .await
+                .unwrap();
                 running.await
             });
 
@@ -1119,7 +1118,11 @@ pub(crate) mod raw_no_crypto {
                 Ok(ServerSignal::Closed { .. } | ServerSignal::ProtocolError { .. })
             ),
             "{message}: {result:?}; handler events: {:?}",
-            result.as_ref().ok().map(ServerSignal::events).unwrap_or(&[])
+            result
+                .as_ref()
+                .ok()
+                .map(ServerSignal::events)
+                .unwrap_or(&[])
         );
     }
 
@@ -1220,19 +1223,15 @@ mod future_certificate {
     use std::process::Stdio;
     use std::sync::Arc;
 
-    use ssh_key::{certificate, PrivateKey};
+    use ssh_key::{PrivateKey, certificate};
 
     use crate::cert::PublicKeyOrCertificate;
-use crate::keys::agent::client::AgentClient;
-    use crate::{client, server};
+    use crate::keys::agent::client::AgentClient;
     use crate::server::Session;
+    use crate::{client, server};
 
     /// Helper to spawn an ssh-agent
-    async fn spawn_agent() -> (
-        tokio::process::Child,
-        std::path::PathBuf,
-        tempfile::TempDir,
-    ) {
+    async fn spawn_agent() -> (tokio::process::Child, std::path::PathBuf, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let agent_path = dir.path().join("agent");
         let agent = tokio::process::Command::new("ssh-agent")
@@ -1364,7 +1363,10 @@ use crate::keys::agent::client::AgentClient;
                     if cert.key_id() == "test-user-cert" {
                         Ok(server::Auth::Accept)
                     } else {
-                        Ok(server::Auth::Reject { proceed_with_methods: None, partial_success: false })
+                        Ok(server::Auth::Reject {
+                            proceed_with_methods: None,
+                            partial_success: false,
+                        })
                     }
                 }
 
@@ -1415,10 +1417,16 @@ use crate::keys::agent::client::AgentClient;
             .unwrap();
 
         // 7. Verify authentication succeeded
-        assert!(auth_result.success(), "Certificate authentication should succeed");
+        assert!(
+            auth_result.success(),
+            "Certificate authentication should succeed"
+        );
 
         // Clean up
-        session.disconnect(crate::Disconnect::ByApplication, "", "").await.unwrap();
+        session
+            .disconnect(crate::Disconnect::ByApplication, "", "")
+            .await
+            .unwrap();
         drop(session);
         server_join.abort();
         agent.kill().await.unwrap();

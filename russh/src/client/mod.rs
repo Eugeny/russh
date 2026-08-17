@@ -96,6 +96,8 @@ pub struct Session {
     target_window_size: u32,
     pending_reads: Vec<Vec<u8>>,
     pending_len: u32,
+    priority_sender: UnboundedSender<Msg>,
+    priority_receiver: UnboundedReceiver<Msg>,
     inbound_channel_sender: Sender<Msg>,
     inbound_channel_receiver: Receiver<Msg>,
     open_global_requests: VecDeque<GlobalRequestResponse>,
@@ -131,6 +133,17 @@ enum Reply {
         instructions: String,
         prompts: Vec<Prompt>,
     },
+    AuthGssapiResponse {
+        selected_mechanism: Vec<u8>,
+        mic_data: Vec<u8>,
+    },
+    AuthGssapiToken {
+        token: Vec<u8>,
+        mic_data: Vec<u8>,
+    },
+    AuthGssapiError {
+        error: auth::GssapiError,
+    },
 }
 
 #[derive(Debug)]
@@ -142,6 +155,16 @@ pub enum Msg {
     },
     AuthInfoResponse {
         responses: Vec<String>,
+    },
+    AuthGssapiToken {
+        token: Vec<u8>,
+    },
+    AuthGssapiMic {
+        token: Option<Vec<u8>>,
+        mic: Vec<u8>,
+    },
+    AuthGssapiExchangeComplete {
+        token: Option<Vec<u8>>,
     },
     Signed {
         data: Vec<u8>,
@@ -518,6 +541,89 @@ impl<H: Handler> Handle<H> {
                 _ => {}
             }
         }
+    }
+
+    /// Authenticate using GSSAPI with MIC (RFC 4462).
+    ///
+    /// `mechanism_oids` contains DER-encoded GSSAPI mechanism OIDs advertised to
+    /// the server. The provided authenticator owns the platform- or
+    /// application-specific GSSAPI implementation and returns continuation
+    /// tokens and, once complete, the MIC over russh's SSH userauth data.
+    pub async fn authenticate_gssapi_with_mic<U: Into<String>, G: auth::GssapiAuthenticator>(
+        &mut self,
+        user: U,
+        mechanism_oids: Vec<Vec<u8>>,
+        authenticator: &mut G,
+    ) -> Result<AuthResult, G::Error> {
+        let user = user.into();
+        if self
+            .sender
+            .send(Msg::Authenticate {
+                user,
+                method: auth::Method::GssapiWithMic { mechanism_oids },
+            })
+            .await
+            .is_err()
+        {
+            return Err((crate::SendError {}).into());
+        }
+        loop {
+            let reply = self.receiver.recv().await;
+            match reply {
+                Some(Reply::AuthSuccess) => return Ok(AuthResult::Success),
+                Some(Reply::AuthFailure {
+                    proceed_with_methods: remaining_methods,
+                    partial_success,
+                }) => {
+                    return Ok(AuthResult::Failure {
+                        remaining_methods,
+                        partial_success,
+                    });
+                }
+                Some(Reply::AuthGssapiResponse {
+                    selected_mechanism,
+                    mic_data,
+                }) => {
+                    let step = authenticator
+                        .gssapi_step(Some(selected_mechanism), None, mic_data)
+                        .await?;
+                    self.send_gssapi_step(step).await?;
+                }
+                Some(Reply::AuthGssapiToken { token, mic_data }) => {
+                    let step = authenticator
+                        .gssapi_step(None, Some(token), mic_data)
+                        .await?;
+                    self.send_gssapi_step(step).await?;
+                }
+                Some(Reply::AuthGssapiError { error }) => {
+                    authenticator.gssapi_error(error).await;
+                }
+                None => {
+                    return Ok(AuthResult::Failure {
+                        remaining_methods: MethodSet::empty(),
+                        partial_success: false,
+                    });
+                }
+                _ => {}
+            }
+        }
+    }
+
+    async fn send_gssapi_step(&mut self, step: auth::GssapiStep) -> Result<(), crate::SendError> {
+        let msg = match step {
+            auth::GssapiStep::Continue { token } => Msg::AuthGssapiToken { token },
+            auth::GssapiStep::Complete {
+                token,
+                mic: Some(mic),
+            } => Msg::AuthGssapiMic { token, mic },
+            auth::GssapiStep::Complete { token, mic: None } => {
+                Msg::AuthGssapiExchangeComplete { token }
+            }
+        };
+        self.sender
+            .send(msg)
+            .await
+            .map_err(|_| crate::SendError {})
     }
 
     /// Authenticate using a certificate with a custom signer that implements the
@@ -1101,6 +1207,7 @@ impl Session {
         receiver: Receiver<Msg>,
         sender: UnboundedSender<Reply>,
     ) -> Self {
+        let (priority_sender, priority_receiver) = unbounded_channel();
         let (inbound_channel_sender, inbound_channel_receiver) = channel(10);
         Self {
             common,
@@ -1108,6 +1215,8 @@ impl Session {
             sender,
             kex: SessionKexState::Idle,
             target_window_size,
+            priority_sender,
+            priority_receiver,
             inbound_channel_sender,
             inbound_channel_receiver,
             channels: HashMap::new(),
@@ -1135,6 +1244,7 @@ impl Session {
             .await;
         trace!("disconnected");
         self.receiver.close();
+        self.priority_receiver.close();
         self.inbound_channel_receiver.close();
         map_err!(stream_write.shutdown().await)?;
         match result {
@@ -1247,6 +1357,7 @@ impl Session {
                     return Err(crate::Error::InactivityTimeout.into());
                 }
                 msg = self.receiver.recv(), if can_receive_outbound => {
+                    self.drain_priority_msgs()?;
                     match msg {
                         Some(msg) => self.handle_msg(msg)?,
                         None => {
@@ -1257,13 +1368,24 @@ impl Session {
 
                     // eagerly take all outgoing messages so writes are batched
                     while !self.kex.active() && !self.common.has_any_pending_data() {
+                        self.drain_priority_msgs()?;
                         match self.receiver.try_recv() {
                             Ok(next) => self.handle_msg(next)?,
                             Err(_) => break
                         }
                     }
                 }
+                msg = self.priority_receiver.recv(), if !self.kex.active() => {
+                    match msg {
+                        Some(msg) => self.handle_msg(msg)?,
+                        None => (),
+                    }
+
+                    // eagerly take all outgoing messages so writes are batched
+                    self.drain_priority_msgs()?;
+                }
                 msg = self.inbound_channel_receiver.recv(), if can_receive_outbound => {
+                    self.drain_priority_msgs()?;
                     match msg {
                         Some(msg) => self.handle_msg(msg)?,
                         None => (),
@@ -1271,6 +1393,7 @@ impl Session {
 
                     // eagerly take all outgoing messages so writes are batched
                     while !self.kex.active() && !self.common.has_any_pending_data() {
+                        self.drain_priority_msgs()?;
                         match self.inbound_channel_receiver.try_recv() {
                             Ok(next) => self.handle_msg(next)?,
                             Err(_) => break
@@ -1340,6 +1463,21 @@ impl Session {
         })
     }
 
+    /// Channel open replies must be dispatched before any channel traffic
+    /// queued after them: the bounded receivers may hold data for a channel
+    /// whose confirmation is still sitting in the priority queue, and
+    /// dispatching that data first would silently drop it (the channel is
+    /// only registered when its open reply is processed).
+    fn drain_priority_msgs(&mut self) -> Result<(), crate::Error> {
+        while !self.kex.active() {
+            match self.priority_receiver.try_recv() {
+                Ok(msg) => self.handle_msg(msg)?,
+                Err(_) => break,
+            }
+        }
+        Ok(())
+    }
+
     fn handle_msg(&mut self, msg: Msg) -> Result<(), crate::Error> {
         match msg {
             Msg::Authenticate { user, method } => {
@@ -1347,6 +1485,21 @@ impl Session {
             }
             Msg::Signed { .. } => {}
             Msg::AuthInfoResponse { .. } => {}
+            Msg::AuthGssapiToken { token } => {
+                if let Some(ref mut enc) = self.common.encrypted {
+                    enc.client_send_gssapi_token(&token)?;
+                }
+            }
+            Msg::AuthGssapiMic { token, mic } => {
+                if let Some(ref mut enc) = self.common.encrypted {
+                    enc.client_send_gssapi_mic(token.as_deref(), &mic)?;
+                }
+            }
+            Msg::AuthGssapiExchangeComplete { token } => {
+                if let Some(ref mut enc) = self.common.encrypted {
+                    enc.client_send_gssapi_exchange_complete(token.as_deref())?;
+                }
+            }
             Msg::ChannelOpenSession { channel_ref } => {
                 let id = self.channel_open_session()?;
                 self.channels.insert(id, channel_ref);
@@ -1738,8 +1891,7 @@ mod tests {
     use std::sync::Arc;
 
     use ssh_encoding::Encode;
-    use tokio::sync::mpsc::channel;
-    use tokio::sync::mpsc::unbounded_channel;
+    use tokio::sync::mpsc::{channel, unbounded_channel};
 
     use super::*;
     use crate::auth::{AuthRequest, Method};

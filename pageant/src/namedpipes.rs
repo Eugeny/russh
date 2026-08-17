@@ -14,6 +14,7 @@ use windows::Win32::Security::Authentication::Identity::{GetUserNameExA, NameUse
 use windows::Win32::Security::Cryptography::{
     CRYPTPROTECTMEMORY_BLOCK_SIZE, CRYPTPROTECTMEMORY_CROSS_PROCESS, CryptProtectMemory,
 };
+use windows::Win32::System::WindowsProgramming::GetUserNameA;
 use windows_strings::PSTR;
 
 use crate::Error;
@@ -65,11 +66,17 @@ impl PageantStream {
                 Some(PSTR(name_buf.as_mut_ptr())),
                 &mut name_length,
             ) {
-                // Pageant falls back to GetUserNameA here,
-                // but as far as I can tell, all Versions of Windows supported by Rust today
-                // should be able to answer the UserNameEx request - the comments in Pageant source
-                // point to Windows XP and earlier compatibility...
-                return Err(Error::from_win32());
+                // GetUserNameExA fails on non-domain-joined machines, where no UPN
+                // (NameUserPrincipal) is configured. Fall back to GetUserNameA
+                // (the SAM account name), like the original PuTTY Pageant.
+                debug!("GetUserNameExA failed, falling back to GetUserNameA");
+
+                let mut name_length = 0;
+                // don't check result on this, always returns ERROR_INSUFFICIENT_BUFFER
+                let _ = GetUserNameA(None, &mut name_length);
+
+                name_buf = vec![0u8; name_length as usize];
+                GetUserNameA(Some(PSTR(name_buf.as_mut_ptr())), &mut name_length)?;
             }
 
             //remove terminating null

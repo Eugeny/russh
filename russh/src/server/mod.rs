@@ -108,7 +108,7 @@ impl Default for Config {
                 "_",
                 env!("CARGO_PKG_VERSION")
             ))),
-            methods: auth::MethodSet::all(),
+            methods: auth::MethodSet::server_supported(),
             auth_rejection_time: std::time::Duration::from_secs(1),
             auth_rejection_time_initial: None,
             keys: Vec::new(),
@@ -1062,8 +1062,10 @@ where
 
     // Reading SSH id and allocating a session.
     let mut stream = SshRead::new(stream);
+    let (priority_sender, priority_receiver) = tokio::sync::mpsc::unbounded_channel();
     let (sender, receiver) = tokio::sync::mpsc::channel(config.event_buffer_size);
     let handle = server::session::Handle {
+        priority_sender,
         sender,
         channel_buffer_size: config.channel_buffer_size,
     };
@@ -1072,6 +1074,7 @@ where
     let mut session = Session {
         target_window_size: common.config.window_size,
         common,
+        priority_receiver,
         receiver,
         sender: handle.clone(),
         pending_reads: Vec::new(),

@@ -6,7 +6,7 @@ use channels::WindowSizeRef;
 use kex::ServerKex;
 use log::debug;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
-use tokio::sync::mpsc::{Receiver, Sender, channel};
+use tokio::sync::mpsc::{Receiver, Sender, UnboundedReceiver, UnboundedSender, channel};
 use tokio::sync::oneshot;
 
 use super::*;
@@ -20,6 +20,7 @@ use crate::{ChannelOpenFailure, map_err, msg};
 pub struct Session {
     pub(crate) common: CommonSession<Arc<Config>>,
     pub(crate) sender: Handle,
+    pub(crate) priority_receiver: UnboundedReceiver<Msg>,
     pub(crate) receiver: Receiver<Msg>,
     pub(crate) target_window_size: u32,
     pub(crate) pending_reads: Vec<Vec<u8>>,
@@ -108,6 +109,7 @@ pub type ChannelOpenHandle = crate::ChannelOpenHandleInner<Msg>;
 /// Handle to a session, used to send messages to a client outside of
 /// the request/response cycle.
 pub struct Handle {
+    pub(crate) priority_sender: UnboundedSender<Msg>,
     pub(crate) sender: Sender<Msg>,
     pub(crate) channel_buffer_size: usize,
 }
@@ -611,7 +613,8 @@ impl Session {
                 description,
                 language_tag,
             } => {
-                self.common.disconnect(reason, &description, &language_tag)?;
+                self.common
+                    .disconnect(reason, &description, &language_tag)?;
             }
             Msg::ChannelOpenReply { pending, result } => {
                 self.finalize_channel_open_reply(pending, result)?;
@@ -679,8 +682,12 @@ impl Session {
                 while drained < MAX_MESSAGES_PER_BATCH {
                     // Only Empty/Disconnected end the drain; both mean "nothing
                     // more to hand off right now", so treat them the same.
-                    let Ok(msg) = self.receiver.try_recv() else {
-                        break;
+                    let msg = match self.priority_receiver.try_recv() {
+                        Ok(msg) => msg,
+                        Err(_) => match self.receiver.try_recv() {
+                            Ok(msg) => msg,
+                            Err(_) => break,
+                        },
                     };
                     self.dispatch_msg(msg)?;
                     drained += 1;
@@ -752,7 +759,24 @@ impl Session {
                     debug!("timeout");
                     return Err(crate::Error::InactivityTimeout.into());
                 }
+                msg = self.priority_receiver.recv(), if !self.kex.active() => {
+                    match msg {
+                        Some(msg) => self.dispatch_msg(msg)?,
+                        None => {
+                            debug!("self.priority_receiver: received None");
+                        }
+                    }
+                }
                 msg = self.receiver.recv(), if !self.kex.active() && !self.common.has_any_pending_data() => {
+                    // Channel open replies must be dispatched before any
+                    // channel traffic queued after them: `msg` may be data for
+                    // a channel whose confirmation is still sitting in the
+                    // priority queue, and dispatching that data first would
+                    // silently drop it (the channel is only registered when
+                    // its open reply is processed).
+                    while let Ok(reply) = self.priority_receiver.try_recv() {
+                        self.dispatch_msg(reply)?;
+                    }
                     match msg {
                         Some(msg) => self.dispatch_msg(msg)?,
                         None => {
@@ -1495,8 +1519,10 @@ mod tests {
 
     fn authenticated_session() -> Session {
         let config = Arc::new(crate::server::Config::default());
+        let (priority_sender, priority_receiver) = tokio::sync::mpsc::unbounded_channel();
         let (sender, receiver) = tokio::sync::mpsc::channel(config.event_buffer_size);
         let handle = Handle {
+            priority_sender,
             sender,
             channel_buffer_size: config.channel_buffer_size,
         };
@@ -1538,6 +1564,7 @@ mod tests {
                 received_data: false,
             },
             sender: handle,
+            priority_receiver,
             receiver,
             target_window_size: config.window_size,
             pending_reads: Vec::new(),

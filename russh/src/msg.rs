@@ -57,6 +57,13 @@ pub const USERAUTH_INFO_RESPONSE: u8 = 61;
 
 // some numbers have same meaning
 pub const USERAUTH_INFO_REQUEST_OR_USERAUTH_PK_OK: u8 = 60;
+#[allow(dead_code)]
+pub const USERAUTH_GSSAPI_RESPONSE: u8 = 60;
+pub const USERAUTH_GSSAPI_TOKEN: u8 = 61;
+pub const USERAUTH_GSSAPI_EXCHANGE_COMPLETE: u8 = 63;
+pub const USERAUTH_GSSAPI_ERROR: u8 = 64;
+pub const USERAUTH_GSSAPI_ERRTOK: u8 = 65;
+pub const USERAUTH_GSSAPI_MIC: u8 = 66;
 
 // https://tools.ietf.org/html/rfc4254#section-9
 pub const GLOBAL_REQUEST: u8 = 80;

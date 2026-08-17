@@ -460,9 +460,7 @@ impl Encrypted {
         if from >= buf0.len() {
             return Ok(0);
         }
-        let window_end = from
-            .checked_add(channel.recipient_window_size as usize)
-            .unwrap_or(usize::MAX);
+        let window_end = from.saturating_add(channel.recipient_window_size as usize);
         let end = std::cmp::min(buf0.len(), window_end);
         #[allow(clippy::indexing_slicing)] // length checked
         let mut buf = &buf0[from..end];
@@ -522,9 +520,7 @@ impl Encrypted {
             return Ok(0);
         }
         let buf0 = buf0.as_ref();
-        let window_end = from
-            .checked_add(channel.recipient_window_size as usize)
-            .unwrap_or(usize::MAX);
+        let window_end = from.saturating_add(channel.recipient_window_size as usize);
         let end = std::cmp::min(buf0.len(), window_end);
         #[allow(clippy::indexing_slicing)] // length checked
         let mut buf = &buf0[from..end];

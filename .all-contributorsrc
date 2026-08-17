@@ -769,6 +769,33 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "PokAhonTAS911",
+      "name": "PokAhonTAS911",
+      "avatar_url": "https://avatars.githubusercontent.com/u/208599324?v=4",
+      "profile": "https://github.com/PokAhonTAS911",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "ayamir",
+      "name": "ayamir",
+      "avatar_url": "https://avatars.githubusercontent.com/u/61657399?v=4",
+      "profile": "http://ayamir.github.io",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "luizribeiro",
+      "name": "Luiz Ribeiro",
+      "avatar_url": "https://avatars.githubusercontent.com/u/112069?v=4",
+      "profile": "http://l9o.dev",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,
