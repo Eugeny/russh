@@ -122,6 +122,7 @@ impl ClientKex {
                         &input.buffer,
                         &self.config.preferred,
                         None,
+                        None,
                         &self.cause,
                     )?
                 };

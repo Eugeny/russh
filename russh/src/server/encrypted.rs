@@ -890,7 +890,9 @@ impl Encrypted {
                 let pubkey = match pk_or_cert {
                     PublicKeyOrCertificate::PublicKey { ref key, .. } => key.clone(),
                     PublicKeyOrCertificate::Certificate(ref cert) => {
-                        // Validate certificate expiration
+                        // Validate certificate expiration. The bounds are None
+                        // for OpenSSH's "always valid" sentinels (PROTOCOL.certkeys),
+                        // which skips the corresponding check.
                         let now = SystemTime::now();
                         if cert.valid_after_time().map(|t| now < t).unwrap_or_default()
                             || cert
@@ -1047,7 +1049,8 @@ impl Encrypted {
             Err(e) => match e {
                 ssh_key::Error::AlgorithmUnknown
                 | ssh_key::Error::AlgorithmUnsupported { .. }
-                | ssh_key::Error::CertificateValidation => {
+                | ssh_key::Error::CertificateValidation
+                | ssh_key::Error::Time => {
                     debug!("public key error: {e}");
                     reject_auth_request(until, &mut self.write, auth_request).await?;
                     Ok(())

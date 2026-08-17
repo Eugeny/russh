@@ -18,7 +18,7 @@ use bytes::Bytes;
 use log::debug;
 use rand_core::Rng;
 use ssh_encoding::{Decode, Encode};
-use ssh_key::{Algorithm, EcdsaCurve, HashAlg, PrivateKey};
+use ssh_key::{Algorithm, Certificate, EcdsaCurve, HashAlg, PrivateKey};
 
 use crate::cipher::CIPHERS;
 use crate::helpers::{AlgorithmExt, NameList};
@@ -36,6 +36,7 @@ use crate::{cipher, compression, kex, mac, msg, AlgorithmKind, Error};
 /// WASM-only stub
 pub struct Config {
     keys: Vec<PrivateKey>,
+    certificates: Vec<Certificate>,
 }
 
 #[derive(Debug, Clone)]
@@ -79,11 +80,12 @@ pub struct Preferred {
     /// `key`, so a server that has a certificate presents it in preference
     /// to a bare key.
     ///
-    /// Empty by default, and only used by the client. Advertising a
-    /// certificate algorithm makes a server prove its identity with a
-    /// certificate instead of a bare key, which a client can only act on
-    /// once it knows which authorities it trusts (see
-    /// [`check_server_certificate`](crate::client::Handler::check_server_certificate))
+    /// Empty by default, and only used by the client (a server advertises
+    /// certificates from [`Config::certificates`](crate::server::Config)
+    /// instead). Advertising a certificate algorithm makes a server prove
+    /// its identity with a certificate instead of a bare key, which a client
+    /// can only act on once it knows which authorities it trusts (see
+    /// [`check_server_key`](crate::client::Handler::check_server_key))
     /// — so turning it on is the caller's decision, never a default.
     pub host_key_certificates: Cow<'static, [Algorithm]>,
     /// Preferred symmetric ciphers.
@@ -101,6 +103,43 @@ pub(crate) fn is_key_compatible_with_algo(key: &PrivateKey, algo: &Algorithm) ->
         // Other keys have to match exactly
         a => key.algorithm() == *a,
     }
+}
+
+/// Certificate algorithm names a server can honor: those of its certificates
+/// that come with a matching private key to sign the exchange with, gated by
+/// `pref.key` so the preference list stays the policy knob for certificates
+/// too. An RSA certificate is offered under every RSA variant pref.key allows
+/// since the hash picks the exchange-signature algorithm, not the certificate.
+pub(crate) fn server_certificate_names(
+    pref: &Preferred,
+    certificates: &[Certificate],
+    keys: &[PrivateKey],
+) -> Vec<String> {
+    let mut names = Vec::new();
+    for cert in certificates {
+        if !keys
+            .iter()
+            .any(|k| k.public_key().key_data() == cert.public_key())
+        {
+            debug!("no host key matching certificate {:?}", cert.key_id());
+            continue;
+        }
+        let variants: Vec<Algorithm> = pref
+            .key
+            .iter()
+            .filter(|a| match (&cert.algorithm(), a) {
+                (Algorithm::Rsa { .. }, Algorithm::Rsa { .. }) => true,
+                (c, a) => c == *a,
+            })
+            .cloned()
+            .collect();
+        for name in variants.iter().map(Algorithm::to_certificate_type) {
+            if !names.contains(&name) {
+                names.push(name);
+            }
+        }
+    }
+    names
 }
 
 impl Preferred {
@@ -221,10 +260,12 @@ pub(crate) trait Select {
     ) -> Result<(bool, A), Error>;
 
     /// `available_host_keys`, if present, is used to limit the host key algorithms to the ones we have keys for.
+    /// `available_certificates` (server only) are the host certificates the server can present.
     fn read_kex(
         buffer: &[u8],
         pref: &Preferred,
         available_host_keys: Option<&[PrivateKey]>,
+        available_certificates: Option<&[Certificate]>,
         cause: &KexCause,
     ) -> Result<Names, Error> {
         let &Some(mut r) = &buffer.get(17..) else {
@@ -290,23 +331,35 @@ pub(crate) trait Select {
             None => pref.key.iter().map(ToOwned::to_owned).collect::<Vec<_>>(),
         };
 
-        // Only the client advertises certificate algorithms (`write_kex`), so
-        // only the client selects over them; a server has no certificate to
-        // present, and its preferences must stay limited to the keys it holds.
-        // Selection runs over the same combined name-list the peer saw —
-        // certificates ahead of plain keys — so `key_both_first` keeps its
-        // meaning for `first_kex_packet_follows`. The algorithm kept for a
-        // certificate is the plain one it contains: that is what signs the
-        // exchange, and it is what every later step needs; that a certificate
-        // was negotiated is recorded separately in [`Names`].
-        let (key_both_first, key_algorithm, host_key_is_certificate) = if !Self::is_server()
-            && !pref.host_key_certificates.is_empty()
-        {
-            let certificate_names = pref
-                .host_key_certificates
+        // Certificate algorithms come from `pref.host_key_certificates` on the
+        // client and from the certificates the server holds (with a matching
+        // host key) on the server. Selection runs over the same combined
+        // name-list the peer saw — certificates ahead of plain keys — so
+        // `key_both_first` keeps its meaning for `first_kex_packet_follows`.
+        // The algorithm kept for a certificate is the plain one it contains:
+        // that is what signs the exchange, and it is what every later step
+        // needs; that a certificate was negotiated is recorded separately in
+        // [`Names`].
+        let certificate_names = if Self::is_server() {
+            match (available_certificates, available_host_keys) {
+                (Some(certificates), Some(keys)) => {
+                    server_certificate_names(pref, certificates, keys)
+                }
+                _ => Vec::new(),
+            }
+        } else {
+            pref.host_key_certificates
                 .iter()
                 .map(Algorithm::to_certificate_type)
-                .collect::<Vec<_>>();
+                .collect::<Vec<_>>()
+        };
+        let (key_both_first, key_algorithm, host_key_is_certificate) = if certificate_names
+            .is_empty()
+        {
+            let (both_first, algorithm) =
+                Self::select(&possible_host_key_algos[..], &key_list, AlgorithmKind::Key)?;
+            (both_first, algorithm, false)
+        } else {
             let advertised = certificate_names
                 .iter()
                 .cloned()
@@ -324,10 +377,6 @@ pub(crate) trait Select {
                     .ok_or(Error::KexInit)?
             };
             (both_first, algorithm, is_certificate)
-        } else {
-            let (both_first, algorithm) =
-                Self::select(&possible_host_key_algos[..], &key_list, AlgorithmKind::Key)?;
-            (both_first, algorithm, false)
         };
 
         // Cipher
@@ -502,18 +551,24 @@ pub(crate) fn write_kex(
         .encode(w)?; // kex algo
 
         if let Some(server_config) = server_config {
-            // Only advertise host key algorithms that we have keys for.
+            // Only advertise host key algorithms that we have keys for, with
+            // certificate algorithms ahead of plain keys so a client that
+            // accepts both is served the certificate.
             NameList(
-                prefs
-                    .key
-                    .iter()
-                    .filter(|algo| {
-                        server_config
-                            .keys
+                server_certificate_names(prefs, &server_config.certificates, &server_config.keys)
+                    .into_iter()
+                    .chain(
+                        prefs
+                            .key
                             .iter()
-                            .any(|k| is_key_compatible_with_algo(k, algo))
-                    })
-                    .map(|x| x.to_string())
+                            .filter(|algo| {
+                                server_config
+                                    .keys
+                                    .iter()
+                                    .any(|k| is_key_compatible_with_algo(k, algo))
+                            })
+                            .map(|x| x.to_string()),
+                    )
                     .collect(),
             )
             .encode(w)?;
@@ -659,7 +714,8 @@ mod tests {
             ],
             true,
         );
-        let names = Server::read_kex(&buf, &Preferred::DEFAULT, None, &KexCause::Initial).unwrap();
+        let names = Server::read_kex(&buf, &Preferred::DEFAULT, None,
+            None, &KexCause::Initial).unwrap();
         assert_eq!(names.kex, kex::MLKEM768X25519_SHA256);
         assert!(names.ignore_guessed, "wrong guess must be ignored");
     }
@@ -668,7 +724,8 @@ mod tests {
     #[test]
     fn correct_guess_is_not_ignored() {
         let buf = build_kexinit(&["mlkem768x25519-sha256", "curve25519-sha256"], true);
-        let names = Server::read_kex(&buf, &Preferred::DEFAULT, None, &KexCause::Initial).unwrap();
+        let names = Server::read_kex(&buf, &Preferred::DEFAULT, None,
+            None, &KexCause::Initial).unwrap();
         assert!(!names.ignore_guessed, "correct guess must be honored");
     }
 
@@ -689,6 +746,7 @@ mod tests {
             &buf,
             &cert_prefs(&[Algorithm::Ed25519]),
             None,
+            None,
             &KexCause::Initial,
         )
         .unwrap();
@@ -707,6 +765,7 @@ mod tests {
                 hash: Some(HashAlg::Sha512),
             }]),
             None,
+            None,
             &KexCause::Initial,
         )
         .unwrap();
@@ -724,7 +783,8 @@ mod tests {
     #[test]
     fn certificate_ignored_when_not_advertised() {
         let buf = build_kexinit_keys(KEX_FIRST, &[ED25519_CERT, "ssh-ed25519"], false);
-        let names = Client::read_kex(&buf, &Preferred::DEFAULT, None, &KexCause::Initial).unwrap();
+        let names = Client::read_kex(&buf, &Preferred::DEFAULT, None,
+            None, &KexCause::Initial).unwrap();
         assert!(!names.host_key_is_certificate);
         assert_eq!(names.key, Algorithm::Ed25519);
     }
@@ -737,6 +797,7 @@ mod tests {
         let names = Server::read_kex(
             &buf,
             &cert_prefs(&[Algorithm::Ed25519]),
+            None,
             None,
             &KexCause::Initial,
         )
@@ -753,6 +814,7 @@ mod tests {
         let names = Client::read_kex(
             &buf,
             &cert_prefs(&[Algorithm::Ed25519]),
+            None,
             None,
             &KexCause::Initial,
         )
@@ -772,6 +834,7 @@ mod tests {
             &buf,
             &cert_prefs(&[Algorithm::Ed25519]),
             None,
+            None,
             &KexCause::Initial,
         )
         .unwrap();
@@ -786,10 +849,106 @@ mod tests {
             &buf,
             &cert_prefs(&[Algorithm::Ed25519]),
             None,
+            None,
             &KexCause::Initial,
         )
         .unwrap();
         assert!(!names.host_key_is_certificate);
         assert!(names.ignore_guessed);
+    }
+
+    fn host_cert(subject: &PrivateKey, ca: &PrivateKey) -> Certificate {
+        let mut builder = ssh_key::certificate::Builder::new_with_random_nonce(
+            &mut rand::rng(),
+            subject.public_key(),
+            0,
+            u64::MAX,
+        )
+        .unwrap();
+        builder.key_id("test").unwrap();
+        builder
+            .cert_type(ssh_key::certificate::CertType::Host)
+            .unwrap();
+        builder.valid_principal("localhost").unwrap();
+        builder.sign(ca).unwrap()
+    }
+
+    /// A certificate without a matching private key can never be honored and
+    /// must not be advertised.
+    #[test]
+    fn certificate_without_matching_key_is_not_advertised() {
+        let ca = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
+        let stale_key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
+        let good_key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
+        let stale_cert = host_cert(&stale_key, &ca);
+        let good_cert = host_cert(&good_key, &ca);
+
+        let keys = vec![good_key];
+        assert_eq!(
+            server_certificate_names(&Preferred::DEFAULT, &[stale_cert], &keys),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            server_certificate_names(&Preferred::DEFAULT, &[good_cert], &keys),
+            vec![ED25519_CERT.to_string()]
+        );
+    }
+
+    /// A certificate whose algorithm is excluded from `pref.key` must not be
+    /// advertised: the preference list gates certificates like plain keys.
+    #[test]
+    fn certificate_for_banned_algorithm_is_not_advertised() {
+        let ca = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
+        let key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
+        let cert = host_cert(&key, &ca);
+        let keys = vec![key];
+
+        let no_ed25519 = Preferred {
+            key: Cow::Owned(vec![Algorithm::Rsa {
+                hash: Some(HashAlg::Sha512),
+            }]),
+            ..Preferred::DEFAULT
+        };
+        assert_eq!(
+            server_certificate_names(&no_ed25519, std::slice::from_ref(&cert), &keys),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            server_certificate_names(&Preferred::DEFAULT, &[cert], &keys),
+            vec![ED25519_CERT.to_string()]
+        );
+    }
+
+    /// The RSA cert variants a server advertises follow `pref.key`, so the
+    /// preference list stays the policy knob for e.g. banning SHA-1.
+    #[test]
+    fn rsa_certificate_variants_follow_preferences() {
+        let ca = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
+        let rsa_key =
+            PrivateKey::random(&mut rand::rng(), Algorithm::Rsa { hash: None }).unwrap();
+        let cert = host_cert(&rsa_key, &ca);
+        let keys = vec![rsa_key];
+
+        // Default preferences allow all three variants, in preference order.
+        assert_eq!(
+            server_certificate_names(&Preferred::DEFAULT, std::slice::from_ref(&cert), &keys),
+            vec![
+                "rsa-sha2-512-cert-v01@openssh.com".to_string(),
+                "rsa-sha2-256-cert-v01@openssh.com".to_string(),
+                "ssh-rsa-cert-v01@openssh.com".to_string(),
+            ]
+        );
+
+        // Preferences without `ssh-rsa` must not advertise its cert variant.
+        let no_sha1 = Preferred {
+            key: Cow::Owned(vec![Algorithm::Rsa {
+                hash: Some(HashAlg::Sha512),
+            }]),
+            ..Preferred::DEFAULT
+        };
+        assert_eq!(
+            server_certificate_names(&no_sha1, &[cert], &keys),
+            vec!["rsa-sha2-512-cert-v01@openssh.com".to_string()]
+        );
     }
 }
