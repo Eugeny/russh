@@ -216,6 +216,26 @@ mod tests {
         let decompressed = decompressor.decompress(&compressed, &mut output).unwrap();
         assert!(decompressed.is_empty());
     }
+
+    #[test]
+    fn partial_flush_packets_round_trip() {
+        // Real SSH packets are partial flushes on one continuous stream, not
+        // a finished stream, and routinely decompress to more than twice
+        // their compressed size.
+        let mut comp = Compress::None;
+        let mut decomp = Decompress::None;
+        Compression::Zlib.init_compress(&mut comp);
+        Compression::Zlib.init_decompress(&mut decomp);
+
+        for len in 1..=4096usize {
+            let payload: Vec<u8> = (0..len).map(|i| b"abcdefgh"[i % 8]).collect();
+            let mut cbuf = Vec::new();
+            let compressed = comp.compress(&payload, &mut cbuf).unwrap().to_vec();
+            let mut dbuf = Vec::new();
+            let out = decomp.decompress(&compressed, &mut dbuf).unwrap();
+            assert_eq!(out, payload.as_slice(), "payload of {len} bytes came back wrong");
+        }
+    }
 }
 
 #[cfg(feature = "flate2")]
@@ -321,8 +341,9 @@ impl Decompress {
                     let d = z.decompress(&input[n_in_..], &mut output[n_out_..], flush);
                     match d? {
                         flate2::Status::Ok | flate2::Status::BufError => {
-                            let consumed_all_input = n_in_ == input.len();
-                            let output_full = n_out_ == output.len();
+                            let consumed_all_input =
+                                z.total_in() as usize - n_in == input.len();
+                            let output_full = z.total_out() as usize - n_out == output.len();
 
                             if !output_full && consumed_all_input {
                                 break;
