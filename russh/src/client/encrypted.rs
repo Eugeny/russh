@@ -24,10 +24,10 @@ use ssh_key::Algorithm;
 use super::IncomingSshPacket;
 use crate::auth::AuthRequest;
 use crate::cert::PublicKeyOrCertificate;
-use crate::client::{Handler, Msg, Prompt, Reply, Session};
+use crate::client::{ChannelOpenHandle, Handler, Msg, Prompt, Reply, Session};
 use crate::helpers::{AlgorithmExt, EncodedExt, NameList, sign_with_hash_alg};
 use crate::keys::key::parse_public_key;
-use crate::parsing::{ChannelOpenConfirmation, ChannelType, OpenChannelMessage};
+use crate::parsing::{ChannelOpenConfirmation, ChannelType, OpenChannelMessage, ensure_end};
 use crate::session::{Encrypted, EncryptedState, GlobalRequestResponse};
 use crate::{
     Channel, ChannelId, ChannelMsg, ChannelOpenFailure, ChannelParams, Error, MethodSet, Sig, auth,
@@ -72,6 +72,7 @@ impl Session {
                     match buf.split_first() {
                         Some((&msg::SERVICE_ACCEPT, mut r)) => {
                             if map_err!(Bytes::decode(&mut r))?.as_ref() == b"ssh-userauth" {
+                                map_err!(ensure_end(&r))?;
                                 *accepted = true;
                                 if let Some(ref meth) = self.common.auth_method {
                                     let len = enc.write.len();
@@ -98,7 +99,8 @@ impl Session {
                 EncryptedState::WaitingAuthRequest(ref mut auth_request) => {
                     trace!("waiting auth request, {:?}", buf.first(),);
                     match buf.split_first() {
-                        Some((&msg::USERAUTH_SUCCESS, _)) => {
+                        Some((&msg::USERAUTH_SUCCESS, r)) => {
+                            map_err!(ensure_end(&r))?;
                             debug!("userauth_success");
                             self.sender
                                 .send(Reply::AuthSuccess)
@@ -111,6 +113,8 @@ impl Session {
                         }
                         Some((&msg::USERAUTH_BANNER, mut r)) => {
                             let banner = map_err!(String::decode(&mut r))?;
+                            let _language_tag = map_err!(String::decode(&mut r))?;
+                            map_err!(ensure_end(&r))?;
                             client.auth_banner(&banner, self).await?;
                             return Ok(());
                         }
@@ -120,6 +124,7 @@ impl Session {
                             let remaining_methods: MethodSet =
                                 (&map_err!(NameList::decode(&mut r))?).into();
                             let partial_success = map_err!(u8::decode(&mut r))? != 0;
+                            map_err!(ensure_end(&r))?;
                             debug!(
                                 "remaining methods {remaining_methods:?}, partial success {partial_success:?}"
                             );
@@ -140,12 +145,31 @@ impl Session {
                             }
                         }
                         Some((&msg::USERAUTH_INFO_REQUEST_OR_USERAUTH_PK_OK, mut r)) => {
-                            if let Some(auth::CurrentRequest::PublicKey {
+                            if let Some(auth::CurrentRequest::GssapiWithMic) = auth_request.current
+                            {
+                                debug!("userauth_gssapi_response");
+                                let selected_mechanism = map_err!(Bytes::decode(&mut r))?.to_vec();
+                                map_err!(ensure_end(&r))?;
+                                let mic_data = enc.client_make_gssapi_mic_data(
+                                    &self.common.auth_user,
+                                    &mut self.common.buffer,
+                                )?;
+                                self.sender
+                                    .send(Reply::AuthGssapiResponse {
+                                        selected_mechanism,
+                                        mic_data,
+                                    })
+                                    .map_err(|_| crate::Error::SendError)?;
+                                return Ok(());
+                            } else if let Some(auth::CurrentRequest::PublicKey {
                                 ref mut sent_pk_ok,
                                 ..
                             }) = auth_request.current
                             {
                                 debug!("userauth_pk_ok");
+                                let _algo = map_err!(String::decode(&mut r))?;
+                                let _key = map_err!(Bytes::decode(&mut r))?;
+                                map_err!(ensure_end(&r))?;
                                 *sent_pk_ok = true;
                             } else if let Some(auth::CurrentRequest::KeyboardInteractive {
                                 ..
@@ -162,8 +186,13 @@ impl Session {
                                 let n_prompts = map_err!(u32::decode(&mut r))?;
 
                                 // read prompts
-                                let mut prompts =
-                                    Vec::with_capacity(n_prompts.try_into().unwrap_or(0));
+                                // Each prompt needs at least a 4-byte length plus a 1-byte echo flag.
+                                let max_prompts = r.remaining_len() / 5;
+                                let n_prompts = n_prompts as usize;
+                                if n_prompts > max_prompts {
+                                    return Err(crate::Error::Inconsistent.into());
+                                }
+                                let mut prompts = Vec::with_capacity(n_prompts);
                                 for _i in 0..n_prompts {
                                     let prompt = map_err!(String::decode(&mut r))?;
 
@@ -173,6 +202,7 @@ impl Session {
                                         echo,
                                     });
                                 }
+                                map_err!(ensure_end(&r))?;
 
                                 // send challenges to caller
                                 self.sender
@@ -284,6 +314,62 @@ impl Session {
                                 _ => {}
                             }
                         }
+                        Some((&msg::USERAUTH_GSSAPI_TOKEN, mut r)) => {
+                            if let Some(auth::CurrentRequest::GssapiWithMic) = auth_request.current
+                            {
+                                debug!("userauth_gssapi_token");
+                                let token = map_err!(Bytes::decode(&mut r))?.to_vec();
+                                map_err!(ensure_end(&r))?;
+                                let mic_data = enc.client_make_gssapi_mic_data(
+                                    &self.common.auth_user,
+                                    &mut self.common.buffer,
+                                )?;
+                                self.sender
+                                    .send(Reply::AuthGssapiToken { token, mic_data })
+                                    .map_err(|_| crate::Error::SendError)?;
+                                return Ok(());
+                            }
+                            return Err(crate::Error::Inconsistent.into());
+                        }
+                        Some((&msg::USERAUTH_GSSAPI_ERROR, mut r)) => {
+                            if let Some(auth::CurrentRequest::GssapiWithMic) = auth_request.current
+                            {
+                                let major_status = map_err!(u32::decode(&mut r))?;
+                                let minor_status = map_err!(u32::decode(&mut r))?;
+                                let message = map_err!(String::decode(&mut r))?;
+                                let _language_tag = map_err!(String::decode(&mut r))?;
+                                map_err!(ensure_end(&r))?;
+                                warn!(
+                                    "userauth_gssapi_error major={major_status} minor={minor_status}: {message}"
+                                );
+                                self.sender
+                                    .send(Reply::AuthGssapiError {
+                                        error: auth::GssapiError::Status {
+                                            major_status,
+                                            minor_status,
+                                            message,
+                                        },
+                                    })
+                                    .map_err(|_| crate::Error::SendError)?;
+                                return Ok(());
+                            }
+                            return Err(crate::Error::Inconsistent.into());
+                        }
+                        Some((&msg::USERAUTH_GSSAPI_ERRTOK, mut r)) => {
+                            if let Some(auth::CurrentRequest::GssapiWithMic) = auth_request.current
+                            {
+                                let token = map_err!(Bytes::decode(&mut r))?.to_vec();
+                                map_err!(ensure_end(&r))?;
+                                warn!("userauth_gssapi_errtok ({} bytes)", token.len());
+                                self.sender
+                                    .send(Reply::AuthGssapiError {
+                                        error: auth::GssapiError::ErrorToken(token),
+                                    })
+                                    .map_err(|_| crate::Error::SendError)?;
+                                return Ok(());
+                            }
+                            return Err(crate::Error::Inconsistent.into());
+                        }
                         Some((&msg::EXT_INFO, mut r)) => {
                             return self.handle_ext_info(&mut r).map_err(Into::into);
                         }
@@ -324,6 +410,7 @@ impl Session {
                 }
             }
         }
+        ensure_end(r)?;
         Ok(())
     }
 
@@ -331,8 +418,7 @@ impl Session {
         let algs = NameList::decode(r)?;
         debug!("* server-sig-algs");
         self.server_sig_algs = Some(
-            algs.0
-                .iter()
+            algs.iter()
                 .filter_map(|x| Algorithm::from_str(x).ok())
                 .inspect(|x| {
                     debug!("  * {x:?}");
@@ -351,6 +437,7 @@ impl Session {
             Some((&msg::CHANNEL_OPEN_CONFIRMATION, mut reader)) => {
                 debug!("channel_open_confirmation");
                 let msg = map_err!(ChannelOpenConfirmation::decode(&mut reader))?;
+                map_err!(ensure_end(&reader))?;
                 let local_id = ChannelId(msg.recipient_channel);
 
                 if let Some(ref mut enc) = self.common.encrypted {
@@ -389,6 +476,7 @@ impl Session {
             Some((&msg::CHANNEL_CLOSE, mut r)) => {
                 debug!("channel_close");
                 let channel_num = map_err!(ChannelId::decode(&mut r))?;
+                map_err!(ensure_end(&r))?;
                 if let Some(ref mut enc) = self.common.encrypted {
                     // The CHANNEL_CLOSE message must be sent to the server at this point or the session
                     // will not be released.
@@ -406,6 +494,7 @@ impl Session {
             Some((&msg::CHANNEL_EOF, mut r)) => {
                 debug!("channel_eof");
                 let channel_num = map_err!(ChannelId::decode(&mut r))?;
+                map_err!(ensure_end(&r))?;
                 if let Some(chan) = self.channels.get(&channel_num) {
                     let _ = chan.send(ChannelMsg::Eof).await;
                 }
@@ -415,15 +504,18 @@ impl Session {
                 debug!("channel_open_failure");
                 let channel_num = map_err!(ChannelId::decode(&mut r))?;
                 let reason_code = ChannelOpenFailure::from_u32(map_err!(u32::decode(&mut r))?)
-                    .unwrap_or(ChannelOpenFailure::Unknown);
+                    .unwrap_or(ChannelOpenFailure::AdministrativelyProhibited);
                 let descr = map_err!(String::decode(&mut r))?;
                 let language = map_err!(String::decode(&mut r))?;
+                map_err!(ensure_end(&r))?;
                 if let Some(ref mut enc) = self.common.encrypted {
                     enc.channels.remove(&channel_num);
                 }
 
                 if let Some(sender) = self.channels.remove(&channel_num) {
-                    let _ = sender.send(ChannelMsg::OpenFailure(reason_code)).await;
+                    let _ = sender
+                        .send(ChannelMsg::OpenFailure(reason_code.clone()))
+                        .await;
                 }
 
                 let _ = self.sender.send(Reply::ChannelOpenFailure);
@@ -436,6 +528,7 @@ impl Session {
                 trace!("channel_data");
                 let channel_num = map_err!(ChannelId::decode(&mut r))?;
                 let data = map_err!(Bytes::decode(&mut r))?;
+                map_err!(ensure_end(&r))?;
                 let target = self.common.config.window_size;
                 if let Some(ref mut enc) = self.common.encrypted {
                     if enc.adjust_window_size(channel_num, &data, target)? {
@@ -458,6 +551,7 @@ impl Session {
                 let channel_num = map_err!(ChannelId::decode(&mut r))?;
                 let extended_code = map_err!(u32::decode(&mut r))?;
                 let data = map_err!(Bytes::decode(&mut r))?;
+                map_err!(ensure_end(&r))?;
                 let target = self.common.config.window_size;
                 if let Some(ref mut enc) = self.common.encrypted {
                     if enc.adjust_window_size(channel_num, &data, target)? {
@@ -490,6 +584,7 @@ impl Session {
                     "xon-xoff" => {
                         map_err!(u8::decode(&mut r))?; // should be 0.
                         let client_can_do = map_err!(u8::decode(&mut r))? != 0;
+                        map_err!(ensure_end(&r))?;
                         if let Some(chan) = self.channels.get(&channel_num) {
                             let _ = chan.send(ChannelMsg::XonXoff { client_can_do }).await;
                         }
@@ -498,6 +593,7 @@ impl Session {
                     "exit-status" => {
                         map_err!(u8::decode(&mut r))?; // should be 0.
                         let exit_status = map_err!(u32::decode(&mut r))?;
+                        map_err!(ensure_end(&r))?;
                         if let Some(chan) = self.channels.get(&channel_num) {
                             let _ = chan.send(ChannelMsg::ExitStatus { exit_status }).await;
                         }
@@ -510,6 +606,7 @@ impl Session {
                         let core_dumped = map_err!(u8::decode(&mut r))? != 0;
                         let error_message = map_err!(String::decode(&mut r))?;
                         let lang_tag = map_err!(String::decode(&mut r))?;
+                        map_err!(ensure_end(&r))?;
                         if let Some(chan) = self.channels.get(&channel_num) {
                             let _ = chan
                                 .send(ChannelMsg::ExitSignal {
@@ -533,6 +630,7 @@ impl Session {
                     }
                     "keepalive@openssh.com" => {
                         let wants_reply = map_err!(u8::decode(&mut r))?;
+                        map_err!(ensure_end(&r))?;
                         if wants_reply == 1 {
                             if let Some(ref mut enc) = self.common.encrypted {
                                 trace!("Received channel keep alive message: {req:?}",);
@@ -570,6 +668,7 @@ impl Session {
             Some((&msg::CHANNEL_WINDOW_ADJUST, mut r)) => {
                 let channel_num = map_err!(ChannelId::decode(&mut r))?;
                 let amount = map_err!(u32::decode(&mut r))?;
+                map_err!(ensure_end(&r))?;
                 let mut new_size = 0;
                 debug!("channel_window_adjust amount: {amount:?}");
                 if let Some(ref mut enc) = self.common.encrypted {
@@ -581,8 +680,11 @@ impl Session {
                     }
                 }
 
-                if let Some(ref mut enc) = self.common.encrypted {
-                    new_size -= enc.flush_pending(channel_num)? as u32;
+                let common = &mut self.common;
+                if let Some(enc) = common.encrypted.as_mut() {
+                    new_size -= enc
+                        .flush_pending_with_writer(&mut common.packet_writer, channel_num)?
+                        as u32;
                 }
                 if let Some(chan) = self.channels.get(&channel_num) {
                     chan.window_size().update(new_size).await;
@@ -598,6 +700,7 @@ impl Session {
                 let wants_reply = map_err!(u8::decode(&mut r))?;
                 if let Some(ref mut enc) = self.common.encrypted {
                     if req.starts_with("keepalive") {
+                        map_err!(ensure_end(&r))?;
                         if wants_reply == 1 {
                             trace!("Received keep alive message: {req:?}",);
                             self.common.wants_reply = false;
@@ -607,25 +710,18 @@ impl Session {
                         }
                     } else if req == "hostkeys-00@openssh.com" {
                         let mut keys = vec![];
-                        loop {
-                            match Bytes::decode(&mut r) {
-                                Ok(key) => {
-                                    let key = map_err!(parse_public_key(&key));
-                                    match key {
-                                        Ok(key) => keys.push(key),
-                                        Err(ref err) => {
-                                            debug!(
-                                                "failed to parse announced host key {key:?}: {err:?}",
-                                            )
-                                        }
-                                    }
-                                }
-                                Err(ssh_encoding::Error::Length) => break,
-                                x => {
-                                    map_err!(x)?;
+                        while !r.is_empty() {
+                            let key_blob = map_err!(Bytes::decode(&mut r))?;
+                            match parse_public_key(&key_blob) {
+                                Ok(key) => keys.push(key),
+                                Err(ref err) => {
+                                    debug!(
+                                        "failed to parse announced host key {key_blob:?}: {err:?}",
+                                    )
                                 }
                             }
                         }
+                        map_err!(ensure_end(&r))?;
                         return client.openssh_ext_host_keys_announced(keys, self).await;
                     } else {
                         warn!("Unhandled global request: {req:?} {wants_reply:?}",);
@@ -638,6 +734,7 @@ impl Session {
             }
             Some((&msg::CHANNEL_SUCCESS, mut r)) => {
                 let channel_num = map_err!(ChannelId::decode(&mut r))?;
+                map_err!(ensure_end(&r))?;
                 if let Some(chan) = self.channels.get(&channel_num) {
                     let _ = chan.send(ChannelMsg::Success).await;
                 }
@@ -645,6 +742,7 @@ impl Session {
             }
             Some((&msg::CHANNEL_FAILURE, mut r)) => {
                 let channel_num = map_err!(ChannelId::decode(&mut r))?;
+                map_err!(ensure_end(&r))?;
                 if let Some(chan) = self.channels.get(&channel_num) {
                     let _ = chan.send(ChannelMsg::Failure).await;
                 }
@@ -653,138 +751,147 @@ impl Session {
             Some((&msg::CHANNEL_OPEN, mut r)) => {
                 let msg = OpenChannelMessage::parse(&mut r)?;
 
-                if let Some(ref mut enc) = self.common.encrypted {
-                    let id = enc.new_channel_id();
-                    let channel = ChannelParams {
-                        recipient_channel: msg.recipient_channel,
-                        sender_channel: id,
-                        recipient_window_size: msg.recipient_window_size,
-                        sender_window_size: self.common.config.window_size,
-                        recipient_maximum_packet_size: msg.recipient_maximum_packet_size,
-                        sender_maximum_packet_size: self.common.config.maximum_packet_size,
-                        confirmed: true,
-                        wants_reply: false,
-                        pending_data: std::collections::VecDeque::new(),
-                        pending_eof: false,
-                        pending_close: false,
-                    };
+                let id = if let Some(ref mut enc) = self.common.encrypted {
+                    enc.new_channel_id()
+                } else {
+                    return Err(crate::Error::Inconsistent.into());
+                };
 
-                    let confirm = || {
-                        debug!("confirming channel: {msg:?}");
-                        map_err!(msg.confirm(
-                            &mut enc.write,
-                            id.0,
-                            channel.sender_window_size,
-                            channel.sender_maximum_packet_size,
-                        ))?;
-                        enc.channels.insert(id, channel);
-                        Ok(())
-                    };
+                let channel_params = ChannelParams {
+                    recipient_channel: msg.recipient_channel,
+                    sender_channel: id,
+                    recipient_window_size: msg.recipient_window_size,
+                    sender_window_size: self.common.config.window_size,
+                    recipient_maximum_packet_size: msg.recipient_maximum_packet_size,
+                    sender_maximum_packet_size: self.common.config.maximum_packet_size,
+                    confirmed: true,
+                    wants_reply: false,
+                    pending_data: std::collections::VecDeque::new(),
+                    pending_eof: false,
+                    pending_close: false,
+                };
 
-                    match &msg.typ {
-                        ChannelType::Session => {
-                            confirm()?;
-                            let channel = self.accept_server_initiated_channel(id, &msg);
-                            client.server_channel_open_session(channel, self).await?
-                        }
-                        ChannelType::DirectTcpip(d) => {
-                            confirm()?;
-                            let channel = self.accept_server_initiated_channel(id, &msg);
+                let (channel, channel_ref) = Channel::new(
+                    id,
+                    self.inbound_channel_sender.clone(),
+                    channel_params.recipient_maximum_packet_size,
+                    channel_params.recipient_window_size,
+                    self.common.config.channel_buffer_size,
+                );
+
+                let pending = crate::PendingChannelOpen {
+                    recipient_channel: msg.recipient_channel,
+                    sender_channel: id,
+                    window_size: self.common.config.window_size,
+                    packet_size: self.common.config.maximum_packet_size,
+                    channel_ref,
+                    channel_params,
+                };
+                let reply = ChannelOpenHandle::new(
+                    self.priority_sender.clone(),
+                    pending,
+                    |pending, result| Msg::ServerChannelOpenReply { pending, result },
+                );
+
+                match &msg.typ {
+                    ChannelType::Session => {
+                        client
+                            .server_channel_open_session(channel, reply, self)
+                            .await?
+                    }
+                    ChannelType::DirectTcpip(d) => {
+                        client
+                            .server_channel_open_direct_tcpip(
+                                channel,
+                                &d.host_to_connect,
+                                d.port_to_connect,
+                                &d.originator_address,
+                                d.originator_port,
+                                reply,
+                                self,
+                            )
+                            .await?
+                    }
+                    ChannelType::DirectStreamLocal(d) => {
+                        client
+                            .server_channel_open_direct_streamlocal(
+                                channel,
+                                &d.socket_path,
+                                reply,
+                                self,
+                            )
+                            .await?
+                    }
+                    ChannelType::X11 {
+                        originator_address,
+                        originator_port,
+                    } => {
+                        client
+                            .server_channel_open_x11(
+                                channel,
+                                originator_address,
+                                *originator_port,
+                                reply,
+                                self,
+                            )
+                            .await?
+                    }
+                    ChannelType::ForwardedTcpIp(d) => {
+                        client
+                            .server_channel_open_forwarded_tcpip(
+                                channel,
+                                &d.host_to_connect,
+                                d.port_to_connect,
+                                &d.originator_address,
+                                d.originator_port,
+                                reply,
+                                self,
+                            )
+                            .await?
+                    }
+                    ChannelType::ForwardedStreamLocal(d) => {
+                        client
+                            .server_channel_open_forwarded_streamlocal(
+                                channel,
+                                &d.socket_path,
+                                reply,
+                                self,
+                            )
+                            .await?
+                    }
+                    ChannelType::AgentForward => {
+                        client
+                            .server_channel_open_agent_forward(channel, reply, self)
+                            .await?
+                    }
+                    ChannelType::Unknown { typ } => {
+                        if client.should_accept_unknown_server_channel(id, typ).await {
                             client
-                                .server_channel_open_direct_tcpip(
-                                    channel,
-                                    &d.host_to_connect,
-                                    d.port_to_connect,
-                                    &d.originator_address,
-                                    d.originator_port,
-                                    self,
-                                )
-                                .await?
-                        }
-                        ChannelType::DirectStreamLocal(d) => {
-                            confirm()?;
-                            let channel = self.accept_server_initiated_channel(id, &msg);
-                            client
-                                .server_channel_open_direct_streamlocal(
-                                    channel,
-                                    &d.socket_path,
-                                    self,
-                                )
-                                .await?
-                        }
-                        ChannelType::X11 {
-                            originator_address,
-                            originator_port,
-                        } => {
-                            confirm()?;
-                            let channel = self.accept_server_initiated_channel(id, &msg);
-                            client
-                                .server_channel_open_x11(
-                                    channel,
-                                    originator_address,
-                                    *originator_port,
-                                    self,
-                                )
-                                .await?
-                        }
-                        ChannelType::ForwardedTcpIp(d) => {
-                            confirm()?;
-                            let channel = self.accept_server_initiated_channel(id, &msg);
-                            client
-                                .server_channel_open_forwarded_tcpip(
-                                    channel,
-                                    &d.host_to_connect,
-                                    d.port_to_connect,
-                                    &d.originator_address,
-                                    d.originator_port,
-                                    self,
-                                )
-                                .await?
-                        }
-                        ChannelType::ForwardedStreamLocal(d) => {
-                            confirm()?;
-                            let channel = self.accept_server_initiated_channel(id, &msg);
-                            client
-                                .server_channel_open_forwarded_streamlocal(
-                                    channel,
-                                    &d.socket_path,
-                                    self,
-                                )
+                                .server_channel_open_unknown(channel, reply, self)
                                 .await?;
-                        }
-                        ChannelType::AgentForward => {
-                            confirm()?;
-                            let channel = self.accept_server_initiated_channel(id, &msg);
-                            client
-                                .server_channel_open_agent_forward(channel, self)
-                                .await?
-                        }
-                        ChannelType::Unknown { typ } => {
-                            if client.should_accept_unknown_server_channel(id, typ).await {
-                                confirm()?;
-                                let channel = self.accept_server_initiated_channel(id, &msg);
-                                client.server_channel_open_unknown(channel, self).await?;
-                            } else {
-                                debug!("unknown channel type: {typ}");
+                        } else {
+                            debug!("unknown channel type: {typ}");
+                            if let Some(ref mut enc) = self.common.encrypted {
                                 msg.unknown_type(&mut enc.write)?;
                             }
                         }
-                    };
-                    Ok(())
-                } else {
-                    Err(crate::Error::Inconsistent.into())
-                }
+                    }
+                };
+                Ok(())
             }
             Some((&msg::REQUEST_SUCCESS, mut r)) => {
                 trace!("Global Request Success");
                 match self.open_global_requests.pop_front() {
                     Some(GlobalRequestResponse::Keepalive) => {
+                        map_err!(ensure_end(&r))?;
                         // ignore keepalives
                     }
                     Some(GlobalRequestResponse::Ping(return_channel)) => {
+                        map_err!(ensure_end(&r))?;
                         let _ = return_channel.send(());
                     }
                     Some(GlobalRequestResponse::NoMoreSessions) => {
+                        map_err!(ensure_end(&r))?;
                         debug!("no-more-sessions@openssh.com requests success");
                     }
                     Some(GlobalRequestResponse::TcpIpForward(return_channel)) => {
@@ -793,7 +900,16 @@ impl Session {
                             Some(0)
                         } else {
                             match u32::decode(&mut r) {
-                                Ok(port) => Some(port),
+                                Ok(port) => {
+                                    if let Err(e) = ensure_end(&r) {
+                                        error!(
+                                            "Error parsing port for TcpIpForward request: {e:?}"
+                                        );
+                                        None
+                                    } else {
+                                        Some(port)
+                                    }
+                                }
                                 Err(e) => {
                                     error!("Error parsing port for TcpIpForward request: {e:?}");
                                     None
@@ -803,12 +919,15 @@ impl Session {
                         let _ = return_channel.send(result);
                     }
                     Some(GlobalRequestResponse::CancelTcpIpForward(return_channel)) => {
+                        map_err!(ensure_end(&r))?;
                         let _ = return_channel.send(true);
                     }
                     Some(GlobalRequestResponse::StreamLocalForward(return_channel)) => {
+                        map_err!(ensure_end(&r))?;
                         let _ = return_channel.send(true);
                     }
                     Some(GlobalRequestResponse::CancelStreamLocalForward(return_channel)) => {
+                        map_err!(ensure_end(&r))?;
                         let _ = return_channel.send(true);
                     }
                     None => {
@@ -817,8 +936,9 @@ impl Session {
                 }
                 Ok(())
             }
-            Some((&msg::REQUEST_FAILURE, _)) => {
+            Some((&msg::REQUEST_FAILURE, r)) => {
                 trace!("global request failure");
+                map_err!(ensure_end(&r))?;
                 match self.open_global_requests.pop_front() {
                     Some(GlobalRequestResponse::Keepalive) => {
                         // ignore keepalives
@@ -854,24 +974,6 @@ impl Session {
         }
     }
 
-    fn accept_server_initiated_channel(
-        &mut self,
-        id: ChannelId,
-        msg: &OpenChannelMessage,
-    ) -> Channel<Msg> {
-        let (channel, channel_ref) = Channel::new(
-            id,
-            self.inbound_channel_sender.clone(),
-            msg.recipient_maximum_packet_size,
-            msg.recipient_window_size,
-            self.common.config.channel_buffer_size,
-        );
-
-        self.channels.insert(id, channel_ref);
-
-        channel
-    }
-
     pub(crate) fn write_auth_request_if_needed(
         &mut self,
         user: &str,
@@ -887,7 +989,7 @@ impl Session {
                 } => {
                     debug!("sending ssh-userauth service requset");
                     if !*sent {
-                        self.common.packet_writer.packet(|w| {
+                        self.common.packet_writer.write_packet(|w| {
                             msg::SERVICE_REQUEST.encode(w)?;
                             "ssh-userauth".encode(w)?;
                             Ok(())
@@ -909,6 +1011,173 @@ impl Session {
         self.common.auth_user.push_str(user);
         self.common.auth_method = Some(meth);
         Ok(is_waiting)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::num::Wrapping;
+
+    use byteorder::{BigEndian, ByteOrder};
+    use ssh_encoding::{Decode, Encode};
+
+    use super::*;
+    use crate::compression::{Compression, Decompress};
+    use crate::kex::{KEXES, NONE};
+    use crate::session::Exchange;
+    use crate::{CryptoVec, MethodKind};
+
+    fn test_encrypted() -> Encrypted {
+        Encrypted {
+            state: EncryptedState::Authenticated,
+            exchange: Some(Exchange::default()),
+            kex: KEXES.get(&NONE).unwrap().make(),
+            key: 0,
+            client_mac: crate::mac::NONE,
+            server_mac: crate::mac::NONE,
+            session_id: CryptoVec::from(&b"session-id"[..]),
+            channels: HashMap::new(),
+            last_channel_id: Wrapping(0),
+            write: Vec::new(),
+            write_cursor: 0,
+            last_rekey: russh_util::time::Instant::now(),
+            server_compression: Compression::None,
+            client_compression: Compression::None,
+            decompress: Decompress::None,
+            rekey_wanted: false,
+            received_extensions: Vec::new(),
+            extension_info_awaiters: HashMap::new(),
+        }
+    }
+
+    fn payloads(buf: &[u8]) -> Vec<&[u8]> {
+        let mut payloads = Vec::new();
+        let mut cursor = 0;
+        while cursor < buf.len() {
+            let packet_len = BigEndian::read_u32(&buf[cursor..cursor + 4]) as usize;
+            let payload_start = cursor + 4;
+            let payload_end = payload_start + packet_len;
+            payloads.push(&buf[payload_start..payload_end]);
+            cursor = payload_end;
+        }
+        payloads
+    }
+
+    #[test]
+    fn method_kind_parses_gssapi_with_mic() {
+        assert_eq!(
+            "gssapi-with-mic".parse::<MethodKind>(),
+            Ok(MethodKind::GssapiWithMic)
+        );
+        assert_eq!(<&str>::from(&MethodKind::GssapiWithMic), "gssapi-with-mic");
+    }
+
+    #[test]
+    fn write_auth_request_encodes_gssapi_with_mic() {
+        let krb5_oid = b"\x06\x09\x2a\x86\x48\x86\xf7\x12\x01\x02\x02".to_vec();
+        let mut encrypted = test_encrypted();
+        let wrote = encrypted
+            .write_auth_request(
+                "alice",
+                &auth::Method::GssapiWithMic {
+                    mechanism_oids: vec![krb5_oid.clone()],
+                },
+            )
+            .unwrap();
+        assert!(wrote);
+
+        let payloads = payloads(&encrypted.write);
+        assert_eq!(payloads.len(), 1);
+        let mut r = payloads[0];
+        assert_eq!(u8::decode(&mut r).unwrap(), msg::USERAUTH_REQUEST);
+        assert_eq!(String::decode(&mut r).unwrap(), "alice");
+        assert_eq!(String::decode(&mut r).unwrap(), "ssh-connection");
+        assert_eq!(String::decode(&mut r).unwrap(), "gssapi-with-mic");
+        assert_eq!(u32::decode(&mut r).unwrap(), 1);
+        assert_eq!(Vec::<u8>::decode(&mut r).unwrap(), krb5_oid);
+        ensure_end(&r).unwrap();
+    }
+
+    #[test]
+    fn client_make_gssapi_mic_data_matches_rfc_4462() {
+        let mut encrypted = test_encrypted();
+        let mut got = Vec::new();
+        let mic_data = encrypted
+            .client_make_gssapi_mic_data("alice", &mut got)
+            .unwrap();
+
+        let mut expected = Vec::new();
+        b"session-id".as_slice().encode(&mut expected).unwrap();
+        expected.push(msg::USERAUTH_REQUEST);
+        "alice".encode(&mut expected).unwrap();
+        "ssh-connection".encode(&mut expected).unwrap();
+        "gssapi-with-mic".encode(&mut expected).unwrap();
+        assert_eq!(mic_data, expected);
+        assert_eq!(got, expected);
+    }
+
+    #[test]
+    fn client_send_gssapi_mic_sends_optional_token_before_mic() {
+        let mut encrypted = test_encrypted();
+        encrypted
+            .client_send_gssapi_mic(Some(b"context-token"), b"mic")
+            .unwrap();
+
+        let payloads = payloads(&encrypted.write);
+        assert_eq!(payloads.len(), 2);
+
+        let mut token = payloads[0];
+        assert_eq!(u8::decode(&mut token).unwrap(), msg::USERAUTH_GSSAPI_TOKEN);
+        assert_eq!(
+            Vec::<u8>::decode(&mut token).unwrap(),
+            b"context-token".to_vec()
+        );
+        ensure_end(&token).unwrap();
+
+        let mut mic = payloads[1];
+        assert_eq!(u8::decode(&mut mic).unwrap(), msg::USERAUTH_GSSAPI_MIC);
+        assert_eq!(Vec::<u8>::decode(&mut mic).unwrap(), b"mic".to_vec());
+        ensure_end(&mic).unwrap();
+    }
+
+    #[test]
+    fn client_send_gssapi_exchange_complete_sends_optional_token_first() {
+        let mut encrypted = test_encrypted();
+        encrypted
+            .client_send_gssapi_exchange_complete(Some(b"context-token"))
+            .unwrap();
+
+        let payloads = payloads(&encrypted.write);
+        assert_eq!(payloads.len(), 2);
+
+        let mut token = payloads[0];
+        assert_eq!(u8::decode(&mut token).unwrap(), msg::USERAUTH_GSSAPI_TOKEN);
+        assert_eq!(
+            Vec::<u8>::decode(&mut token).unwrap(),
+            b"context-token".to_vec()
+        );
+        ensure_end(&token).unwrap();
+
+        let mut complete = payloads[1];
+        assert_eq!(
+            u8::decode(&mut complete).unwrap(),
+            msg::USERAUTH_GSSAPI_EXCHANGE_COMPLETE
+        );
+        ensure_end(&complete).unwrap();
+    }
+
+    #[test]
+    fn client_send_gssapi_mic_skips_empty_final_token() {
+        let mut encrypted = test_encrypted();
+        encrypted.client_send_gssapi_mic(Some(b""), b"mic").unwrap();
+
+        let payloads = payloads(&encrypted.write);
+        assert_eq!(payloads.len(), 1);
+        let mut mic = payloads[0];
+        assert_eq!(u8::decode(&mut mic).unwrap(), msg::USERAUTH_GSSAPI_MIC);
+        assert_eq!(Vec::<u8>::decode(&mut mic).unwrap(), b"mic".to_vec());
+        ensure_end(&mic).unwrap();
     }
 }
 
@@ -996,8 +1265,68 @@ impl Encrypted {
                     submethods.as_bytes().encode(&mut self.write)?;
                     true
                 }
+                auth::Method::GssapiWithMic { ref mechanism_oids } => {
+                    user.as_bytes().encode(&mut self.write)?;
+                    "ssh-connection".encode(&mut self.write)?;
+                    "gssapi-with-mic".encode(&mut self.write)?;
+                    (mechanism_oids.len() as u32).encode(&mut self.write)?;
+                    for oid in mechanism_oids {
+                        oid.as_slice().encode(&mut self.write)?;
+                    }
+                    true
+                }
             }
         }))
+    }
+
+    fn client_make_gssapi_mic_data(
+        &mut self,
+        user: &str,
+        buffer: &mut Vec<u8>,
+    ) -> Result<Vec<u8>, crate::Error> {
+        buffer.clear();
+        self.session_id.as_ref().encode(buffer)?;
+        buffer.push(msg::USERAUTH_REQUEST);
+        user.encode(buffer)?;
+        "ssh-connection".encode(buffer)?;
+        "gssapi-with-mic".encode(buffer)?;
+        Ok(buffer.clone())
+    }
+
+    pub(crate) fn client_send_gssapi_token(&mut self, token: &[u8]) -> Result<(), crate::Error> {
+        push_packet!(self.write, {
+            msg::USERAUTH_GSSAPI_TOKEN.encode(&mut self.write)?;
+            token.encode(&mut self.write)?;
+        });
+        Ok(())
+    }
+
+    pub(crate) fn client_send_gssapi_mic(
+        &mut self,
+        token: Option<&[u8]>,
+        mic: &[u8],
+    ) -> Result<(), crate::Error> {
+        if let Some(token) = token.filter(|t| !t.is_empty()) {
+            self.client_send_gssapi_token(token)?;
+        }
+        push_packet!(self.write, {
+            msg::USERAUTH_GSSAPI_MIC.encode(&mut self.write)?;
+            mic.encode(&mut self.write)?;
+        });
+        Ok(())
+    }
+
+    pub(crate) fn client_send_gssapi_exchange_complete(
+        &mut self,
+        token: Option<&[u8]>,
+    ) -> Result<(), crate::Error> {
+        if let Some(token) = token.filter(|t| !t.is_empty()) {
+            self.client_send_gssapi_token(token)?;
+        }
+        push_packet!(self.write, {
+            msg::USERAUTH_GSSAPI_EXCHANGE_COMPLETE.encode(&mut self.write)?;
+        });
+        Ok(())
     }
 
     fn client_make_to_sign(

@@ -3,7 +3,7 @@ use std::fmt::{Debug, Display, Formatter};
 use std::future::{Future, Pending};
 
 use futures::future::Either as EitherFuture;
-use log::{debug, warn};
+use log::warn;
 use parsing::ChannelOpenConfirmation;
 pub use russh_cryptovec::CryptoVec;
 use ssh_encoding::{Decode, Encode};
@@ -14,8 +14,7 @@ mod tests;
 
 mod auth;
 
-/// Certificate and public key types.
-pub mod cert;
+mod cert;
 /// Cipher names
 pub mod cipher;
 /// Compression algorithm names
@@ -218,7 +217,9 @@ pub enum Error {
     #[error(transparent)]
     Elapsed(#[from] tokio::time::error::Elapsed),
 
-    #[error("Violation detected during strict key exchange, message {message_type} at seq no {sequence_number}")]
+    #[error(
+        "Violation detected during strict key exchange, message {message_type} at seq no {sequence_number}"
+    )]
     StrictKeyExchangeViolation {
         message_type: u8,
         sequence_number: usize,
@@ -290,7 +291,9 @@ impl Default for Limits {
     }
 }
 
-pub use auth::{AgentAuthError, MethodKind, MethodSet, Signer};
+pub use auth::{
+    AgentAuthError, GssapiAuthenticator, GssapiError, GssapiStep, MethodKind, MethodSet, Signer,
+};
 
 /// A reason for disconnection.
 #[allow(missing_docs)] // This should be relatively self-explanatory.
@@ -401,24 +404,49 @@ impl Sig {
 }
 
 /// Reason for not being able to open a channel.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[allow(missing_docs)]
 pub enum ChannelOpenFailure {
-    AdministrativelyProhibited = 1,
-    ConnectFailed = 2,
-    UnknownChannelType = 3,
-    ResourceShortage = 4,
-    Unknown = 0,
+    AdministrativelyProhibited,
+    ConnectFailed,
+    UnknownChannelType,
+    ResourceShortage,
+    Other { code: u32, reason: String },
 }
 
 impl ChannelOpenFailure {
-    fn from_u32(x: u32) -> Option<ChannelOpenFailure> {
+    pub(crate) fn from_u32(x: u32) -> Option<ChannelOpenFailure> {
         match x {
-            1 => Some(ChannelOpenFailure::AdministrativelyProhibited),
-            2 => Some(ChannelOpenFailure::ConnectFailed),
-            3 => Some(ChannelOpenFailure::UnknownChannelType),
-            4 => Some(ChannelOpenFailure::ResourceShortage),
-            _ => None,
+            1 => Some(Self::AdministrativelyProhibited),
+            2 => Some(Self::ConnectFailed),
+            3 => Some(Self::UnknownChannelType),
+            4 => Some(Self::ResourceShortage),
+            code => Some(Self::Other {
+                code,
+                reason: format!("Unknown code {code}"),
+            }),
+        }
+    }
+
+    /// SSH protocol reason code for this failure
+    pub fn code(&self) -> u32 {
+        match self {
+            Self::AdministrativelyProhibited => 1,
+            Self::ConnectFailed => 2,
+            Self::UnknownChannelType => 3,
+            Self::ResourceShortage => 4,
+            Self::Other { code, .. } => *code,
+        }
+    }
+
+    /// A human-readable description of this failure.
+    pub fn description(&self) -> &str {
+        match self {
+            Self::AdministrativelyProhibited => "Administratively prohibited",
+            Self::ConnectFailed => "Connect failed",
+            Self::UnknownChannelType => "Unknown channel type",
+            Self::ResourceShortage => "Resource shortage",
+            Self::Other { reason, .. } => reason.as_str(),
         }
     }
 }
@@ -426,6 +454,14 @@ impl ChannelOpenFailure {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 /// The identifier of a channel.
 pub struct ChannelId(u32);
+
+impl ChannelId {
+    // Not public to prevent construction of invalid
+    // ChannelIds by the library user
+    pub fn number(&self) -> u32 {
+        self.0
+    }
+}
 
 impl Decode for ChannelId {
     type Error = ssh_encoding::Error;
@@ -500,5 +536,68 @@ pub(crate) fn future_or_pending<R, F: Future<Output = R>, T>(
     match val {
         None => EitherFuture::Left(core::future::pending()),
         Some(x) => EitherFuture::Right(f(x)),
+    }
+}
+
+/// Pending channel-open state, passed through the reply handle to the session loop.
+#[derive(Debug)]
+#[doc(hidden)]
+pub struct PendingChannelOpen {
+    pub(crate) recipient_channel: u32,
+    pub(crate) sender_channel: ChannelId,
+    pub(crate) window_size: u32,
+    pub(crate) packet_size: u32,
+    pub(crate) channel_ref: channels::ChannelRef,
+    pub(crate) channel_params: ChannelParams,
+}
+
+/// A handle passed to channel-open callbacks that the handler uses to
+/// accept or reject the incoming channel request.
+///
+/// Dropping the handle without calling [`accept`](ChannelOpenHandle::accept) or
+/// [`reject`](ChannelOpenHandle::reject) automatically sends an
+/// `AdministrativelyProhibited` rejection.
+pub struct ChannelOpenHandleInner<M: Send> {
+    sender: tokio::sync::mpsc::UnboundedSender<M>,
+    inner: Option<PendingChannelOpen>,
+    make_msg: fn(PendingChannelOpen, Result<(), ChannelOpenFailure>) -> M,
+}
+
+impl<M: Send> ChannelOpenHandleInner<M> {
+    pub(crate) fn new(
+        sender: tokio::sync::mpsc::UnboundedSender<M>,
+        pending: PendingChannelOpen,
+        make_msg: fn(PendingChannelOpen, Result<(), ChannelOpenFailure>) -> M,
+    ) -> Self {
+        Self {
+            sender,
+            inner: Some(pending),
+            make_msg,
+        }
+    }
+
+    /// Accept the channel open request.
+    pub async fn accept(mut self) {
+        if let Some(pending) = self.inner.take() {
+            let _ = self.sender.send((self.make_msg)(pending, Ok(())));
+        }
+    }
+
+    /// Reject the channel open request with a reason.
+    pub async fn reject(mut self, reason: ChannelOpenFailure) {
+        if let Some(pending) = self.inner.take() {
+            let _ = self.sender.send((self.make_msg)(pending, Err(reason)));
+        }
+    }
+}
+
+impl<M: Send> Drop for ChannelOpenHandleInner<M> {
+    fn drop(&mut self) {
+        if let Some(pending) = self.inner.take() {
+            let _ = self.sender.send((self.make_msg)(
+                pending,
+                Err(ChannelOpenFailure::AdministrativelyProhibited),
+            ));
+        }
     }
 }

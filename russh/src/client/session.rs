@@ -443,8 +443,10 @@ impl Session {
     }
 
     pub fn data(&mut self, channel: ChannelId, data: impl Into<bytes::Bytes>) -> Result<(), crate::Error> {
-        if let Some(ref mut enc) = self.common.encrypted {
-            enc.data(channel, data, self.kex.active())
+        let is_rekeying = self.kex.active();
+        let common = &mut self.common;
+        if let Some(enc) = common.encrypted.as_mut() {
+            enc.data_with_writer(&mut common.packet_writer, channel, data, is_rekeying)
         } else {
             unreachable!()
         }
@@ -472,8 +474,10 @@ impl Session {
         ext: u32,
         data: impl Into<bytes::Bytes>,
     ) -> Result<(), crate::Error> {
-        if let Some(ref mut enc) = self.common.encrypted {
-            enc.extended_data(channel, ext, data, self.kex.active())
+        let is_rekeying = self.kex.active();
+        let common = &mut self.common;
+        if let Some(enc) = common.encrypted.as_mut() {
+            enc.extended_data_with_writer(&mut common.packet_writer, channel, ext, data, is_rekeying)
         } else {
             unreachable!()
         }

@@ -35,8 +35,8 @@ impl Deref for DhGroupUInt {
 
 #[derive(Clone)]
 pub struct DhGroup {
-    pub(crate) prime: DhGroupUInt,
-    pub(crate) generator: DhGroupUInt,
+    pub prime: DhGroupUInt,
+    pub generator: DhGroupUInt,
     // pub(crate) exp_size: u64,
 }
 

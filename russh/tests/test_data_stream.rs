@@ -1,7 +1,7 @@
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::Arc;
 
-use russh::keys::PrivateKeyWithHashAlg;
+use russh::keys::{PrivateKeyWithHashAlg, PublicKeyOrCertificate};
 use russh::server::{self, Auth, Msg, Server as _, Session};
 use russh::{Channel, ChannelMsg, client};
 use ssh_key::PrivateKey;
@@ -195,8 +195,10 @@ impl russh::server::Handler for Server {
     async fn channel_open_session(
         &mut self,
         mut channel: Channel<Msg>,
+        reply: server::ChannelOpenHandle,
         _session: &mut Session,
-    ) -> Result<bool, Self::Error> {
+    ) -> Result<(), Self::Error> {
+        reply.accept().await;
         tokio::spawn(async move {
             let (mut writer, mut reader) =
                 (channel.make_writer(), channel.make_reader_ext(Some(1)));
@@ -208,7 +210,7 @@ impl russh::server::Handler for Server {
             writer.shutdown().await.expect("Shutdown failed");
         });
 
-        Ok(true)
+        Ok(())
     }
 }
 
@@ -217,10 +219,7 @@ struct Client;
 impl russh::client::Handler for Client {
     type Error = anyhow::Error;
 
-    async fn check_server_key(
-        &mut self,
-        _: &russh::cert::PublicKeyOrCertificate,
-    ) -> Result<bool, Self::Error> {
+    async fn check_server_key(&mut self, _: &PublicKeyOrCertificate) -> Result<bool, Self::Error> {
         Ok(true)
     }
 }

@@ -149,8 +149,9 @@ impl Handler for AppServer {
     async fn channel_open_session(
         &mut self,
         channel: Channel<Msg>,
+        reply: ChannelOpenHandle,
         session: &mut Session,
-    ) -> Result<bool, Self::Error> {
+    ) -> Result<(), Self::Error> {
         let terminal_handle = TerminalHandle::start(session.handle(), channel.id()).await;
 
         let backend = CrosstermBackend::new(terminal_handle);
@@ -165,7 +166,8 @@ impl Handler for AppServer {
         let mut clients = self.clients.lock().await;
         clients.insert(self.id, terminal);
 
-        Ok(true)
+        reply.accept().await;
+        Ok(())
     }
 
     async fn auth_publickey(&mut self, _: &str, _: &PublicKey) -> Result<Auth, Self::Error> {

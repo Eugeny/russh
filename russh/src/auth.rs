@@ -33,6 +33,7 @@ pub enum MethodKind {
     PublicKey,
     HostBased,
     KeyboardInteractive,
+    GssapiWithMic,
 }
 
 impl From<&MethodKind> for &'static str {
@@ -43,6 +44,7 @@ impl From<&MethodKind> for &'static str {
             MethodKind::PublicKey => "publickey",
             MethodKind::HostBased => "hostbased",
             MethodKind::KeyboardInteractive => "keyboard-interactive",
+            MethodKind::GssapiWithMic => "gssapi-with-mic",
         }
     }
 }
@@ -55,6 +57,7 @@ impl FromStr for MethodKind {
             "publickey" => Ok(MethodKind::PublicKey),
             "hostbased" => Ok(MethodKind::HostBased),
             "keyboard-interactive" => Ok(MethodKind::KeyboardInteractive),
+            "gssapi-with-mic" => Ok(MethodKind::GssapiWithMic),
             _ => Err(()),
         }
     }
@@ -100,7 +103,6 @@ impl From<&NameList> for MethodSet {
     fn from(value: &NameList) -> Self {
         Self(
             value
-                .0
                 .iter()
                 .filter_map(|x| MethodKind::from_str(x).ok())
                 .collect(),
@@ -113,7 +115,18 @@ impl MethodSet {
         Self(Vec::new())
     }
 
-    pub fn all() -> Self {
+    pub fn client_supported() -> Self {
+        Self(vec![
+            MethodKind::None,
+            MethodKind::Password,
+            MethodKind::PublicKey,
+            MethodKind::HostBased,
+            MethodKind::KeyboardInteractive,
+            MethodKind::GssapiWithMic,
+        ])
+    }
+
+    pub fn server_supported() -> Self {
         Self(vec![
             MethodKind::None,
             MethodKind::Password,
@@ -165,6 +178,73 @@ pub trait Signer: Sized {
     ) -> impl Future<Output = Result<Vec<u8>, Self::Error>> + Send;
 }
 
+/// One step of a GSSAPI security context exchange, as produced by a
+/// [`GssapiAuthenticator`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GssapiStep {
+    /// The context is not established yet; send `token` to the server and
+    /// wait for its next token.
+    Continue {
+        token: Vec<u8>,
+    },
+    /// The context is established. `token` is the final output token, if any.
+    /// `mic` is the MIC computed over the `mic_data` passed to
+    /// [`GssapiAuthenticator::gssapi_step`]. Implementations MUST produce a
+    /// MIC whenever the established context supports integrity protection
+    /// (RFC 4462, Section 3.5); `None` falls back to
+    /// `SSH_MSG_USERAUTH_GSSAPI_EXCHANGE_COMPLETE`.
+    Complete {
+        token: Option<Vec<u8>>,
+        mic: Option<Vec<u8>>,
+    },
+}
+
+/// A GSS-API error reported by the server during `gssapi-with-mic`
+/// authentication. Informational: the server follows up with an
+/// authentication failure.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GssapiError {
+    /// `SSH_MSG_USERAUTH_GSSAPI_ERROR` (RFC 4462, Section 3.8).
+    Status {
+        major_status: u32,
+        minor_status: u32,
+        message: String,
+    },
+    /// `SSH_MSG_USERAUTH_GSSAPI_ERRTOK` (RFC 4462, Section 3.10). May be
+    /// passed to `GSS_Init_sec_context()` to obtain mechanism-specific
+    /// error details.
+    ErrorToken(Vec<u8>),
+}
+
+#[cfg_attr(feature = "async-trait", async_trait::async_trait)]
+pub trait GssapiAuthenticator: Sized {
+    type Error: From<crate::SendError>;
+
+    /// Advance the GSSAPI security context.
+    ///
+    /// `selected_mechanism` is `Some` on the first step and carries the
+    /// DER-encoded OID of the mechanism the server selected; implementations
+    /// must verify it is one of the mechanisms they offered (RFC 4462,
+    /// Section 3.3). It is `None` on subsequent steps.
+    ///
+    /// `input_token` is the token received from the server, if any.
+    /// `mic_data` is the data to compute the final MIC over once the context
+    /// is established.
+    fn gssapi_step(
+        &mut self,
+        selected_mechanism: Option<Vec<u8>>,
+        input_token: Option<Vec<u8>>,
+        mic_data: Vec<u8>,
+    ) -> impl Future<Output = Result<GssapiStep, Self::Error>> + Send;
+
+    /// Called when the server reports a GSS-API error; the server follows up
+    /// with an authentication failure. The default implementation ignores
+    /// the error.
+    fn gssapi_error(&mut self, _error: GssapiError) -> impl Future<Output = ()> + Send {
+        async {}
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum AgentAuthError {
     #[error(transparent)]
@@ -174,7 +254,7 @@ pub enum AgentAuthError {
 }
 
 #[cfg_attr(feature = "async-trait", async_trait::async_trait)]
-impl<R: AsyncRead + AsyncWrite + Unpin + Send + 'static> Signer
+impl<R: AsyncRead + AsyncWrite + Unpin + Send> Signer
     for crate::keys::agent::client::AgentClient<R>
 {
     type Error = AgentAuthError;
@@ -221,18 +301,30 @@ pub enum Method {
     KeyboardInteractive {
         submethods: String,
     },
+    GssapiWithMic {
+        mechanism_oids: Vec<Vec<u8>>,
+    },
     // Hostbased,
 }
 
 #[doc(hidden)]
 #[derive(Debug)]
 pub struct AuthRequest {
+    initial_methods: MethodSet,
     pub methods: MethodSet,
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub partial_success: bool,
     pub current: Option<CurrentRequest>,
+    pub(crate) principal: Option<AuthPrincipal>,
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub rejection_count: usize,
+}
+
+#[doc(hidden)]
+#[derive(Debug)]
+pub(crate) struct AuthPrincipal {
+    user: String,
+    service: String,
 }
 
 #[doc(hidden)]
@@ -250,25 +342,54 @@ pub enum CurrentRequest {
         #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
         submethods: String,
     },
+    GssapiWithMic,
 }
 
 impl AuthRequest {
+    pub(crate) fn server(methods: MethodSet) -> Self {
+        Self {
+            initial_methods: methods.clone(),
+            methods,
+            partial_success: false,
+            current: None,
+            principal: None,
+            rejection_count: 0,
+        }
+    }
+
     pub(crate) fn new(method: &Method) -> Self {
-        match method {
-            Method::KeyboardInteractive { submethods } => Self {
-                methods: MethodSet::all(),
-                partial_success: false,
-                current: Some(CurrentRequest::KeyboardInteractive {
+        let current = match method {
+            Method::KeyboardInteractive { submethods } => {
+                Some(CurrentRequest::KeyboardInteractive {
                     submethods: submethods.to_string(),
-                }),
-                rejection_count: 0,
-            },
-            _ => Self {
-                methods: MethodSet::all(),
-                partial_success: false,
-                current: None,
-                rejection_count: 0,
-            },
+                })
+            }
+            Method::GssapiWithMic { .. } => Some(CurrentRequest::GssapiWithMic),
+            _ => None,
+        };
+        Self {
+            initial_methods: MethodSet::client_supported(),
+            methods: MethodSet::client_supported(),
+            partial_success: false,
+            current,
+            principal: None,
+            rejection_count: 0,
+        }
+    }
+
+    pub(crate) fn bind_or_reset_principal(&mut self, user: &str, service: &str) -> bool {
+        match &self.principal {
+            Some(bound) if bound.user == user && bound.service == service => false,
+            _ => {
+                self.principal = Some(AuthPrincipal {
+                    user: user.to_owned(),
+                    service: service.to_owned(),
+                });
+                self.methods = self.initial_methods.clone();
+                self.partial_success = false;
+                self.current = None;
+                true
+            }
         }
     }
 }

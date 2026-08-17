@@ -7,11 +7,11 @@ use sha2::Digest;
 use ssh_encoding::{Encode, Writer};
 
 use super::{
-    compute_keys, encode_mpint, KexAlgorithm, KexAlgorithmImplementor, KexType, SharedSecret,
+    KexAlgorithm, KexAlgorithmImplementor, KexType, SharedSecret, compute_keys, encode_mpint,
 };
 use crate::mac::{self};
 use crate::session::Exchange;
-use crate::{cipher, msg, CryptoVec};
+use crate::{CryptoVec, cipher, msg};
 
 pub struct Curve25519KexType {}
 
@@ -74,12 +74,19 @@ impl KexAlgorithmImplementor for Curve25519Kex {
             pubkey
         };
 
+        if client_pubkey.0 == [0u8; 32] {
+            debug!("client sent zero curve25519 pubkey");
+            return Err(crate::Error::Kex);
+        }
+
         let server_secret = Scalar::from_bytes_mod_order(rand::random::<[u8; 32]>());
         let server_pubkey = (ED25519_BASEPOINT_TABLE * &server_secret).to_montgomery();
 
         // fill exchange.
         exchange.server_ephemeral.clear();
-        exchange.server_ephemeral.extend_from_slice(&server_pubkey.0);
+        exchange
+            .server_ephemeral
+            .extend_from_slice(&server_pubkey.0);
         let shared = server_secret * client_pubkey;
         self.shared_secret = Some(shared);
         Ok(())
@@ -99,7 +106,7 @@ impl KexAlgorithmImplementor for Curve25519Kex {
         client_ephemeral.extend_from_slice(&client_pubkey.0);
 
         msg::KEX_ECDH_INIT.encode(writer)?;
-        client_pubkey.0.encode(writer)?;
+        (client_pubkey.0[..]).encode(writer)?;
 
         self.local_secret = Some(client_secret);
         Ok(())
@@ -107,8 +114,15 @@ impl KexAlgorithmImplementor for Curve25519Kex {
 
     fn compute_shared_secret(&mut self, remote_pubkey_: &[u8]) -> Result<(), crate::Error> {
         let local_secret = self.local_secret.take().ok_or(crate::Error::KexInit)?;
+        if remote_pubkey_.len() != 32 {
+            return Err(crate::Error::Kex);
+        }
         let mut remote_pubkey = MontgomeryPoint([0; 32]);
         remote_pubkey.0.clone_from_slice(remote_pubkey_);
+        if remote_pubkey.0 == [0u8; 32] {
+            debug!("server sent zero curve25519 pubkey");
+            return Err(crate::Error::Kex);
+        }
         let shared = local_secret * remote_pubkey;
         self.shared_secret = Some(shared);
         Ok(())
