@@ -1,153 +1,135 @@
 #![cfg(not(target_arch = "wasm32"))]
+use std::borrow::Cow;
+use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use russh::keys::PublicKeyOrCertificate;
 use russh::keys::ssh_key::certificate::{Builder, CertType};
 use russh::keys::ssh_key::{self, Algorithm, HashAlg, PrivateKey};
 use russh::*;
-use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::net::TcpListener;
+
+fn host_cert(
+    subject: &PrivateKey,
+    signing_ca: &PrivateKey,
+    valid_after: u64,
+    valid_before: u64,
+) -> russh::keys::Certificate {
+    let mut builder = Builder::new_with_random_nonce(
+        &mut rand::rng(),
+        subject.public_key().clone(),
+        valid_after,
+        valid_before,
+    )
+    .unwrap();
+    builder.serial(42).unwrap();
+    builder.key_id("test-server").unwrap();
+    builder.cert_type(CertType::Host).unwrap();
+    builder.valid_principal("localhost").unwrap();
+    builder.sign(signing_ca).unwrap()
+}
+
+/// Spin up a server with `config` and connect a client that trusts
+/// `trusted_ca` and advertises the certificate algorithm `cert_algo`.
+/// Returns the connect result.
+async fn serve_and_connect(
+    config: server::Config,
+    cert_algo: Algorithm,
+    trusted_ca: &PrivateKey,
+) -> Result<client::Handle<TestClient>, russh::Error> {
+    let config = Arc::new(config);
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    tokio::spawn(async move {
+        let (socket, _) = listener.accept().await.unwrap();
+        let _ = server::run_stream(config, socket, TestServer {})
+            .await
+            .unwrap();
+    });
+
+    let mut client_config = client::Config::default();
+    // Opt into host certificates: advertise the certificate algorithm.
+    client_config.preferred.host_key_certificates = Cow::Owned(vec![cert_algo]);
+    let client_config = Arc::new(client_config);
+
+    let client = TestClient {
+        ca_public_key: trusted_ca.public_key().clone(),
+    };
+
+    client::connect(client_config, addr, client).await
+}
+
+/// Spin up a server presenting a host certificate for `key_algo` signed by
+/// `signing_ca`, and connect a client that trusts `trusted_ca` and advertises
+/// the certificate algorithm `cert_algo`. Returns the connect result.
+async fn connect_with_cert(
+    key_algo: Algorithm,
+    cert_algo: Algorithm,
+    valid_after: u64,
+    valid_before: u64,
+    trusted_ca: &PrivateKey,
+    signing_ca: &PrivateKey,
+) -> Result<client::Handle<TestClient>, russh::Error> {
+    let server_key = PrivateKey::random(&mut rand::rng(), key_algo).unwrap();
+    let cert = host_cert(&server_key, signing_ca, valid_after, valid_before);
+
+    let mut config = server::Config::default();
+    config.keys.push(server_key);
+    config.certificates.push(cert);
+
+    serve_and_connect(config, cert_algo, trusted_ca).await
+}
 
 #[tokio::test]
 async fn test_server_certificate_auth() {
     let _ = env_logger::try_init();
 
-    // Generate CA key
     let ca_key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
-    let ca_public_key = ca_key.public_key();
-
-    // Generate Server key
-    let server_key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
-    let server_public_key = server_key.public_key();
-
-    //. Create Server Certificate signed by CA
-    let start = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs();
-    let end = start + 3600;
 
-    let mut builder =
-        Builder::new_with_random_nonce(&mut rand::rng(), server_public_key.clone(), start, end)
-            .unwrap();
-    builder.serial(42).unwrap();
-    builder.key_id("test-server").unwrap();
-    builder.cert_type(CertType::Host).unwrap();
-    builder.valid_principal("localhost").unwrap();
-
-    let cert = builder.sign(&ca_key).unwrap();
-
-    // Configure Server
-    let mut config = server::Config::default();
-    config.keys.push(server_key);
-    config.certificates.push(cert);
-    let config = Arc::new(config);
-
-    // Start Server
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-
-    let server_finished = Arc::new(Mutex::new(false));
-    let server_finished_clone = server_finished.clone();
-
-    tokio::spawn(async move {
-        let (socket, _) = listener.accept().await.unwrap();
-        server::run_stream(config, socket, TestServer {})
-            .await
-            .unwrap();
-        *server_finished_clone.lock().unwrap() = true;
-    });
-
-    // Configure Client
-    let mut client_config = client::Config::default();
-
-    // Set CA public key - this will automatically add cert algorithms to preferred
-    client_config.ca_public_keys = Some(vec![ca_public_key.clone()]);
-
-    let client_config = Arc::new(client_config);
-
-    let client = TestClient {
-        ca_public_key: ca_public_key.clone(),
-        verified: Arc::new(Mutex::new(false)),
-    };
-
-    // Connect Client
-    let session = client::connect(client_config, addr, client).await.unwrap();
+    let session = connect_with_cert(
+        Algorithm::Ed25519,
+        Algorithm::Ed25519,
+        now,
+        now + 3600,
+        &ca_key,
+        &ca_key,
+    )
+    .await
+    .unwrap();
 
     session
         .disconnect(Disconnect::ByApplication, "", "")
         .await
         .unwrap();
 }
+
 #[tokio::test]
 async fn test_server_wrong_ca_certificate_auth() {
     let _ = env_logger::try_init();
 
-    //Generate CA key
     let ca_key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
-    let ca_public_key = ca_key.public_key();
-
-    //Generate second CA key
     let evil_ca_key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
-
-    assert_ne!(evil_ca_key, ca_key);
-
-    // Generate Server key
-    let server_key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
-    let server_public_key = server_key.public_key();
-
-    // Create Server Certificate signed by CA
-    // Builder::new_with_random_nonce(rng, public_key, valid_after, valid_before)
-    let start = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs();
-    let end = start + 3600;
 
-    let mut builder =
-        Builder::new_with_random_nonce(&mut rand::rng(), server_public_key.clone(), start, end)
-            .unwrap();
-    builder.serial(42).unwrap();
-    builder.key_id("test-server").unwrap();
-    builder.cert_type(CertType::Host).unwrap();
-    builder.valid_principal("localhost").unwrap();
-
-    let cert = builder.sign(&evil_ca_key).unwrap();
-
-    // Configure Server
-    let mut config = server::Config::default();
-    config.keys.push(server_key);
-    config.certificates.push(cert);
-    let config = Arc::new(config);
-
-    // Start Server
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-
-    let server_finished = Arc::new(Mutex::new(false));
-    let server_finished_clone = server_finished.clone();
-
-    tokio::spawn(async move {
-        let (socket, _) = listener.accept().await.unwrap();
-        server::run_stream(config, socket, TestServer {})
-            .await
-            .unwrap();
-        *server_finished_clone.lock().unwrap() = true;
-    });
-
-    // Configure Client
-    let mut client_config = client::Config::default();
-
-    // Set CA public key - this will automatically add cert algorithms to preferred
-    client_config.ca_public_keys = Some(vec![ca_public_key.clone()]);
-
-    let client_config = Arc::new(client_config);
-
-    let client = TestClient {
-        ca_public_key: ca_public_key.clone(),
-        verified: Arc::new(Mutex::new(false)),
-    };
-
-    // Connect Client
-    if let Ok(session) = client::connect(client_config, addr, client).await {
+    if let Ok(session) = connect_with_cert(
+        Algorithm::Ed25519,
+        Algorithm::Ed25519,
+        now,
+        now + 3600,
+        &ca_key,
+        &evil_ca_key,
+    )
+    .await
+    {
         session
             .disconnect(Disconnect::ByApplication, "", "")
             .await
@@ -160,140 +142,76 @@ async fn test_server_wrong_ca_certificate_auth() {
 async fn test_server_rsa_sha2_512_certificate_auth() {
     let _ = env_logger::try_init();
 
-    // Generate CA key (RSA, SHA-512)
-    let ca_key = PrivateKey::random(
-        &mut rand::rng(),
-        Algorithm::Rsa {
-            hash: Some(HashAlg::Sha512),
-        },
-    )
-    .unwrap();
-    let ca_public_key = ca_key.public_key();
-
-    // Generate Server key (RSA, SHA-512)
-    let server_key = PrivateKey::random(
-        &mut rand::rng(),
-        Algorithm::Rsa {
-            hash: Some(HashAlg::Sha512),
-        },
-    )
-    .unwrap();
-    let server_public_key = server_key.public_key();
-
-    // Create Server Certificate signed by CA
-    let start = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    let rsa = Algorithm::Rsa {
+        hash: Some(HashAlg::Sha512),
+    };
+    let ca_key = PrivateKey::random(&mut rand::rng(), rsa.clone()).unwrap();
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs();
-    let end = start + 3600;
 
-    let mut builder =
-        Builder::new_with_random_nonce(&mut rand::rng(), server_public_key.clone(), start, end)
-            .unwrap();
-    builder.serial(42).unwrap();
-    builder.key_id("test-server-rsa").unwrap();
-    builder.cert_type(CertType::Host).unwrap();
-    builder.valid_principal("localhost").unwrap();
-
-    let cert = builder.sign(&ca_key).unwrap();
-
-    // Configure Server
-    let mut config = server::Config::default();
-    config.keys.push(server_key);
-    config.certificates.push(cert);
-    let config = Arc::new(config);
-
-    // Start Server
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-
-    let server_finished = Arc::new(Mutex::new(false));
-    let server_finished_clone = server_finished.clone();
-
-    tokio::spawn(async move {
-        let (socket, _) = listener.accept().await.unwrap();
-        server::run_stream(config, socket, TestServer {})
-            .await
-            .unwrap();
-        *server_finished_clone.lock().unwrap() = true;
-    });
-
-    // Configure Client
-    let mut client_config = client::Config::default();
-
-    // Set CA public key - this will automatically add cert algorithms to preferred
-    client_config.ca_public_keys = Some(vec![ca_public_key.clone()]);
-
-    let client_config = Arc::new(client_config);
-
-    let client = TestClient {
-        ca_public_key: ca_public_key.clone(),
-        verified: Arc::new(Mutex::new(false)),
-    };
-
-    // Connect Client — must succeed and certificate must validate
-    let session = client::connect(client_config, addr, client).await.unwrap();
+    let session = connect_with_cert(rsa.clone(), rsa, now, now + 3600, &ca_key, &ca_key)
+        .await
+        .unwrap();
 
     session
         .disconnect(Disconnect::ByApplication, "", "")
         .await
         .unwrap();
 }
+
 #[tokio::test]
 async fn test_server_infinite_validity_certificate_auth() {
     let _ = env_logger::try_init();
 
-    // Generate CA key
     let ca_key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
-    let ca_public_key = ca_key.public_key();
 
-    // Generate Server key
-    let server_key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
-    let server_public_key = server_key.public_key();
+    // A host cert with valid_after=0 and valid_before=u64::MAX (OpenSSH
+    // "always valid" sentinels per PROTOCOL.certkeys), matching what
+    // `ssh-keygen -s ca -h key.pub` generates without the -V flag.
+    let session = connect_with_cert(
+        Algorithm::Ed25519,
+        Algorithm::Ed25519,
+        0,
+        u64::MAX,
+        &ca_key,
+        &ca_key,
+    )
+    .await
+    .unwrap();
 
-    // Create host cert with valid_after=0 and valid_before=u64::MAX (OpenSSH "no expiry"
-    // sentinel per PROTOCOL.certkeys), matching what `ssh-keygen -s ca -h key.pub` generates
-    // without the -V flag.
-    let mut builder =
-        Builder::new_with_random_nonce(&mut rand::rng(), server_public_key.clone(), 0, u64::MAX)
-            .unwrap();
-    builder.serial(42).unwrap();
-    builder.key_id("test-server-infinite").unwrap();
-    builder.cert_type(CertType::Host).unwrap();
-    builder.valid_principal("localhost").unwrap();
+    session
+        .disconnect(Disconnect::ByApplication, "", "")
+        .await
+        .unwrap();
+}
 
-    let cert = builder.sign(&ca_key).unwrap();
+/// Regression test: a certificate whose private key is absent from
+/// `config.keys` must be skipped at presentation time (not only at
+/// advertisement time), so a later certificate that does have its key
+/// still works.
+#[tokio::test]
+async fn test_server_stale_certificate_is_skipped() {
+    let _ = env_logger::try_init();
 
-    // Configure Server
+    let ca_key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
+    let stale_key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
+    let good_key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
+
     let mut config = server::Config::default();
-    config.keys.push(server_key);
-    config.certificates.push(cert);
-    let config = Arc::new(config);
+    config
+        .certificates
+        .push(host_cert(&stale_key, &ca_key, 0, u64::MAX));
+    config
+        .certificates
+        .push(host_cert(&good_key, &ca_key, 0, u64::MAX));
+    config.keys.push(good_key);
 
-    // Start Server
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
+    let session = serve_and_connect(config, Algorithm::Ed25519, &ca_key)
+        .await
+        .unwrap();
 
-    tokio::spawn(async move {
-        let (socket, _) = listener.accept().await.unwrap();
-        server::run_stream(config, socket, TestServer {})
-            .await
-            .unwrap();
-    });
-
-    // Configure Client
-    let mut client_config = client::Config::default();
-    client_config.ca_public_keys = Some(vec![ca_public_key.clone()]);
-    let client_config = Arc::new(client_config);
-
-    let client = TestClient {
-        ca_public_key: ca_public_key.clone(),
-        verified: Arc::new(Mutex::new(false)),
-    };
-
-    // Must connect successfully — infinite-validity certs were previously rejected
-    // because valid_before=u64::MAX caused certificate parsing to fail.
-    let session = client::connect(client_config, addr, client).await.unwrap();
     session
         .disconnect(Disconnect::ByApplication, "", "")
         .await
@@ -316,7 +234,6 @@ impl server::Handler for TestServer {
 
 struct TestClient {
     ca_public_key: ssh_key::PublicKey,
-    verified: Arc<Mutex<bool>>,
 }
 
 impl client::Handler for TestClient {
@@ -324,49 +241,41 @@ impl client::Handler for TestClient {
 
     async fn check_server_key(
         &mut self,
-        server_public_key: &russh::cert::PublicKeyOrCertificate,
+        server_public_key: &PublicKeyOrCertificate,
     ) -> Result<bool, Self::Error> {
         match server_public_key {
-            russh::cert::PublicKeyOrCertificate::Certificate(cert) => {
-                // Perform the signature verification using your trusted CA public key.
-                // This checks if the certificate was genuinely signed by your CA.
+            PublicKeyOrCertificate::Certificate(cert) => {
+                // Check that the certificate was signed by the trusted CA.
                 let fingerprint = self.ca_public_key.fingerprint(HashAlg::Sha256);
                 if let Err(e) = cert.validate([&fingerprint]) {
-                    eprintln!("Host certificate signature verification failed: {}", e);
+                    eprintln!("Host certificate signature verification failed: {e}");
                     return Ok(false);
                 }
 
                 // Check the certificate's validity period.
-                let current_unix_time = SystemTime::now()
+                let now = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap()
                     .as_secs();
-
-                if current_unix_time < cert.valid_after() || current_unix_time > cert.valid_before()
-                {
+                if now < cert.valid_after() || now > cert.valid_before() {
                     eprintln!("Host certificate is outside its validity period.");
                     return Ok(false);
                 }
 
-                // (Optional but recommended) Check the certificate's valid principals.
+                // Check the certificate's valid principals.
                 let target_hostname = "localhost";
                 if !cert
                     .valid_principals()
                     .contains(&target_hostname.to_string())
                 {
-                    eprintln!(
-                        "Host certificate is not valid for principal: {}",
-                        target_hostname
-                    );
+                    eprintln!("Host certificate is not valid for principal: {target_hostname}");
                     return Ok(false);
                 }
 
-                // If all checks pass, the certificate is valid.
                 Ok(true)
             }
-            russh::cert::PublicKeyOrCertificate::PublicKey { .. } => {
-                // If the server presents a plain public key (not a certificate), decide
-                // whether to accept it. For certificate-only environments, you might reject.
+            PublicKeyOrCertificate::PublicKey { .. } => {
+                // Certificate-only environment: reject plain host keys.
                 eprintln!("Server presented a plain public key, not a certificate.");
                 Ok(false)
             }

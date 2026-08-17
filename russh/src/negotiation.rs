@@ -107,9 +107,10 @@ pub(crate) fn is_key_compatible_with_algo(key: &PrivateKey, algo: &Algorithm) ->
 
 /// Certificate algorithm names a server can honor: those of its certificates
 /// that come with a matching private key to sign the exchange with. An RSA
-/// certificate is offered under every RSA variant, since the hash picks the
-/// exchange-signature algorithm, not the certificate.
+/// certificate is offered under the RSA variants pref.key allows since the
+/// hash picks the exchange-signature algorithm, not the certificate.
 pub(crate) fn server_certificate_names(
+    pref: &Preferred,
     certificates: &[Certificate],
     keys: &[PrivateKey],
 ) -> Vec<String> {
@@ -123,15 +124,12 @@ pub(crate) fn server_certificate_names(
             continue;
         }
         let variants = match cert.algorithm() {
-            Algorithm::Rsa { .. } => vec![
-                Algorithm::Rsa {
-                    hash: Some(HashAlg::Sha512),
-                },
-                Algorithm::Rsa {
-                    hash: Some(HashAlg::Sha256),
-                },
-                Algorithm::Rsa { hash: None },
-            ],
+            Algorithm::Rsa { .. } => pref
+                .key
+                .iter()
+                .filter(|a| matches!(a, Algorithm::Rsa { .. }))
+                .cloned()
+                .collect(),
             a => vec![a],
         };
         for name in variants.iter().map(Algorithm::to_certificate_type) {
@@ -343,7 +341,9 @@ pub(crate) trait Select {
         // [`Names`].
         let certificate_names = if Self::is_server() {
             match (available_certificates, available_host_keys) {
-                (Some(certificates), Some(keys)) => server_certificate_names(certificates, keys),
+                (Some(certificates), Some(keys)) => {
+                    server_certificate_names(pref, certificates, keys)
+                }
                 _ => Vec::new(),
             }
         } else {
@@ -554,7 +554,7 @@ pub(crate) fn write_kex(
             // certificate algorithms ahead of plain keys so a client that
             // accepts both is served the certificate.
             NameList(
-                server_certificate_names(&server_config.certificates, &server_config.keys)
+                server_certificate_names(prefs, &server_config.certificates, &server_config.keys)
                     .into_iter()
                     .chain(
                         prefs
@@ -764,6 +764,7 @@ mod tests {
                 hash: Some(HashAlg::Sha512),
             }]),
             None,
+            None,
             &KexCause::Initial,
         )
         .unwrap();
@@ -853,5 +854,75 @@ mod tests {
         .unwrap();
         assert!(!names.host_key_is_certificate);
         assert!(names.ignore_guessed);
+    }
+
+    fn host_cert(subject: &PrivateKey, ca: &PrivateKey) -> Certificate {
+        let mut builder = ssh_key::certificate::Builder::new_with_random_nonce(
+            &mut rand::rng(),
+            subject.public_key(),
+            0,
+            u64::MAX,
+        )
+        .unwrap();
+        builder.key_id("test").unwrap();
+        builder
+            .cert_type(ssh_key::certificate::CertType::Host)
+            .unwrap();
+        builder.valid_principal("localhost").unwrap();
+        builder.sign(ca).unwrap()
+    }
+
+    /// A certificate without a matching private key can never be honored and
+    /// must not be advertised.
+    #[test]
+    fn certificate_without_matching_key_is_not_advertised() {
+        let ca = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
+        let stale_key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
+        let good_key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
+        let stale_cert = host_cert(&stale_key, &ca);
+        let good_cert = host_cert(&good_key, &ca);
+
+        let keys = vec![good_key];
+        assert_eq!(
+            server_certificate_names(&Preferred::DEFAULT, &[stale_cert], &keys),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            server_certificate_names(&Preferred::DEFAULT, &[good_cert], &keys),
+            vec![ED25519_CERT.to_string()]
+        );
+    }
+
+    /// The RSA cert variants a server advertises follow `pref.key`, so the
+    /// preference list stays the policy knob for e.g. banning SHA-1.
+    #[test]
+    fn rsa_certificate_variants_follow_preferences() {
+        let ca = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
+        let rsa_key =
+            PrivateKey::random(&mut rand::rng(), Algorithm::Rsa { hash: None }).unwrap();
+        let cert = host_cert(&rsa_key, &ca);
+        let keys = vec![rsa_key];
+
+        // Default preferences allow all three variants, in preference order.
+        assert_eq!(
+            server_certificate_names(&Preferred::DEFAULT, std::slice::from_ref(&cert), &keys),
+            vec![
+                "rsa-sha2-512-cert-v01@openssh.com".to_string(),
+                "rsa-sha2-256-cert-v01@openssh.com".to_string(),
+                "ssh-rsa-cert-v01@openssh.com".to_string(),
+            ]
+        );
+
+        // Preferences without `ssh-rsa` must not advertise its cert variant.
+        let no_sha1 = Preferred {
+            key: Cow::Owned(vec![Algorithm::Rsa {
+                hash: Some(HashAlg::Sha512),
+            }]),
+            ..Preferred::DEFAULT
+        };
+        assert_eq!(
+            server_certificate_names(&no_sha1, &[cert], &keys),
+            vec!["rsa-sha2-512-cert-v01@openssh.com".to_string()]
+        );
     }
 }
