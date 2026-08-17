@@ -3,6 +3,7 @@ use std::{net::SocketAddr, sync::Arc, time::Duration};
 use bytes::Bytes;
 
 use rand::Rng;
+use russh::keys::PublicKeyOrCertificate;
 use russh::keys::key::PrivateKeyWithHashAlg;
 use russh::{
     Channel,
@@ -167,7 +168,7 @@ impl russh::client::Handler for Client {
 
     async fn check_server_key(
         &mut self,
-        _key: &russh::keys::PublicKey,
+        _key: &PublicKeyOrCertificate,
     ) -> Result<bool, Self::Error> {
         Ok(true)
     }
