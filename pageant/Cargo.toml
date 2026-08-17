@@ -45,4 +45,5 @@ namedpipes = [
     "dep:windows-strings",
     "windows/Win32_Security_Authentication_Identity",
     "windows/Win32_Security_Cryptography",
+    "windows/Win32_System_WindowsProgramming",
 ]
