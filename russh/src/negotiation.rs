@@ -106,9 +106,10 @@ pub(crate) fn is_key_compatible_with_algo(key: &PrivateKey, algo: &Algorithm) ->
 }
 
 /// Certificate algorithm names a server can honor: those of its certificates
-/// that come with a matching private key to sign the exchange with. An RSA
-/// certificate is offered under the RSA variants pref.key allows since the
-/// hash picks the exchange-signature algorithm, not the certificate.
+/// that come with a matching private key to sign the exchange with, gated by
+/// `pref.key` so the preference list stays the policy knob for certificates
+/// too. An RSA certificate is offered under every RSA variant pref.key allows
+/// since the hash picks the exchange-signature algorithm, not the certificate.
 pub(crate) fn server_certificate_names(
     pref: &Preferred,
     certificates: &[Certificate],
@@ -123,15 +124,15 @@ pub(crate) fn server_certificate_names(
             debug!("no host key matching certificate {:?}", cert.key_id());
             continue;
         }
-        let variants = match cert.algorithm() {
-            Algorithm::Rsa { .. } => pref
-                .key
-                .iter()
-                .filter(|a| matches!(a, Algorithm::Rsa { .. }))
-                .cloned()
-                .collect(),
-            a => vec![a],
-        };
+        let variants: Vec<Algorithm> = pref
+            .key
+            .iter()
+            .filter(|a| match (&cert.algorithm(), a) {
+                (Algorithm::Rsa { .. }, Algorithm::Rsa { .. }) => true,
+                (c, a) => c == *a,
+            })
+            .cloned()
+            .collect();
         for name in variants.iter().map(Algorithm::to_certificate_type) {
             if !names.contains(&name) {
                 names.push(name);
@@ -889,6 +890,31 @@ mod tests {
         );
         assert_eq!(
             server_certificate_names(&Preferred::DEFAULT, &[good_cert], &keys),
+            vec![ED25519_CERT.to_string()]
+        );
+    }
+
+    /// A certificate whose algorithm is excluded from `pref.key` must not be
+    /// advertised: the preference list gates certificates like plain keys.
+    #[test]
+    fn certificate_for_banned_algorithm_is_not_advertised() {
+        let ca = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
+        let key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
+        let cert = host_cert(&key, &ca);
+        let keys = vec![key];
+
+        let no_ed25519 = Preferred {
+            key: Cow::Owned(vec![Algorithm::Rsa {
+                hash: Some(HashAlg::Sha512),
+            }]),
+            ..Preferred::DEFAULT
+        };
+        assert_eq!(
+            server_certificate_names(&no_ed25519, std::slice::from_ref(&cert), &keys),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            server_certificate_names(&Preferred::DEFAULT, &[cert], &keys),
             vec![ED25519_CERT.to_string()]
         );
     }
