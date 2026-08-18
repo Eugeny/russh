@@ -1405,6 +1405,11 @@ impl Session {
                         map_err!(ensure_end(r))?;
 
                         if let Some(chan) = self.channels.get(&channel_num) {
+                            // Only the first `i` entries were decoded from the
+                            // request; the rest of `modes` is padding and must
+                            // not be passed on as if the client had sent it.
+                            #[allow(clippy::indexing_slicing)] // `i <= modes.len()` checked above
+                            let terminal_modes = modes[..i].to_vec();
                             let _ = chan
                                 .send(ChannelMsg::RequestPty {
                                     want_reply: true,
@@ -1413,7 +1418,7 @@ impl Session {
                                     row_height,
                                     pix_width,
                                     pix_height,
-                                    terminal_modes: modes.into(),
+                                    terminal_modes,
                                 })
                                 .await;
                         }
