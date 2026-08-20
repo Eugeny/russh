@@ -15,7 +15,7 @@ This is a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Éti
 > ✨ = added in Russh
 
 * [More panic safety](https://github.com/warp-tech/russh#safety) ✨
-* async traits ✨
+* async traits
 * `direct-tcpip` (local port forwarding)
 * `forward-tcpip` (remote port forwarding) ✨
 * `direct-streamlocal` (local UNIX socket forwarding, client only) ✨
@@ -23,8 +23,8 @@ This is a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Éti
 * Ciphers:
   * `chacha20-poly1305@openssh.com`
   * `aes128-gcm@openssh.com` ✨
-  * `aes256-gcm@openssh.com` ✨
-  * `aes256-ctr` ✨
+  * `aes256-gcm@openssh.com`
+  * `aes256-ctr`
   * `aes192-ctr` ✨
   * `aes128-ctr` ✨
   * `aes256-cbc` ✨
@@ -32,6 +32,7 @@ This is a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Éti
   * `aes128-cbc` ✨
   * `3des-cbc` ✨
 * Key exchanges:
+  * `mlkem768x25519-sha256`
   * `curve25519-sha256@libssh.org`
   * `diffie-hellman-group-sha1` (GEX) ✨
   * `diffie-hellman-group1-sha1` ✨
@@ -42,9 +43,10 @@ This is a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Éti
   * `ecdh-sha2-nistp256` ✨
   * `ecdh-sha2-nistp384` ✨
   * `ecdh-sha2-nistp521` ✨
+  * OpenSSH strict key exchange support
 * MACs:
   * `hmac-sha1` ✨
-  * `hmac-sha2-256` ✨
+  * `hmac-sha2-256`
   * `hmac-sha2-512` ✨
   * `hmac-sha1-etm@openssh.com` ✨
   * `hmac-sha2-256-etm@openssh.com` ✨
@@ -115,7 +117,7 @@ This is a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Éti
 * [Sandhole](https://github.com/EpicEric/sandhole) - Expose HTTP/SSH/TCP services through SSH port forwarding. A reverse proxy that just works with an OpenSSH client.
   * Uses `russh::server` for reverse forwarding connections, local forwarding tunnels, and the `ratatui` based admin interface.
 * [Motor OS](https://github.com/moturus/motor-os) -  A new Rust-based operating system for VMs.
-  * Uses `russh::server` as the base for its own [SSH Server](https://github.com/moturus/motor-os/tree/main/src/bin/russhd). 
+  * Uses `russh::server` as the base for its own [SSH Server](https://github.com/moturus/motor-os/tree/main/src/bin/russhd).
 * [Cubic VM](https://github.com/cubic-vm/cubic) - A lightweight command-line manager for virtual machines.
   * Uses `russh::client` and `russh_sftp::client` to access the virtual machine instances.
 * [ferrissh](https://crates.io/crates/ferrissh) - An async SSH CLI scraper library for network device automation in Rust.
@@ -123,7 +125,7 @@ This is a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Éti
 * [Yazi](https://github.com/sxyazi/yazi) - Blazing fast terminal file manager written in Rust, based on async I/O.
   * Uses `russh::client` to implement an async SFTP provider for remote file management.
 * [GitArena](https://github.com/mellowagain/gitarena) - Software development platform with built-in vcs, issue tracking and code review.
-  * Uses `russh::server` to allow Git operations over SSH. 
+  * Uses `russh::server` to allow Git operations over SSH.
 * [Calagopus](https://github.com/calagopus/wings) - Fast, Efficient and Scalable Game hosting - built for everyone.
   * Uses `russh::server` for efficiently implementing SSH shells and SFTP file management.
 * [Oryxis](https://github.com/wilsonglasser/oryxis) - Rust-native SSH client with an encrypted vault, P2P sync and an embedded terminal.
