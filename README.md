@@ -55,8 +55,8 @@ This is a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Éti
   * `ssh-ed25519`
   * `rsa-sha2-256`
   * `rsa-sha2-512`
-  * `ssh-rsa` ✨
-  * `ecdsa-sha2-nistp256` ✨
+  * `ssh-rsa`
+  * `ecdsa-sha2-nistp256`
   * `ecdsa-sha2-nistp384` ✨
   * `ecdsa-sha2-nistp521` ✨
   * OpenSSH certificates ✨
