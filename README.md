@@ -12,7 +12,7 @@ Examples: [simple client](russh/examples/client_exec_simple.rs), [interactive PT
 
 This is a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Étienne Meunier.
 
-> ✨ = added in Russh
+> ✨ = added in Russh independently. Thrussh added some of these when necessary, but we have a policy of adding more algorithms. The trade-off is completeness vs complexity/security, and we choose completeness.
 
 * [More panic safety](https://github.com/warp-tech/russh#safety) ✨
 * async traits ✨
