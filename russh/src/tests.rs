@@ -839,6 +839,12 @@ pub(crate) mod raw_no_crypto {
         }
 
         pub(crate) async fn connect_without_kex() -> Self {
+            Self::connect_without_kex_with_config(no_crypto_server_config()).await
+        }
+
+        pub(crate) async fn connect_without_kex_with_config(
+            config: Arc<server::Config>,
+        ) -> Self {
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             let addr = listener.local_addr().unwrap();
             let events = Arc::new(Mutex::new(Vec::new()));
@@ -846,7 +852,7 @@ pub(crate) mod raw_no_crypto {
             let server_task = tokio::spawn(async move {
                 let (socket, _) = listener.accept().await.unwrap();
                 let running = server::run_stream(
-                    no_crypto_server_config(),
+                    config,
                     socket,
                     MalformedInputServer {
                         events: server_events,
@@ -929,6 +935,67 @@ pub(crate) mod raw_no_crypto {
                 _ => ServerSignal::Closed { events },
             }
         }
+    }
+
+    pub(crate) const MSG_IGNORE: u8 = 2;
+
+    fn strict_kex_server_config() -> Arc<server::Config> {
+        let mut config = server::Config::default();
+        config.inactivity_timeout = None;
+        config
+            .keys
+            .push(PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap());
+        Arc::new(config)
+    }
+
+    /// KEXINIT advertising algorithms the default server config accepts, so
+    /// that negotiation succeeds and the server waits for KEX_ECDH_INIT.
+    fn real_kexinit_payload(kex_names: &[&str]) -> Vec<u8> {
+        let mut payload = Vec::new();
+        payload.push(MSG_KEXINIT);
+        payload.extend_from_slice(&[0; 16]);
+        encode_name_list(&mut payload, kex_names);
+        encode_name_list(&mut payload, &["ssh-ed25519"]);
+        encode_name_list(&mut payload, &["aes256-ctr"]);
+        encode_name_list(&mut payload, &["aes256-ctr"]);
+        encode_name_list(&mut payload, &["hmac-sha2-256"]);
+        encode_name_list(&mut payload, &["hmac-sha2-256"]);
+        encode_name_list(&mut payload, &["none"]);
+        encode_name_list(&mut payload, &["none"]);
+        encode_name_list(&mut payload, &[]);
+        encode_name_list(&mut payload, &[]);
+        payload.push(0);
+        push_u32(&mut payload, 0);
+        payload
+    }
+
+    async fn ignore_during_initial_kex(kex_names: &[&str]) -> ServerSignal {
+        let mut session = RawSession::connect_without_kex_with_config(strict_kex_server_config())
+            .await;
+        session
+            .send_packet(&real_kexinit_payload(kex_names))
+            .await
+            .unwrap();
+        session.send_packet(&[MSG_IGNORE]).await.unwrap();
+        session.result().await
+    }
+
+    /// Strict kex forbids any non-KEX message during the initial exchange.
+    #[tokio::test]
+    async fn ignore_during_initial_strict_kex_is_rejected() {
+        assert!(matches!(
+            ignore_during_initial_kex(&["curve25519-sha256", "kex-strict-c-v00@openssh.com"]).await,
+            ServerSignal::ProtocolError { .. }
+        ));
+    }
+
+    /// ... and without it, SSH_MSG_IGNORE is still legal at any time.
+    #[tokio::test]
+    async fn ignore_during_initial_kex_is_allowed_without_strict_kex() {
+        assert!(matches!(
+            ignore_during_initial_kex(&["curve25519-sha256"]).await,
+            ServerSignal::Survived { .. }
+        ));
     }
 
     fn no_crypto_server_config() -> Arc<server::Config> {
