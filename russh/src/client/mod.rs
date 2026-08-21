@@ -1771,7 +1771,11 @@ async fn reply<H: Handler>(
             pkt.seqn.0,
             pkt.buffer.len()
         );
-        if session.common.strict_kex && session.common.encrypted.is_none() {
+        let strict_kex = match session.kex {
+            SessionKexState::InProgress(ref kex) => kex.strict_kex(),
+            _ => session.common.strict_kex,
+        };
+        if strict_kex && session.common.encrypted.is_none() {
             let seqno = pkt.seqn.0 - 1; // was incremented after read()
             validate_server_msg_strict_kex(*message_type, seqno as usize)?;
         }

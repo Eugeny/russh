@@ -88,6 +88,17 @@ impl ClientKex {
         }
     }
 
+    /// Whether strict kex was negotiated, as soon as the peer's KEXINIT has
+    /// been read (i.e. before the exchange completes).
+    pub fn strict_kex(&self) -> bool {
+        match self.state {
+            ClientKexState::Created => false,
+            ClientKexState::WaitingForGexReply { ref names, .. }
+            | ClientKexState::WaitingForDhReply { ref names, .. } => names.strict_kex(),
+            ClientKexState::WaitingForNewKeys { ref newkeys, .. } => newkeys.names.strict_kex(),
+        }
+    }
+
     pub fn kexinit(&mut self, output: &mut PacketWriter) -> Result<(), Error> {
         self.exchange.client_kex_init =
             negotiation::write_kex(&self.config.preferred, output, None)?;

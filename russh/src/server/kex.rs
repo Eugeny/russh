@@ -83,6 +83,15 @@ impl ServerKex {
         }
     }
 
+    pub fn strict_kex(&self) -> bool {
+        match self.state {
+            ServerKexState::Created => false,
+            ServerKexState::WaitingForGexRequest { ref names, .. }
+            | ServerKexState::WaitingForDhInit { ref names, .. } => names.strict_kex(),
+            ServerKexState::WaitingForNewKeys { ref newkeys } => newkeys.names.strict_kex(),
+        }
+    }
+
     pub fn kexinit(&mut self, output: &mut PacketWriter) -> Result<(), Error> {
         self.exchange.server_kex_init =
             negotiation::write_kex(&self.config.preferred, output, Some(self.config.as_ref()))?;
