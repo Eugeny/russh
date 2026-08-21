@@ -683,6 +683,104 @@ mod channels {
         )
         .await;
     }
+
+    /// What a client sends in a pty-req is what the application on the server
+    /// side must see: exactly those modes, with no padding behind them.
+    #[tokio::test]
+    async fn test_pty_req_modes_are_delivered_unpadded() {
+        let modes = vec![(Pty::VINTR, 3), (Pty::VQUIT, 28)];
+        assert_eq!(send_pty_req(modes.clone()).await, modes);
+    }
+
+    /// A mode list padded with TTY_OP_END entries -- the shape an application
+    /// proxying a pty-req ends up holding -- must still produce a well formed
+    /// request. The encoder skips those entries, so the length it declares for
+    /// the modes string must not count them, or the receiver reads the rest of
+    /// the packet as terminal modes and rejects it.
+    #[tokio::test]
+    async fn test_pty_req_with_padded_modes_is_well_formed() {
+        let mut padded = vec![(Pty::VINTR, 3)];
+        padded.resize(130, (Pty::TTY_OP_END, 0));
+        assert_eq!(send_pty_req(padded).await, vec![(Pty::VINTR, 3)]);
+    }
+
+    /// Send one pty-req and return the modes the server side received.
+    async fn send_pty_req(modes: Vec<(Pty, u32)>) -> Vec<(Pty, u32)> {
+        struct Client {}
+
+        impl client::Handler for Client {
+            type Error = crate::Error;
+
+            async fn check_server_key(
+                &mut self,
+                _server_public_key: &PublicKeyOrCertificate,
+            ) -> Result<bool, Self::Error> {
+                Ok(true)
+            }
+        }
+
+        struct ServerHandle {
+            seen: tokio::sync::mpsc::UnboundedSender<Vec<(Pty, u32)>>,
+        }
+
+        impl server::Handler for ServerHandle {
+            type Error = crate::Error;
+
+            async fn auth_publickey(
+                &mut self,
+                _: &str,
+                _: &crate::keys::ssh_key::PublicKey,
+            ) -> Result<server::Auth, Self::Error> {
+                Ok(server::Auth::Accept)
+            }
+
+            async fn channel_open_session(
+                &mut self,
+                mut channel: Channel<server::Msg>,
+                reply: server::ChannelOpenHandle,
+                session: &mut Session,
+            ) -> Result<(), Self::Error> {
+                reply.accept().await;
+
+                let seen = self.seen.clone();
+                let handle = session.handle();
+                let id = channel.id();
+                tokio::spawn(async move {
+                    while let Some(msg) = channel.wait().await {
+                        if let ChannelMsg::RequestPty { terminal_modes, .. } = msg {
+                            let _ = seen.send(terminal_modes);
+                            // Answer, so the client knows we are done looking.
+                            let _ = handle.channel_success(id).await;
+                            break;
+                        }
+                    }
+                });
+                Ok(())
+            }
+        }
+
+        let (seen, mut received) = tokio::sync::mpsc::unbounded_channel();
+        test_session(
+            Client {},
+            ServerHandle { seen },
+            move |client| async move {
+                let mut channel = client.channel_open_session().await.unwrap();
+                channel
+                    .request_pty(true, "xterm", 80, 24, 0, 0, &modes)
+                    .await
+                    .unwrap();
+                match channel.wait().await {
+                    Some(ChannelMsg::Success) => (),
+                    other => panic!("pty request was not accepted: {other:?}"),
+                }
+                client
+            },
+            |server| async move { server },
+        )
+        .await;
+
+        received.try_recv().expect("server never saw the pty request")
+    }
 }
 
 mod gex {
