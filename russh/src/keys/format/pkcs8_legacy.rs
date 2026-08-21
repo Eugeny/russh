@@ -217,7 +217,8 @@ fn asn1_read_aes256cbc(
     reader: &mut yasna::BERReaderSeq,
 ) -> Result<Result<Encryption, Error>, yasna::ASN1Error> {
     let iv = reader.next().read_bytes()?;
-    let mut i = [0; 16];
-    i.clone_from_slice(&iv);
+    let Ok(i) = <[u8; 16]>::try_from(&iv[..]) else {
+        return Ok(Err(Error::InvalidParameters));
+    };
     Ok(Ok(Encryption::Aes256Cbc(i)))
 }
