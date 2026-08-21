@@ -9,6 +9,7 @@ use futures::future::Future;
 use futures::stream::{Stream, StreamExt};
 use ssh_encoding::{Decode, Encode, Reader};
 use ssh_key::PrivateKey;
+use subtle::ConstantTimeEq;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::time::sleep;
 use {std, tokio};
@@ -247,7 +248,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
     fn unlock<R: Reader>(&self, r: &mut R) -> Result<bool, Error> {
         let password = Bytes::decode(r)?;
         let mut lock = self.lock.0.write().or(Err(Error::AgentFailure))?;
-        if lock[..] == password {
+        if bool::from(lock[..].ct_eq(&password)) {
             lock.clear();
             Ok(true)
         } else {
