@@ -236,6 +236,77 @@ mod tests {
             assert_eq!(out, payload.as_slice(), "payload of {len} bytes came back wrong");
         }
     }
+
+    /// Deterministic bytes with no redundancy for deflate to exploit, so the
+    /// packet comes back out larger than it went in.
+    fn incompressible(seed: u64, len: usize) -> Vec<u8> {
+        let mut state = seed
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        (0..len)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                (state >> 24) as u8
+            })
+            .collect()
+    }
+
+    #[test]
+    fn compressed_packets_larger_than_the_reserve_round_trip() {
+        // Deflate grows incompressible input rather than shrinking it, so a
+        // large enough packet needs more output than the reserve holds.
+        for len in [1024usize, 32768, 32769, 40000, 65536, 131072, 262144] {
+            let mut comp = Compress::None;
+            let mut decomp = Decompress::None;
+            Compression::Zlib.init_compress(&mut comp);
+            Compression::Zlib.init_decompress(&mut decomp);
+
+            let payload = incompressible(len as u64, len);
+            let mut cbuf = Vec::new();
+            let compressed = comp.compress(&payload, &mut cbuf).unwrap().to_vec();
+            let mut dbuf = Vec::new();
+            let out = decomp.decompress(&compressed, &mut dbuf).unwrap();
+            assert!(
+                out == payload.as_slice(),
+                "payload of {len} bytes came back as {} bytes",
+                out.len()
+            );
+        }
+    }
+
+    #[test]
+    fn compress_into_round_trips_oversized_packets_after_a_prefix() {
+        // The packet writer compresses into a buffer that already holds the
+        // packet prefix, so the payload lands partway into the output.
+        const PREFIX: &[u8] = b"packet prefix";
+
+        let mut comp = Compress::None;
+        let mut decomp = Decompress::None;
+        Compression::Zlib.init_compress(&mut comp);
+        Compression::Zlib.init_decompress(&mut decomp);
+
+        for packet in 0..4u64 {
+            let payload = incompressible(packet, 65536);
+            let mut buf = PREFIX.to_vec();
+            let n = comp
+                .compress_into(&payload, &mut buf, PREFIX.len())
+                .unwrap();
+
+            assert_eq!(&buf[..PREFIX.len()], PREFIX, "prefix was clobbered");
+            assert_eq!(buf.len(), PREFIX.len() + n, "output length disagrees");
+
+            let mut dbuf = Vec::new();
+            let out = decomp.decompress(&buf[PREFIX.len()..], &mut dbuf).unwrap();
+            assert!(
+                out == payload.as_slice(),
+                "packet {packet} came back as {} of {} bytes",
+                out.len(),
+                payload.len()
+            );
+        }
+    }
 }
 
 #[cfg(feature = "flate2")]
@@ -249,31 +320,12 @@ impl Compress {
         input: &'a [u8],
         output: &'a mut Vec<u8>,
     ) -> Result<&'a [u8], crate::Error> {
-        match *self {
-            Compress::None => Ok(input),
-            Compress::Zlib(ref mut z) => {
-                output.clear();
-                let n_in = z.total_in() as usize;
-                let n_out = z.total_out() as usize;
-                output.resize(input.len() + 10, 0);
-                let flush = flate2::FlushCompress::Partial;
-                loop {
-                    let n_in_ = z.total_in() as usize - n_in;
-                    let n_out_ = z.total_out() as usize - n_out;
-                    #[allow(clippy::indexing_slicing)] // length checked
-                    let c = z.compress(&input[n_in_..], &mut output[n_out_..], flush)?;
-                    match c {
-                        flate2::Status::BufError => {
-                            output.resize(output.len() * 2, 0);
-                        }
-                        _ => break,
-                    }
-                }
-                let n_out_ = z.total_out() as usize - n_out;
-                #[allow(clippy::indexing_slicing)] // length checked
-                Ok(&output[..n_out_])
-            }
+        if let Compress::None = *self {
+            return Ok(input);
         }
+        let n_out_ = self.compress_into(input, output, 0)?;
+        #[allow(clippy::indexing_slicing)] // length checked
+        Ok(&output[..n_out_])
     }
 
     pub fn compress_into(
@@ -300,9 +352,17 @@ impl Compress {
                     let n_out_ = z.total_out() as usize - n_out;
                     #[allow(clippy::indexing_slicing)] // length checked
                     let c = z.compress(&input[n_in_..], &mut output[start_len + n_out_..], flush)?;
+
+                    // deflate leaves room to spare only once it has emitted
+                    // everything it holds, so a buffer filled to the brim may
+                    // still have more to come.
+                    let room = output.len().saturating_sub(start_len);
+                    if z.total_out() as usize - n_out < room {
+                        break;
+                    }
                     match c {
-                        flate2::Status::BufError => {
-                            let growth = output.len().saturating_sub(start_len).max(1);
+                        flate2::Status::Ok | flate2::Status::BufError => {
+                            let growth = room.max(1);
                             output.resize(output.len() + growth, 0);
                         }
                         _ => break,
