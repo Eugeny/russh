@@ -390,28 +390,23 @@ pub(crate) trait Select {
 
         let need_mac = CIPHERS.get(&cipher).map(|x| x.needs_mac()).unwrap_or(false);
 
-        let client_mac =
-            match Self::select(&pref.mac, &NameList::decode(&mut r)?, AlgorithmKind::Mac) {
-                Ok((_, m)) => m,
-                Err(e) => {
-                    if need_mac {
-                        return Err(e);
-                    } else {
-                        mac::NONE
-                    }
-                }
-            };
-        let server_mac =
-            match Self::select(&pref.mac, &NameList::decode(&mut r)?, AlgorithmKind::Mac) {
-                Ok((_, m)) => m,
-                Err(e) => {
-                    if need_mac {
-                        return Err(e);
-                    } else {
-                        mac::NONE
-                    }
-                }
-            };
+        // Select a MAC, refusing `none` whenever the negotiated cipher needs an
+        // integrity MAC — regardless of whether `none` was a common choice or
+        // only the no-common-MAC fallback. Pairing e.g. aes*-ctr/cbc with
+        // mac=none yields a tag_len() of 0 and a panic on the read path.
+        let select_mac = |list: &[String]| match Self::select(&pref.mac, list, AlgorithmKind::Mac) {
+            Ok((_, m)) if need_mac && m == mac::NONE => Err(Error::NoCommonAlgo {
+                kind: AlgorithmKind::Mac,
+                ours: pref.mac.iter().map(|x| x.as_ref().to_owned()).collect(),
+                theirs: list.to_vec(),
+            }),
+            Ok((_, m)) => Ok(m),
+            Err(_) if !need_mac => Ok(mac::NONE),
+            Err(e) => Err(e),
+        };
+
+        let client_mac = select_mac(&NameList::decode(&mut r)?)?;
+        let server_mac = select_mac(&NameList::decode(&mut r)?)?;
 
         // Compression
 
@@ -855,6 +850,58 @@ mod tests {
         .unwrap();
         assert!(!names.host_key_is_certificate);
         assert!(names.ignore_guessed);
+    }
+
+    /// A cipher that requires a separate integrity MAC (aes*-ctr/cbc, 3des)
+    /// must never negotiate `mac=none`, even when both peers list `none` as a
+    /// common choice: the resulting tag_len()==0 pairing panics the read path.
+    #[test]
+    fn needs_mac_cipher_rejects_negotiated_none_mac() {
+        let pref = Preferred::DEFAULT;
+        let mut buf = vec![msg::KEXINIT];
+        buf.extend_from_slice(&[0u8; 16]); // cookie
+        let names = |v: Vec<String>| NameList(v);
+        names(pref.kex.iter().map(|x| x.as_ref().to_string()).collect())
+            .encode(&mut buf)
+            .unwrap();
+        names(pref.key.iter().map(ToString::to_string).collect())
+            .encode(&mut buf)
+            .unwrap();
+        // aes256-ctr, which needs_mac().
+        for _ in 0..2 {
+            names(vec!["aes256-ctr".to_string()])
+                .encode(&mut buf)
+                .unwrap();
+        }
+        // Only `none` offered for MAC.
+        for _ in 0..2 {
+            names(vec!["none".to_string()]).encode(&mut buf).unwrap();
+        }
+        for _ in 0..2 {
+            names(
+                pref.compression
+                    .iter()
+                    .map(|x| x.as_ref().to_string())
+                    .collect(),
+            )
+            .encode(&mut buf)
+            .unwrap();
+        }
+        Vec::<String>::new().encode(&mut buf).unwrap(); // lang c2s
+        Vec::<String>::new().encode(&mut buf).unwrap(); // lang s2c
+        0u8.encode(&mut buf).unwrap(); // follows
+        0u32.encode(&mut buf).unwrap();
+
+        // A `none`-only MAC list must ship `none` in local prefs to be common.
+        let with_none_mac = Preferred {
+            cipher: Cow::Borrowed(&[cipher::AES_256_CTR]),
+            mac: Cow::Borrowed(&[mac::NONE]),
+            ..Preferred::DEFAULT
+        };
+        assert!(
+            Server::read_kex(&buf, &with_none_mac, None, None, &KexCause::Initial).is_err(),
+            "aes-ctr + mac=none must be refused"
+        );
     }
 
     fn host_cert(subject: &PrivateKey, ca: &PrivateKey) -> Certificate {

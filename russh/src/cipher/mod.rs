@@ -314,6 +314,14 @@ pub(crate) async fn read<R: AsyncRead + Unpin>(
                 return Err(Error::PacketSize(len));
             }
 
+            // A valid packet_length can never be shorter than the block we
+            // already read to probe it; a smaller value would shrink the
+            // buffer below `l` below and panic on the `buffer.buffer[l..]`
+            // slice. Reject it as a protocol error instead.
+            if len + PACKET_LENGTH_LEN < cipher.packet_length_to_read_for_block_length() {
+                return Err(Error::PacketSize(len));
+            }
+
             buffer.len = len + cipher.tag_len();
             trace!("reading, clear len = {:?}", buffer.len);
         }
