@@ -477,6 +477,9 @@ impl Session {
                 debug!("channel_close");
                 let channel_num = map_err!(ChannelId::decode(&mut r))?;
                 map_err!(ensure_end(&r))?;
+                if !self.common.is_established_channel(channel_num) {
+                    return Ok(());
+                }
                 if let Some(ref mut enc) = self.common.encrypted {
                     // The CHANNEL_CLOSE message must be sent to the server at this point or the session
                     // will not be released.
@@ -495,6 +498,9 @@ impl Session {
                 debug!("channel_eof");
                 let channel_num = map_err!(ChannelId::decode(&mut r))?;
                 map_err!(ensure_end(&r))?;
+                if !self.common.is_established_channel(channel_num) {
+                    return Ok(());
+                }
                 if let Some(chan) = self.channels.get(&channel_num) {
                     let _ = chan.send(ChannelMsg::Eof).await;
                 }
@@ -508,8 +514,16 @@ impl Session {
                 let descr = map_err!(String::decode(&mut r))?;
                 let language = map_err!(String::decode(&mut r))?;
                 map_err!(ensure_end(&r))?;
-                if let Some(ref mut enc) = self.common.encrypted {
-                    enc.channels.remove(&channel_num);
+                // Unlike other channel-scoped messages this arrives for a
+                // channel the client opened but that is not yet confirmed, so
+                // gate on existence in the encrypted table rather than
+                // `is_established_channel` (which requires `confirmed`).
+                let known = match self.common.encrypted {
+                    Some(ref mut enc) => enc.channels.remove(&channel_num).is_some(),
+                    None => false,
+                };
+                if !known {
+                    return Ok(());
                 }
 
                 if let Some(sender) = self.channels.remove(&channel_num) {
@@ -529,6 +543,9 @@ impl Session {
                 let channel_num = map_err!(ChannelId::decode(&mut r))?;
                 let data = map_err!(Bytes::decode(&mut r))?;
                 map_err!(ensure_end(&r))?;
+                if !self.common.is_established_channel(channel_num) {
+                    return Ok(());
+                }
                 let target = self.common.config.window_size;
                 if let Some(ref mut enc) = self.common.encrypted {
                     if enc.adjust_window_size(channel_num, &data, target)? {
@@ -552,6 +569,9 @@ impl Session {
                 let extended_code = map_err!(u32::decode(&mut r))?;
                 let data = map_err!(Bytes::decode(&mut r))?;
                 map_err!(ensure_end(&r))?;
+                if !self.common.is_established_channel(channel_num) {
+                    return Ok(());
+                }
                 let target = self.common.config.window_size;
                 if let Some(ref mut enc) = self.common.encrypted {
                     if enc.adjust_window_size(channel_num, &data, target)? {
@@ -580,6 +600,9 @@ impl Session {
                 let channel_num = map_err!(ChannelId::decode(&mut r))?;
                 let req = map_err!(String::decode(&mut r))?;
                 debug!("channel_request: {channel_num:?} {req:?}",);
+                if !self.common.is_established_channel(channel_num) {
+                    return Ok(());
+                }
                 match req.as_str() {
                     "xon-xoff" => {
                         map_err!(u8::decode(&mut r))?; // should be 0.
@@ -669,6 +692,9 @@ impl Session {
                 let channel_num = map_err!(ChannelId::decode(&mut r))?;
                 let amount = map_err!(u32::decode(&mut r))?;
                 map_err!(ensure_end(&r))?;
+                if !self.common.is_established_channel(channel_num) {
+                    return Ok(());
+                }
                 let mut new_size = 0;
                 debug!("channel_window_adjust amount: {amount:?}");
                 if let Some(ref mut enc) = self.common.encrypted {
@@ -735,6 +761,9 @@ impl Session {
             Some((&msg::CHANNEL_SUCCESS, mut r)) => {
                 let channel_num = map_err!(ChannelId::decode(&mut r))?;
                 map_err!(ensure_end(&r))?;
+                if !self.common.is_established_channel(channel_num) {
+                    return Ok(());
+                }
                 if let Some(chan) = self.channels.get(&channel_num) {
                     let _ = chan.send(ChannelMsg::Success).await;
                 }
@@ -743,6 +772,9 @@ impl Session {
             Some((&msg::CHANNEL_FAILURE, mut r)) => {
                 let channel_num = map_err!(ChannelId::decode(&mut r))?;
                 map_err!(ensure_end(&r))?;
+                if !self.common.is_established_channel(channel_num) {
+                    return Ok(());
+                }
                 if let Some(chan) = self.channels.get(&channel_num) {
                     let _ = chan.send(ChannelMsg::Failure).await;
                 }

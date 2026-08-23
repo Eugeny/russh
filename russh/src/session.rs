@@ -134,6 +134,20 @@ impl<C> CommonSession<C> {
             .is_some_and(Encrypted::has_any_pending_data)
     }
 
+    /// Channel-scoped messages (`CHANNEL_DATA`, `CHANNEL_EOF`, `CHANNEL_CLOSE`,
+    /// `CHANNEL_REQUEST`, ...) operate on an already-open channel. An
+    /// authenticated peer must not be able to drive channel callbacks
+    /// (`data`, `exit_status`, `channel_close`, ...) for a recipient id that
+    /// was never opened or whose local open is still waiting for peer
+    /// confirmation. The encrypted channel table is authoritative for the SSH
+    /// protocol state.
+    pub(crate) fn is_established_channel(&self, channel: ChannelId) -> bool {
+        self.encrypted
+            .as_ref()
+            .and_then(|enc| enc.channels.get(&channel))
+            .is_some_and(|channel| channel.confirmed)
+    }
+
     pub fn newkeys(&mut self, newkeys: NewKeys) {
         if let Some(ref mut enc) = self.encrypted {
             enc.exchange = Some(newkeys.exchange);

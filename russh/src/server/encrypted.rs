@@ -1167,22 +1167,6 @@ async fn reply_userauth_info_response(
 }
 
 impl Session {
-    /// Channel-scoped messages (`CHANNEL_REQUEST`, `CHANNEL_DATA`,
-    /// `CHANNEL_EOF`, `CHANNEL_CLOSE`, ...) operate on an already-open channel.
-    /// An authenticated peer must not be able to drive channel callbacks
-    /// (`exec_request`, `data`, `channel_close`, ...) for a recipient id that
-    /// was never opened, whose open the application denied, or whose local open
-    /// is still waiting for peer confirmation. The encrypted channel table is
-    /// authoritative for the SSH protocol state; `self.channels` may already
-    /// contain local stream handles for unconfirmed server-initiated opens.
-    fn is_established_channel(&self, channel: ChannelId) -> bool {
-        self.common
-            .encrypted
-            .as_ref()
-            .and_then(|enc| enc.channels.get(&channel))
-            .is_some_and(|channel| channel.confirmed)
-    }
-
     async fn server_read_authenticated<H: Handler + Send, R: Reader>(
         &mut self,
         handler: &mut H,
@@ -1194,7 +1178,7 @@ impl Session {
             msg::CHANNEL_CLOSE => {
                 let channel_num = map_err!(ChannelId::decode(r))?;
                 map_err!(ensure_end(r))?;
-                if !self.is_established_channel(channel_num) {
+                if !self.common.is_established_channel(channel_num) {
                     return Ok(());
                 }
                 if let Some(ref mut enc) = self.common.encrypted {
@@ -1214,7 +1198,7 @@ impl Session {
             msg::CHANNEL_EOF => {
                 let channel_num = map_err!(ChannelId::decode(r))?;
                 map_err!(ensure_end(r))?;
-                if !self.is_established_channel(channel_num) {
+                if !self.common.is_established_channel(channel_num) {
                     return Ok(());
                 }
                 if let Some(chan) = self.channels.get(&channel_num) {
@@ -1225,7 +1209,7 @@ impl Session {
             }
             msg::CHANNEL_EXTENDED_DATA | msg::CHANNEL_DATA => {
                 let channel_num = map_err!(ChannelId::decode(r))?;
-                if !self.is_established_channel(channel_num) {
+                if !self.common.is_established_channel(channel_num) {
                     return Ok(());
                 }
 
@@ -1272,7 +1256,7 @@ impl Session {
                 let channel_num = map_err!(ChannelId::decode(r))?;
                 let amount = map_err!(u32::decode(r))?;
                 map_err!(ensure_end(r))?;
-                if !self.is_established_channel(channel_num) {
+                if !self.common.is_established_channel(channel_num) {
                     return Ok(());
                 }
                 let mut new_size = 0;
@@ -1349,7 +1333,7 @@ impl Session {
                         channel.wants_reply = wants_reply != 0;
                     }
                 }
-                if !self.is_established_channel(channel_num) {
+                if !self.common.is_established_channel(channel_num) {
                     // Request for a channel that was never opened (or whose open
                     // was denied): drop it without invoking any handler callback.
                     return Ok(());
