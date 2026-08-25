@@ -811,6 +811,9 @@ pub(crate) enum GlobalRequestResponse {
     /// request was for StreamLocalForward, sends true for success or false for failure
     StreamLocalForward(oneshot::Sender<bool>),
     CancelStreamLocalForward(oneshot::Sender<bool>),
+    /// request had a custom name; sends `Some` with the response-specific
+    /// payload on success or `None` on failure
+    Other(oneshot::Sender<Option<CryptoVec>>),
 }
 
 #[cfg(test)]

@@ -70,8 +70,8 @@ use crate::session::{CommonSession, EncryptedState, GlobalRequestResponse, NewKe
 use crate::ssh_read::SshRead;
 use crate::sshbuffer::{IncomingSshPacket, PacketWriter, SSHBuffer, SshId};
 use crate::{
-    ChannelId, ChannelOpenFailure, Disconnect, Error, Limits, MethodSet, Sig, auth, map_err, msg,
-    negotiation,
+    ChannelId, ChannelOpenFailure, CryptoVec, Disconnect, Error, Limits, MethodSet, Sig, auth,
+    map_err, msg, negotiation,
 };
 
 mod encrypted;
@@ -240,6 +240,13 @@ pub enum Msg {
     },
     NoMoreSessions {
         want_reply: bool,
+    },
+    /// Send a global request with a custom name to the remote
+    SendGlobalRequest {
+        name: String,
+        data: CryptoVec,
+        /// Provide a channel for the reply result to request a reply from the server
+        reply_channel: Option<oneshot::Sender<Option<CryptoVec>>>,
     },
 }
 
@@ -1056,6 +1063,47 @@ impl<H: Handler> Handle<H> {
             .await
             .map_err(|_| Error::SendError)
     }
+
+    /// Send a global request with a custom, non-standard name to the remote peer.
+    ///
+    /// `data` is the request-specific payload and is appended verbatim after the
+    /// request name and the want-reply flag (see RFC 4254 section 4). When
+    /// `want_reply` is true this waits for the peer's reply and returns its
+    /// response-specific data, which may be empty. When it is false it returns
+    /// `Ok(None)` without waiting for a reply.
+    pub async fn send_global_request<A: Into<String>>(
+        &self,
+        name: A,
+        data: &[u8],
+        want_reply: bool,
+    ) -> Result<Option<CryptoVec>, Error> {
+        let (reply_channel, reply_recv) = if want_reply {
+            let (send, recv) = oneshot::channel();
+            (Some(send), Some(recv))
+        } else {
+            (None, None)
+        };
+        self.sender
+            .send(Msg::SendGlobalRequest {
+                name: name.into(),
+                data: CryptoVec::from_slice(data),
+                reply_channel,
+            })
+            .await
+            .map_err(|_| Error::SendError)?;
+
+        match reply_recv {
+            Some(reply_recv) => match reply_recv.await {
+                Ok(Some(data)) => Ok(Some(data)),
+                Ok(None) => Err(Error::RequestDenied),
+                Err(e) => {
+                    error!("Unable to receive send_global_request result: {e:?}");
+                    Err(Error::Disconnect)
+                }
+            },
+            None => Ok(None),
+        }
+    }
 }
 
 impl<H: Handler> Future for Handle<H> {
@@ -1667,6 +1715,13 @@ impl Session {
             }
             Msg::NoMoreSessions { want_reply } => {
                 let _ = self.no_more_sessions(want_reply);
+            }
+            Msg::SendGlobalRequest {
+                name,
+                data,
+                reply_channel,
+            } => {
+                let _ = self.send_global_request(reply_channel, &name, &data);
             }
             Msg::ServerChannelOpenReply { pending, result } => {
                 self.finalize_server_channel_open_reply(pending, result)?;

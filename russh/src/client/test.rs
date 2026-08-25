@@ -164,4 +164,64 @@ mod tests {
             msg => panic!("Unexpected message {msg:?}"),
         }
     }
+
+    #[tokio::test]
+    async fn test_send_custom_global_request() {
+        let _ = env_logger::try_init();
+
+        let client_key = PrivateKey::random(&mut rng(), ssh_key::Algorithm::Ed25519).unwrap();
+
+        let mut config = server::Config::default();
+        config.auth_rejection_time = std::time::Duration::from_secs(1);
+        config.inactivity_timeout = None;
+        config
+            .keys
+            .push(PrivateKey::random(&mut rng(), ssh_key::Algorithm::Ed25519).unwrap());
+        let config = Arc::new(config);
+
+        let mut server = TestServer {
+            clients: Arc::new(Mutex::new(HashMap::new())),
+            id: 0,
+        };
+
+        let socket = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = socket.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            let (socket, _) = socket.accept().await.unwrap();
+            let server_handler = server.new_client(None);
+            server::run_stream(config, socket, server_handler)
+                .await
+                .unwrap();
+        });
+
+        let client_config = Arc::new(Config::default());
+        let mut session = connect(client_config, addr, Client {}).await.unwrap();
+
+        let auth_result = session
+            .authenticate_publickey(
+                std::env::var("USER").unwrap_or("user".to_string()),
+                PrivateKeyWithHashAlg::new(
+                    Arc::new(client_key),
+                    session.best_supported_rsa_hash().await.unwrap().flatten(),
+                ),
+            )
+            .await
+            .unwrap();
+        assert!(auth_result.success());
+
+        // The default server has no handler for this request name, so it replies
+        // with a failure, which surfaces as RequestDenied.
+        let denied = session
+            .send_global_request("custom-request@example.com", b"payload", true)
+            .await;
+        assert!(matches!(denied, Err(Error::RequestDenied)));
+
+        // Without a reply requested the call returns immediately.
+        let no_reply = session
+            .send_global_request("custom-request@example.com", b"payload", false)
+            .await
+            .unwrap();
+        assert!(no_reply.is_none());
+    }
 }

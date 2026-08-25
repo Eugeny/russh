@@ -30,8 +30,8 @@ use crate::keys::key::parse_public_key;
 use crate::parsing::{ChannelOpenConfirmation, ChannelType, OpenChannelMessage, ensure_end};
 use crate::session::{Encrypted, EncryptedState, GlobalRequestResponse};
 use crate::{
-    Channel, ChannelId, ChannelMsg, ChannelOpenFailure, ChannelParams, Error, MethodSet, Sig, auth,
-    map_err, msg,
+    Channel, ChannelId, ChannelMsg, ChannelOpenFailure, ChannelParams, CryptoVec, Error, MethodSet,
+    Sig, auth, map_err, msg,
 };
 
 impl Session {
@@ -962,6 +962,9 @@ impl Session {
                         map_err!(ensure_end(&r))?;
                         let _ = return_channel.send(true);
                     }
+                    Some(GlobalRequestResponse::Other(return_channel)) => {
+                        let _ = return_channel.send(Some(CryptoVec::from_slice(r)));
+                    }
                     None => {
                         error!("Received global request failure for unknown request!")
                     }
@@ -992,6 +995,9 @@ impl Session {
                     }
                     Some(GlobalRequestResponse::CancelStreamLocalForward(return_channel)) => {
                         let _ = return_channel.send(false);
+                    }
+                    Some(GlobalRequestResponse::Other(return_channel)) => {
+                        let _ = return_channel.send(None);
                     }
                     None => {
                         error!("Received global request failure for unknown request!")
