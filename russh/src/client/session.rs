@@ -4,7 +4,7 @@ use tokio::sync::oneshot;
 
 use crate::client::Session;
 use crate::session::EncryptedState;
-use crate::{map_err, msg, ChannelId, Disconnect, Pty, Sig};
+use crate::{map_err, msg, ChannelId, CryptoVec, Disconnect, Pty, Sig};
 
 impl Session {
     fn channel_open_generic<F>(
@@ -398,6 +398,34 @@ impl Session {
                 "cancel-streamlocal-forward@openssh.com".encode(&mut enc.write)?;
                 (want_reply as u8).encode(&mut enc.write)?;
                 socket_path.encode(&mut enc.write)?;
+            });
+        }
+        Ok(())
+    }
+
+    /// Sends a global request with a custom name to the server.
+    ///
+    /// `data` is appended verbatim after the request name and want-reply flag.
+    /// If `reply_channel` is not None, sets want_reply and returns the server's
+    /// response-specific data via the channel, [`Some`] on success or [`None`]
+    /// on failure.
+    pub fn send_global_request(
+        &mut self,
+        reply_channel: Option<oneshot::Sender<Option<CryptoVec>>>,
+        name: &str,
+        data: &[u8],
+    ) -> Result<(), crate::Error> {
+        if let Some(ref mut enc) = self.common.encrypted {
+            let want_reply = reply_channel.is_some();
+            if let Some(reply_channel) = reply_channel {
+                self.open_global_requests
+                    .push_back(crate::session::GlobalRequestResponse::Other(reply_channel));
+            }
+            push_packet!(enc.write, {
+                msg::GLOBAL_REQUEST.encode(&mut enc.write)?;
+                name.encode(&mut enc.write)?;
+                (want_reply as u8).encode(&mut enc.write)?;
+                enc.write.extend_from_slice(data);
             });
         }
         Ok(())
