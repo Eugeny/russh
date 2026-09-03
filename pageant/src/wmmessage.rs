@@ -157,7 +157,10 @@ impl MemoryMap {
         Ok(())
     }
 
-    fn read(&mut self, n: usize) -> Vec<u8> {
+    fn read(&mut self, n: usize) -> Result<Vec<u8>, Error> {
+        if self.pos.checked_add(n).is_none_or(|end| end > self.length) {
+            return Err(Error::Overflow);
+        }
         let out = vec![0; n];
         unsafe {
             std::ptr::copy_nonoverlapping(
@@ -167,7 +170,7 @@ impl MemoryMap {
             );
         }
         self.pos += n;
-        out
+        Ok(out)
     }
 }
 
@@ -225,13 +228,13 @@ pub fn query_pageant_direct(cookie: String, msg: &[u8]) -> Result<Vec<u8>, Error
     }
 
     map.seek(0);
-    let mut buf = map.read(4);
+    let mut buf = map.read(4)?;
     if buf.len() < 4 {
         return Err(Error::NoResponse);
     }
     #[allow(clippy::indexing_slicing)] // length checked
     let size = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]) as usize;
-    buf.extend(map.read(size));
+    buf.extend(map.read(size)?);
 
     Ok(buf)
 }
