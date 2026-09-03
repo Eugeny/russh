@@ -711,7 +711,11 @@ impl Encrypted {
                 let len = BigEndian::read_u32(&self.write[self.write_cursor..]) as usize;
                 #[allow(clippy::indexing_slicing)]
                 let to_write = &self.write[(self.write_cursor + 4)..(self.write_cursor + 4 + len)];
-                trace!("session_write_encrypted, buf = {to_write:?}");
+                trace!(
+                    "session_write_encrypted, msg type {:?}, len {}",
+                    to_write.first(),
+                    to_write.len()
+                );
 
                 writer.packet_raw(to_write)?;
                 self.write_cursor += 4 + len

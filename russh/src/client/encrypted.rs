@@ -40,13 +40,11 @@ impl Session {
         client: &mut H,
         pkt: &mut IncomingSshPacket,
     ) -> Result<(), H::Error> {
-        #[allow(clippy::indexing_slicing)] // length checked
-        {
-            trace!(
-                "client_read_encrypted, buf = {:?}",
-                &pkt.buffer[..pkt.buffer.len().min(20)]
-            );
-        }
+        trace!(
+            "client_read_encrypted, msg type {:?}, len {}",
+            pkt.buffer.first(),
+            pkt.buffer.len()
+        );
 
         self.process_packet(client, &pkt.buffer).await
     }
@@ -75,11 +73,9 @@ impl Session {
                                 map_err!(ensure_end(&r))?;
                                 *accepted = true;
                                 if let Some(ref meth) = self.common.auth_method {
-                                    let len = enc.write.len();
                                     let auth_request = AuthRequest::new(meth);
-                                    #[allow(clippy::indexing_slicing)] // length checked
                                     if enc.write_auth_request(&self.common.auth_user, meth)? {
-                                        debug!("enc: {:?}", &enc.write[len..]);
+                                        debug!("enc: auth request written");
                                         enc.state = EncryptedState::WaitingAuthRequest(auth_request)
                                     }
                                 } else {
@@ -102,6 +98,8 @@ impl Session {
                         Some((&msg::USERAUTH_SUCCESS, r)) => {
                             map_err!(ensure_end(&r))?;
                             debug!("userauth_success");
+                            // Drop the credential as soon as it is no longer needed.
+                            self.common.auth_method = None;
                             self.sender
                                 .send(Reply::AuthSuccess)
                                 .map_err(|_| crate::Error::SendError)?;
@@ -246,7 +244,7 @@ impl Session {
                                         &mut self.common.buffer,
                                     )?
                                 }
-                                Some(auth::Method::FuturePublicKey { key, hash_alg }) => {
+                                Some(auth::Method::FuturePublicKey { ref key, hash_alg }) => {
                                     debug!("public key");
                                     self.common.buffer.clear();
                                     let i = enc.client_make_to_sign(
@@ -262,7 +260,10 @@ impl Session {
                                     let buf = std::mem::take(&mut self.common.buffer);
 
                                     self.sender
-                                        .send(Reply::SignRequest { key, data: buf })
+                                        .send(Reply::SignRequest {
+                                            key: key.clone(),
+                                            data: buf,
+                                        })
                                         .map_err(|_| crate::Error::SendError)?;
                                     self.common.buffer = loop {
                                         match self.receiver.recv().await {
@@ -279,7 +280,7 @@ impl Session {
                                         })
                                     }
                                 }
-                                Some(auth::Method::FutureCertificate { cert, hash_alg }) => {
+                                Some(auth::Method::FutureCertificate { ref cert, hash_alg }) => {
                                     debug!("certificate");
                                     self.common.buffer.clear();
                                     let i = enc.client_make_to_sign(
@@ -293,7 +294,7 @@ impl Session {
 
                                     self.sender
                                         .send(Reply::SignRequestCert {
-                                            cert,
+                                            cert: cert.clone(),
                                             hash_alg,
                                             data: buf,
                                         })
