@@ -2,9 +2,9 @@ name: Semver check
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
 
 env:
   CARGO_TERM_COLOR: always
@@ -14,12 +14,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v2
+      - uses: actions/checkout@v2
 
-    - name: Build (no features enabled)
-      run: cargo build --verbose
+      - name: Build (no features enabled)
+        run: cargo build --verbose
 
-    - name: Check semver compatibility (russh)
-      uses: obi1kenobi/cargo-semver-checks-action@v2
-      with:
-        package: russh
+      - name: Check semver compatibility (russh)
+        uses: obi1kenobi/cargo-semver-checks-action@v2
+        with:
+          package: russh
