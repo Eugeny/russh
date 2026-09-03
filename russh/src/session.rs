@@ -811,6 +811,11 @@ pub(crate) enum GlobalRequestResponse {
     /// request was for StreamLocalForward, sends true for success or false for failure
     StreamLocalForward(oneshot::Sender<bool>),
     CancelStreamLocalForward(oneshot::Sender<bool>),
+    /// OpenSSH host-key ownership proof, including the original session ID.
+    HostKeysProve {
+        return_channel: oneshot::Sender<Option<crate::client::HostKeysProof>>,
+        session_id: Vec<u8>,
+    },
 }
 
 #[cfg(test)]

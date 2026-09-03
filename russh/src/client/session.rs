@@ -442,6 +442,36 @@ impl Session {
         Ok(())
     }
 
+    /// Request proof that the server owns each announced OpenSSH host key.
+    pub fn request_hostkeys_prove(
+        &mut self,
+        return_channel: oneshot::Sender<Option<super::HostKeysProof>>,
+        keys: &[crate::keys::PublicKey],
+    ) -> Result<(), crate::Error> {
+        let key_blobs = keys
+            .iter()
+            .map(crate::keys::PublicKey::to_bytes)
+            .collect::<Result<Vec<_>, _>>()?;
+        let Some(ref mut enc) = self.common.encrypted else {
+            let _ = return_channel.send(None);
+            return Ok(());
+        };
+        self.open_global_requests
+            .push_back(crate::session::GlobalRequestResponse::HostKeysProve {
+                return_channel,
+                session_id: enc.session_id.to_vec(),
+            });
+        push_packet!(enc.write, {
+            msg::GLOBAL_REQUEST.encode(&mut enc.write)?;
+            "hostkeys-prove-00@openssh.com".encode(&mut enc.write)?;
+            1u8.encode(&mut enc.write)?;
+            for key_blob in &key_blobs {
+                key_blob.as_slice().encode(&mut enc.write)?;
+            }
+        });
+        Ok(())
+    }
+
     pub fn data(&mut self, channel: ChannelId, data: impl Into<bytes::Bytes>) -> Result<(), crate::Error> {
         let is_rekeying = self.kex.active();
         let common = &mut self.common;

@@ -962,6 +962,26 @@ impl Session {
                         map_err!(ensure_end(&r))?;
                         let _ = return_channel.send(true);
                     }
+                    Some(GlobalRequestResponse::HostKeysProve {
+                        return_channel,
+                        session_id,
+                    }) => {
+                        let mut signatures = Vec::new();
+                        while !r.is_empty() {
+                            match Bytes::decode(&mut r) {
+                                Ok(signature) => signatures.push(signature.to_vec()),
+                                Err(error) => {
+                                    error!("Error parsing hostkeys proof: {error:?}");
+                                    let _ = return_channel.send(None);
+                                    return Ok(());
+                                }
+                            }
+                        }
+                        let _ = return_channel.send(Some(super::HostKeysProof {
+                            session_id,
+                            signatures,
+                        }));
+                    }
                     None => {
                         error!("Received global request failure for unknown request!")
                     }
@@ -992,6 +1012,9 @@ impl Session {
                     }
                     Some(GlobalRequestResponse::CancelStreamLocalForward(return_channel)) => {
                         let _ = return_channel.send(false);
+                    }
+                    Some(GlobalRequestResponse::HostKeysProve { return_channel, .. }) => {
+                        let _ = return_channel.send(None);
                     }
                     None => {
                         error!("Received global request failure for unknown request!")
