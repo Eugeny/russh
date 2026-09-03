@@ -1187,7 +1187,7 @@ async fn reply<H: Handler + Send>(
                             common.packet_writer.buffer().bytes = 0;
                             if let Some(enc) = common.encrypted.as_mut() {
                                 enc.last_rekey = Instant::now();
-                                enc.flush_all_pending_with_writer(&mut common.packet_writer)?;
+                                enc.flush_all_pending_with_writer(&mut common.packet_writer, false)?;
                             }
                         }
 

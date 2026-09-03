@@ -1738,9 +1738,13 @@ impl Session {
     /// buffer. This does *not* flush to the socket.
     fn flush(&mut self) -> Result<(), crate::Error> {
         if let Some(ref mut enc) = self.common.encrypted {
+            // Tearing down: get the queued packets (incl. DISCONNECT) out in
+            // order, kex or not.
+            let is_rekeying = self.kex.active() && !self.common.disconnected;
             if enc.flush(
                 &self.common.config.as_ref().limits,
                 &mut self.common.packet_writer,
+                is_rekeying,
             )? && !self.kex.active()
             {
                 self.begin_rekey()?;
@@ -1830,7 +1834,7 @@ async fn reply<H: Handler>(
                             common.packet_writer.buffer().bytes = 0;
                             if let Some(enc) = common.encrypted.as_mut() {
                                 enc.last_rekey = Instant::now();
-                                enc.flush_all_pending_with_writer(&mut common.packet_writer)?;
+                                enc.flush_all_pending_with_writer(&mut common.packet_writer, false)?;
                             }
                         }
 

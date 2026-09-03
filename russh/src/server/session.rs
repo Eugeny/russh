@@ -877,9 +877,13 @@ impl Session {
     /// Flush the session, i.e. encrypt the pending buffer.
     pub fn flush(&mut self) -> Result<(), Error> {
         if let Some(ref mut enc) = self.common.encrypted {
+            // Tearing down: get the queued packets (incl. DISCONNECT) out in
+            // order, kex or not.
+            let is_rekeying = self.kex.active() && !self.common.disconnected;
             if enc.flush(
                 &self.common.config.as_ref().limits,
                 &mut self.common.packet_writer,
+                is_rekeying,
             )? && self.kex == SessionKexState::Idle
             {
                 debug!("starting rekeying");

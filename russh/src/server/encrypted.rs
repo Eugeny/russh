@@ -1268,10 +1268,15 @@ impl Session {
                     new_size = channel.recipient_window_size.saturating_add(amount);
                     channel.recipient_window_size = new_size;
                 }
+                let is_rekeying = self.kex.active();
                 let common = &mut self.common;
                 if let Some(enc) = common.encrypted.as_mut() {
                     new_size -= enc
-                        .flush_pending_with_writer(&mut common.packet_writer, channel_num)?
+                        .flush_pending_with_writer(
+                            &mut common.packet_writer,
+                            channel_num,
+                            is_rekeying,
+                        )?
                         as u32;
                 }
                 if let Some(chan) = self.channels.get(&channel_num) {
