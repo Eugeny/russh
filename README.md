@@ -130,6 +130,8 @@ This is a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Éti
   * Uses `russh::server` for efficiently implementing SSH shells and SFTP file management.
 * [Oryxis](https://github.com/wilsonglasser/oryxis) - Rust-native SSH client with an encrypted vault, P2P sync and an embedded terminal.
   * Uses `russh::client` for connections, jump hosts, SOCKS/HTTP/command proxies and SFTP.
+* [react-native-ssh](https://github.com/osuki-dev/react-native-ssh) - Native SSH client for React Native and Expo.
+  * Uses `russh::client` as the SSH transport implementation behind Nitro Modules bindings.
 
 ## Contributors ✨
 
