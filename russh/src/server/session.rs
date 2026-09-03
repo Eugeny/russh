@@ -1482,6 +1482,7 @@ impl Session {
 
     pub(crate) fn begin_rekey(&mut self) -> Result<(), Error> {
         debug!("beginning re-key");
+        self.pending_len = 0;
         let mut kex = ServerKex::new(
             self.common.config.clone(),
             &self.common.remote_sshid,

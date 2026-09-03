@@ -1096,6 +1096,67 @@ pub(crate) mod raw_no_crypto {
         ));
     }
 
+    /// Server that did its initial exchange with the `none` kex but can also
+    /// negotiate curve25519, so a rekey offering only curve25519 parks it
+    /// waiting for a KEX_ECDH_INIT the raw client never sends.
+    fn stalled_rekey_server_config() -> Arc<server::Config> {
+        let mut config = server::Config::default();
+        config.inactivity_timeout = None;
+        config.preferred = Preferred {
+            kex: Cow::Owned(vec![kex::NONE, kex::CURVE25519]),
+            ..no_crypto_preferred()
+        };
+        config
+            .keys
+            .push(PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap());
+        Arc::new(config)
+    }
+
+    /// Authenticate, then start a rekey and leave it hanging.
+    async fn stalled_rekey_session() -> RawSession {
+        let mut session =
+            RawSession::connect_without_kex_with_config(stalled_rekey_server_config()).await;
+        raw_client_no_crypto_kex(&mut session.stream).await.unwrap();
+        session.auth_none().await.unwrap();
+        session
+            .send_packet(&kexinit_payload("curve25519-sha256"))
+            .await
+            .unwrap();
+        let server_kexinit = read_packet(&mut session.stream).await.unwrap();
+        assert_eq!(server_kexinit.first(), Some(&MSG_KEXINIT));
+        session
+    }
+
+    /// A peer that starts a rekey and then sends channel traffic instead of
+    /// finishing it is cut off before the request is looked at. RFC 4253 s7.1
+    /// forbids non-transport messages after KEXINIT, and honouring them let a
+    /// peer that never completes the rekey grow the reply queue without bound.
+    #[tokio::test]
+    async fn channel_open_after_peer_kexinit_during_rekey_is_rejected() {
+        let mut session = stalled_rekey_session().await;
+        let mut open = vec![MSG_CHANNEL_OPEN];
+        open.extend(channel_open_payload(b"session"));
+        session.send_packet(&open).await.unwrap();
+
+        let signal = session.result().await;
+        match signal {
+            ServerSignal::ProtocolError { events } => assert_eq!(events, ["auth_none"]),
+            other => panic!("expected a protocol error, got {other:?}"),
+        }
+    }
+
+    /// ...while transport-layer messages are still fine mid-rekey, which also
+    /// shows the stalled server above is parked, not broken.
+    #[tokio::test]
+    async fn ignore_after_peer_kexinit_during_rekey_is_allowed() {
+        let mut session = stalled_rekey_session().await;
+        session.send_packet(&[MSG_IGNORE]).await.unwrap();
+        assert!(matches!(
+            session.result().await,
+            ServerSignal::Survived { .. }
+        ));
+    }
+
     fn no_crypto_server_config() -> Arc<server::Config> {
         let mut config = server::Config::default();
         config.inactivity_timeout = None;
@@ -1596,5 +1657,144 @@ mod future_certificate {
         server_join.abort();
         agent.kill().await.unwrap();
         agent.wait().await.unwrap();
+    }
+}
+
+mod rekey_under_load {
+    use std::sync::Arc;
+
+    use keys::PrivateKeyWithHashAlg;
+    use ssh_key::PrivateKey;
+
+    use super::*;
+    use crate::cert::PublicKeyOrCertificate;
+    use crate::server::Session;
+
+    struct Client;
+
+    impl client::Handler for Client {
+        type Error = crate::Error;
+
+        async fn check_server_key(
+            &mut self,
+            _server_public_key: &PublicKeyOrCertificate,
+        ) -> Result<bool, Self::Error> {
+            Ok(true)
+        }
+    }
+
+    struct Echo;
+
+    impl server::Handler for Echo {
+        type Error = crate::Error;
+
+        async fn auth_publickey(
+            &mut self,
+            _: &str,
+            _: &crate::keys::ssh_key::PublicKey,
+        ) -> Result<server::Auth, Self::Error> {
+            Ok(server::Auth::Accept)
+        }
+
+        async fn channel_open_session(
+            &mut self,
+            _channel: Channel<server::Msg>,
+            reply: server::ChannelOpenHandle,
+            _session: &mut Session,
+        ) -> Result<(), Self::Error> {
+            reply.accept().await;
+            Ok(())
+        }
+
+        async fn data(
+            &mut self,
+            channel: ChannelId,
+            data: &[u8],
+            session: &mut Session,
+        ) -> Result<(), Self::Error> {
+            session.data(channel, data.to_vec())?;
+            Ok(())
+        }
+    }
+
+    /// Server-initiated rekeys while the client streams data: the client's
+    /// in-flight traffic (legal until it has seen the server's KEXINIT) is
+    /// handled across each rekey with nothing lost or misordered.
+    #[tokio::test]
+    async fn client_traffic_in_flight_during_server_rekey_survives() {
+        let _ = env_logger::try_init();
+
+        let mut config = server::Config::default();
+        config.inactivity_timeout = None;
+        // Rekey every 64 KiB written: ~16 rekeys over the transfer below.
+        config.limits = Limits::new(64 * 1024, 1 << 30, std::time::Duration::from_secs(3600));
+        config
+            .keys
+            .push(PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap());
+        let config = Arc::new(config);
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            server::run_stream(config, socket, Echo).await.unwrap().await
+        });
+
+        let key = PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap();
+        let mut session = client::connect(Arc::new(client::Config::default()), addr, Client)
+            .await
+            .unwrap();
+        assert!(
+            session
+                .authenticate_publickey("user", PrivateKeyWithHashAlg::new(Arc::new(key), None))
+                .await
+                .unwrap()
+                .success()
+        );
+        let mut channel = session.channel_open_session().await.unwrap();
+
+        const CHUNK: usize = 4096;
+        const CHUNKS: usize = 256;
+        let payload: Vec<u8> = (0..CHUNK * CHUNKS).map(|i| (i % 251) as u8).collect();
+
+        let writer = {
+            let payload = payload.clone();
+            let writer = channel.make_writer();
+            tokio::spawn(async move {
+                use tokio::io::AsyncWriteExt;
+                let mut writer = writer;
+                for chunk in payload.chunks(CHUNK) {
+                    writer.write_all(chunk).await.unwrap();
+                }
+                writer.flush().await.unwrap();
+            })
+        };
+
+        let mut server = server;
+        let mut echoed = Vec::with_capacity(payload.len());
+        let received = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+            while echoed.len() < payload.len() {
+                match channel.wait().await {
+                    Some(ChannelMsg::Data { data }) => echoed.extend_from_slice(&data),
+                    Some(ChannelMsg::WindowAdjusted { .. }) => {}
+                    other => {
+                        let server = tokio::time::timeout(
+                            std::time::Duration::from_secs(1),
+                            &mut server,
+                        )
+                        .await;
+                        panic!(
+                            "unexpected channel message: {other:?} after {} bytes; server: {server:?}",
+                            echoed.len()
+                        );
+                    }
+                }
+            }
+        })
+        .await;
+        assert!(received.is_ok(), "echo did not complete");
+        writer.await.unwrap();
+
+        assert!(echoed == payload, "echoed data differs from what was sent");
     }
 }

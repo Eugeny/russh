@@ -83,6 +83,11 @@ impl ServerKex {
         }
     }
 
+    /// `Created` is "our KEXINIT is out, the peer's has not arrived".
+    pub fn peer_kexinit_received(&self) -> bool {
+        !matches!(self.state, ServerKexState::Created)
+    }
+
     pub fn strict_kex(&self) -> bool {
         match self.state {
             ServerKexState::Created => false,
