@@ -218,6 +218,45 @@ mod tests {
     }
 
     #[test]
+    fn incompressible_packets_round_trip() {
+        // Incompressible input makes deflate output land on or past the
+        // `input.len() + 10` reservation, so the compress loops must keep
+        // going when the buffer comes back exactly full, on both `compress`
+        // and `compress_into`.
+        let mut comp = Compress::None;
+        let mut decomp = Decompress::None;
+        Compression::Zlib.init_compress(&mut comp);
+        Compression::Zlib.init_decompress(&mut decomp);
+
+        let mut seed = 0x9e37_79b9_7f4a_7c15_u64;
+        for &len in &[1usize, 100, 4096, 32768, 65536, 200_000, 262_144] {
+            let payload: Vec<u8> = (0..len)
+                .map(|_| {
+                    seed ^= seed << 13;
+                    seed ^= seed >> 7;
+                    seed ^= seed << 17;
+                    (seed >> 24) as u8
+                })
+                .collect();
+
+            let mut cbuf = Vec::new();
+            let compressed = comp.compress(&payload, &mut cbuf).unwrap().to_vec();
+            let mut dbuf = Vec::new();
+            let out = decomp.decompress(&compressed, &mut dbuf).unwrap();
+            assert_eq!(out, payload.as_slice(), "compress: {len} bytes");
+
+            let prefix = b"hdr".len();
+            let mut cbuf = b"hdr".to_vec();
+            let n = comp.compress_into(&payload, &mut cbuf, prefix).unwrap();
+            assert_eq!(&cbuf[..prefix], b"hdr");
+            assert_eq!(cbuf.len(), prefix + n);
+            let mut dbuf = Vec::new();
+            let out = decomp.decompress(&cbuf[prefix..], &mut dbuf).unwrap();
+            assert_eq!(out, payload.as_slice(), "compress_into: {len} bytes");
+        }
+    }
+
+    #[test]
     fn partial_flush_packets_round_trip() {
         // Real SSH packets are partial flushes on one continuous stream, not
         // a finished stream, and routinely decompress to more than twice
@@ -262,8 +301,15 @@ impl Compress {
                     let n_out_ = z.total_out() as usize - n_out;
                     #[allow(clippy::indexing_slicing)] // length checked
                     let c = z.compress(&input[n_in_..], &mut output[n_out_..], flush)?;
+                    // A flush is complete only once deflate leaves room in
+                    // the output buffer; `Ok` with the buffer exactly full
+                    // means more is pending.
+                    let output_full = z.total_out() as usize - n_out == output.len();
                     match c {
                         flate2::Status::BufError => {
+                            output.resize(output.len() * 2, 0);
+                        }
+                        _ if output_full => {
                             output.resize(output.len() * 2, 0);
                         }
                         _ => break,
@@ -300,8 +346,14 @@ impl Compress {
                     let n_out_ = z.total_out() as usize - n_out;
                     #[allow(clippy::indexing_slicing)] // length checked
                     let c = z.compress(&input[n_in_..], &mut output[start_len + n_out_..], flush)?;
+                    // See `compress`: full buffer on `Ok` means more pending.
+                    let output_full = start_len + (z.total_out() as usize - n_out) == output.len();
                     match c {
                         flate2::Status::BufError => {
+                            let growth = output.len().saturating_sub(start_len).max(1);
+                            output.resize(output.len() + growth, 0);
+                        }
+                        _ if output_full => {
                             let growth = output.len().saturating_sub(start_len).max(1);
                             output.resize(output.len() + growth, 0);
                         }
@@ -341,11 +393,16 @@ impl Decompress {
                     let d = z.decompress(&input[n_in_..], &mut output[n_out_..], flush);
                     match d? {
                         flate2::Status::Ok | flate2::Status::BufError => {
-                            let consumed_all_input =
-                                z.total_in() as usize - n_in == input.len();
+                            let made_progress = z.total_in() as usize - n_in != n_in_
+                                || z.total_out() as usize - n_out != n_out_;
                             let output_full = z.total_out() as usize - n_out == output.len();
 
-                            if !output_full && consumed_all_input {
+                            // Keep going while calls still produce output: the
+                            // inflater can return `BufError` with all input
+                            // consumed and decoded bytes still buffered inside
+                            // it (miniz_oxide >= 0.9 does exactly that). Only
+                            // a call that moves nothing means we're done.
+                            if !output_full && !made_progress {
                                 break;
                             }
 
