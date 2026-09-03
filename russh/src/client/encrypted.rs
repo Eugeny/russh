@@ -1262,6 +1262,7 @@ mod tests {
         algorithm
     }
 
+    #[cfg(feature = "rsa")]
     #[test]
     fn rsa_future_certificate_hash_is_encoded_in_probe_and_signed_requests() {
         let certificate = rsa_user_certificate();
