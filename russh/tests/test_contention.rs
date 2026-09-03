@@ -1,22 +1,18 @@
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::net::SocketAddr;
+use std::sync::Arc;
+use std::time::Duration;
 
 use bytes::Bytes;
-
 use rand::Rng;
+use russh::Channel;
+use russh::client::{self, ChannelOpenHandle, Msg, Session};
 use russh::keys::PublicKeyOrCertificate;
 use russh::keys::key::PrivateKeyWithHashAlg;
-use russh::{
-    Channel,
-    client::{self, ChannelOpenHandle, Msg, Session},
-    server::{self, Auth, Server as _},
-};
+use russh::server::{self, Auth, Server as _};
 use ssh_key::PrivateKey;
-use tokio::io::{AsyncWriteExt, copy_bidirectional};
-use tokio::{
-    io::AsyncReadExt,
-    net::{TcpListener, TcpStream},
-    time::timeout,
-};
+use tokio::io::{AsyncReadExt, AsyncWriteExt, copy_bidirectional};
+use tokio::net::{TcpListener, TcpStream};
+use tokio::time::timeout;
 
 static DATA_SIZE: usize = 20_000_000;
 static THREADS: usize = 16;
