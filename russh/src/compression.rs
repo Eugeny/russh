@@ -87,8 +87,7 @@ impl Compression {
                 if let Compress::Zlib(ref mut c) = *comp {
                     c.reset()
                 } else {
-                    *comp =
-                        Compress::Zlib(flate2::Compress::new(flate2::Compression::fast(), true))
+                    *comp = Compress::Zlib(flate2::Compress::new(flate2::Compression::fast(), true))
                 }
             }
             Compression::None => {
@@ -201,7 +200,9 @@ mod tests {
         let mut decompressor = Decompress::Zlib(flate2::Decompress::new(true));
         let mut output = Vec::new();
 
-        let err = decompressor.decompress(&compressed, &mut output).unwrap_err();
+        let err = decompressor
+            .decompress(&compressed, &mut output)
+            .unwrap_err();
         assert!(
             matches!(err, crate::Error::PacketSize(len) if len > MAXIMUM_DECOMPRESSED_PACKET_LEN)
         );
@@ -272,7 +273,11 @@ mod tests {
             let compressed = comp.compress(&payload, &mut cbuf).unwrap().to_vec();
             let mut dbuf = Vec::new();
             let out = decomp.decompress(&compressed, &mut dbuf).unwrap();
-            assert_eq!(out, payload.as_slice(), "payload of {len} bytes came back wrong");
+            assert_eq!(
+                out,
+                payload.as_slice(),
+                "payload of {len} bytes came back wrong"
+            );
         }
     }
 }
@@ -288,38 +293,12 @@ impl Compress {
         input: &'a [u8],
         output: &'a mut Vec<u8>,
     ) -> Result<&'a [u8], crate::Error> {
-        match *self {
-            Compress::None => Ok(input),
-            Compress::Zlib(ref mut z) => {
-                output.clear();
-                let n_in = z.total_in() as usize;
-                let n_out = z.total_out() as usize;
-                output.resize(input.len() + 10, 0);
-                let flush = flate2::FlushCompress::Partial;
-                loop {
-                    let n_in_ = z.total_in() as usize - n_in;
-                    let n_out_ = z.total_out() as usize - n_out;
-                    #[allow(clippy::indexing_slicing)] // length checked
-                    let c = z.compress(&input[n_in_..], &mut output[n_out_..], flush)?;
-                    // A flush is complete only once deflate leaves room in
-                    // the output buffer; `Ok` with the buffer exactly full
-                    // means more is pending.
-                    let output_full = z.total_out() as usize - n_out == output.len();
-                    match c {
-                        flate2::Status::BufError => {
-                            output.resize(output.len() * 2, 0);
-                        }
-                        _ if output_full => {
-                            output.resize(output.len() * 2, 0);
-                        }
-                        _ => break,
-                    }
-                }
-                let n_out_ = z.total_out() as usize - n_out;
-                #[allow(clippy::indexing_slicing)] // length checked
-                Ok(&output[..n_out_])
-            }
+        if let Compress::None = *self {
+            return Ok(input);
         }
+        let n_out_ = self.compress_into(input, output, 0)?;
+        #[allow(clippy::indexing_slicing)] // length checked
+        Ok(&output[..n_out_])
     }
 
     pub fn compress_into(
@@ -345,7 +324,8 @@ impl Compress {
                     let n_in_ = z.total_in() as usize - n_in;
                     let n_out_ = z.total_out() as usize - n_out;
                     #[allow(clippy::indexing_slicing)] // length checked
-                    let c = z.compress(&input[n_in_..], &mut output[start_len + n_out_..], flush)?;
+                    let c =
+                        z.compress(&input[n_in_..], &mut output[start_len + n_out_..], flush)?;
                     // See `compress`: full buffer on `Ok` means more pending.
                     let output_full = start_len + (z.total_out() as usize - n_out) == output.len();
                     match c {
