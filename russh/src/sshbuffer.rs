@@ -188,6 +188,38 @@ fn test_write_packet_matches_clear_cipher_write_output() {
 }
 
 #[test]
+fn installing_a_cipher_starts_a_new_write_key_epoch() {
+    let mut writer = PacketWriter::clear();
+    writer.packet_raw(b"initial key exchange").unwrap();
+    assert_ne!(writer.buffer().bytes, 0);
+
+    writer.set_cipher(Box::new(cipher::clear::Key {}));
+
+    assert_eq!(writer.buffer().bytes, 0);
+    writer.packet_raw(b"encrypted epoch").unwrap();
+    assert_eq!(writer.buffer().bytes, b"encrypted epoch".len());
+}
+
+#[tokio::test]
+async fn automatic_rekey_read_counter_tracks_payload_bytes() {
+    let payload = b"inbound rekey accounting";
+    let mut writer = PacketWriter::clear();
+    writer.packet_raw(payload).unwrap();
+    let encoded = writer.buffer().buffer.clone();
+    let (mut reader, mut sender) = tokio::io::duplex(encoded.len());
+    sender.write_all(&encoded).await.unwrap();
+    drop(sender);
+
+    let mut buffer = SSHBuffer::new();
+    let mut opening_key = cipher::clear::Key {};
+    cipher::read(&mut reader, &mut buffer, &mut opening_key)
+        .await
+        .unwrap();
+
+    assert_eq!(buffer.bytes, payload.len());
+}
+
+#[test]
 fn test_write_packet_restores_output_buffer_on_error() {
     let mut writer = PacketWriter::clear();
     writer
@@ -290,7 +322,7 @@ fn packet_bytes_compressed_matches_packet_output() {
 pub struct SSHBuffer {
     pub buffer: Vec<u8>,
     pub len: usize,   // next packet length.
-    pub bytes: usize, // total bytes written since the last rekey
+    pub bytes: usize, // total payload bytes read/written since the last rekey
     // Sequence numbers are on 32 bits and wrap.
     // https://tools.ietf.org/html/rfc4253#section-6.4
     pub seqn: Wrapping<u32>,
@@ -557,6 +589,10 @@ impl PacketWriter {
 
     pub fn set_cipher(&mut self, cipher: Box<dyn SealingKey + Send>) {
         self.cipher = cipher;
+        // Every cipher installation starts a new key epoch. In particular,
+        // discard the cleartext KEX packets counted before the initial keys
+        // were installed as well as the previous encrypted epoch on rekey.
+        self.write_buffer.bytes = 0;
     }
 
     pub fn reset_seqn(&mut self) {
