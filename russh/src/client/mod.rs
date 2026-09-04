@@ -81,6 +81,15 @@ mod session;
 #[cfg(test)]
 mod test;
 
+/// Successful raw response to `hostkeys-prove-00@openssh.com`.
+///
+/// Signature verification remains the caller's responsibility.
+#[derive(Debug)]
+pub struct HostKeysProof {
+    pub session_id: Vec<u8>,
+    pub signatures: Vec<Vec<u8>>,
+}
+
 /// Actual client session's state.
 ///
 /// It is in charge of multiplexing and keeping track of various channels
@@ -2007,6 +2016,41 @@ mod tests {
             reply_sender,
         );
         (session, sender, reply_receiver)
+    }
+
+    #[test]
+    fn hostkeys_prove_request_encodes_every_key_blob() {
+        let (mut session, sender, _replies) = keyboard_interactive_session();
+        let host_key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
+        let host_key = host_key.public_key().clone();
+        let (return_channel, _proof) = oneshot::channel();
+
+        session
+            .request_hostkeys_prove(return_channel, std::slice::from_ref(&host_key))
+            .unwrap();
+        drop(sender);
+
+        let written = session.common.encrypted.as_ref().unwrap().write.to_vec();
+        let packet_len =
+            u32::from_be_bytes(written[..4].try_into().unwrap()) as usize;
+        let mut payload = &written[4..4 + packet_len];
+
+        assert_eq!(u8::decode(&mut payload).unwrap(), crate::msg::GLOBAL_REQUEST);
+        assert_eq!(
+            String::decode(&mut payload).unwrap(),
+            "hostkeys-prove-00@openssh.com"
+        );
+        assert_eq!(u8::decode(&mut payload).unwrap(), 1, "want_reply must be set");
+        assert_eq!(
+            Vec::<u8>::decode(&mut payload).unwrap(),
+            host_key.to_bytes().unwrap()
+        );
+        assert!(payload.is_empty());
+
+        assert!(matches!(
+            session.open_global_requests.front(),
+            Some(GlobalRequestResponse::HostKeysProve { .. })
+        ));
     }
 
     #[cfg(feature = "flate2")]
