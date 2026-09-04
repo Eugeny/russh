@@ -17,7 +17,7 @@ default = ["flate2", "aws-lc-rs", "rsa"]
 # Crypto backends: enable at least one of `aws-lc-rs` or `ring`.
 aws-lc-rs = ["dep:aws-lc-rs"] # Default crypto backend.
 async-trait = ["dep:async-trait"]
-legacy-ed25519-pkcs8-parser = ["yasna"]
+legacy-ed25519-pkcs8-parser = ["yasna", "num-bigint-04"]
 # Danger: 3DES cipher is insecure.
 des = ["dep:des"]
 # Danger: DSA algorithm is insecure.
@@ -63,6 +63,10 @@ md5 = "0.8"
 ml-kem = "0.3"
 module-lattice = "0.2"
 num-bigint = { version = "0.5", features = ["rand_0_10"] }
+# `yasna` accepts any num-bigint 0.4; only listed to raise the floor, because
+# a cargo-minimal-versions failure below 0.4.6 resolves `div_ceil` to the
+# inherent `u64::div_ceil` instead of `Integer::div_ceil`.
+num-bigint-04 = { package = "num-bigint", version = "0.4.6", optional = true }
 p256 = { version = "0.14", features = ["ecdh"] }
 p384 = { version = "0.14", features = ["ecdh"] }
 p521 = { version = "0.14", features = ["ecdh"] }

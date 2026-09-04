@@ -4,7 +4,13 @@
     clippy::indexing_slicing,
     clippy::panic
 )]
-#![allow(clippy::single_match, clippy::upper_case_acronyms)]
+// Rust 1.91 extended `collapsible_if` to suggest let-chains, which rustfmt
+// does not yet format; revisit once it does.
+#![allow(
+    clippy::collapsible_if,
+    clippy::single_match,
+    clippy::upper_case_acronyms
+)]
 #![allow(macro_expanded_macro_exports_accessed_by_absolute_paths)]
 // length checked
 // Copyright 2016 Pierre-Étienne Meunier
