@@ -1159,6 +1159,39 @@ async fn reply<H: Handler + Send>(
 
     let is_kex_msg = pkt.buffer.first().cloned().map(is_kex_msg).unwrap_or(false);
 
+    // RFC 4253 s7.1: after a KEXINIT, only transport (1-19) and kex (20-49)
+    // messages may flow until NEWKEYS. Non-transport messages (>= 50: auth and
+    // channel traffic) are the DoS vector -- their replies queue on an
+    // unbounded channel that is not drained until the rekey the peer may never
+    // finish completes.
+    //
+    //   * Once the PEER's own KEXINIT has arrived, nothing of theirs is
+    //     legitimately still in flight, so such a message is a protocol
+    //     violation -- reject it.
+    //   * Before it arrives (we initiated the rekey; the peer may not have seen
+    //     our KEXINIT yet) their in-flight messages are legal. Handle them as
+    //     usual, but bound the total so a peer that stalls the rekey and floods
+    //     cannot grow memory without limit. `pending_len` is reset when the
+    //     rekey completes (see `begin_rekey` and the kex-done path).
+    if !is_kex_msg && session.common.encrypted.is_some() {
+        if let (Some(&msg_type), SessionKexState::InProgress(kex)) =
+            (pkt.buffer.first(), &session.kex)
+        {
+            if msg_type >= msg::USERAUTH_REQUEST {
+                if kex.peer_kexinit_received() {
+                    return Err(crate::Error::Inconsistent.into());
+                }
+                session.pending_len =
+                    session.pending_len.saturating_add(pkt.buffer.len() as u32);
+                if u64::from(session.pending_len)
+                    > 2 * u64::from(session.common.config.window_size)
+                {
+                    return Err(crate::Error::Pending.into());
+                }
+            }
+        }
+    }
+
     if is_kex_msg {
         if let SessionKexState::InProgress(kex) = session.kex.take() {
             let progress = kex
@@ -1187,7 +1220,7 @@ async fn reply<H: Handler + Send>(
                             common.packet_writer.buffer().bytes = 0;
                             if let Some(enc) = common.encrypted.as_mut() {
                                 enc.last_rekey = Instant::now();
-                                enc.flush_all_pending_with_writer(&mut common.packet_writer)?;
+                                enc.flush_all_pending_with_writer(&mut common.packet_writer, false)?;
                             }
                         }
 

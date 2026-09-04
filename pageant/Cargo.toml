@@ -6,8 +6,8 @@ edition = "2024"
 license = "Apache-2.0"
 name = "pageant"
 repository = "https://github.com/warp-tech/russh"
-version = "0.2.2"
-rust-version = "1.85"
+version = "0.2.3"
+rust-version = "1.89"
 
 [dependencies]
 thiserror.workspace = true

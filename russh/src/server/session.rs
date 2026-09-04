@@ -893,9 +893,13 @@ impl Session {
     pub fn flush(&mut self) -> Result<(), Error> {
         let mut start_rekey = false;
         if let Some(ref mut enc) = self.common.encrypted {
+            // Tearing down: get the queued packets (incl. DISCONNECT) out in
+            // order, kex or not.
+            let is_rekeying = self.kex.active() && !self.common.disconnected;
             if enc.flush(
                 &self.common.config.as_ref().limits,
                 &mut self.common.packet_writer,
+                is_rekeying,
             )? && self.kex == SessionKexState::Idle
                 && Self::automatic_rekey_eligible(&enc.state)
             {
@@ -1553,6 +1557,7 @@ impl Session {
 
     pub(crate) fn begin_rekey(&mut self) -> Result<(), Error> {
         debug!("beginning re-key");
+        self.pending_len = 0;
         let mut kex = ServerKex::new(
             self.common.config.clone(),
             &self.common.remote_sshid,

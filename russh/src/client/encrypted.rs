@@ -40,13 +40,11 @@ impl Session {
         client: &mut H,
         pkt: &mut IncomingSshPacket,
     ) -> Result<(), H::Error> {
-        #[allow(clippy::indexing_slicing)] // length checked
-        {
-            trace!(
-                "client_read_encrypted, buf = {:?}",
-                &pkt.buffer[..pkt.buffer.len().min(20)]
-            );
-        }
+        trace!(
+            "client_read_encrypted, msg type {:?}, len {}",
+            pkt.buffer.first(),
+            pkt.buffer.len()
+        );
 
         self.process_packet(client, &pkt.buffer).await
     }
@@ -75,11 +73,9 @@ impl Session {
                                 map_err!(ensure_end(&r))?;
                                 *accepted = true;
                                 if let Some(ref meth) = self.common.auth_method {
-                                    let len = enc.write.len();
                                     let auth_request = AuthRequest::new(meth);
-                                    #[allow(clippy::indexing_slicing)] // length checked
                                     if enc.write_auth_request(&self.common.auth_user, meth)? {
-                                        debug!("enc: {:?}", &enc.write[len..]);
+                                        debug!("enc: auth request written");
                                         enc.state = EncryptedState::WaitingAuthRequest(auth_request)
                                     }
                                 } else {
@@ -102,6 +98,8 @@ impl Session {
                         Some((&msg::USERAUTH_SUCCESS, r)) => {
                             map_err!(ensure_end(&r))?;
                             debug!("userauth_success");
+                            // Drop the credential as soon as it is no longer needed.
+                            self.common.auth_method = None;
                             self.sender
                                 .send(Reply::AuthSuccess)
                                 .map_err(|_| crate::Error::SendError)?;
@@ -246,7 +244,7 @@ impl Session {
                                         &mut self.common.buffer,
                                     )?
                                 }
-                                Some(auth::Method::FuturePublicKey { key, hash_alg }) => {
+                                Some(auth::Method::FuturePublicKey { ref key, hash_alg }) => {
                                     debug!("public key");
                                     self.common.buffer.clear();
                                     let i = enc.client_make_to_sign(
@@ -255,13 +253,17 @@ impl Session {
                                             key: key.clone(),
                                             hash_alg,
                                         },
+                                        None,
                                         &mut self.common.buffer,
                                     )?;
                                     let len = self.common.buffer.len();
                                     let buf = std::mem::take(&mut self.common.buffer);
 
                                     self.sender
-                                        .send(Reply::SignRequest { key, data: buf })
+                                        .send(Reply::SignRequest {
+                                            key: key.clone(),
+                                            data: buf,
+                                        })
                                         .map_err(|_| crate::Error::SendError)?;
                                     self.common.buffer = loop {
                                         match self.receiver.recv().await {
@@ -278,12 +280,13 @@ impl Session {
                                         })
                                     }
                                 }
-                                Some(auth::Method::FutureCertificate { cert, hash_alg }) => {
+                                Some(auth::Method::FutureCertificate { ref cert, hash_alg }) => {
                                     debug!("certificate");
                                     self.common.buffer.clear();
                                     let i = enc.client_make_to_sign(
                                         &self.common.auth_user,
                                         &PublicKeyOrCertificate::Certificate(cert.clone()),
+                                        hash_alg,
                                         &mut self.common.buffer,
                                     )?;
                                     let len = self.common.buffer.len();
@@ -291,7 +294,7 @@ impl Session {
 
                                     self.sender
                                         .send(Reply::SignRequestCert {
-                                            cert,
+                                            cert: cert.clone(),
                                             hash_alg,
                                             data: buf,
                                         })
@@ -706,10 +709,15 @@ impl Session {
                     }
                 }
 
+                let is_rekeying = self.kex.active();
                 let common = &mut self.common;
                 if let Some(enc) = common.encrypted.as_mut() {
                     new_size -= enc
-                        .flush_pending_with_writer(&mut common.packet_writer, channel_num)?
+                        .flush_pending_with_writer(
+                            &mut common.packet_writer,
+                            channel_num,
+                            is_rekeying,
+                        )?
                         as u32;
                 }
                 if let Some(chan) = self.channels.get(&channel_num) {
@@ -1211,6 +1219,101 @@ mod tests {
         assert_eq!(Vec::<u8>::decode(&mut mic).unwrap(), b"mic".to_vec());
         ensure_end(&mic).unwrap();
     }
+
+
+    fn rsa_user_certificate() -> ssh_key::Certificate {
+        let subject = ssh_key::PrivateKey::random(
+            &mut rand::rng(),
+            ssh_key::Algorithm::Rsa { hash: None },
+        )
+        .unwrap();
+        let ca = ssh_key::PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519)
+            .unwrap();
+        let mut builder = ssh_key::certificate::Builder::new_with_random_nonce(
+            &mut rand::rng(),
+            subject.public_key(),
+            0,
+            u64::MAX,
+        )
+        .unwrap();
+        builder.key_id("rsa-user-cert").unwrap();
+        builder
+            .cert_type(ssh_key::certificate::CertType::User)
+            .unwrap();
+        builder.valid_principal("alice").unwrap();
+        builder.sign(&ca).unwrap()
+    }
+
+    fn decode_userauth_certificate_algorithm(
+        mut request: &[u8],
+        expected_has_signature: bool,
+    ) -> String {
+        assert_eq!(u8::decode(&mut request).unwrap(), msg::USERAUTH_REQUEST);
+        assert_eq!(String::decode(&mut request).unwrap(), "alice");
+        assert_eq!(String::decode(&mut request).unwrap(), "ssh-connection");
+        assert_eq!(String::decode(&mut request).unwrap(), "publickey");
+        assert_eq!(
+            u8::decode(&mut request).unwrap(),
+            u8::from(expected_has_signature)
+        );
+        let algorithm = String::decode(&mut request).unwrap();
+        let _certificate = Vec::<u8>::decode(&mut request).unwrap();
+        ensure_end(&request).unwrap();
+        algorithm
+    }
+
+    #[cfg(feature = "rsa")]
+    #[test]
+    fn rsa_future_certificate_hash_is_encoded_in_probe_and_signed_requests() {
+        let certificate = rsa_user_certificate();
+        for (hash_alg, expected) in [
+            (
+                Some(ssh_key::HashAlg::Sha512),
+                "rsa-sha2-512-cert-v01@openssh.com",
+            ),
+            (
+                Some(ssh_key::HashAlg::Sha256),
+                "rsa-sha2-256-cert-v01@openssh.com",
+            ),
+            (None, "ssh-rsa-cert-v01@openssh.com"),
+        ] {
+            let mut encrypted = test_encrypted();
+            encrypted
+                .write_auth_request(
+                    "alice",
+                    &auth::Method::FutureCertificate {
+                        cert: certificate.clone(),
+                        hash_alg,
+                    },
+                )
+                .unwrap();
+            let probe_payloads = payloads(&encrypted.write);
+            assert_eq!(probe_payloads.len(), 1);
+            assert_eq!(
+                decode_userauth_certificate_algorithm(probe_payloads[0], false),
+                expected
+            );
+
+            let mut signed = Vec::new();
+            encrypted
+                .client_make_to_sign(
+                    "alice",
+                    &PublicKeyOrCertificate::Certificate(certificate.clone()),
+                    hash_alg,
+                    &mut signed,
+                )
+                .unwrap();
+            let mut signed_request = signed.as_slice();
+            assert_eq!(
+                Vec::<u8>::decode(&mut signed_request).unwrap(),
+                b"session-id"
+            );
+            assert_eq!(
+                decode_userauth_certificate_algorithm(signed_request, true),
+                expected
+            );
+        }
+    }
 }
 
 impl Encrypted {
@@ -1276,13 +1379,14 @@ impl Encrypted {
                     key.to_bytes()?.as_slice().encode(&mut self.write)?;
                     true
                 }
-                auth::Method::FutureCertificate { ref cert, .. } => {
+                auth::Method::FutureCertificate { ref cert, hash_alg } => {
                     user.as_bytes().encode(&mut self.write)?;
                     "ssh-connection".encode(&mut self.write)?;
                     "publickey".encode(&mut self.write)?;
                     self.write.push(0); // This is a probe
 
                     cert.algorithm()
+                        .with_hash_alg(hash_alg)
                         .to_certificate_type()
                         .encode(&mut self.write)?;
                     cert.to_bytes()?.as_slice().encode(&mut self.write)?;
@@ -1365,6 +1469,7 @@ impl Encrypted {
         &mut self,
         user: &str,
         key: &PublicKeyOrCertificate,
+        certificate_hash_alg: Option<ssh_key::HashAlg>,
         buffer: &mut Vec<u8>,
     ) -> Result<usize, crate::Error> {
         buffer.clear();
@@ -1379,7 +1484,10 @@ impl Encrypted {
 
         match key {
             PublicKeyOrCertificate::Certificate(cert) => {
-                cert.algorithm().to_certificate_type().encode(buffer)?;
+                cert.algorithm()
+                    .with_hash_alg(certificate_hash_alg)
+                    .to_certificate_type()
+                    .encode(buffer)?;
                 cert.to_bytes()?.encode(buffer)?;
             }
             PublicKeyOrCertificate::PublicKey { key, hash_alg } => {
@@ -1399,7 +1507,7 @@ impl Encrypted {
         match method {
             auth::Method::PublicKey { key } => {
                 let i0 =
-                    self.client_make_to_sign(user, &PublicKeyOrCertificate::from(key), buffer)?;
+                    self.client_make_to_sign(user, &PublicKeyOrCertificate::from(key), None, buffer)?;
 
                 // Extend with self-signature.
                 sign_with_hash_alg(key, buffer)?.encode(&mut *buffer)?;
@@ -1413,6 +1521,7 @@ impl Encrypted {
                 let i0 = self.client_make_to_sign(
                     user,
                     &PublicKeyOrCertificate::Certificate(cert.clone()),
+                    None,
                     buffer,
                 )?;
 

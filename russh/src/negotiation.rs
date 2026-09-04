@@ -968,6 +968,7 @@ mod tests {
 
     /// The RSA cert variants a server advertises follow `pref.key`, so the
     /// preference list stays the policy knob for e.g. banning SHA-1.
+    #[cfg(feature = "rsa")]
     #[test]
     fn rsa_certificate_variants_follow_preferences() {
         let ca = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();

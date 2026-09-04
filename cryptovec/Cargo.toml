@@ -7,7 +7,7 @@ license = "Apache-2.0"
 name = "russh-cryptovec"
 repository = "https://github.com/warp-tech/russh"
 version = "0.62.0"
-rust-version = "1.85"
+rust-version = "1.89"
 
 [dependencies]
 ssh-encoding = { workspace = true, optional = true }
