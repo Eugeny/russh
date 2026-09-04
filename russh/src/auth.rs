@@ -21,6 +21,7 @@ use std::sync::Arc;
 use ssh_key::{Certificate, HashAlg, PrivateKey};
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite};
+use zeroize::Zeroize;
 
 use crate::helpers::NameList;
 use crate::keys::PrivateKeyWithHashAlg;
@@ -274,7 +275,6 @@ impl<R: AsyncRead + AsyncWrite + Unpin + Send> Signer
     }
 }
 
-#[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
 pub enum Method {
     None,
@@ -305,6 +305,50 @@ pub enum Method {
         mechanism_oids: Vec<Vec<u8>>,
     },
     // Hostbased,
+}
+
+impl Drop for Method {
+    fn drop(&mut self) {
+        if let Method::Password { password } = self {
+            password.zeroize();
+        }
+    }
+}
+
+impl std::fmt::Debug for Method {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Method::None => f.write_str("None"),
+            Method::Password { .. } => f
+                .debug_struct("Password")
+                .field("password", &"<redacted>")
+                .finish(),
+            Method::PublicKey { key } => f.debug_struct("PublicKey").field("key", key).finish(),
+            Method::OpenSshCertificate { key, cert } => f
+                .debug_struct("OpenSshCertificate")
+                .field("key", key)
+                .field("cert", cert)
+                .finish(),
+            Method::FuturePublicKey { key, hash_alg } => f
+                .debug_struct("FuturePublicKey")
+                .field("key", key)
+                .field("hash_alg", hash_alg)
+                .finish(),
+            Method::FutureCertificate { cert, hash_alg } => f
+                .debug_struct("FutureCertificate")
+                .field("cert", cert)
+                .field("hash_alg", hash_alg)
+                .finish(),
+            Method::KeyboardInteractive { submethods } => f
+                .debug_struct("KeyboardInteractive")
+                .field("submethods", submethods)
+                .finish(),
+            Method::GssapiWithMic { mechanism_oids } => f
+                .debug_struct("GssapiWithMic")
+                .field("mechanism_oids", mechanism_oids)
+                .finish(),
+        }
+    }
 }
 
 #[doc(hidden)]

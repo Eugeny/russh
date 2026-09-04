@@ -126,7 +126,16 @@ impl Session {
                     pix_width.encode(&mut enc.write)?;
                     pix_height.encode(&mut enc.write)?;
 
-                    ((1 + 5 * terminal_modes.len()) as u32).encode(&mut enc.write)?;
+                    // TTY_OP_END entries are skipped below and the single
+                    // terminator is written afterwards, so the length must
+                    // count only the modes that are actually encoded --
+                    // otherwise the declared string length overruns the
+                    // bytes written and the rest of the packet is garbage.
+                    let encoded_modes = terminal_modes
+                        .iter()
+                        .filter(|&&(code, _)| code != Pty::TTY_OP_END)
+                        .count();
+                    ((1 + 5 * encoded_modes) as u32).encode(&mut enc.write)?;
                     for &(code, value) in terminal_modes {
                         if code == Pty::TTY_OP_END {
                             continue;

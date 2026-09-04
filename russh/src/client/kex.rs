@@ -88,6 +88,11 @@ impl ClientKex {
         }
     }
 
+    /// `Created` is "our KEXINIT is out, the peer's has not arrived".
+    pub fn peer_kexinit_received(&self) -> bool {
+        !matches!(self.state, ClientKexState::Created)
+    }
+
     /// Whether strict kex was negotiated, as soon as the peer's KEXINIT has
     /// been read (i.e. before the exchange completes).
     pub fn strict_kex(&self) -> bool {
