@@ -200,6 +200,10 @@ fn installing_a_cipher_starts_a_new_write_key_epoch() {
     assert_eq!(writer.buffer().bytes, b"encrypted epoch".len());
 }
 
+// Unlike the built-in `#[test]`, `#[tokio::test]` is a proc macro that expands
+// even when the crate is not built in test mode, so it needs an explicit
+// `cfg(test)` to keep the `wasm32-wasip1` build (which has no tokio `rt`) green.
+#[cfg(test)]
 #[tokio::test]
 async fn automatic_rekey_read_counter_tracks_payload_bytes() {
     let payload = b"inbound rekey accounting";
