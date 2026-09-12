@@ -1,137 +1,195 @@
 # Russh
 
-[![Rust](https://github.com/warp-tech/russh/actions/workflows/rust.yml/badge.svg)](https://github.com/warp-tech/russh/actions/workflows/rust.yml)  <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
-[![All Contributors](https://img.shields.io/badge/all_contributors-91-orange.svg?style=flat-square)](#contributors-)
-<!-- ALL-CONTRIBUTORS-BADGE:END -->
+[![Crate](https://img.shields.io/crates/v/russh.svg)](https://crates.io/crates/russh) 
+[![Docs](https://docs.rs/russh/badge.svg)](https://docs.rs/russh)
 
-Low-level Tokio SSH2 client and server implementation.
+A low-level, `async` SSH 2.0 client and server library for Rust / Tokio.
 
-> **Crypto backends:** enable at least one of the `aws-lc-rs` or `ring` features. `russh` fails to compile when both are disabled because a crypto backend is required.
+Russh gives you direct access to the SSH protocol: channels, authentication, key exchange, port and socket forwarding.  It is written in safe Rust, uses async traits, and supports a broad range of algorithms for wide scale interoperability with real-world servers and clients.
 
-Examples: [simple client](russh/examples/client_exec_simple.rs), [interactive PTY client](russh/examples/client_exec_interactive.rs), [server](russh/examples/echoserver.rs), [SFTP client](russh/examples/sftp_client.rs), [SFTP server](russh/examples/sftp_server.rs).
+- **Async-native** - integrates directly with Tokio,  `AsyncRead`/`AsyncWrite` channels
+- **Broad interoperability** - safe algorithms by default, with opt-in support for legacy ones
+- **Safety-focused** - panics, `unwrap`/`expect` and unchecked indexing are denied by default
 
-This is a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Étienne Meunier.
+## Getting started
 
-> ✨ = added in Russh
+Add russh to your `Cargo.toml`, choosing a crypto backend feature (see below):
 
-* [More panic safety](https://github.com/warp-tech/russh#safety) ✨
-* async traits
-* `direct-tcpip` (local port forwarding)
-* `forward-tcpip` (remote port forwarding) ✨
-* `direct-streamlocal` (local UNIX socket forwarding, client only) ✨
-* `forward-streamlocal` (remote UNIX socket forwarding) ✨
-* Ciphers:
-  * `chacha20-poly1305@openssh.com`
-  * `aes128-gcm@openssh.com` ✨
-  * `aes256-gcm@openssh.com`
-  * `aes256-ctr`
-  * `aes192-ctr` ✨
-  * `aes128-ctr` ✨
-  * `aes256-cbc` ✨
-  * `aes192-cbc` ✨
-  * `aes128-cbc` ✨
-  * `3des-cbc` ✨
-* Key exchanges:
-  * `mlkem768x25519-sha256`
-  * `curve25519-sha256@libssh.org`
-  * `diffie-hellman-group-sha1` (GEX) ✨
-  * `diffie-hellman-group1-sha1` ✨
-  * `diffie-hellman-group14-sha1` ✨
-  * `diffie-hellman-group-sha256` (GEX) ✨
-  * `diffie-hellman-group14-sha256` ✨
-  * `diffie-hellman-group16-sha512` ✨
-  * `ecdh-sha2-nistp256` ✨
-  * `ecdh-sha2-nistp384` ✨
-  * `ecdh-sha2-nistp521` ✨
-  * OpenSSH strict key exchange support
-* MACs:
-  * `hmac-sha1` ✨
-  * `hmac-sha2-256`
-  * `hmac-sha2-512` ✨
-  * `hmac-sha1-etm@openssh.com` ✨
-  * `hmac-sha2-256-etm@openssh.com` ✨
-  * `hmac-sha2-512-etm@openssh.com` ✨
-* Host keys and public key auth:
-  * `ssh-ed25519`
-  * `rsa-sha2-256`
-  * `rsa-sha2-512`
-  * `ssh-rsa`
-  * `ecdsa-sha2-nistp256`
-  * `ecdsa-sha2-nistp384` ✨
-  * `ecdsa-sha2-nistp521` ✨
-  * OpenSSH certificates ✨
-* Authentication methods:
-  * `password`
-  * `publickey`
-  * `keyboard-interactive`
-  * `none`
-  * OpenSSH certificates ✨
-* Dependency updates
-* OpenSSH keepalive request handling ✨
-* OpenSSH agent forwarding channels ✨
-* OpenSSH `server-sig-algs` extension ✨
-* PPK key format ✨
-* Pageant support ✨
-* `AsyncRead`/`AsyncWrite`-able channels ✨
+```toml
+[dependencies]
+russh = { version = "0.63", features = ["aws-lc-rs"] }
+tokio = { version = "1", features = ["full"] }
+```
+
+Then have a look at the examples:
+
+- [simple client](russh/examples/client_exec_simple.rs)
+- [interactive PTY client](russh/examples/client_exec_interactive.rs)
+- [server](russh/examples/echoserver.rs)
+- [SFTP client](russh/examples/sftp_client.rs)
+- [SFTP server](russh/examples/sftp_server.rs)
+
+API documentation is on [docs.rs](https://docs.rs/russh)
+
+## Crypto backends
+
+Russh requires exactly one crypto backend. Enable the `aws-lc-rs` or `ring` crate feature.
+
+```toml
+# aws-lc-rs (default in most setups)
+russh = { version = "0.63", features = ["aws-lc-rs"] }
+
+# or ring (keep `flate2` and `rsa` when disabling default features)
+russh = { version = "0.63", default-features = false, features = ["ring", "flate2", "rsa"] }
+```
+
+## Supported algorithms
+
+Russh aims for broad interoperability, so it supports both algorithms currently considered safe and a set of older ones that allow connections to older switches etc. Legacy algorithms are opt in.
+
+### Key exchange
+
+**Recommended**
+
+- `mlkem768x25519-sha256` (post-quantum hybrid)
+- `curve25519-sha256`, `curve25519-sha256@libssh.org`
+- `diffie-hellman-group-exchange-sha256` (GEX)
+- `diffie-hellman-group18-sha512`, `diffie-hellman-group17-sha512`, `diffie-hellman-group16-sha512`, `diffie-hellman-group15-sha512`
+- `diffie-hellman-group14-sha256`
+- OpenSSH strict key exchange (Terrapin mitigation)
+- Programmatic group choice support for DH-GEX
+
+**Legacy**
+
+- `ecdh-sha2-nistp256`, `ecdh-sha2-nistp384`, `ecdh-sha2-nistp521`
+- `diffie-hellman-group14-sha1`
+- `diffie-hellman-group1-sha1`
+- `diffie-hellman-group-exchange-sha1` (GEX)
+
+### Ciphers
+
+**Recommended**
+
+- `chacha20-poly1305@openssh.com`
+- `aes256-gcm@openssh.com`, `aes128-gcm@openssh.com`
+- `aes256-ctr`, `aes192-ctr`, `aes128-ctr`
+
+**Legacy**
+
+- `aes256-cbc`, `aes192-cbc`, `aes128-cbc`
+- `3des-cbc` (requires the `des` crate feature)
+
+### MACs
+
+**Recommended**
+
+- `hmac-sha2-256-etm@openssh.com`, `hmac-sha2-512-etm@openssh.com`
+- `hmac-sha2-256`, `hmac-sha2-512`
+
+**Legacy**
+
+- `hmac-sha1-etm@openssh.com`
+- `hmac-sha1`
+
+### Compression
+
+- `none`
+- `zlib`, `zlib@openssh.com` (requires the `flate2` crate feature, on by default)
+
+### Host keys & public-key authentication
+
+**Recommended**
+
+- `ssh-ed25519`
+- `ecdsa-sha2-nistp256`, `ecdsa-sha2-nistp384`, `ecdsa-sha2-nistp521`
+- `rsa-sha2-256`, `rsa-sha2-512`
+- `ssh-rsa` (SHA-1)
+- OpenSSH certificates
+
+### Authentication methods
+
+- `publickey`
+- `password`
+- `keyboard-interactive`
+- `none`
+- OpenSSH certificate authentication
+
+## Features
+
+- Local port forwarding (`direct-tcpip`)
+- Remote port forwarding (`forward-tcpip`)
+- Local UNIX socket forwarding (`direct-streamlocal`, client only)
+- Remote UNIX socket forwarding (`forward-streamlocal`)
+- `AsyncRead` / `AsyncWrite`-able channels
+- OpenSSH agent forwarding channels
+- OpenSSH keepalive request handling
+- OpenSSH `server-sig-algs` extension
+- PuTTY PPK key format
+- Pageant support (Windows)
 
 ## Safety
 
-* `deny(clippy::unwrap_used)`
-* `deny(clippy::expect_used)`
-* `deny(clippy::indexing_slicing)`
-* `deny(clippy::panic)`
-* Exceptions are checked manually
+Russh is built to withstand malicious/misbehaving peers. 
 
-### Panics
+- `deny(clippy::unwrap_used)`
+- `deny(clippy::expect_used)`
+- `deny(clippy::indexing_slicing)`
+- `deny(clippy::panic)`
 
-* When the Rust allocator fails to allocate memory during a CryptoVec being resized.
-* When `mlock`/`munlock` fails to protect sensitive data in memory.
+Exceptions are reviewed and justified manually.
 
 ### Unsafe code
 
-* `cryptovec` uses `unsafe` for faster copying, initialization and binding to native API.
+- `cryptovec` uses `unsafe` for faster copying, initialization, and binding to native APIs.
 
 ## Ecosystem
 
-* [russh-sftp](https://crates.io/crates/russh-sftp) - server-side and client-side SFTP subsystem support for `russh` - see `russh/examples/sftp_server.rs` or `russh/examples/sftp_client.rs`.
-* [async-ssh2-tokio](https://crates.io/crates/async-ssh2-tokio) - simple high-level API for running commands over SSH.
+- [russh-sftp](https://crates.io/crates/russh-sftp) - server-side and client-side SFTP subsystem support for `russh`; see `russh/examples/sftp_server.rs` or `russh/examples/sftp_client.rs`.
+- [async-ssh2-tokio](https://crates.io/crates/async-ssh2-tokio) - simple high-level API for running commands over SSH.
 
 ## Adopters
 
-* [HexPatch](https://github.com/Etto48/HexPatch) - A binary patcher and editor written in Rust with terminal user interface (TUI).
-  * Uses `russh::client` and `russh_sftp::client` to allow remote editing of files.
-* [kartoffels](https://github.com/Patryk27/kartoffels) - A game where you're given a potato and your job is to implement a firmware for it
-  * Uses `russh:server` to deliver the game, using `ratatui` as the rendering engine.
-* [kty](https://github.com/grampelberg/kty) - The terminal for Kubernetes.
-  * Uses `russh::server` to deliver the `ratatui` based TUI and `russh_sftp::server` to provide `scp` based file management.
-* [lapdev](https://github.com/lapce/lapdev) - Self-Hosted Remote Dev Environment
-  * Uses `russh::server` to construct a proxy into your development environment.
-* [medusa](https://github.com/evilsocket/medusa) - A fast and secure multi protocol honeypot.
-  * Uses `russh::server` to be the basis of the honeypot.
-* [rebels-in-the-sky](https://github.com/ricott1/rebels-in-the-sky) - P2P terminal game about spacepirates playing basketball across the galaxy
-  * Uses `russh::server` to deliver the game, using `ratatui` as the rendering engine.
-* [warpgate](https://github.com/warp-tech/warpgate) - Smart SSH, HTTPS and MySQL bastion that requires no additional client-side software
-  * Uses `russh::server` in addition to `russh::client` as part of the smart SSH functionality.
-* [Devolutions Gateway](https://github.com/Devolutions/devolutions-gateway/) - Establish a secure entry point for internal or external segmented networks that require authorized just-in-time (JIT) access.
-  * Uses `russh::client` for the web-based SSH client of the standalone web application.
-* [Sandhole](https://github.com/EpicEric/sandhole) - Expose HTTP/SSH/TCP services through SSH port forwarding. A reverse proxy that just works with an OpenSSH client.
-  * Uses `russh::server` for reverse forwarding connections, local forwarding tunnels, and the `ratatui` based admin interface.
-* [Motor OS](https://github.com/moturus/motor-os) -  A new Rust-based operating system for VMs.
-  * Uses `russh::server` as the base for its own [SSH Server](https://github.com/moturus/motor-os/tree/main/src/bin/russhd).
-* [Cubic VM](https://github.com/cubic-vm/cubic) - A lightweight command-line manager for virtual machines.
-  * Uses `russh::client` and `russh_sftp::client` to access the virtual machine instances.
-* [ferrissh](https://crates.io/crates/ferrissh) - An async SSH CLI scraper library for network device automation in Rust.
-  * Uses russh::client for SSH transport, authentication, and interactive PTY sessions.
-* [Yazi](https://github.com/sxyazi/yazi) - Blazing fast terminal file manager written in Rust, based on async I/O.
-  * Uses `russh::client` to implement an async SFTP provider for remote file management.
-* [GitArena](https://github.com/mellowagain/gitarena) - Software development platform with built-in vcs, issue tracking and code review.
-  * Uses `russh::server` to allow Git operations over SSH.
-* [Calagopus](https://github.com/calagopus/wings) - Fast, Efficient and Scalable Game hosting - built for everyone.
-  * Uses `russh::server` for efficiently implementing SSH shells and SFTP file management.
-* [Oryxis](https://github.com/wilsonglasser/oryxis) - Rust-native SSH client with an encrypted vault, P2P sync and an embedded terminal.
-  * Uses `russh::client` for connections, jump hosts, SOCKS/HTTP/command proxies and SFTP.
-* [react-native-ssh](https://github.com/osuki-dev/react-native-ssh) - Native SSH client for React Native and Expo.
-  * Uses `russh::client` as the SSH transport implementation behind Nitro Modules bindings.
+- [HexPatch](https://github.com/Etto48/HexPatch) - A binary patcher and editor written in Rust with a terminal user interface (TUI).
+  - Uses `russh::client` and `russh_sftp::client` to allow remote editing of files.
+- [kartoffels](https://github.com/Patryk27/kartoffels) - A game where you're given a potato and your job is to implement a firmware for it.
+  - Uses `russh::server` to deliver the game, using `ratatui` as the rendering engine.
+- [kty](https://github.com/grampelberg/kty) - The terminal for Kubernetes.
+  - Uses `russh::server` to deliver the `ratatui` based TUI and `russh_sftp::server` to provide `scp` based file management.
+- [lapdev](https://github.com/lapce/lapdev) - Self-hosted remote dev environment.
+  - Uses `russh::server` to construct a proxy into your development environment.
+- [medusa](https://github.com/evilsocket/medusa) - A fast and secure multi-protocol honeypot.
+  - Uses `russh::server` to be the basis of the honeypot.
+- [rebels-in-the-sky](https://github.com/ricott1/rebels-in-the-sky) - P2P terminal game about space pirates playing basketball across the galaxy.
+  - Uses `russh::server` to deliver the game, using `ratatui` as the rendering engine.
+- [warpgate](https://github.com/warp-tech/warpgate) - Smart SSH, HTTPS and MySQL bastion that requires no additional client-side software.
+  - Uses `russh::server` in addition to `russh::client` as part of the smart SSH functionality.
+- [Devolutions Gateway](https://github.com/Devolutions/devolutions-gateway/) - Establish a secure entry point for internal or external segmented networks that require authorized just-in-time (JIT) access.
+  - Uses `russh::client` for the web-based SSH client of the standalone web application.
+- [Sandhole](https://github.com/EpicEric/sandhole) - Expose HTTP/SSH/TCP services through SSH port forwarding. A reverse proxy that just works with an OpenSSH client.
+  - Uses `russh::server` for reverse forwarding connections, local forwarding tunnels, and the `ratatui` based admin interface.
+- [Motor OS](https://github.com/moturus/motor-os) - A new Rust-based operating system for VMs.
+  - Uses `russh::server` as the base for its own [SSH Server](https://github.com/moturus/motor-os/tree/main/src/bin/russhd).
+- [Cubic VM](https://github.com/cubic-vm/cubic) - A lightweight command-line manager for virtual machines.
+  - Uses `russh::client` and `russh_sftp::client` to access the virtual machine instances.
+- [ferrissh](https://crates.io/crates/ferrissh) - An async SSH CLI scraper library for network device automation in Rust.
+  - Uses `russh::client` for SSH transport, authentication, and interactive PTY sessions.
+- [Yazi](https://github.com/sxyazi/yazi) - Blazing fast terminal file manager written in Rust, based on async I/O.
+  - Uses `russh::client` to implement an async SFTP provider for remote file management.
+- [GitArena](https://github.com/mellowagain/gitarena) - Software development platform with built-in VCS, issue tracking and code review.
+  - Uses `russh::server` to allow Git operations over SSH.
+- [Calagopus](https://github.com/calagopus/wings) - Fast, efficient and scalable game hosting - built for everyone.
+  - Uses `russh::server` for efficiently implementing SSH shells and SFTP file management.
+- [Oryxis](https://github.com/wilsonglasser/oryxis) - Rust-native SSH client with an encrypted vault, P2P sync and an embedded terminal.
+  - Uses `russh::client` for connections, jump hosts, SOCKS/HTTP/command proxies and SFTP.
+- [react-native-ssh](https://github.com/osuki-dev/react-native-ssh) - Native SSH client for React Native and Expo.
+  - Uses `russh::client` as the SSH transport implementation behind Nitro Modules bindings.
+
+## History
+
+Russh began as a fork of [Thrussh](https://nest.pijul.com/pijul/thrussh) by Pierre-Étienne Meunier, originally extended to provide the SSH backend for [Warpgate](https://github.com/warp-tech/warpgate). 
+
+It has since been substantially reworked, and is maintained independently. Russh prioritises safety-by-default and broad algorithm interoperability.
+Thanks to Pierre-Étienne and the Thrussh contributors for the original foundation.
 
 ## Contributors ✨
 
