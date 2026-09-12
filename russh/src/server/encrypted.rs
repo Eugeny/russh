@@ -729,6 +729,7 @@ impl Encrypted {
                 if auth_request.bind_or_reset_principal(&user, &service_name) {
                     auth_user.clear();
                 }
+                auth_request.partial_success = false;
             }
 
             if method == "password" {
@@ -760,15 +761,19 @@ impl Encrypted {
                 } else {
                     auth_user.clear();
                     if let Auth::Reject {
-                        proceed_with_methods: Some(proceed_with_methods),
+                        proceed_with_methods,
                         partial_success,
                     } = auth
                     {
-                        auth_request.methods = proceed_with_methods;
                         auth_request.partial_success = partial_success;
+                        match proceed_with_methods {
+                            Some(methods) => auth_request.methods = methods,
+                            None => {
+                                auth_request.methods.remove(MethodKind::Password);
+                            }
+                        }
                     } else {
                         auth_request.methods.remove(MethodKind::Password);
-                        auth_request.partial_success = false;
                     }
                     reject_auth_request(until, &mut self.write, auth_request).await?;
                 }
@@ -801,15 +806,19 @@ impl Encrypted {
                 } else {
                     auth_user.clear();
                     if let Auth::Reject {
-                        proceed_with_methods: Some(proceed_with_methods),
+                        proceed_with_methods,
                         partial_success,
                     } = auth
                     {
-                        auth_request.methods = proceed_with_methods;
                         auth_request.partial_success = partial_success;
+                        match proceed_with_methods {
+                            Some(methods) => auth_request.methods = methods,
+                            None => {
+                                auth_request.methods.remove(MethodKind::None);
+                            }
+                        }
                     } else {
                         auth_request.methods.remove(MethodKind::None);
-                        auth_request.partial_success = false;
                     }
                     reject_auth_request(until, &mut self.write, auth_request).await?;
                 }
@@ -983,14 +992,14 @@ impl Encrypted {
                                 self.state = EncryptedState::InitCompression;
                             } else {
                                 if let Auth::Reject {
-                                    proceed_with_methods: Some(proceed_with_methods),
+                                    proceed_with_methods,
                                     partial_success,
                                 } = auth
                                 {
-                                    auth_request.methods = proceed_with_methods;
                                     auth_request.partial_success = partial_success;
-                                } else {
-                                    auth_request.partial_success = false;
+                                    if let Some(methods) = proceed_with_methods {
+                                        auth_request.methods = methods;
+                                    }
                                 }
                                 auth_user.clear();
                                 reject_auth_request(until, &mut self.write, auth_request).await?;
@@ -1032,14 +1041,14 @@ impl Encrypted {
                         }
                         auth => {
                             if let Auth::Reject {
-                                proceed_with_methods: Some(proceed_with_methods),
+                                proceed_with_methods,
                                 partial_success,
                             } = auth
                             {
-                                auth_request.methods = proceed_with_methods;
                                 auth_request.partial_success = partial_success;
-                            } else {
-                                auth_request.partial_success = false;
+                                if let Some(methods) = proceed_with_methods {
+                                    auth_request.methods = methods;
+                                }
                             }
                             auth_user.clear();
                             reject_auth_request(until, &mut self.write, auth_request).await?;
@@ -1075,7 +1084,9 @@ async fn reject_auth_request(
         write.push(auth_request.partial_success as u8);
     });
     auth_request.current = None;
-    auth_request.rejection_count += 1;
+    if !auth_request.partial_success {
+        auth_request.rejection_count += 1;
+    }
     debug!("packet pushed");
     tokio::time::sleep_until(until).await;
     Ok(())

@@ -1,7 +1,9 @@
 //! Regression test catching <https://github.com/Eugeny/russh/issues/772>.
 use std::sync::Arc;
+use std::time::Duration;
 
 use russh::keys::ssh_key;
+use russh::keys::ssh_key::certificate::{Builder, CertType};
 use russh::keys::{PrivateKey, PrivateKeyWithHashAlg, PublicKeyOrCertificate};
 use russh::{MethodKind, MethodSet, client, server};
 
@@ -30,9 +32,13 @@ impl server::Handler for PartialSuccessServer {
     async fn auth_password(
         &mut self,
         _user: &str,
-        _password: &str,
+        password: &str,
     ) -> Result<server::Auth, Self::Error> {
-        Ok(partial_success_reject())
+        if password == "wrong" {
+            Ok(server::Auth::reject())
+        } else {
+            Ok(partial_success_reject())
+        }
     }
 
     async fn auth_publickey_offered(
@@ -78,6 +84,11 @@ fn partial_success_reject() -> server::Auth {
 
 async fn connect() -> client::Handle<AcceptServerKey> {
     let mut server_config = server::Config::default();
+    server_config.auth_rejection_time = Duration::from_millis(1);
+    server_config.auth_rejection_time_initial = Some(Duration::from_millis(1));
+    // A partial success must not count as a failed attempt: every test below
+    // that sends a second request after a partial success relies on this.
+    server_config.max_auth_attempts = 1;
     server_config
         .keys
         .push(PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap());
@@ -181,4 +192,79 @@ async fn keyboard_interactive() {
         panic!("expected KeyboardInteractiveAuthResponse::Failure");
     };
     assert_partial_success(partial_success, &remaining_methods);
+}
+
+/// The flag describes only the request it answers: a plain rejection after a
+/// partial success must not inherit it.
+#[tokio::test]
+async fn plain_rejection_after_partial_success() {
+    let mut session = connect().await;
+    let first = session.authenticate_password("alice", "ok").await.unwrap();
+    assert!(
+        matches!(
+            first,
+            client::AuthResult::Failure {
+                partial_success: true,
+                ..
+            }
+        ),
+        "expected partial success, got {first:?}"
+    );
+    let second = session
+        .authenticate_password("alice", "wrong")
+        .await
+        .unwrap();
+    // An empty method set means the server disconnected instead of answering.
+    assert!(
+        matches!(
+            second,
+            client::AuthResult::Failure {
+                partial_success: false,
+                ref remaining_methods,
+            } if !remaining_methods.is_empty()
+        ),
+        "stale partial_success leaked into a plain rejection: {second:?}"
+    );
+}
+
+/// Rejections that never reach a handler (here: an expired certificate) must
+/// not report a partial success left over from an earlier request.
+#[tokio::test]
+async fn handlerless_rejection_after_partial_success() {
+    let mut session = connect().await;
+    let first = session.authenticate_password("alice", "ok").await.unwrap();
+    assert!(
+        matches!(
+            first,
+            client::AuthResult::Failure {
+                partial_success: true,
+                ..
+            }
+        ),
+        "expected partial success, got {first:?}"
+    );
+
+    let key = Arc::new(PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap());
+    let ca = PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap();
+    let mut builder =
+        Builder::new_with_random_nonce(&mut rand::rng(), key.public_key().clone(), 1, 2).unwrap();
+    builder.cert_type(CertType::User).unwrap();
+    builder.valid_principal("alice").unwrap();
+    let expired_cert = builder.sign(&ca).unwrap();
+
+    let second = session
+        .authenticate_openssh_cert("alice", key, expired_cert)
+        .await
+        .unwrap();
+    // An empty method set means the server disconnected instead of answering.
+    assert!(
+        matches!(
+            second,
+            client::AuthResult::Failure {
+                partial_success: false,
+                ref remaining_methods,
+            } if !remaining_methods.is_empty()
+        ),
+        "expired cert reported as partial success: {second:?}"
+    );
 }
