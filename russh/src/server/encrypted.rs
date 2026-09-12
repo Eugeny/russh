@@ -768,8 +768,8 @@ impl Encrypted {
                         auth_request.partial_success = partial_success;
                     } else {
                         auth_request.methods.remove(MethodKind::Password);
+                        auth_request.partial_success = false;
                     }
-                    auth_request.partial_success = false;
                     reject_auth_request(until, &mut self.write, auth_request).await?;
                 }
                 Ok(())
@@ -809,8 +809,8 @@ impl Encrypted {
                         auth_request.partial_success = partial_success;
                     } else {
                         auth_request.methods.remove(MethodKind::None);
+                        auth_request.partial_success = false;
                     }
-                    auth_request.partial_success = false;
                     reject_auth_request(until, &mut self.write, auth_request).await?;
                 }
                 Ok(())
@@ -989,8 +989,9 @@ impl Encrypted {
                                 {
                                     auth_request.methods = proceed_with_methods;
                                     auth_request.partial_success = partial_success;
+                                } else {
+                                    auth_request.partial_success = false;
                                 }
-                                auth_request.partial_success = false;
                                 auth_user.clear();
                                 reject_auth_request(until, &mut self.write, auth_request).await?;
                             }
@@ -1037,8 +1038,9 @@ impl Encrypted {
                             {
                                 auth_request.methods = proceed_with_methods;
                                 auth_request.partial_success = partial_success;
+                            } else {
+                                auth_request.partial_success = false;
                             }
-                            auth_request.partial_success = false;
                             auth_user.clear();
                             reject_auth_request(until, &mut self.write, auth_request).await?;
                         }
