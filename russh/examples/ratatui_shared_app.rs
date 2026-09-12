@@ -145,6 +145,7 @@ impl Server for AppServer {
 
 impl Handler for AppServer {
     type Error = anyhow::Error;
+    type Data = ();
 
     async fn channel_open_session(
         &mut self,
