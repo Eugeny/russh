@@ -1498,9 +1498,9 @@ impl Session {
 
                         let response = handler.agent_request(channel_num, self).await?;
                         if response {
-                            self.request_success()
+                            self.channel_success(channel_num)?
                         } else {
-                            self.request_failure()
+                            self.channel_failure(channel_num)?
                         }
                         Ok(())
                     }
