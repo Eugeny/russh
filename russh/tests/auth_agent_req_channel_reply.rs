@@ -213,5 +213,9 @@ async fn russh_matches_openssh() {
         reply_is_channel_scoped(russh_channel),
         reply_is_channel_scoped(openssh_channel),
     );
+    assert!(
+        openssh_scoped,
+        "reference sshd did not reply on the channel"
+    );
     assert_eq!(russh_scoped, openssh_scoped);
 }
