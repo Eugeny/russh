@@ -317,6 +317,9 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/gvz"><img src="https://avatars.githubusercontent.com/u/3962183?v=4?s=100" width="100px;" alt="Georg von Zengen"/><br /><sub><b>Georg von Zengen</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=gvz" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/tluyben"><img src="https://avatars.githubusercontent.com/u/623448?v=4?s=100" width="100px;" alt="tluyben"/><br /><sub><b>tluyben</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=tluyben" title="Code">💻</a></td>
     </tr>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://harmont.dev"><img src="https://avatars.githubusercontent.com/u/15203893?v=4?s=100" width="100px;" alt="Marko Vejnovic"/><br /><sub><b>Marko Vejnovic</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=markovejnovic" title="Code">💻</a></td>
+    </tr>
   </tbody>
 </table>
 
