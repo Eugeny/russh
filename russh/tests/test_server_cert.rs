@@ -138,6 +138,8 @@ async fn test_server_wrong_ca_certificate_auth() {
     }
 }
 
+// RSA key generation needs the `rsa` feature.
+#[cfg(feature = "rsa")]
 #[tokio::test]
 async fn test_server_rsa_sha2_512_certificate_auth() {
     let _ = env_logger::try_init();
