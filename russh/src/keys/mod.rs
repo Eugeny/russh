@@ -103,6 +103,7 @@ pub enum Error {
     #[error("Invalid Ed25519 key data")]
     Ed25519KeyError(#[from] ed25519_dalek::SignatureError),
     /// The type of the key is unsupported
+    #[cfg(feature = "ecdsa")]
     #[error("Invalid ECDSA key data")]
     EcdsaKeyError(#[from] p256::elliptic_curve::Error),
     /// The key is encrypted (should supply a password?)
@@ -159,6 +160,7 @@ pub enum Error {
     Pkcs1(#[from] pkcs1::Error),
     #[error("Pkcs8: {0}")]
     Pkcs8(#[from] ::pkcs8::Error),
+    #[cfg(feature = "ecdsa")]
     #[error("Sec1: {0}")]
     Sec1(#[from] sec1::Error),
 
@@ -577,6 +579,7 @@ abw8VeY2goORjpBXsfydBETbgQ==
         test_decode_encode_symmetry(key);
     }
 
+    #[cfg(feature = "ecdsa")]
     #[test]
     fn test_decode_pkcs8_p256_secret_key() {
         // Generated using: ssh-keygen -t ecdsa -b 256 -m pkcs8 -f $file
@@ -595,6 +598,7 @@ qa92U3p4fkJToKXku5eq/32OBj23YMtz76jO3yfMbtG3l1JWLowPA8tV
         test_decode_encode_symmetry(key);
     }
 
+    #[cfg(feature = "ecdsa")]
     #[test]
     fn test_decode_pkcs8_p384_secret_key() {
         // Generated using: ssh-keygen -t ecdsa -b 384 -m pkcs8 -f $file
@@ -614,6 +618,7 @@ CI3WfCsQvVjoC7m8qRyxuvR3Rv8gGXR1coQciIoCurLnn9zOFvXCS2Y=
         test_decode_encode_symmetry(key);
     }
 
+    #[cfg(feature = "ecdsa")]
     #[test]
     fn test_decode_pkcs8_p521_secret_key() {
         // Generated using: ssh-keygen -t ecdsa -b 521 -m pkcs8 -f $file
@@ -635,6 +640,9 @@ Ow==
         test_decode_encode_symmetry(key);
     }
 
+    // Only the RSA and ECDSA PKCS#8 tests above round-trip a key through the
+    // encoder.
+    #[cfg(any(feature = "rsa", feature = "ecdsa"))]
     fn test_decode_encode_symmetry(key: &str) {
         let original_key_bytes = data_encoding::BASE64_MIME
             .decode(

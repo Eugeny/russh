@@ -15,7 +15,9 @@ use rand::rng;
 //
 use ssh_encoding::Decode;
 use ssh_key::public::KeyData;
-use ssh_key::{Algorithm, EcdsaCurve, PublicKey};
+#[cfg(feature = "ecdsa")]
+use ssh_key::EcdsaCurve;
+use ssh_key::{Algorithm, PublicKey};
 
 use crate::keys::Error;
 
@@ -100,12 +102,15 @@ pub use private_key_with_hash_alg::PrivateKeyWithHashAlg;
 
 pub const ALL_KEY_TYPES: &[Algorithm] = &[
     Algorithm::Dsa,
+    #[cfg(feature = "ecdsa")]
     Algorithm::Ecdsa {
         curve: EcdsaCurve::NistP256,
     },
+    #[cfg(feature = "ecdsa")]
     Algorithm::Ecdsa {
         curve: EcdsaCurve::NistP384,
     },
+    #[cfg(feature = "ecdsa")]
     Algorithm::Ecdsa {
         curve: EcdsaCurve::NistP521,
     },
@@ -120,6 +125,7 @@ pub const ALL_KEY_TYPES: &[Algorithm] = &[
     Algorithm::Rsa {
         hash: Some(ssh_key::HashAlg::Sha512),
     },
+    #[cfg(feature = "ecdsa")]
     Algorithm::SkEcdsaSha2NistP256,
     Algorithm::SkEd25519,
 ];
