@@ -1,3 +1,4 @@
+use std::ffi::CStr;
 use std::io::IoSlice;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -18,7 +19,6 @@ use windows::Win32::System::WindowsProgramming::GetUserNameA;
 use windows_strings::PSTR;
 
 use crate::Error;
-use crate::username::{UsernameLookupError, resolve_username};
 
 /// Pageant transport stream. Implements [AsyncRead] and [AsyncWrite].
 pub struct PageantStream {
@@ -62,34 +62,36 @@ impl PageantStream {
 
             let mut name_buf = vec![0u8; name_length as usize];
 
-            let principal = if GetUserNameExA(
+            if !GetUserNameExA(
                 NameUserPrincipal,
                 Some(PSTR(name_buf.as_mut_ptr())),
                 &mut name_length,
             ) {
-                Ok(name_buf)
-            } else {
-                Err(Error::from_win32())
-            };
-
-            resolve_username(principal, || {
                 // GetUserNameExA fails on non-domain-joined machines, where no UPN
                 // (NameUserPrincipal) is configured. Fall back to GetUserNameA
                 // (the SAM account name), like the original PuTTY Pageant.
-                debug!("No principal username, falling back to GetUserNameA");
+                debug!(
+                    "GetUserNameExA failed ({}), falling back to GetUserNameA",
+                    Error::from_win32()
+                );
 
                 let mut name_length = 0;
                 // don't check result on this, always returns ERROR_INSUFFICIENT_BUFFER
                 let _ = GetUserNameA(None, &mut name_length);
 
-                let mut name_buf = vec![0u8; name_length as usize];
+                name_buf = vec![0u8; name_length as usize];
                 GetUserNameA(Some(PSTR(name_buf.as_mut_ptr())), &mut name_length)?;
-                Ok(name_buf)
-            })
-            .map_err(|error| match error {
-                UsernameLookupError::Api(error) => error,
-                UsernameLookupError::Invalid => Error::InvalidUsername,
-            })
+            }
+
+            // match putty behavior: parse as C string (trim at first NULL) and split UPNs at @
+            let name = CStr::from_bytes_until_nul(&name_buf)
+                .ok()
+                .and_then(|name| name.to_str().ok())
+                .ok_or(Error::InvalidUsername)?;
+            Ok(name
+                .split_once('@')
+                .map_or(name, |(name, _)| name)
+                .to_owned())
         }
     }
 
