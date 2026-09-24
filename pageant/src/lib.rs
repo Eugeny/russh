@@ -14,6 +14,9 @@
 mod error;
 pub use error::*;
 
+#[cfg(any(all(windows, feature = "namedpipes"), test))]
+mod username;
+
 #[cfg(all(windows, feature = "wmmessage"))]
 pub mod wmmessage;
 

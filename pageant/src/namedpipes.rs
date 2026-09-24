@@ -18,6 +18,7 @@ use windows::Win32::System::WindowsProgramming::GetUserNameA;
 use windows_strings::PSTR;
 
 use crate::Error;
+use crate::username::{UsernameLookupError, resolve_username};
 
 /// Pageant transport stream. Implements [AsyncRead] and [AsyncWrite].
 pub struct PageantStream {
@@ -61,34 +62,34 @@ impl PageantStream {
 
             let mut name_buf = vec![0u8; name_length as usize];
 
-            if !GetUserNameExA(
+            let principal = if GetUserNameExA(
                 NameUserPrincipal,
                 Some(PSTR(name_buf.as_mut_ptr())),
                 &mut name_length,
             ) {
+                Ok(name_buf)
+            } else {
+                Err(Error::from_win32())
+            };
+
+            resolve_username(principal, || {
                 // GetUserNameExA fails on non-domain-joined machines, where no UPN
                 // (NameUserPrincipal) is configured. Fall back to GetUserNameA
                 // (the SAM account name), like the original PuTTY Pageant.
-                debug!("GetUserNameExA failed, falling back to GetUserNameA");
+                debug!("No principal username, falling back to GetUserNameA");
 
                 let mut name_length = 0;
                 // don't check result on this, always returns ERROR_INSUFFICIENT_BUFFER
                 let _ = GetUserNameA(None, &mut name_length);
 
-                name_buf = vec![0u8; name_length as usize];
+                let mut name_buf = vec![0u8; name_length as usize];
                 GetUserNameA(Some(PSTR(name_buf.as_mut_ptr())), &mut name_length)?;
-            }
-
-            //remove terminating null
-            if let Some(0) = name_buf.pop() {
-                let mut name = String::from_utf8(name_buf).map_err(|_| Error::InvalidUsername)?;
-                if let Some(at_index) = name.find('@') {
-                    name.drain(at_index..);
-                }
-                Ok(name)
-            } else {
-                Err(Error::InvalidUsername)
-            }
+                Ok(name_buf)
+            })
+            .map_err(|error| match error {
+                UsernameLookupError::Api(error) => error,
+                UsernameLookupError::Invalid => Error::InvalidUsername,
+            })
         }
     }
 
