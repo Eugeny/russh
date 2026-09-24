@@ -1,3 +1,4 @@
+#![cfg(feature = "ml-kem")]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 //! Integration tests for ML-KEM hybrid key exchange

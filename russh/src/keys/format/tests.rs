@@ -4,6 +4,7 @@ use crate::keys::pkcs8::{decode_pkcs8, encode_pkcs8_encrypted};
 
 use super::decode_secret_key;
 
+#[cfg(feature = "ecdsa")]
 #[test]
 fn test_ec_private_key() {
     let key = r#"-----BEGIN EC PRIVATE KEY-----
@@ -25,6 +26,7 @@ fn test_pkcs8_roundtrip() {
     assert_eq!(decrypted, original_key);
 }
 
+#[cfg(feature = "ecdsa")]
 #[test]
 fn test_ec_private_key_with_full_domain_params() {
     // This key uses full EC domain parameters instead of a named curve OID.
@@ -48,6 +50,7 @@ b6KBhA+L9No0qBbsdpwaMewJChyf5AIft0Un3A==\n\
     });
 }
 
+#[cfg(feature = "ecdsa")]
 #[test]
 fn test_ec_p521_private_key_with_full_domain_params() {
     // P-521 key with full EC domain parameters (not named curve OID).

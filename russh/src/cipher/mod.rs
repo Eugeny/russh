@@ -23,32 +23,36 @@ use std::num::Wrapping;
 use std::sync::LazyLock;
 
 use aes::{Aes128, Aes192, Aes256};
-#[cfg(feature = "aws-lc-rs")]
+#[cfg(all(feature = "aes-gcm", feature = "aws-lc-rs"))]
 use aws_lc_rs::aead::{AES_128_GCM as ALGORITHM_AES_128_GCM, AES_256_GCM as ALGORITHM_AES_256_GCM};
 use byteorder::{BigEndian, ByteOrder};
 use block::CtrWrapper;
 use ctr::Ctr128BE;
 use delegate::delegate;
 use log::trace;
-#[cfg(all(not(feature = "aws-lc-rs"), feature = "ring"))]
+#[cfg(all(feature = "aes-gcm", not(feature = "aws-lc-rs"), feature = "ring"))]
 use ring::aead::{AES_128_GCM as ALGORITHM_AES_128_GCM, AES_256_GCM as ALGORITHM_AES_256_GCM};
 use ssh_encoding::Encode;
 use tokio::io::{AsyncRead, AsyncReadExt};
 
+#[cfg(feature = "aes-cbc")]
 use self::cbc::CbcWrapper;
 use crate::Error;
 use crate::mac::MacAlgorithm;
 use crate::sshbuffer::SSHBuffer;
 
 pub(crate) mod block;
+#[cfg(feature = "aes-cbc")]
 pub(crate) mod cbc;
 pub(crate) mod chacha20poly1305;
 pub(crate) mod clear;
+#[cfg(feature = "aes-gcm")]
 pub(crate) mod gcm;
 
 use block::SshBlockCipher;
 use chacha20poly1305::SshChacha20Poly1305Cipher;
 use clear::Clear;
+#[cfg(feature = "aes-gcm")]
 use gcm::GcmCipher;
 
 pub(crate) trait Cipher {
@@ -85,16 +89,21 @@ pub const AES_128_CTR: Name = Name("aes128-ctr");
 /// `aes192-ctr`
 pub const AES_192_CTR: Name = Name("aes192-ctr");
 /// `aes128-cbc`
+#[cfg(feature = "aes-cbc")]
 pub const AES_128_CBC: Name = Name("aes128-cbc");
 /// `aes192-cbc`
+#[cfg(feature = "aes-cbc")]
 pub const AES_192_CBC: Name = Name("aes192-cbc");
 /// `aes256-cbc`
+#[cfg(feature = "aes-cbc")]
 pub const AES_256_CBC: Name = Name("aes256-cbc");
 /// `aes256-ctr`
 pub const AES_256_CTR: Name = Name("aes256-ctr");
 /// `aes128-gcm@openssh.com`
+#[cfg(feature = "aes-gcm")]
 pub const AES_128_GCM: Name = Name("aes128-gcm@openssh.com");
 /// `aes256-gcm@openssh.com`
+#[cfg(feature = "aes-gcm")]
 pub const AES_256_GCM: Name = Name("aes256-gcm@openssh.com");
 /// `chacha20-poly1305@openssh.com`
 pub const CHACHA20_POLY1305: Name = Name("chacha20-poly1305@openssh.com");
@@ -107,10 +116,15 @@ static _3DES_CBC: SshBlockCipher<CbcWrapper<des::TdesEde3>> = SshBlockCipher(Pha
 static _AES_128_CTR: SshBlockCipher<CtrWrapper<Ctr128BE<Aes128>>> = SshBlockCipher(PhantomData);
 static _AES_192_CTR: SshBlockCipher<CtrWrapper<Ctr128BE<Aes192>>> = SshBlockCipher(PhantomData);
 static _AES_256_CTR: SshBlockCipher<CtrWrapper<Ctr128BE<Aes256>>> = SshBlockCipher(PhantomData);
+#[cfg(feature = "aes-gcm")]
 static _AES_128_GCM: GcmCipher = GcmCipher(&ALGORITHM_AES_128_GCM);
+#[cfg(feature = "aes-gcm")]
 static _AES_256_GCM: GcmCipher = GcmCipher(&ALGORITHM_AES_256_GCM);
+#[cfg(feature = "aes-cbc")]
 static _AES_128_CBC: SshBlockCipher<CbcWrapper<Aes128>> = SshBlockCipher(PhantomData);
+#[cfg(feature = "aes-cbc")]
 static _AES_192_CBC: SshBlockCipher<CbcWrapper<Aes192>> = SshBlockCipher(PhantomData);
+#[cfg(feature = "aes-cbc")]
 static _AES_256_CBC: SshBlockCipher<CbcWrapper<Aes256>> = SshBlockCipher(PhantomData);
 static _CHACHA20_POLY1305: SshChacha20Poly1305Cipher = SshChacha20Poly1305Cipher {};
 
@@ -122,10 +136,15 @@ pub static ALL_CIPHERS: &[&Name] = &[
     &AES_128_CTR,
     &AES_192_CTR,
     &AES_256_CTR,
+    #[cfg(feature = "aes-gcm")]
     &AES_128_GCM,
+    #[cfg(feature = "aes-gcm")]
     &AES_256_GCM,
+    #[cfg(feature = "aes-cbc")]
     &AES_128_CBC,
+    #[cfg(feature = "aes-cbc")]
     &AES_192_CBC,
+    #[cfg(feature = "aes-cbc")]
     &AES_256_CBC,
     &CHACHA20_POLY1305,
 ];
@@ -140,10 +159,15 @@ pub(crate) static CIPHERS: LazyLock<HashMap<&'static Name, &(dyn Cipher + Send +
         h.insert(&AES_128_CTR, &_AES_128_CTR);
         h.insert(&AES_192_CTR, &_AES_192_CTR);
         h.insert(&AES_256_CTR, &_AES_256_CTR);
+        #[cfg(feature = "aes-gcm")]
         h.insert(&AES_128_GCM, &_AES_128_GCM);
+        #[cfg(feature = "aes-gcm")]
         h.insert(&AES_256_GCM, &_AES_256_GCM);
+        #[cfg(feature = "aes-cbc")]
         h.insert(&AES_128_CBC, &_AES_128_CBC);
+        #[cfg(feature = "aes-cbc")]
         h.insert(&AES_192_CBC, &_AES_192_CBC);
+        #[cfg(feature = "aes-cbc")]
         h.insert(&AES_256_CBC, &_AES_256_CBC);
         h.insert(&CHACHA20_POLY1305, &_CHACHA20_POLY1305);
         assert_eq!(h.len(), ALL_CIPHERS.len());
@@ -373,6 +397,8 @@ const MAXIMUM_PACKET_LEN_HEADROOM: usize =
 const MAXIMUM_PACKET_LEN: usize = MAXIMUM_PACKET_LEN_BASELINE + MAXIMUM_PACKET_LEN_HEADROOM;
 // Keep post-decompression growth within the same packet-acceptance model as
 // the transport read path.
+// Only the compression path consults this outside of tests.
+#[cfg_attr(not(feature = "flate2"), allow(dead_code))]
 pub(crate) const MAXIMUM_DECOMPRESSED_PACKET_LEN: usize = MAXIMUM_PACKET_LEN;
 
 #[cfg(feature = "_bench")]
