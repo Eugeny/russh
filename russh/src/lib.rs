@@ -87,10 +87,10 @@
 //! messages sent through a `server::Handle` are processed when there
 //! is no incoming packet to read.
 
-#[cfg(not(any(feature = "ring", feature = "aws-lc-rs")))]
+#[cfg(not(any(feature = "ring", feature = "aws-lc-rs", feature = "rustcrypto")))]
 compile_error!(
-    "`russh` requires enabling either the `ring` or `aws-lc-rs` feature as a crypto backend."
+    "`russh` requires enabling one of the `aws-lc-rs`, `ring` or `rustcrypto` features as a crypto backend."
 );
 
-#[cfg(any(feature = "ring", feature = "aws-lc-rs"))]
+#[cfg(any(feature = "ring", feature = "aws-lc-rs", feature = "rustcrypto"))]
 include!("lib_inner.rs");
