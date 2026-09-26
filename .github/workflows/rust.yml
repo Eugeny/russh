@@ -22,6 +22,9 @@ jobs:
       - name: Build (all features enabled)
         run: cargo build --verbose --all-features
 
+      - name: Build (pure-Rust crypto backend)
+        run: cargo build --verbose -p russh --no-default-features --features flate2,rsa,rustcrypto
+
   Build-Windows:
     runs-on: windows-latest
 
@@ -80,6 +83,9 @@ jobs:
       - name: Clippy (all features enabled)
         run: cargo clippy --all-features -- -D warnings
 
+      - name: Clippy (pure-Rust crypto backend)
+        run: cargo clippy -p russh --no-default-features --features flate2,rsa,rustcrypto -- -D warnings
+
   Test:
     runs-on: ubuntu-24.04
 
@@ -103,6 +109,14 @@ jobs:
         run: |
           eval `ssh-agent`
           cargo test --verbose --all-features
+        env:
+          RUST_BACKTRACE: 1
+
+      # Release: unoptimised RustCrypto ciphers are too slow for test_contention's 30 s window.
+      - name: Test (pure-Rust crypto backend)
+        run: |
+          eval `ssh-agent`
+          cargo test --verbose --release -p russh --no-default-features --features flate2,rsa,rustcrypto
         env:
           RUST_BACKTRACE: 1
 

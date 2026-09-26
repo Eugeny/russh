@@ -33,7 +33,7 @@ API documentation is on [docs.rs](https://docs.rs/russh)
 
 ## Crypto backends
 
-Russh requires exactly one crypto backend. Enable the `aws-lc-rs` or `ring` crate feature.
+Russh requires exactly one crypto backend. Enable the `aws-lc-rs`, `ring` or `rustcrypto` crate feature.
 
 ```toml
 # aws-lc-rs (default in most setups)
@@ -41,6 +41,10 @@ russh = { version = "0.63", features = ["aws-lc-rs"] }
 
 # or ring (keep `flate2` and `rsa` when disabling default features)
 russh = { version = "0.63", default-features = false, features = ["ring", "flate2", "rsa"] }
+
+# or rustcrypto: pure Rust, for targets that cannot build C or assembly.
+# Used only when neither aws-lc-rs nor ring is enabled.
+russh = { version = "0.63", default-features = false, features = ["rustcrypto", "flate2", "rsa"] }
 ```
 
 ## Supported algorithms

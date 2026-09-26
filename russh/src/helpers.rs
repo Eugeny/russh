@@ -191,7 +191,7 @@ pub(crate) mod macros {
     pub(crate) use map_err;
 }
 
-#[cfg(any(feature = "ring", feature = "aws-lc-rs"))]
+#[cfg(any(feature = "ring", feature = "aws-lc-rs", feature = "rustcrypto"))]
 pub(crate) use macros::map_err;
 
 #[doc(hidden)]
@@ -270,7 +270,11 @@ pub use algorithm::AlgorithmExt;
 
 use crate::keys::key::PrivateKeyWithHashAlg;
 
-#[cfg(all(test, not(feature = "rsa"), any(feature = "ring", feature = "aws-lc-rs")))]
+#[cfg(all(
+    test,
+    not(feature = "rsa"),
+    any(feature = "ring", feature = "aws-lc-rs", feature = "rustcrypto")
+))]
 mod tests {
     use std::sync::Arc;
 

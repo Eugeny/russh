@@ -42,14 +42,25 @@ use crate::sshbuffer::SSHBuffer;
 
 pub(crate) mod block;
 pub(crate) mod cbc;
+#[cfg(any(feature = "ring", feature = "aws-lc-rs"))]
 pub(crate) mod chacha20poly1305;
 pub(crate) mod clear;
+#[cfg(any(feature = "ring", feature = "aws-lc-rs"))]
 pub(crate) mod gcm;
+#[cfg(all(
+    feature = "rustcrypto",
+    any(test, not(any(feature = "ring", feature = "aws-lc-rs")))
+))]
+pub(crate) mod rustcrypto;
 
 use block::SshBlockCipher;
+#[cfg(any(feature = "ring", feature = "aws-lc-rs"))]
 use chacha20poly1305::SshChacha20Poly1305Cipher;
 use clear::Clear;
+#[cfg(any(feature = "ring", feature = "aws-lc-rs"))]
 use gcm::GcmCipher;
+#[cfg(not(any(feature = "ring", feature = "aws-lc-rs")))]
+use rustcrypto::{chacha20poly1305::SshChacha20Poly1305Cipher, gcm::GcmCipher};
 
 pub(crate) trait Cipher {
     fn needs_mac(&self) -> bool {
@@ -107,8 +118,14 @@ static _3DES_CBC: SshBlockCipher<CbcWrapper<des::TdesEde3>> = SshBlockCipher(Pha
 static _AES_128_CTR: SshBlockCipher<CtrWrapper<Ctr128BE<Aes128>>> = SshBlockCipher(PhantomData);
 static _AES_192_CTR: SshBlockCipher<CtrWrapper<Ctr128BE<Aes192>>> = SshBlockCipher(PhantomData);
 static _AES_256_CTR: SshBlockCipher<CtrWrapper<Ctr128BE<Aes256>>> = SshBlockCipher(PhantomData);
+#[cfg(any(feature = "ring", feature = "aws-lc-rs"))]
 static _AES_128_GCM: GcmCipher = GcmCipher(&ALGORITHM_AES_128_GCM);
+#[cfg(any(feature = "ring", feature = "aws-lc-rs"))]
 static _AES_256_GCM: GcmCipher = GcmCipher(&ALGORITHM_AES_256_GCM);
+#[cfg(not(any(feature = "ring", feature = "aws-lc-rs")))]
+static _AES_128_GCM: GcmCipher<aes_gcm::Aes128Gcm> = GcmCipher(PhantomData);
+#[cfg(not(any(feature = "ring", feature = "aws-lc-rs")))]
+static _AES_256_GCM: GcmCipher<aes_gcm::Aes256Gcm> = GcmCipher(PhantomData);
 static _AES_128_CBC: SshBlockCipher<CbcWrapper<Aes128>> = SshBlockCipher(PhantomData);
 static _AES_192_CBC: SshBlockCipher<CbcWrapper<Aes192>> = SshBlockCipher(PhantomData);
 static _AES_256_CBC: SshBlockCipher<CbcWrapper<Aes256>> = SshBlockCipher(PhantomData);
