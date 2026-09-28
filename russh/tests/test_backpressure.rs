@@ -174,6 +174,7 @@ impl russh::server::Server for Server {
 
 impl russh::server::Handler for Server {
     type Error = anyhow::Error;
+    type Data = ();
 
     async fn auth_publickey(
         &mut self,
@@ -242,6 +243,7 @@ impl russh::server::Server for HandleBackpressureServer {
 
 impl russh::server::Handler for HandleBackpressureServer {
     type Error = anyhow::Error;
+    type Data = ();
 
     async fn auth_publickey(
         &mut self,
