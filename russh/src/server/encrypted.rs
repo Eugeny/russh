@@ -28,7 +28,7 @@ use ssh_key::{PublicKey, Signature};
 use tokio::time::Instant;
 
 use super::*;
-use crate::helpers::NameList;
+use crate::helpers::{AlgorithmExt, NameList};
 use crate::map_err;
 use crate::parsing::{ChannelOpenConfirmation, ChannelType, OpenChannelMessage, ensure_end};
 
@@ -484,6 +484,61 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "rsa")]
+    #[tokio::test]
+    async fn signature_algorithm_must_match_requested_algorithm() {
+        #[derive(Default)]
+        struct AcceptAnyKey {
+            authenticated: bool,
+        }
+
+        impl Handler for AcceptAnyKey {
+            type Error = Error;
+
+            async fn auth_publickey_offered(
+                &mut self,
+                _user: &str,
+                _public_key: &PublicKey,
+            ) -> Result<Auth, Self::Error> {
+                Ok(Auth::Accept)
+            }
+
+            async fn auth_publickey(
+                &mut self,
+                _user: &str,
+                _public_key: &PublicKey,
+            ) -> Result<Auth, Self::Error> {
+                self.authenticated = true;
+                Ok(Auth::Accept)
+            }
+        }
+
+        let rsa = ssh_key::private::RsaKeypair::random(&mut rand::rng(), 2048).unwrap();
+        let private = Arc::new(PrivateKey::from(rsa));
+
+        // Announces rsa-sha2-512, but the signature blob is ssh-rsa (SHA-1).
+        let mut session = test_auth_session();
+        let mut handler = AcceptAnyKey::default();
+        let packet = publickey_signed_packet_as("alice", private.clone(), "rsa-sha2-512", None);
+        session.process_packet(&mut handler, &packet).await.unwrap();
+        assert!(
+            !handler.authenticated,
+            "an ssh-rsa (SHA-1) signature was accepted for a request announcing rsa-sha2-512"
+        );
+
+        // Same announcement, matching signature: still accepted.
+        let mut session = test_auth_session();
+        let mut handler = AcceptAnyKey::default();
+        let packet = publickey_signed_packet_as(
+            "alice",
+            private,
+            "rsa-sha2-512",
+            Some(ssh_key::HashAlg::Sha512),
+        );
+        session.process_packet(&mut handler, &packet).await.unwrap();
+        assert!(handler.authenticated);
+    }
+
     #[tokio::test]
     async fn channel_request_for_unconfirmed_server_open_does_not_call_handler() {
         let mut session = test_authenticated_session();
@@ -590,20 +645,36 @@ mod tests {
         private_key: Arc<PrivateKey>,
         public_key: &PublicKey,
     ) -> Vec<u8> {
+        publickey_signed_packet_as(user, private_key, public_key.algorithm().as_str(), None)
+    }
+
+    /// A signed publickey request announcing `announced` as its algorithm,
+    /// signed with `hash` (`None` = the key's plain algorithm, `ssh-rsa` for RSA).
+    fn publickey_signed_packet_as(
+        user: &str,
+        private_key: Arc<PrivateKey>,
+        announced: &str,
+        hash: Option<ssh_key::HashAlg>,
+    ) -> Vec<u8> {
         let mut packet = Vec::new();
         packet.push(msg::USERAUTH_REQUEST);
         user.encode(&mut packet).unwrap();
         "ssh-connection".encode(&mut packet).unwrap();
         "publickey".encode(&mut packet).unwrap();
         1u8.encode(&mut packet).unwrap();
-        public_key.algorithm().as_str().encode(&mut packet).unwrap();
-        public_key.to_bytes().unwrap().encode(&mut packet).unwrap();
+        announced.encode(&mut packet).unwrap();
+        private_key
+            .public_key()
+            .to_bytes()
+            .unwrap()
+            .encode(&mut packet)
+            .unwrap();
 
         let mut signed = Vec::new();
         CryptoVec::new().as_ref().encode(&mut signed).unwrap();
         signed.extend_from_slice(&packet);
         let signature =
-            sign_with_hash_alg(&PrivateKeyWithHashAlg::new(private_key, None), &signed).unwrap();
+            sign_with_hash_alg(&PrivateKeyWithHashAlg::new(private_key, hash), &signed).unwrap();
         signature.encode(&mut packet).unwrap();
         packet
     }
@@ -958,6 +1029,24 @@ impl Encrypted {
                     let sig = map_err!(Signature::decode(&mut signature_reader))?;
                     map_err!(ensure_end(&signature_reader))?;
                     map_err!(ensure_end(r))?;
+
+                    // RFC 4252 §7 / RFC 8332 §3: the signature must use the
+                    // algorithm named in the request. Otherwise a client can
+                    // announce rsa-sha2-512 and sign with ssh-rsa (SHA-1).
+                    let requested_algo = match pk_or_cert {
+                        PublicKeyOrCertificate::PublicKey { .. } => {
+                            ssh_key::Algorithm::new(&pubkey_algo)
+                        }
+                        PublicKeyOrCertificate::Certificate(_) => {
+                            ssh_key::Algorithm::new_certificate_ext(&pubkey_algo)
+                        }
+                    };
+                    if requested_algo.ok() != Some(sig.algorithm()) {
+                        debug!("signature algorithm does not match the requested one");
+                        auth_user.clear();
+                        reject_auth_request(until, &mut self.write, auth_request).await?;
+                        return Ok(());
+                    }
 
                     let is_valid = if accepted_probe_matches && user == auth_user {
                         true
