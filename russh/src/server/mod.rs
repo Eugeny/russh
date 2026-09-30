@@ -935,6 +935,7 @@ pub trait Server {
                                 let error_tx = error_tx.clone();
 
                                 russh_util::runtime::spawn(async move {
+                                    #[allow(clippy::collapsible_if)]
                                     if config.nodelay {
                                         if let Err(e) = socket.set_nodelay(true) {
                                             warn!("set_nodelay() failed: {e:?}");
@@ -1173,6 +1174,7 @@ async fn reply<H: Handler + Send>(
     //     usual, but bound the total so a peer that stalls the rekey and floods
     //     cannot grow memory without limit. `pending_len` is reset when the
     //     rekey completes (see `begin_rekey` and the kex-done path).
+    #[allow(clippy::collapsible_if)]
     if !is_kex_msg && session.common.encrypted.is_some() {
         if let (Some(&msg_type), SessionKexState::InProgress(kex)) =
             (pkt.buffer.first(), &session.kex)
@@ -1181,10 +1183,8 @@ async fn reply<H: Handler + Send>(
                 if kex.peer_kexinit_received() {
                     return Err(crate::Error::Inconsistent.into());
                 }
-                session.pending_len =
-                    session.pending_len.saturating_add(pkt.buffer.len() as u32);
-                if u64::from(session.pending_len)
-                    > 2 * u64::from(session.common.config.window_size)
+                session.pending_len = session.pending_len.saturating_add(pkt.buffer.len() as u32);
+                if u64::from(session.pending_len) > 2 * u64::from(session.common.config.window_size)
                 {
                     return Err(crate::Error::Pending.into());
                 }
@@ -1192,6 +1192,7 @@ async fn reply<H: Handler + Send>(
         }
     }
 
+    #[allow(clippy::collapsible_if)]
     if is_kex_msg {
         if let SessionKexState::InProgress(kex) = session.kex.take() {
             let progress = kex
@@ -1220,7 +1221,10 @@ async fn reply<H: Handler + Send>(
                             common.packet_writer.buffer().bytes = 0;
                             if let Some(enc) = common.encrypted.as_mut() {
                                 enc.last_rekey = Instant::now();
-                                enc.flush_all_pending_with_writer(&mut common.packet_writer, false)?;
+                                enc.flush_all_pending_with_writer(
+                                    &mut common.packet_writer,
+                                    false,
+                                )?;
                             }
                         }
 

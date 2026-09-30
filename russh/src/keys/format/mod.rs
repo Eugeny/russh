@@ -8,9 +8,6 @@ use crate::keys::Error;
 
 pub mod openssh;
 
-#[cfg(feature = "legacy-ed25519-pkcs8-parser")]
-mod pkcs8_legacy;
-
 #[cfg(test)]
 mod tests;
 
@@ -104,18 +101,7 @@ pub fn decode_secret_key(secret: &str, password: Option<&str>) -> Result<Private
         Some(Format::Rsa) => Ok(decode_rsa_pkcs1_der(&secret)?.into()),
         Some(Format::Pkcs5Encrypted(enc)) => decode_pkcs5(&secret, password, enc),
         Some(Format::Pkcs8Encrypted) | Some(Format::Pkcs8) => {
-            let result = self::pkcs8::decode_pkcs8(&secret, password.map(|x| x.as_bytes()));
-            #[cfg(feature = "legacy-ed25519-pkcs8-parser")]
-            {
-                if result.is_err() {
-                    let legacy_result =
-                        pkcs8_legacy::decode_pkcs8(&secret, password.map(|x| x.as_bytes()));
-                    if let Ok(key) = legacy_result {
-                        return Ok(key);
-                    }
-                }
-            }
-            result
+            self::pkcs8::decode_pkcs8(&secret, password.map(|x| x.as_bytes()))
         }
         None => Err(Error::CouldNotReadKey),
     }

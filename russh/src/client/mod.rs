@@ -629,10 +629,7 @@ impl<H: Handler> Handle<H> {
                 Msg::AuthGssapiExchangeComplete { token }
             }
         };
-        self.sender
-            .send(msg)
-            .await
-            .map_err(|_| crate::SendError {})
+        self.sender.send(msg).await.map_err(|_| crate::SendError {})
     }
 
     /// Authenticate using a certificate with a custom signer that implements the
@@ -1095,6 +1092,7 @@ pub async fn connect<H: Handler + Send + 'static, A: tokio::net::ToSocketAddrs>(
     handler: H,
 ) -> Result<Handle<H>, H::Error> {
     let socket = map_err!(tokio::net::TcpStream::connect(addrs).await)?;
+    #[allow(clippy::collapsible_if)]
     if config.as_ref().nodelay {
         if let Err(e) = socket.set_nodelay(true) {
             warn!("set_nodelay() failed: {e:?}");
@@ -1349,16 +1347,16 @@ impl Session {
                     reading.set(start_reading(stream_read, buffer, opening_cipher));
                 }
                 () = &mut keepalive_timer => {
-                    if let Some(ref mut enc) = self.common.encrypted {
-                        if matches!(enc.state, EncryptedState::Authenticated) {
-                            self.common.alive_timeouts = self.common.alive_timeouts.saturating_add(1);
-                            if self.common.config.keepalive_max != 0 && self.common.alive_timeouts > self.common.config.keepalive_max {
-                                debug!("Timeout, server not responding to keepalives");
-                                return Err(crate::Error::KeepaliveTimeout.into());
-                            }
-                            sent_keepalive = true;
-                            self.send_keepalive(true)?;
+                    if let Some(ref mut enc) = self.common.encrypted
+                        && matches!(enc.state, EncryptedState::Authenticated)
+                    {
+                        self.common.alive_timeouts = self.common.alive_timeouts.saturating_add(1);
+                        if self.common.config.keepalive_max != 0 && self.common.alive_timeouts > self.common.config.keepalive_max {
+                            debug!("Timeout, server not responding to keepalives");
+                            return Err(crate::Error::KeepaliveTimeout.into());
                         }
+                        sent_keepalive = true;
+                        self.send_keepalive(true)?;
                     }
                 }
                 () = &mut inactivity_timer => {
@@ -1412,16 +1410,21 @@ impl Session {
             };
 
             self.flush()?;
-            map_err!(self.common.packet_writer.flush_into(stream_write).await)?;
+            crate::flush_or_timeout(
+                &mut self.common.packet_writer,
+                stream_write,
+                inactivity_timer.as_mut(),
+            )
+            .await?;
 
-            if let Some(ref mut enc) = self.common.encrypted {
-                if let EncryptedState::InitCompression = enc.state {
-                    if enc.client_compression.is_deferred() {
-                        enc.client_compression
-                            .init_compress(self.common.packet_writer.compress());
-                    }
-                    enc.state = EncryptedState::Authenticated;
+            if let Some(ref mut enc) = self.common.encrypted
+                && let EncryptedState::InitCompression = enc.state
+            {
+                if enc.client_compression.is_deferred() {
+                    enc.client_compression
+                        .init_compress(self.common.packet_writer.compress());
                 }
+                enc.state = EncryptedState::Authenticated;
             }
 
             if self.common.received_data {
@@ -1432,21 +1435,21 @@ impl Session {
                 // data from it.
                 self.common.alive_timeouts = 0;
             }
-            if self.common.received_data || sent_keepalive {
-                if let (futures::future::Either::Right(ref mut sleep), Some(d)) = (
+            if (self.common.received_data || sent_keepalive)
+                && let (futures::future::Either::Right(ref mut sleep), Some(d)) = (
                     keepalive_timer.as_mut().as_pin_mut(),
                     self.common.config.keepalive_interval,
-                ) {
-                    sleep.as_mut().reset(tokio::time::Instant::now() + d);
-                }
+                )
+            {
+                sleep.as_mut().reset(tokio::time::Instant::now() + d);
             }
-            if !sent_keepalive {
-                if let (futures::future::Either::Right(ref mut sleep), Some(d)) = (
+            if !sent_keepalive
+                && let (futures::future::Either::Right(ref mut sleep), Some(d)) = (
                     inactivity_timer.as_mut().as_pin_mut(),
                     self.common.config.inactivity_timeout,
-                ) {
-                    sleep.as_mut().reset(tokio::time::Instant::now() + d);
-                }
+                )
+            {
+                sleep.as_mut().reset(tokio::time::Instant::now() + d);
             }
         }
 
@@ -1822,6 +1825,7 @@ async fn reply<H: Handler>(
     //     usual, but bound the total so a peer that stalls the rekey and floods
     //     cannot grow memory without limit. `pending_len` is reset when the
     //     rekey completes (see `begin_rekey` and the kex-done path).
+    #[allow(clippy::collapsible_if)]
     if !is_kex_msg && session.common.encrypted.is_some() {
         if let (Some(&msg_type), SessionKexState::InProgress(kex)) =
             (pkt.buffer.first(), &session.kex)
@@ -1830,10 +1834,8 @@ async fn reply<H: Handler>(
                 if kex.peer_kexinit_received() {
                     return Err(crate::Error::Inconsistent.into());
                 }
-                session.pending_len =
-                    session.pending_len.saturating_add(pkt.buffer.len() as u32);
-                if u64::from(session.pending_len)
-                    > 2 * u64::from(session.common.config.window_size)
+                session.pending_len = session.pending_len.saturating_add(pkt.buffer.len() as u32);
+                if u64::from(session.pending_len) > 2 * u64::from(session.common.config.window_size)
                 {
                     return Err(crate::Error::Pending.into());
                 }
@@ -1841,6 +1843,7 @@ async fn reply<H: Handler>(
         }
     }
 
+    #[allow(clippy::collapsible_if)]
     if is_kex_msg {
         if let SessionKexState::InProgress(kex) = session.kex.take() {
             let progress = kex.step(Some(pkt), &mut session.common.packet_writer)?;
@@ -1877,7 +1880,10 @@ async fn reply<H: Handler>(
                             common.packet_writer.buffer().bytes = 0;
                             if let Some(enc) = common.encrypted.as_mut() {
                                 enc.last_rekey = Instant::now();
-                                enc.flush_all_pending_with_writer(&mut common.packet_writer, false)?;
+                                enc.flush_all_pending_with_writer(
+                                    &mut common.packet_writer,
+                                    false,
+                                )?;
                             }
                         }
 
@@ -1957,7 +1963,10 @@ mod tests {
     impl Handler for TestHandler {
         type Error = crate::Error;
 
-        async fn check_server_key(&mut self, _: &PublicKeyOrCertificate) -> Result<bool, Self::Error> {
+        async fn check_server_key(
+            &mut self,
+            _: &PublicKeyOrCertificate,
+        ) -> Result<bool, Self::Error> {
             Ok(true)
         }
     }

@@ -550,6 +550,7 @@ impl Session {
                     return Ok(());
                 }
                 let target = self.common.config.window_size;
+                #[allow(clippy::collapsible_if)]
                 if let Some(ref mut enc) = self.common.encrypted {
                     if enc.adjust_window_size(channel_num, &data, target)? {
                         let next_window =
@@ -576,6 +577,7 @@ impl Session {
                     return Ok(());
                 }
                 let target = self.common.config.window_size;
+                #[allow(clippy::collapsible_if)]
                 if let Some(ref mut enc) = self.common.encrypted {
                     if enc.adjust_window_size(channel_num, &data, target)? {
                         let next_window =
@@ -675,15 +677,15 @@ impl Session {
                     }
                     _ => {
                         let wants_reply = map_err!(u8::decode(&mut r))?;
-                        if wants_reply == 1 {
-                            if let Some(ref mut enc) = self.common.encrypted {
-                                self.common.wants_reply = false;
-                                if let Some(ch) = enc.channels.get(&channel_num) {
-                                    push_packet!(enc.write, {
-                                        map_err!(msg::CHANNEL_FAILURE.encode(&mut enc.write))?;
-                                        map_err!(ch.recipient_channel.encode(&mut enc.write))?;
-                                    })
-                                }
+                        if wants_reply == 1
+                            && let Some(ref mut enc) = self.common.encrypted
+                        {
+                            self.common.wants_reply = false;
+                            if let Some(ch) = enc.channels.get(&channel_num) {
+                                push_packet!(enc.write, {
+                                    map_err!(msg::CHANNEL_FAILURE.encode(&mut enc.write))?;
+                                    map_err!(ch.recipient_channel.encode(&mut enc.write))?;
+                                })
                             }
                         }
                         info!("Unknown channel request {req:?} {wants_reply:?}",);
@@ -712,13 +714,11 @@ impl Session {
                 let is_rekeying = self.kex.active();
                 let common = &mut self.common;
                 if let Some(enc) = common.encrypted.as_mut() {
-                    new_size -= enc
-                        .flush_pending_with_writer(
-                            &mut common.packet_writer,
-                            channel_num,
-                            is_rekeying,
-                        )?
-                        as u32;
+                    new_size -= enc.flush_pending_with_writer(
+                        &mut common.packet_writer,
+                        channel_num,
+                        is_rekeying,
+                    )? as u32;
                 }
                 if let Some(chan) = self.channels.get(&channel_num) {
                     chan.window_size().update(new_size).await;
@@ -1243,15 +1243,12 @@ mod tests {
         ensure_end(&mic).unwrap();
     }
 
-
     fn rsa_user_certificate() -> ssh_key::Certificate {
-        let subject = ssh_key::PrivateKey::random(
-            &mut rand::rng(),
-            ssh_key::Algorithm::Rsa { hash: None },
-        )
-        .unwrap();
-        let ca = ssh_key::PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519)
-            .unwrap();
+        let subject =
+            ssh_key::PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Rsa { hash: None })
+                .unwrap();
+        let ca =
+            ssh_key::PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap();
         let mut builder = ssh_key::certificate::Builder::new_with_random_nonce(
             &mut rand::rng(),
             subject.public_key(),
@@ -1529,8 +1526,12 @@ impl Encrypted {
     ) -> Result<(), crate::Error> {
         match method {
             auth::Method::PublicKey { key } => {
-                let i0 =
-                    self.client_make_to_sign(user, &PublicKeyOrCertificate::from(key), None, buffer)?;
+                let i0 = self.client_make_to_sign(
+                    user,
+                    &PublicKeyOrCertificate::from(key),
+                    None,
+                    buffer,
+                )?;
 
                 // Extend with self-signature.
                 sign_with_hash_alg(key, buffer)?.encode(&mut *buffer)?;

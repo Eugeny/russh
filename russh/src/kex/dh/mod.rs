@@ -121,10 +121,10 @@ impl<D: Digest> std::fmt::Debug for DhGroupKex<D> {
 pub(crate) fn biguint_to_mpint(biguint: &BigUint) -> Vec<u8> {
     let mut mpint = Vec::new();
     let bytes = biguint.to_bytes_be();
-    if let Some(b) = bytes.first() {
-        if b > &0x7f {
-            mpint.push(0);
-        }
+    if let Some(b) = bytes.first()
+        && b > &0x7f
+    {
+        mpint.push(0);
     }
     mpint.extend(&bytes);
     mpint

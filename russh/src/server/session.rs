@@ -697,12 +697,12 @@ impl Session {
                 }
                 if drained > 0 {
                     self.flush()?;
-                    map_err!(
-                        self.common
-                            .packet_writer
-                            .flush_into(&mut stream_write)
-                            .await
-                    )?;
+                    crate::flush_or_timeout(
+                        &mut self.common.packet_writer,
+                        &mut stream_write,
+                        inactivity_timer.as_mut(),
+                    )
+                    .await?;
                 }
                 // A drained Disconnect sets this; don't block in `select!` after.
                 if self.common.disconnected {
@@ -787,12 +787,12 @@ impl Session {
             }
             self.flush()?;
 
-            map_err!(
-                self.common
-                    .packet_writer
-                    .flush_into(&mut stream_write)
-                    .await
-            )?;
+            crate::flush_or_timeout(
+                &mut self.common.packet_writer,
+                &mut stream_write,
+                inactivity_timer.as_mut(),
+            )
+            .await?;
 
             if self.common.received_data {
                 // Reset the number of failed keepalive attempts. We don't
@@ -802,21 +802,21 @@ impl Session {
                 // data from it.
                 self.common.alive_timeouts = 0;
             }
-            if self.common.received_data || sent_keepalive {
-                if let (futures::future::Either::Right(ref mut sleep), Some(d)) = (
+            if (self.common.received_data || sent_keepalive)
+                && let (futures::future::Either::Right(ref mut sleep), Some(d)) = (
                     keepalive_timer.as_mut().as_pin_mut(),
                     self.common.config.keepalive_interval,
-                ) {
-                    sleep.as_mut().reset(tokio::time::Instant::now() + d);
-                }
+                )
+            {
+                sleep.as_mut().reset(tokio::time::Instant::now() + d);
             }
-            if !sent_keepalive {
-                if let (futures::future::Either::Right(ref mut sleep), Some(d)) = (
+            if !sent_keepalive
+                && let (futures::future::Either::Right(ref mut sleep), Some(d)) = (
                     inactivity_timer.as_mut().as_pin_mut(),
                     self.common.config.inactivity_timeout,
-                ) {
-                    sleep.as_mut().reset(tokio::time::Instant::now() + d);
-                }
+                )
+            {
+                sleep.as_mut().reset(tokio::time::Instant::now() + d);
             }
         }
         debug!("disconnected");
@@ -826,14 +826,22 @@ impl Session {
             if let Some((stream_read, buffer, opening_cipher)) = is_reading.take() {
                 reading.set(start_reading(stream_read, buffer, opening_cipher));
             }
-            match (&mut reading).await {
-                Ok((0, _, _, _)) => break,
-                Ok((_, r, b, opening_cipher)) => {
-                    is_reading = Some((r, b, opening_cipher));
+            tokio::select! {
+                r = &mut reading => match r {
+                    Ok((0, _, _, _)) => break,
+                    Ok((_, r, b, opening_cipher)) => {
+                        is_reading = Some((r, b, opening_cipher));
+                    }
+                    // at this stage of session shutdown, EOF is not unexpected
+                    Err(Error::IO(ref e)) if e.kind() == ErrorKind::UnexpectedEof => break,
+                    Err(e) => return Err(e.into()),
+                },
+                // The client was told to disconnect and never closed its side;
+                // dropping the stream closes it for them.
+                () = &mut inactivity_timer => {
+                    debug!("timeout waiting for the client to close");
+                    break;
                 }
-                // at this stage of session shutdown, EOF is not unexpected
-                Err(Error::IO(ref e)) if e.kind() == ErrorKind::UnexpectedEof => break,
-                Err(e) => return Err(e.into()),
             }
         }
 
@@ -846,30 +854,30 @@ impl Session {
     }
 
     pub fn writable_packet_size(&self, channel: &ChannelId) -> u32 {
-        if let Some(ref enc) = self.common.encrypted {
-            if let Some(channel) = enc.channels.get(channel) {
-                return channel
-                    .sender_window_size
-                    .min(channel.sender_maximum_packet_size);
-            }
+        if let Some(ref enc) = self.common.encrypted
+            && let Some(channel) = enc.channels.get(channel)
+        {
+            return channel
+                .sender_window_size
+                .min(channel.sender_maximum_packet_size);
         }
         0
     }
 
     pub fn window_size(&self, channel: &ChannelId) -> u32 {
-        if let Some(ref enc) = self.common.encrypted {
-            if let Some(channel) = enc.channels.get(channel) {
-                return channel.sender_window_size;
-            }
+        if let Some(ref enc) = self.common.encrypted
+            && let Some(channel) = enc.channels.get(channel)
+        {
+            return channel.sender_window_size;
         }
         0
     }
 
     pub fn max_packet_size(&self, channel: &ChannelId) -> u32 {
-        if let Some(ref enc) = self.common.encrypted {
-            if let Some(channel) = enc.channels.get(channel) {
-                return channel.sender_maximum_packet_size;
-            }
+        if let Some(ref enc) = self.common.encrypted
+            && let Some(channel) = enc.channels.get(channel)
+        {
+            return channel.sender_maximum_packet_size;
         }
         0
     }
@@ -966,11 +974,11 @@ impl Session {
     /// cancelling). Always call this function if the request was
     /// successful (it checks whether the client expects an answer).
     pub fn request_success(&mut self) {
-        if self.common.wants_reply {
-            if let Some(ref mut enc) = self.common.encrypted {
-                self.common.wants_reply = false;
-                push_packet!(enc.write, enc.write.push(msg::REQUEST_SUCCESS))
-            }
+        if self.common.wants_reply
+            && let Some(ref mut enc) = self.common.encrypted
+        {
+            self.common.wants_reply = false;
+            push_packet!(enc.write, enc.write.push(msg::REQUEST_SUCCESS))
         }
     }
 
@@ -986,17 +994,17 @@ impl Session {
     /// function if the request was successful (it checks whether the
     /// client expects an answer).
     pub fn channel_success(&mut self, channel: ChannelId) -> Result<(), crate::Error> {
-        if let Some(ref mut enc) = self.common.encrypted {
-            if let Some(channel) = enc.channels.get_mut(&channel) {
-                assert!(channel.confirmed);
-                if channel.wants_reply {
-                    channel.wants_reply = false;
-                    debug!("channel_success {channel:?}");
-                    push_packet!(enc.write, {
-                        msg::CHANNEL_SUCCESS.encode(&mut enc.write)?;
-                        channel.recipient_channel.encode(&mut enc.write)?;
-                    })
-                }
+        if let Some(ref mut enc) = self.common.encrypted
+            && let Some(channel) = enc.channels.get_mut(&channel)
+        {
+            assert!(channel.confirmed);
+            if channel.wants_reply {
+                channel.wants_reply = false;
+                debug!("channel_success {channel:?}");
+                push_packet!(enc.write, {
+                    msg::CHANNEL_SUCCESS.encode(&mut enc.write)?;
+                    channel.recipient_channel.encode(&mut enc.write)?;
+                })
             }
         }
         Ok(())
@@ -1004,16 +1012,16 @@ impl Session {
 
     /// Send a "failure" reply to a global request.
     pub fn channel_failure(&mut self, channel: ChannelId) -> Result<(), crate::Error> {
-        if let Some(ref mut enc) = self.common.encrypted {
-            if let Some(channel) = enc.channels.get_mut(&channel) {
-                assert!(channel.confirmed);
-                if channel.wants_reply {
-                    channel.wants_reply = false;
-                    push_packet!(enc.write, {
-                        enc.write.push(msg::CHANNEL_FAILURE);
-                        channel.recipient_channel.encode(&mut enc.write)?;
-                    })
-                }
+        if let Some(ref mut enc) = self.common.encrypted
+            && let Some(channel) = enc.channels.get_mut(&channel)
+        {
+            assert!(channel.confirmed);
+            if channel.wants_reply {
+                channel.wants_reply = false;
+                push_packet!(enc.write, {
+                    enc.write.push(msg::CHANNEL_FAILURE);
+                    channel.recipient_channel.encode(&mut enc.write)?;
+                })
             }
         }
         Ok(())
@@ -1142,18 +1150,18 @@ impl Session {
         channel: ChannelId,
         client_can_do: bool,
     ) -> Result<(), Error> {
-        if let Some(ref mut enc) = self.common.encrypted {
-            if let Some(channel) = enc.channels.get(&channel) {
-                assert!(channel.confirmed);
-                push_packet!(enc.write, {
-                    msg::CHANNEL_REQUEST.encode(&mut enc.write)?;
+        if let Some(ref mut enc) = self.common.encrypted
+            && let Some(channel) = enc.channels.get(&channel)
+        {
+            assert!(channel.confirmed);
+            push_packet!(enc.write, {
+                msg::CHANNEL_REQUEST.encode(&mut enc.write)?;
 
-                    channel.recipient_channel.encode(&mut enc.write)?;
-                    "xon-xoff".encode(&mut enc.write)?;
-                    0u8.encode(&mut enc.write)?;
-                    (client_can_do as u8).encode(&mut enc.write)?;
-                })
-            }
+                channel.recipient_channel.encode(&mut enc.write)?;
+                "xon-xoff".encode(&mut enc.write)?;
+                0u8.encode(&mut enc.write)?;
+                (client_can_do as u8).encode(&mut enc.write)?;
+            })
         }
         Ok(())
     }
@@ -1194,18 +1202,18 @@ impl Session {
         channel: ChannelId,
         exit_status: u32,
     ) -> Result<(), Error> {
-        if let Some(ref mut enc) = self.common.encrypted {
-            if let Some(channel) = enc.channels.get(&channel) {
-                assert!(channel.confirmed);
-                push_packet!(enc.write, {
-                    msg::CHANNEL_REQUEST.encode(&mut enc.write)?;
+        if let Some(ref mut enc) = self.common.encrypted
+            && let Some(channel) = enc.channels.get(&channel)
+        {
+            assert!(channel.confirmed);
+            push_packet!(enc.write, {
+                msg::CHANNEL_REQUEST.encode(&mut enc.write)?;
 
-                    channel.recipient_channel.encode(&mut enc.write)?;
-                    "exit-status".encode(&mut enc.write)?;
-                    0u8.encode(&mut enc.write)?;
-                    exit_status.encode(&mut enc.write)?;
-                })
-            }
+                channel.recipient_channel.encode(&mut enc.write)?;
+                "exit-status".encode(&mut enc.write)?;
+                0u8.encode(&mut enc.write)?;
+                exit_status.encode(&mut enc.write)?;
+            })
         }
         Ok(())
     }
@@ -1219,21 +1227,21 @@ impl Session {
         error_message: &str,
         language_tag: &str,
     ) -> Result<(), Error> {
-        if let Some(ref mut enc) = self.common.encrypted {
-            if let Some(channel) = enc.channels.get(&channel) {
-                assert!(channel.confirmed);
-                push_packet!(enc.write, {
-                    msg::CHANNEL_REQUEST.encode(&mut enc.write)?;
+        if let Some(ref mut enc) = self.common.encrypted
+            && let Some(channel) = enc.channels.get(&channel)
+        {
+            assert!(channel.confirmed);
+            push_packet!(enc.write, {
+                msg::CHANNEL_REQUEST.encode(&mut enc.write)?;
 
-                    channel.recipient_channel.encode(&mut enc.write)?;
-                    "exit-signal".encode(&mut enc.write)?;
-                    0u8.encode(&mut enc.write)?;
-                    signal.name().encode(&mut enc.write)?;
-                    (core_dumped as u8).encode(&mut enc.write)?;
-                    error_message.encode(&mut enc.write)?;
-                    language_tag.encode(&mut enc.write)?;
-                })
-            }
+                channel.recipient_channel.encode(&mut enc.write)?;
+                "exit-signal".encode(&mut enc.write)?;
+                0u8.encode(&mut enc.write)?;
+                signal.name().encode(&mut enc.write)?;
+                (core_dumped as u8).encode(&mut enc.write)?;
+                error_message.encode(&mut enc.write)?;
+                language_tag.encode(&mut enc.write)?;
+            })
         }
         Ok(())
     }

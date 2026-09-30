@@ -1,13 +1,15 @@
 use std::convert::TryFrom;
 use std::fmt::{Debug, Display, Formatter};
 use std::future::{Future, Pending};
+use std::pin::Pin;
 
 use futures::future::Either as EitherFuture;
-use log::warn;
+use log::{debug, warn};
 use parsing::ChannelOpenConfirmation;
 pub use russh_cryptovec::CryptoVec;
 use ssh_encoding::{Decode, Encode};
 use thiserror::Error;
+use tokio::io::AsyncWrite;
 
 #[cfg(test)]
 mod tests;
@@ -525,6 +527,20 @@ impl ChannelParams {
             std::mem::take(&mut self.pending_eof),
             std::mem::take(&mut self.pending_close),
         )
+    }
+}
+
+pub(crate) async fn flush_or_timeout<W: AsyncWrite + Unpin>(
+    writer: &mut sshbuffer::PacketWriter,
+    stream: &mut W,
+    inactivity_timer: Pin<&mut impl Future<Output = ()>>,
+) -> Result<(), Error> {
+    tokio::select! {
+        r = writer.flush_into(stream) => Ok(r?),
+        _ = inactivity_timer => {
+            debug!("timeout while writing");
+            Err(Error::InactivityTimeout)
+        }
     }
 }
 

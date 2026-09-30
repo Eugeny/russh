@@ -9,7 +9,7 @@ license = "Apache-2.0"
 name = "russh"
 readme = "../README.md"
 repository = "https://github.com/warp-tech/russh"
-version = "0.63.2"
+version = "0.63.3"
 rust-version = "1.89"
 
 [features]
@@ -17,7 +17,6 @@ default = ["flate2", "aws-lc-rs", "rsa"]
 # Crypto backends: enable at least one of `aws-lc-rs` or `ring`.
 aws-lc-rs = ["dep:aws-lc-rs"] # Default crypto backend.
 async-trait = ["dep:async-trait"]
-legacy-ed25519-pkcs8-parser = ["yasna"]
 # Danger: 3DES cipher is insecure.
 des = ["dep:des"]
 # Danger: DSA algorithm is insecure.
@@ -94,10 +93,6 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["io-util", "sync", "time"] }
 typenum = "1.17"
 universal-hash = "0.6.1" # only pinned due to a cargo-minimal-versions failure in 0.6.0
-yasna = { version = "0.6", features = [
-  "bit-vec",
-  "num-bigint",
-], optional = true }
 zeroize = "1.7"
 criterion = { version = "0.7", optional = true, features = ["html_reports"] }
 
