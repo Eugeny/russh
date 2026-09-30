@@ -19,7 +19,7 @@ use std::str::FromStr;
 use bytes::Bytes;
 use log::{debug, error, info, trace, warn};
 use ssh_encoding::{Decode, Encode, Reader};
-use ssh_key::Algorithm;
+use ssh_key::{Algorithm, PublicKey, Signature};
 
 use super::IncomingSshPacket;
 use crate::auth::AuthRequest;
@@ -30,9 +30,34 @@ use crate::keys::key::parse_public_key;
 use crate::parsing::{ChannelOpenConfirmation, ChannelType, OpenChannelMessage, ensure_end};
 use crate::session::{Encrypted, EncryptedState, GlobalRequestResponse};
 use crate::{
-    Channel, ChannelId, ChannelMsg, ChannelOpenFailure, ChannelParams, Error, MethodSet, Sig, auth,
-    map_err, msg,
+    Channel, ChannelId, ChannelMsg, ChannelOpenFailure, ChannelParams, CryptoVec, Error, MethodSet,
+    Sig, auth, map_err, msg,
 };
+
+/// Checks a `hostkeys-prove-00@openssh.com` reply: one signature per requested
+/// key, in order, each over `string name || string session_id || string key_blob`.
+fn verify_hostkeys_proof(
+    session_id: &[u8],
+    keys: &[PublicKey],
+    mut r: &[u8],
+) -> Result<(), crate::Error> {
+    for key in keys {
+        let signature = Bytes::decode(&mut r)?;
+        let mut signature_reader = &signature[..];
+        let signature = Signature::decode(&mut signature_reader)?;
+        ensure_end(&signature_reader)?;
+
+        // CryptoVec: the session id is key material and is zeroized on drop.
+        let mut signed = CryptoVec::new();
+        "hostkeys-prove-00@openssh.com".encode(&mut signed)?;
+        session_id.encode(&mut signed)?;
+        key.to_bytes()?.encode(&mut signed)?;
+        signature::Verifier::verify(key, &signed, &signature)
+            .map_err(|_| crate::Error::WrongServerSig)?;
+    }
+    ensure_end(&r)?;
+    Ok(())
+}
 
 impl Session {
     pub(crate) async fn client_read_encrypted<H: Handler>(
@@ -970,6 +995,19 @@ impl Session {
                         map_err!(ensure_end(&r))?;
                         let _ = return_channel.send(true);
                     }
+                    Some(GlobalRequestResponse::HostKeysProve {
+                        return_channel,
+                        keys,
+                    }) => {
+                        let result = match self.common.encrypted {
+                            Some(ref enc) => verify_hostkeys_proof(&enc.session_id, &keys, r),
+                            None => Err(crate::Error::Inconsistent),
+                        };
+                        if let Err(ref e) = result {
+                            error!("hostkeys-prove-00@openssh.com reply rejected: {e:?}");
+                        }
+                        let _ = return_channel.send(result);
+                    }
                     None => {
                         error!("Received global request failure for unknown request!")
                     }
@@ -1000,6 +1038,9 @@ impl Session {
                     }
                     Some(GlobalRequestResponse::CancelStreamLocalForward(return_channel)) => {
                         let _ = return_channel.send(false);
+                    }
+                    Some(GlobalRequestResponse::HostKeysProve { return_channel, .. }) => {
+                        let _ = return_channel.send(Err(crate::Error::RequestDenied));
                     }
                     None => {
                         error!("Received global request failure for unknown request!")

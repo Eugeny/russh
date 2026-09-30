@@ -241,6 +241,10 @@ pub enum Msg {
     NoMoreSessions {
         want_reply: bool,
     },
+    HostKeysProve {
+        reply_channel: oneshot::Sender<Result<(), crate::Error>>,
+        keys: Vec<PublicKey>,
+    },
 }
 
 impl From<(ChannelId, ChannelMsg)> for Msg {
@@ -1053,6 +1057,21 @@ impl<H: Handler> Handle<H> {
             .await
             .map_err(|_| Error::SendError)
     }
+
+    /// Asks the server to prove it holds each host key it announced through `hostkeys-00@openssh.com` (see [`Handler::openssh_ext_host_keys_announced`]).
+    ///
+    /// Succeeds only if the server successfully proves ownereship of all keys announced. [`Error::RequestDenied`] means the server refused and [`Error::WrongServerSig`] means at least one signature did not verify.
+    pub async fn hostkeys_prove(&self, keys: Vec<PublicKey>) -> Result<(), Error> {
+        let (reply_channel, reply_recv) = oneshot::channel();
+        self.sender
+            .send(Msg::HostKeysProve {
+                reply_channel,
+                keys,
+            })
+            .await
+            .map_err(|_| Error::SendError)?;
+        reply_recv.await.unwrap_or(Err(Error::Disconnect))
+    }
 }
 
 impl<H: Handler> Future for Handle<H> {
@@ -1671,6 +1690,12 @@ impl Session {
             Msg::NoMoreSessions { want_reply } => {
                 let _ = self.no_more_sessions(want_reply);
             }
+            Msg::HostKeysProve {
+                reply_channel,
+                keys,
+            } => {
+                self.request_hostkeys_prove(reply_channel, keys)?;
+            }
             Msg::ServerChannelOpenReply { pending, result } => {
                 self.finalize_server_channel_open_reply(pending, result)?;
             }
@@ -1944,6 +1969,7 @@ mod tests {
     use super::*;
     use crate::auth::{AuthRequest, Method};
     use crate::compression::{Compression, Decompress};
+    use crate::helpers::EncodedExt;
     use crate::kex::{KEXES, NONE};
     use crate::session::{CommonSession, Encrypted, EncryptedState, Exchange};
     use crate::sshbuffer::{IncomingSshPacket, PacketWriter, SSHBuffer};
@@ -2016,6 +2042,144 @@ mod tests {
             reply_sender,
         );
         (session, sender, reply_receiver)
+    }
+
+    const HOSTKEYS_SESSION_ID: &[u8] = b"hostkeys-session-id";
+
+    /// An authenticated session with one outstanding `hostkeys-prove-00` request.
+    fn hostkeys_prove_session() -> (
+        Session,
+        tokio::sync::mpsc::Sender<Msg>,
+        oneshot::Receiver<Result<(), crate::Error>>,
+        PrivateKey,
+    ) {
+        let (mut session, sender, _replies) = keyboard_interactive_session();
+        let enc = session.common.encrypted.as_mut().unwrap();
+        enc.state = EncryptedState::Authenticated;
+        enc.session_id = CryptoVec::from(HOSTKEYS_SESSION_ID);
+        let host_key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
+        let (reply_channel, reply) = oneshot::channel();
+        session
+            .request_hostkeys_prove(reply_channel, vec![host_key.public_key().clone()])
+            .unwrap();
+        (session, sender, reply, host_key)
+    }
+
+    /// `SSH_MSG_REQUEST_SUCCESS` carrying one signature over the given session id.
+    fn hostkeys_proof_packet(host_key: &PrivateKey, session_id: &[u8]) -> Vec<u8> {
+        let mut signed = Vec::new();
+        "hostkeys-prove-00@openssh.com".encode(&mut signed).unwrap();
+        session_id.encode(&mut signed).unwrap();
+        host_key
+            .public_key()
+            .to_bytes()
+            .unwrap()
+            .encode(&mut signed)
+            .unwrap();
+        let signature: ssh_key::Signature = signature::Signer::try_sign(host_key, &signed).unwrap();
+
+        let mut packet = vec![crate::msg::REQUEST_SUCCESS];
+        signature.encoded().unwrap().encode(&mut packet).unwrap();
+        packet
+    }
+
+    #[test]
+    fn hostkeys_prove_request_encodes_every_key_blob() {
+        let (session, _sender, _reply, host_key) = hostkeys_prove_session();
+
+        let written = session.common.encrypted.as_ref().unwrap().write.to_vec();
+        let packet_len = u32::from_be_bytes(written[..4].try_into().unwrap()) as usize;
+        let mut payload = &written[4..4 + packet_len];
+
+        assert_eq!(
+            u8::decode(&mut payload).unwrap(),
+            crate::msg::GLOBAL_REQUEST
+        );
+        assert_eq!(
+            String::decode(&mut payload).unwrap(),
+            "hostkeys-prove-00@openssh.com"
+        );
+        assert_eq!(
+            u8::decode(&mut payload).unwrap(),
+            1,
+            "want_reply must be set"
+        );
+        assert_eq!(
+            Vec::<u8>::decode(&mut payload).unwrap(),
+            host_key.public_key().to_bytes().unwrap()
+        );
+        assert!(payload.is_empty());
+
+        assert!(matches!(
+            session.open_global_requests.front(),
+            Some(GlobalRequestResponse::HostKeysProve { .. })
+        ));
+    }
+
+    #[test]
+    fn hostkeys_prove_empty_key_list_resolves_without_a_request() {
+        let (mut session, _sender, _replies) = keyboard_interactive_session();
+        let (reply_channel, mut reply) = oneshot::channel();
+        session
+            .request_hostkeys_prove(reply_channel, vec![])
+            .unwrap();
+
+        assert!(matches!(reply.try_recv(), Ok(Ok(()))));
+        assert!(session.common.encrypted.as_ref().unwrap().write.is_empty());
+        assert!(session.open_global_requests.is_empty());
+    }
+
+    #[tokio::test]
+    async fn hostkeys_prove_reply_verifies_signature() {
+        let (mut session, _sender, mut reply, host_key) = hostkeys_prove_session();
+        let packet = hostkeys_proof_packet(&host_key, HOSTKEYS_SESSION_ID);
+        session
+            .process_packet(&mut TestHandler, &packet)
+            .await
+            .unwrap();
+
+        assert!(matches!(reply.try_recv(), Ok(Ok(()))));
+        assert!(session.open_global_requests.is_empty());
+    }
+
+    #[tokio::test]
+    async fn hostkeys_prove_reply_rejects_signature_over_other_session() {
+        let (mut session, _sender, mut reply, host_key) = hostkeys_prove_session();
+        let packet = hostkeys_proof_packet(&host_key, b"some-other-session");
+        session
+            .process_packet(&mut TestHandler, &packet)
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            reply.try_recv(),
+            Ok(Err(crate::Error::WrongServerSig))
+        ));
+    }
+
+    #[tokio::test]
+    async fn hostkeys_prove_reply_rejects_missing_signature() {
+        let (mut session, _sender, mut reply, _host_key) = hostkeys_prove_session();
+        session
+            .process_packet(&mut TestHandler, &[crate::msg::REQUEST_SUCCESS])
+            .await
+            .unwrap();
+
+        assert!(matches!(reply.try_recv(), Ok(Err(_))));
+    }
+
+    #[tokio::test]
+    async fn hostkeys_prove_failure_reply_is_denied() {
+        let (mut session, _sender, mut reply, _host_key) = hostkeys_prove_session();
+        session
+            .process_packet(&mut TestHandler, &[crate::msg::REQUEST_FAILURE])
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            reply.try_recv(),
+            Ok(Err(crate::Error::RequestDenied))
+        ));
     }
 
     #[cfg(feature = "flate2")]
@@ -2730,7 +2894,13 @@ pub trait Handler: Sized + Send {
         window
     }
 
-    /// Called when the server signals success.
+    /// Called when the server announces its host keys
+    /// (`hostkeys-00@openssh.com`, sent by OpenSSH after authentication).
+    ///
+    /// Announced keys must not be trusted until the server proves it holds
+    /// them: hand them to [`Handle::hostkeys_prove`] from another task, or
+    /// call [`Session::request_hostkeys_prove`] here and forward the receiver.
+    /// Do not await the proof inside this callback.
     #[allow(unused_variables)]
     fn openssh_ext_host_keys_announced(
         &mut self,
