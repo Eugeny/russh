@@ -15,7 +15,7 @@ use windows::Win32::System::Memory::{
     UnmapViewOfFile,
 };
 use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, SendMessageA, WM_COPYDATA};
-use windows::core::HSTRING;
+use windows::core::PCWSTR;
 
 use crate::Error;
 
@@ -107,7 +107,8 @@ struct MemoryMap {
 }
 
 impl MemoryMap {
-    fn new(name: String, length: usize) -> Result<Self, Error> {
+    fn new(name: &str, length: usize) -> Result<Self, Error> {
+        let wide_name = wide_null(name);
         let filemap = unsafe {
             CreateFileMappingW(
                 INVALID_HANDLE_VALUE,
@@ -117,7 +118,7 @@ impl MemoryMap {
                 PAGE_READWRITE,
                 0,
                 length as u32,
-                &HSTRING::from(name.clone()),
+                PCWSTR(wide_name.as_ptr()),
             )
         }?;
         if filemap.is_invalid() {
@@ -184,11 +185,16 @@ impl Drop for MemoryMap {
 }
 
 fn find_pageant_window() -> Result<HWND, Error> {
-    let w = unsafe { FindWindowW(&HSTRING::from("Pageant"), &HSTRING::from("Pageant")) }?;
+    let pageant = wide_null("Pageant");
+    let w = unsafe { FindWindowW(PCWSTR(pageant.as_ptr()), PCWSTR(pageant.as_ptr())) }?;
     if w.is_invalid() {
         return Err(Error::NotFound);
     }
     Ok(w)
+}
+
+fn wide_null(value: &str) -> Vec<u16> {
+    value.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
 const _AGENT_COPYDATA_ID: u64 = 0x804E50BA;
@@ -203,7 +209,7 @@ pub fn query_pageant_direct(cookie: String, msg: &[u8]) -> Result<Vec<u8>, Error
     let hwnd = find_pageant_window()?;
     let map_name = format!("PageantRequest{cookie}");
 
-    let mut map: MemoryMap = MemoryMap::new(map_name.clone(), _AGENT_MAX_MSGLEN)?;
+    let mut map: MemoryMap = MemoryMap::new(&map_name, _AGENT_MAX_MSGLEN)?;
     map.write(msg)?;
 
     let char_buffer = CString::new(map_name.as_bytes()).map_err(|_| Error::InvalidCookie)?;
