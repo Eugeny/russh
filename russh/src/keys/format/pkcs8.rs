@@ -1,12 +1,20 @@
 use std::convert::{TryFrom, TryInto};
 
+#[cfg(feature = "ecdsa")]
 use p256::NistP256;
+#[cfg(feature = "ecdsa")]
 use p384::NistP384;
+#[cfg(feature = "ecdsa")]
 use p521::NistP521;
-use pkcs8::{AssociatedOid, EncodePrivateKey, PrivateKeyInfoRef, SecretDocument};
+#[cfg(feature = "ecdsa")]
+use pkcs8::AssociatedOid;
+use pkcs8::{EncodePrivateKey, PrivateKeyInfoRef, SecretDocument};
+#[cfg(feature = "ecdsa")]
 use spki::ObjectIdentifier;
 use ssh_key::PrivateKey;
-use ssh_key::private::{EcdsaKeypair, Ed25519Keypair, Ed25519PrivateKey, KeypairData};
+#[cfg(feature = "ecdsa")]
+use ssh_key::private::EcdsaKeypair;
+use ssh_key::private::{Ed25519Keypair, Ed25519PrivateKey, KeypairData};
 
 use crate::keys::Error;
 use crate::keys::key::safe_rng;
@@ -24,6 +32,10 @@ pub fn decode_pkcs8(
         doc
     };
 
+    // With the `ecdsa` feature off the EC branches below are compiled out, and
+    // an EC key falls through to the PKCS#8 decoder, which reports its curve
+    // OID as `Error::UnknownAlgorithm`.
+    #[cfg(feature = "ecdsa")]
     if let Ok(key) = doc.decode_msg::<sec1::EcPrivateKey>() {
         // X9.62 EC private key
         let Some(curve) = key.parameters.and_then(|x| x.named_curve()) else {
@@ -34,6 +46,7 @@ pub fn decode_pkcs8(
     }
 
     // SEC1 key with full domain parameters (not a named curve OID)
+    #[cfg(feature = "ecdsa")]
     if let Ok(kp) = explicit_curve_params::decode_sec1_with_full_domain_params(ciphertext) {
         return Ok(PrivateKey::new(KeypairData::Ecdsa(kp), "")?);
     }
@@ -67,6 +80,7 @@ fn pkcs8_pki_into_keypair_data(pki: PrivateKeyInfoRef<'_>) -> Result<KeypairData
                 private: pk,
             }))
         }
+        #[cfg(feature = "ecdsa")]
         sec1::ALGORITHM_OID => Ok(KeypairData::Ecdsa(ec_key_data_into_keypair(
             pki.algorithm.parameters_oid()?,
             pki,
@@ -75,6 +89,7 @@ fn pkcs8_pki_into_keypair_data(pki: PrivateKeyInfoRef<'_>) -> Result<KeypairData
     }
 }
 
+#[cfg(feature = "ecdsa")]
 fn ec_key_data_into_keypair<K, E>(
     curve_oid: ObjectIdentifier,
     private_key: K,
@@ -111,6 +126,7 @@ where
     })
 }
 
+#[cfg(feature = "ecdsa")]
 mod explicit_curve_params {
     use super::*;
 
@@ -247,6 +263,7 @@ pub fn encode_pkcs8(key: &ssh_key::PrivateKey) -> Result<Vec<u8>, Error> {
             let sk: rsa::RsaPrivateKey = pair.try_into()?;
             sk.to_pkcs8_der()?.as_bytes().to_vec()
         }
+        #[cfg(feature = "ecdsa")]
         ssh_key::private::KeypairData::Ecdsa(pair) => match pair {
             EcdsaKeypair::NistP256 { private, .. } => {
                 let sk = p256::SecretKey::from_slice(private.as_slice())?;

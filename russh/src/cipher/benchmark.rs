@@ -8,7 +8,13 @@ pub fn bench(c: &mut Criterion) {
 
     let mut packet_length = hint::black_box(vec![0u8; 4]);
 
-    for cipher_name in [super::CHACHA20_POLY1305, super::AES_256_GCM] {
+    const BENCHED_CIPHERS: &[super::Name] = &[
+        super::CHACHA20_POLY1305,
+        #[cfg(feature = "aes-gcm")]
+        super::AES_256_GCM,
+    ];
+
+    for &cipher_name in BENCHED_CIPHERS {
         let cipher = super::CIPHERS.get(&cipher_name).unwrap();
 
         let mut key = vec![0; cipher.key_len()];

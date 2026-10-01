@@ -1,95 +1,127 @@
 pub mod groups;
+#[cfg(feature = "dh-group")]
 use std::marker::PhantomData;
 
+#[cfg(feature = "dh-group")]
 use byteorder::{BigEndian, ByteOrder};
+#[cfg(feature = "dh-group")]
 use digest::Digest;
+#[cfg(feature = "dh-group")]
 use groups::DH;
+#[cfg(feature = "dh-group")]
 use log::{error, trace};
+#[cfg(feature = "dh-group")]
 use num_bigint::BigUint;
+#[cfg(feature = "dh-group")]
 use sha1::Sha1;
+#[cfg(feature = "dh-group")]
 use sha2::{Sha256, Sha512};
 use ssh_encoding::{Decode, Encode, Reader, Writer};
 
+#[cfg(feature = "dh-group")]
 use self::groups::{
     DhGroup, DH_GROUP1, DH_GROUP14, DH_GROUP15, DH_GROUP16, DH_GROUP17, DH_GROUP18,
 };
+#[cfg(feature = "dh-group")]
 use super::{compute_keys, KexAlgorithm, KexAlgorithmImplementor, KexType, SharedSecret};
 use crate::client::GexParams;
+#[cfg(feature = "dh-group")]
 use crate::session::Exchange;
-use crate::{cipher, mac, msg, CryptoVec, Error};
+#[cfg(feature = "dh-group")]
+use crate::{cipher, mac, msg, CryptoVec};
+use crate::Error;
 
+#[cfg(feature = "dh-group")]
 pub(crate) struct DhGroup15Sha512KexType {}
 
+#[cfg(feature = "dh-group")]
 impl KexType for DhGroup15Sha512KexType {
     fn make(&self) -> KexAlgorithm {
         DhGroupKex::<Sha512>::new(Some(&DH_GROUP15)).into()
     }
 }
 
+#[cfg(feature = "dh-group")]
 pub(crate) struct DhGroup17Sha512KexType {}
 
+#[cfg(feature = "dh-group")]
 impl KexType for DhGroup17Sha512KexType {
     fn make(&self) -> KexAlgorithm {
         DhGroupKex::<Sha512>::new(Some(&DH_GROUP17)).into()
     }
 }
 
+#[cfg(feature = "dh-group")]
 pub(crate) struct DhGroup18Sha512KexType {}
 
+#[cfg(feature = "dh-group")]
 impl KexType for DhGroup18Sha512KexType {
     fn make(&self) -> KexAlgorithm {
         DhGroupKex::<Sha512>::new(Some(&DH_GROUP18)).into()
     }
 }
 
+#[cfg(feature = "dh-group")]
 pub(crate) struct DhGexSha1KexType {}
 
+#[cfg(feature = "dh-group")]
 impl KexType for DhGexSha1KexType {
     fn make(&self) -> KexAlgorithm {
         DhGroupKex::<Sha1>::new(None).into()
     }
 }
 
+#[cfg(feature = "dh-group")]
 pub(crate) struct DhGexSha256KexType {}
 
+#[cfg(feature = "dh-group")]
 impl KexType for DhGexSha256KexType {
     fn make(&self) -> KexAlgorithm {
         DhGroupKex::<Sha256>::new(None).into()
     }
 }
 
+#[cfg(feature = "dh-group")]
 pub(crate) struct DhGroup1Sha1KexType {}
 
+#[cfg(feature = "dh-group")]
 impl KexType for DhGroup1Sha1KexType {
     fn make(&self) -> KexAlgorithm {
         DhGroupKex::<Sha1>::new(Some(&DH_GROUP1)).into()
     }
 }
 
+#[cfg(feature = "dh-group")]
 pub(crate) struct DhGroup14Sha1KexType {}
 
+#[cfg(feature = "dh-group")]
 impl KexType for DhGroup14Sha1KexType {
     fn make(&self) -> KexAlgorithm {
         DhGroupKex::<Sha1>::new(Some(&DH_GROUP14)).into()
     }
 }
 
+#[cfg(feature = "dh-group")]
 pub(crate) struct DhGroup14Sha256KexType {}
 
+#[cfg(feature = "dh-group")]
 impl KexType for DhGroup14Sha256KexType {
     fn make(&self) -> KexAlgorithm {
         DhGroupKex::<Sha256>::new(Some(&DH_GROUP14)).into()
     }
 }
 
+#[cfg(feature = "dh-group")]
 pub(crate) struct DhGroup16Sha512KexType {}
 
+#[cfg(feature = "dh-group")]
 impl KexType for DhGroup16Sha512KexType {
     fn make(&self) -> KexAlgorithm {
         DhGroupKex::<Sha512>::new(Some(&DH_GROUP16)).into()
     }
 }
 
+#[cfg(feature = "dh-group")]
 #[doc(hidden)]
 pub(crate) struct DhGroupKex<D: Digest> {
     dh: Option<DH>,
@@ -98,6 +130,7 @@ pub(crate) struct DhGroupKex<D: Digest> {
     _digest: PhantomData<D>,
 }
 
+#[cfg(feature = "dh-group")]
 impl<D: Digest> DhGroupKex<D> {
     pub(crate) fn new(group: Option<&DhGroup>) -> DhGroupKex<D> {
         DhGroupKex {
@@ -109,6 +142,7 @@ impl<D: Digest> DhGroupKex<D> {
     }
 }
 
+#[cfg(feature = "dh-group")]
 impl<D: Digest> std::fmt::Debug for DhGroupKex<D> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(
@@ -118,6 +152,7 @@ impl<D: Digest> std::fmt::Debug for DhGroupKex<D> {
     }
 }
 
+#[cfg(feature = "dh-group")]
 pub(crate) fn biguint_to_mpint(biguint: &BigUint) -> Vec<u8> {
     let mut mpint = Vec::new();
     let bytes = biguint.to_bytes_be();
@@ -130,6 +165,7 @@ pub(crate) fn biguint_to_mpint(biguint: &BigUint) -> Vec<u8> {
     mpint
 }
 
+#[cfg(feature = "dh-group")]
 impl<D: Digest> KexAlgorithmImplementor for DhGroupKex<D> {
     fn skip_exchange(&self) -> bool {
         false

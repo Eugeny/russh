@@ -13,17 +13,54 @@ version = "0.63.3"
 rust-version = "1.89"
 
 [features]
-default = ["flate2", "aws-lc-rs", "rsa"]
+default = [
+  "flate2",
+  "aws-lc-rs",
+  "rsa",
+  "aes-cbc",
+  "aes-gcm",
+  "dh-group",
+  "ecdsa",
+  "ml-kem",
+]
 # Crypto backends: enable at least one of `aws-lc-rs` or `ring`.
 aws-lc-rs = ["dep:aws-lc-rs"] # Default crypto backend.
 async-trait = ["dep:async-trait"]
 # Danger: 3DES cipher is insecure.
-des = ["dep:des"]
+des = ["dep:des", "aes-cbc"]
 # Danger: DSA algorithm is insecure.
 dsa = ["ssh-key/dsa"]
 ring = ["dep:ring"] # Alternative crypto backend.
-rsa = ["dep:rsa", "dep:pkcs1", "ssh-key/rsa"]
+rsa = ["dep:rsa", "dep:pkcs1", "dep:crypto-bigint", "dep:md5", "ssh-key/rsa"]
 serde = ["ssh-key/serde"]
+
+# Algorithm groups. All are on by default; turning one off drops its algorithms
+# (a peer offering only those finds no common algorithm) and its dependencies
+# from the build. `curve25519-sha256`, `chacha20-poly1305@openssh.com`,
+# AES-CTR, the HMAC-SHA2 family and Ed25519 keys are never gated.
+#
+# `aes*-cbc` ciphers.
+aes-cbc = []
+# `aes*-gcm@openssh.com` ciphers.
+aes-gcm = []
+# `diffie-hellman-group*` and `diffie-hellman-group-exchange-*` key exchange.
+dh-group = ["dep:num-bigint"]
+# ECDSA host/user keys and `ecdh-sha2-nistp*` key exchange.
+ecdsa = [
+  "dep:crypto-bigint",
+  "dep:ecdsa",
+  "dep:elliptic-curve",
+  "dep:p256",
+  "dep:p384",
+  "dep:p521",
+  "dep:sec1",
+  "ssh-key/p256",
+  "ssh-key/p384",
+  "ssh-key/p521",
+]
+# `mlkem768x25519-sha256` post-quantum hybrid key exchange.
+ml-kem = ["dep:ml-kem", "dep:module-lattice", "dep:sha3", "dep:keccak"]
+
 _bench = ["dep:criterion"]
 
 [dependencies]
@@ -38,15 +75,15 @@ cbc = { version = "0.2" }
 cipher = "0.5.1" # only pinned due to a cargo-minimal-versions failure in 0.5.0
 ctr = "0.10"
 curve25519-dalek = "5"
-crypto-bigint = { version = "0.7.3", features = ["alloc"] }
+crypto-bigint = { version = "0.7.3", features = ["alloc"], optional = true }
 data-encoding = "2.3"
 delegate.workspace = true
 digest.workspace = true
 der = "0.8"
 des = { version = "0.9", optional = true }
-ecdsa = "0.17"
+ecdsa = { version = "0.17", optional = true }
 ed25519-dalek = { version = "3", features = ["alloc", "rand_core", "pkcs8"] }
-elliptic-curve = { version = "0.14", features = ["ecdh"] }
+elliptic-curve = { version = "0.14", features = ["ecdh"], optional = true }
 enum_dispatch = "0.3.13"
 flate2 = { version = "1.0.15", optional = true }
 futures.workspace = true
@@ -56,15 +93,15 @@ ghash = "0.6.0" # only pinned due to a cargo-minimal-versions failure in 0.6.0-r
 hex-literal = "1"
 hmac.workspace = true
 inout = { version = "0.2" }
-keccak = "0.2.0"
+keccak = { version = "0.2.0", optional = true }
 log.workspace = true
-md5 = "0.8"
-ml-kem = "0.3"
-module-lattice = "0.2"
-num-bigint = { version = "0.5", features = ["rand_0_10"] }
-p256 = { version = "0.14", features = ["ecdh"] }
-p384 = { version = "0.14", features = ["ecdh"] }
-p521 = { version = "0.14", features = ["ecdh"] }
+md5 = { version = "0.8", optional = true }
+ml-kem = { version = "0.3", optional = true }
+module-lattice = { version = "0.2", optional = true }
+num-bigint = { version = "0.5", features = ["rand_0_10"], optional = true }
+p256 = { version = "0.14", features = ["ecdh"], optional = true }
+p384 = { version = "0.14", features = ["ecdh"], optional = true }
+p521 = { version = "0.14", features = ["ecdh"], optional = true }
 pbkdf2 = "0.13"
 pkcs1 = { version = "=0.8.0-rc.4", optional = true }
 pkcs5 = "0.8"
@@ -80,10 +117,10 @@ russh-cryptovec = { version = "0.62.0", path = "../cryptovec", features = [
 russh-util = { version = "0.52.0", path = "../russh-util" }
 salsa20 = "0.11.0"
 scrypt = "0.12.0"
-sec1 = { version = "0.8", features = ["der"] }
+sec1 = { version = "0.8", features = ["der"], optional = true }
 sha1.workspace = true
 sha2.workspace = true
-sha3 = "0.12.0"
+sha3 = { version = "0.12.0", optional = true }
 signature.workspace = true
 spki = "0.8"
 ssh-encoding.workspace = true
