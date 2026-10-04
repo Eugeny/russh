@@ -345,10 +345,12 @@ pub(crate) async fn read<R: AsyncRead + Unpin>(
         .len()
         .checked_sub(padding_length)
         .ok_or(Error::IndexOutOfBounds)?;
+    let payload_len = plaintext_end.saturating_sub(PADDING_LENGTH_LEN);
 
     // Sequence numbers are on 32 bits and wrap.
     // https://tools.ietf.org/html/rfc4253#section-6.4
     buffer.seqn += Wrapping(1);
+    buffer.bytes = buffer.bytes.saturating_add(payload_len);
     buffer.len = 0;
 
     // Remove the padding
