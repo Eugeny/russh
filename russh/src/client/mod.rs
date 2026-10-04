@@ -1356,9 +1356,14 @@ impl Session {
 
                             if kex_was_active && !self.kex.active() {
                                 buffer.bytes = 0;
-                            } else if self.read_rekey_limit_reached(buffer.bytes) {
-                                debug!("rekey limit reached after {} inbound bytes", buffer.bytes);
-                                self.initiate_rekey()?;
+                            } else if self.automatic_rekey_allowed()
+                                && buffer.bytes >= self.common.config.limits.rekey_read_limit
+                            {
+                                debug!("rekey read limit reached after {} inbound bytes", buffer.bytes);
+                                if let Some(enc) = self.common.encrypted.as_mut() {
+                                    // flush checks this
+                                    enc.rekey_wanted = true;
+                                }
                             }
                         }
                     }
@@ -1367,8 +1372,8 @@ impl Session {
                     reading.set(start_reading(stream_read, buffer, opening_cipher));
                 }
                 () = &mut rekey_timer => {
+                    // The flush after the select sees the elapsed limit.
                     debug!("rekey time limit reached");
-                    self.initiate_rekey()?;
                 }
                 () = &mut keepalive_timer => {
                     if let Some(ref mut enc) = self.common.encrypted
@@ -1784,10 +1789,6 @@ impl Session {
                 .encrypted
                 .as_ref()
                 .is_some_and(|enc| matches!(enc.state, EncryptedState::Authenticated))
-    }
-
-    fn read_rekey_limit_reached(&self, read_bytes: usize) -> bool {
-        self.automatic_rekey_allowed() && read_bytes >= self.common.config.limits.rekey_read_limit
     }
 
     fn rekey_time_remaining(&self) -> Option<Duration> {
@@ -2260,44 +2261,76 @@ mod tests {
         );
     }
 
-    #[test]
-    fn automatic_rekey_starts_at_inbound_read_limit() {
-        let (mut session, sender, _replies) = keyboard_interactive_session();
-        Arc::get_mut(&mut session.common.config)
-            .expect("test session owns its config")
-            .limits = crate::Limits::new(1 << 30, 16, std::time::Duration::from_secs(3600));
-        let encrypted = session.common.encrypted.as_mut().unwrap();
-        encrypted.state = EncryptedState::Authenticated;
-        encrypted.kex = KEXES.get(&crate::kex::CURVE25519).unwrap().make();
-        drop(sender);
+    /// `keyboard_interactive_session` negotiates the `none` kex, which cannot
+    /// be repeated; swap in one that can and install `limits`.
+    fn allow_rekey(session: &mut Session, limits: crate::Limits) {
+        Arc::get_mut(&mut session.common.config).unwrap().limits = limits;
+        session.common.encrypted.as_mut().unwrap().kex =
+            KEXES.get(&crate::kex::CURVE25519).unwrap().make();
+    }
 
-        assert!(!session.read_rekey_limit_reached(15));
-        assert!(session.read_rekey_limit_reached(16));
-        session.initiate_rekey().unwrap();
-
-        assert!(session.kex.active());
+    /// Drives the client event loop on one end of an in-memory stream and
+    /// returns the type of the first packet it writes.
+    async fn first_packet_from_event_loop(
+        mut session: Session,
+        peer: &mut tokio::io::DuplexStream,
+        stream: tokio::io::DuplexStream,
+    ) -> Option<u8> {
+        let (stream_read, mut stream_write) = SshRead::new(stream).split();
+        let mut handler = TestHandler;
+        let mut kex_done_signal = None;
+        let event_loop = session.run_inner(
+            stream_read,
+            &mut stream_write,
+            &mut handler,
+            &mut kex_done_signal,
+        );
+        tokio::pin!(event_loop);
+        let mut buffer = SSHBuffer::new();
+        let mut opening_key = cipher::clear::Key;
+        let packet = cipher::read(peer, &mut buffer, &mut opening_key);
+        tokio::select! {
+            r = &mut event_loop => panic!("event loop ended before rekeying: {:?}", r.map(drop)),
+            r = tokio::time::timeout(Duration::from_secs(5), packet) => {
+                r.ok()?.unwrap();
+                buffer.buffer.get(5).copied()
+            }
+        }
     }
 
     #[tokio::test]
-    async fn automatic_rekey_deadline_wakes_an_idle_authenticated_session() {
-        let (mut session, sender, _replies) = keyboard_interactive_session();
-        Arc::get_mut(&mut session.common.config)
-            .expect("test session owns its config")
-            .limits = crate::Limits::new(1 << 30, 1 << 30, Duration::ZERO);
-        let encrypted = session.common.encrypted.as_mut().unwrap();
-        encrypted.state = EncryptedState::Authenticated;
-        encrypted.kex = KEXES.get(&crate::kex::CURVE25519).unwrap().make();
-        drop(sender);
+    async fn read_limit_starts_rekey_from_the_event_loop() {
+        let (mut session, _sender, _replies) = keyboard_interactive_session();
+        allow_rekey(
+            &mut session,
+            crate::Limits::new(1 << 30, 16, Duration::from_secs(3600)),
+        );
+        session.common.encrypted.as_mut().unwrap().state = EncryptedState::Authenticated;
+        let (mut peer, stream) = tokio::io::duplex(64 * 1024);
+        let mut ignore = PacketWriter::clear();
+        ignore.packet_raw(&[msg::IGNORE; 32]).unwrap();
+        peer.write_all(&ignore.buffer().buffer).await.unwrap();
 
-        let remaining = session
-            .rekey_time_remaining()
-            .expect("authenticated sessions with a finite limit need a deadline");
-        tokio::time::timeout(Duration::from_millis(50), tokio::time::sleep(remaining))
-            .await
-            .expect("an expired rekey deadline must wake without transport activity");
-        session.initiate_rekey().unwrap();
+        assert_eq!(
+            first_packet_from_event_loop(session, &mut peer, stream).await,
+            Some(msg::KEXINIT)
+        );
+    }
 
-        assert!(session.kex.active());
+    #[tokio::test]
+    async fn time_limit_starts_rekey_from_the_event_loop() {
+        let (mut session, _sender, _replies) = keyboard_interactive_session();
+        allow_rekey(
+            &mut session,
+            crate::Limits::new(1 << 30, 1 << 30, Duration::from_millis(50)),
+        );
+        session.common.encrypted.as_mut().unwrap().state = EncryptedState::Authenticated;
+        let (mut peer, stream) = tokio::io::duplex(64 * 1024);
+
+        assert_eq!(
+            first_packet_from_event_loop(session, &mut peer, stream).await,
+            Some(msg::KEXINIT)
+        );
     }
 
     #[cfg(feature = "flate2")]

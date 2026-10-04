@@ -748,9 +748,14 @@ impl Session {
 
                             if kex_was_active && !self.kex.active() {
                                 buffer.bytes = 0;
-                            } else if self.read_rekey_limit_reached(buffer.bytes) {
-                                debug!("rekey limit reached after {} inbound bytes", buffer.bytes);
-                                self.initiate_rekey()?;
+                            } else if self.automatic_rekey_allowed()
+                                && buffer.bytes >= self.common.config.limits.rekey_read_limit
+                            {
+                                debug!("rekey read limit reached after {} inbound bytes", buffer.bytes);
+                                if let Some(enc) = self.common.encrypted.as_mut() {
+                                    // flush checks this
+                                    enc.rekey_wanted = true;
+                                }
                             }
 
                             std::mem::swap(&mut opening_cipher, &mut self.common.remote_to_local);
@@ -759,8 +764,8 @@ impl Session {
                     reading.set(start_reading(stream_read, buffer, opening_cipher));
                 }
                 () = &mut rekey_timer => {
+                    // The flush after the select sees the elapsed limit.
                     debug!("rekey time limit reached");
-                    self.initiate_rekey()?;
                 }
                 () = &mut keepalive_timer => {
                     self.common.alive_timeouts = self.common.alive_timeouts.saturating_add(1);
@@ -900,7 +905,6 @@ impl Session {
 
     /// Flush the session, i.e. encrypt the pending buffer.
     pub fn flush(&mut self) -> Result<(), Error> {
-        let mut start_rekey = false;
         if let Some(ref mut enc) = self.common.encrypted {
             // Tearing down: get the queued packets (incl. DISCONNECT) out in
             // order, kex or not.
@@ -926,29 +930,20 @@ impl Session {
                         }
                         enc.state = EncryptedState::Authenticated;
                     }
-                    start_rekey = true;
+                    self.begin_rekey()?;
                 }
             }
-        }
-        if start_rekey {
-            self.begin_rekey()?;
         }
         Ok(())
     }
 
+    /// `InitCompression` counts: USERAUTH_SUCCESS is flushed in that state and
+    /// an idle peer never sends the packet that would advance it.
     fn automatic_rekey_eligible(state: &EncryptedState) -> bool {
         matches!(
             state,
             EncryptedState::InitCompression | EncryptedState::Authenticated
         )
-    }
-
-    fn initiate_rekey(&mut self) -> Result<(), Error> {
-        if let Some(ref mut enc) = self.common.encrypted {
-            enc.rekey_wanted = true;
-            self.flush()?;
-        }
-        Ok(())
     }
 
     /// Is a limit-triggered rekey allowed now? no kex in flight & authed
@@ -959,10 +954,6 @@ impl Session {
                 .encrypted
                 .as_ref()
                 .is_some_and(|enc| Self::automatic_rekey_eligible(&enc.state))
-    }
-
-    fn read_rekey_limit_reached(&self, read_bytes: usize) -> bool {
-        self.automatic_rekey_allowed() && read_bytes >= self.common.config.limits.rekey_read_limit
     }
 
     fn rekey_time_remaining(&self) -> Option<Duration> {
@@ -1727,22 +1718,6 @@ mod tests {
     }
 
     #[test]
-    fn automatic_rekey_server_starts_at_inbound_read_limit() {
-        let mut session = authenticated_session();
-        session.common.encrypted.as_mut().unwrap().kex =
-            KEXES.get(&crate::kex::CURVE25519).unwrap().make();
-        Arc::get_mut(&mut session.common.config)
-            .expect("test session owns its config")
-            .limits = crate::Limits::new(1 << 30, 16, std::time::Duration::from_secs(3600));
-
-        assert!(!session.read_rekey_limit_reached(15));
-        assert!(session.read_rekey_limit_reached(16));
-        session.initiate_rekey().unwrap();
-
-        assert!(session.kex.active());
-    }
-
-    #[test]
     fn automatic_rekey_server_waits_until_authentication_completes() {
         let mut session = authenticated_session();
         Arc::get_mut(&mut session.common.config)
@@ -1806,17 +1781,10 @@ mod tests {
             session.common.packet_writer.compress(),
             Compress::None
         ));
-        let remaining = session
-            .rekey_time_remaining()
-            .expect("auth success must arm the finite rekey deadline before another peer packet");
-        tokio::time::timeout(
-            std::time::Duration::from_millis(50),
-            tokio::time::sleep(remaining),
-        )
-        .await
-        .expect("the idle post-authentication rekey deadline must wake");
+        assert_eq!(session.rekey_time_remaining(), Some(Duration::ZERO));
 
-        session.initiate_rekey().unwrap();
+        // What the event loop does once that deadline fires.
+        session.flush().unwrap();
 
         assert!(session.kex.active());
         assert!(matches!(
@@ -1827,29 +1795,6 @@ mod tests {
             session.common.packet_writer.compress(),
             Compress::Zlib(_)
         ));
-    }
-
-    #[tokio::test]
-    async fn automatic_rekey_server_deadline_wakes_an_idle_authenticated_session() {
-        let mut session = authenticated_session();
-        session.common.encrypted.as_mut().unwrap().kex =
-            KEXES.get(&crate::kex::CURVE25519).unwrap().make();
-        Arc::get_mut(&mut session.common.config)
-            .expect("test session owns its config")
-            .limits = crate::Limits::new(1 << 30, 1 << 30, std::time::Duration::ZERO);
-
-        let remaining = session
-            .rekey_time_remaining()
-            .expect("authenticated sessions with a finite limit need a deadline");
-        tokio::time::timeout(
-            std::time::Duration::from_millis(50),
-            tokio::time::sleep(remaining),
-        )
-        .await
-        .expect("an expired rekey deadline must wake without transport activity");
-        session.initiate_rekey().unwrap();
-
-        assert!(session.kex.active());
     }
 
     /// `authenticated_session` negotiates the `none` kex, which cannot be
@@ -1873,5 +1818,55 @@ mod tests {
             crate::Limits::new(1 << 30, 1 << 30, Duration::ZERO),
         );
         assert_eq!(session.rekey_time_remaining(), Some(Duration::ZERO));
+    }
+
+    /// Runs the server event loop on one end of an in-memory stream and
+    /// returns the type of the first packet it writes.
+    async fn first_packet_from_event_loop(
+        session: Session,
+        peer: &mut tokio::io::DuplexStream,
+        stream: tokio::io::DuplexStream,
+    ) -> Option<u8> {
+        let event_loop = tokio::spawn(session.run(SshRead::new(stream), TestHandler));
+        let mut buffer = SSHBuffer::new();
+        let mut opening_key = cipher::clear::Key;
+        let packet = cipher::read(peer, &mut buffer, &mut opening_key);
+        let result = tokio::time::timeout(Duration::from_secs(5), packet).await;
+        event_loop.abort();
+        result.ok()?.unwrap();
+        buffer.buffer.get(5).copied()
+    }
+
+    #[tokio::test]
+    async fn read_limit_starts_rekey_from_the_event_loop() {
+        let mut session = authenticated_session();
+        allow_rekey(
+            &mut session,
+            crate::Limits::new(1 << 30, 16, Duration::from_secs(3600)),
+        );
+        let (mut peer, stream) = tokio::io::duplex(64 * 1024);
+        let mut ignore = PacketWriter::clear();
+        ignore.packet_raw(&[msg::IGNORE; 32]).unwrap();
+        peer.write_all(&ignore.buffer().buffer).await.unwrap();
+
+        assert_eq!(
+            first_packet_from_event_loop(session, &mut peer, stream).await,
+            Some(msg::KEXINIT)
+        );
+    }
+
+    #[tokio::test]
+    async fn time_limit_starts_rekey_from_the_event_loop() {
+        let mut session = authenticated_session();
+        allow_rekey(
+            &mut session,
+            crate::Limits::new(1 << 30, 1 << 30, Duration::from_millis(50)),
+        );
+        let (mut peer, stream) = tokio::io::duplex(64 * 1024);
+
+        assert_eq!(
+            first_packet_from_event_loop(session, &mut peer, stream).await,
+            Some(msg::KEXINIT)
+        );
     }
 }
