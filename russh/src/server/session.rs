@@ -1718,58 +1718,48 @@ mod tests {
     }
 
     #[test]
-    fn automatic_rekey_server_waits_until_authentication_completes() {
+    fn limit_triggered_rekey_waits_for_authentication() {
         let mut session = authenticated_session();
-        Arc::get_mut(&mut session.common.config)
-            .expect("test session owns its config")
-            .limits = crate::Limits::new(0, 0, std::time::Duration::from_secs(3600));
-        let encrypted = session.common.encrypted.as_mut().unwrap();
-        encrypted.state = EncryptedState::WaitingAuthServiceRequest {
+        allow_rekey(&mut session, crate::Limits::new(0, 0, Duration::from_secs(3600)));
+        let enc = session.common.encrypted.as_mut().unwrap();
+        enc.state = EncryptedState::WaitingAuthServiceRequest {
             accepted: false,
             sent: false,
         };
-        encrypted.kex = KEXES.get(&crate::kex::CURVE25519).unwrap().make();
-        encrypted.server_compression = Compression::ZlibOpenSSH;
+        enc.server_compression = Compression::ZlibOpenSSH;
 
         session.flush().unwrap();
-        assert!(
-            !session.kex.active(),
-            "a pre-authentication server write limit must not start rekeying"
-        );
+        assert!(!session.kex.active(), "write limit hit before authentication");
 
+        // USERAUTH_SUCCESS has been flushed; the next peer packet would
+        // activate delayed compression, but the rekey comes first.
         session.common.encrypted.as_mut().unwrap().state = EncryptedState::InitCompression;
         session.flush().unwrap();
-        assert!(
-            session.kex.active(),
-            "the same server write limit must start rekeying after auth succeeds"
-        );
-        assert!(
-            matches!(
-                session.common.encrypted.as_ref().unwrap().state,
-                EncryptedState::Authenticated
-            ),
-            "automatic rekey must complete the delayed-compression state transition"
-        );
-        assert!(
-            matches!(session.common.packet_writer.compress(), Compress::Zlib(_)),
-            "KEXINIT after auth success must use delayed server compression"
-        );
+        assert!(session.kex.active());
+        assert!(matches!(
+            session.common.encrypted.as_ref().unwrap().state,
+            EncryptedState::Authenticated
+        ));
+        assert!(matches!(
+            session.common.packet_writer.compress(),
+            Compress::Zlib(_)
+        ));
     }
 
     #[tokio::test]
-    async fn automatic_rekey_server_auth_success_arms_idle_deadline_before_next_packet() {
+    async fn auth_success_arms_the_rekey_deadline_before_the_next_packet() {
         let mut session = authenticated_session();
-        Arc::get_mut(&mut session.common.config)
-            .expect("test session owns its config")
-            .limits = crate::Limits::new(1 << 30, 1 << 30, std::time::Duration::ZERO);
-        let encrypted = session.common.encrypted.as_mut().unwrap();
-        encrypted.state =
+        allow_rekey(
+            &mut session,
+            crate::Limits::new(1 << 30, 1 << 30, Duration::ZERO),
+        );
+        let enc = session.common.encrypted.as_mut().unwrap();
+        enc.state =
             EncryptedState::WaitingAuthRequest(AuthRequest::server(MethodSet::server_supported()));
-        encrypted.kex = KEXES.get(&crate::kex::CURVE25519).unwrap().make();
-        encrypted.server_compression = Compression::ZlibOpenSSH;
+        enc.server_compression = Compression::ZlibOpenSSH;
 
         session
-            .process_packet(&mut AcceptNoneHandler, &none_auth_request("idle-user"))
+            .process_packet(&mut AcceptNoneHandler, &none_auth_request("user"))
             .await
             .unwrap();
 

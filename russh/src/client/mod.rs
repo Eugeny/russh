@@ -2221,52 +2221,25 @@ mod tests {
         ));
     }
 
-    fn session_with_tiny_rekey_limit(state: EncryptedState) -> Session {
-        let (mut session, sender, _replies) = keyboard_interactive_session();
-        Arc::get_mut(&mut session.common.config)
-            .expect("test session owns its config")
-            .limits = crate::Limits::new(0, 0, std::time::Duration::from_secs(3600));
-        let encrypted = session.common.encrypted.as_mut().unwrap();
-        encrypted.state = state;
-        encrypted.kex = KEXES.get(&crate::kex::CURVE25519).unwrap().make();
-        drop(sender);
-        session
-    }
-
-    #[test]
-    fn automatic_rekey_waits_until_authentication_completes() {
-        let mut session =
-            session_with_tiny_rekey_limit(EncryptedState::WaitingAuthServiceRequest {
-                accepted: false,
-                sent: false,
-            });
-
-        session.flush().unwrap();
-
-        assert!(
-            !session.kex.active(),
-            "a pre-authentication write limit must not start a second key exchange"
-        );
-    }
-
-    #[test]
-    fn automatic_rekey_starts_after_authentication() {
-        let mut session = session_with_tiny_rekey_limit(EncryptedState::Authenticated);
-
-        session.flush().unwrap();
-
-        assert!(
-            session.kex.active(),
-            "the same write limit must start rekeying after authentication"
-        );
-    }
-
     /// `keyboard_interactive_session` negotiates the `none` kex, which cannot
     /// be repeated; swap in one that can and install `limits`.
     fn allow_rekey(session: &mut Session, limits: crate::Limits) {
         Arc::get_mut(&mut session.common.config).unwrap().limits = limits;
         session.common.encrypted.as_mut().unwrap().kex =
             KEXES.get(&crate::kex::CURVE25519).unwrap().make();
+    }
+
+    #[test]
+    fn limit_triggered_rekey_waits_for_authentication() {
+        let (mut session, _sender, _replies) = keyboard_interactive_session();
+        allow_rekey(&mut session, crate::Limits::new(0, 0, Duration::from_secs(3600)));
+
+        session.flush().unwrap();
+        assert!(!session.kex.active(), "write limit hit before authentication");
+
+        session.common.encrypted.as_mut().unwrap().state = EncryptedState::Authenticated;
+        session.flush().unwrap();
+        assert!(session.kex.active());
     }
 
     #[test]
