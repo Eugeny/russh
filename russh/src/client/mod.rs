@@ -1933,7 +1933,6 @@ async fn reply<H: Handler>(
                         {
                             let common = &mut session.common;
                             common.newkeys(newkeys);
-                            common.packet_writer.buffer().bytes = 0;
                             if let Some(enc) = common.encrypted.as_mut() {
                                 enc.last_rekey = Instant::now();
                                 enc.flush_all_pending_with_writer(
