@@ -6,7 +6,6 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::{Terminal, TerminalOptions, Viewport};
-use russh::keys::ssh_key::PublicKey;
 use russh::server::*;
 use russh::{Channel, ChannelId, Pty};
 use tokio::sync::Mutex;
@@ -169,7 +168,11 @@ impl Handler for AppServer {
         Ok(())
     }
 
-    async fn auth_publickey(&mut self, _: &str, _: &PublicKey) -> Result<Auth, Self::Error> {
+    async fn auth_publickey(
+        &mut self,
+        _: &str,
+        _: VerifiedPublicKey<'_>,
+    ) -> Result<Auth, Self::Error> {
         Ok(Auth::Accept)
     }
 
