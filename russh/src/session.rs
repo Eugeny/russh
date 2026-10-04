@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::mem::replace;
 use std::num::Wrapping;
+use std::time::Duration;
 
 use byteorder::{BigEndian, ByteOrder};
 use bytes::Bytes;
@@ -735,6 +736,15 @@ impl Encrypted {
         Ok(replace(&mut self.rekey_wanted, false)
             || writer.buffer().bytes >= limits.rekey_write_limit
             || dur >= limits.rekey_time_limit)
+    }
+
+    /// Time until time limit based rekey
+    pub(crate) fn rekey_time_remaining(&self, limits: &Limits) -> Option<Duration> {
+        if self.kex.skip_exchange() || limits.rekey_time_limit == Duration::MAX {
+            return None;
+        }
+        let elapsed = russh_util::time::Instant::now().duration_since(self.last_rekey);
+        Some(limits.rekey_time_limit.saturating_sub(elapsed))
     }
 
     pub fn new_channel_id(&mut self) -> ChannelId {

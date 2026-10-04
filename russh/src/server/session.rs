@@ -1,6 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::io::ErrorKind;
 use std::sync::Arc;
+use std::time::Duration;
 
 use channels::WindowSizeRef;
 use kex::ServerKex;
@@ -950,32 +951,28 @@ impl Session {
         Ok(())
     }
 
-    fn read_rekey_limit_reached(&self, read_bytes: usize) -> bool {
+    /// Is a limit-triggered rekey allowed now? no kex in flight & authed
+    fn automatic_rekey_allowed(&self) -> bool {
         !self.kex.active()
             && self
                 .common
                 .encrypted
                 .as_ref()
                 .is_some_and(|enc| Self::automatic_rekey_eligible(&enc.state))
-            && read_bytes >= self.common.config.limits.rekey_read_limit
     }
 
-    fn rekey_time_remaining(&self) -> Option<std::time::Duration> {
-        if self.kex.active() {
+    fn read_rekey_limit_reached(&self, read_bytes: usize) -> bool {
+        self.automatic_rekey_allowed() && read_bytes >= self.common.config.limits.rekey_read_limit
+    }
+
+    fn rekey_time_remaining(&self) -> Option<Duration> {
+        if !self.automatic_rekey_allowed() {
             return None;
         }
-
-        let enc = self.common.encrypted.as_ref()?;
-        if !Self::automatic_rekey_eligible(&enc.state) {
-            return None;
-        }
-
-        let limit = self.common.config.limits.rekey_time_limit;
-        if limit == std::time::Duration::MAX {
-            return None;
-        }
-
-        Some(limit.saturating_sub(Instant::now().duration_since(enc.last_rekey)))
+        self.common
+            .encrypted
+            .as_ref()?
+            .rekey_time_remaining(&self.common.config.limits)
     }
 
     pub fn flush_pending(&mut self, channel: ChannelId) -> Result<usize, Error> {
@@ -1729,7 +1726,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn automatic_rekey_server_starts_at_inbound_read_limit() {
         let mut session = authenticated_session();
@@ -1737,11 +1733,7 @@ mod tests {
             KEXES.get(&crate::kex::CURVE25519).unwrap().make();
         Arc::get_mut(&mut session.common.config)
             .expect("test session owns its config")
-            .limits = crate::Limits::new(
-            1 << 30,
-            16,
-            std::time::Duration::from_secs(3600),
-        );
+            .limits = crate::Limits::new(1 << 30, 16, std::time::Duration::from_secs(3600));
 
         assert!(!session.read_rekey_limit_reached(15));
         assert!(session.read_rekey_limit_reached(16));
@@ -1755,11 +1747,7 @@ mod tests {
         let mut session = authenticated_session();
         Arc::get_mut(&mut session.common.config)
             .expect("test session owns its config")
-            .limits = crate::Limits::new(
-            0,
-            0,
-            std::time::Duration::from_secs(3600),
-        );
+            .limits = crate::Limits::new(0, 0, std::time::Duration::from_secs(3600));
         let encrypted = session.common.encrypted.as_mut().unwrap();
         encrypted.state = EncryptedState::WaitingAuthServiceRequest {
             accepted: false,
@@ -1848,11 +1836,7 @@ mod tests {
             KEXES.get(&crate::kex::CURVE25519).unwrap().make();
         Arc::get_mut(&mut session.common.config)
             .expect("test session owns its config")
-            .limits = crate::Limits::new(
-            1 << 30,
-            1 << 30,
-            std::time::Duration::ZERO,
-        );
+            .limits = crate::Limits::new(1 << 30, 1 << 30, std::time::Duration::ZERO);
 
         let remaining = session
             .rekey_time_remaining()
@@ -1866,5 +1850,28 @@ mod tests {
         session.initiate_rekey().unwrap();
 
         assert!(session.kex.active());
+    }
+
+    /// `authenticated_session` negotiates the `none` kex, which cannot be
+    /// repeated, and expects compressed input; undo both and install `limits`.
+    fn allow_rekey(session: &mut Session, limits: crate::Limits) {
+        Arc::get_mut(&mut session.common.config).unwrap().limits = limits;
+        let enc = session.common.encrypted.as_mut().unwrap();
+        enc.kex = KEXES.get(&crate::kex::CURVE25519).unwrap().make();
+        enc.decompress = Decompress::None;
+    }
+
+    #[test]
+    fn no_rekey_deadline_when_the_kex_cannot_be_repeated() {
+        let mut session = authenticated_session();
+        Arc::get_mut(&mut session.common.config).unwrap().limits =
+            crate::Limits::new(1 << 30, 1 << 30, Duration::ZERO);
+        assert_eq!(session.rekey_time_remaining(), None, "`none` kex");
+
+        allow_rekey(
+            &mut session,
+            crate::Limits::new(1 << 30, 1 << 30, Duration::ZERO),
+        );
+        assert_eq!(session.rekey_time_remaining(), Some(Duration::ZERO));
     }
 }

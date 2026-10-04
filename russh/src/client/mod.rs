@@ -1326,7 +1326,8 @@ impl Session {
             // application output in its bounded receivers while a channel is
             // window-blocked.
             let can_receive_outbound = !self.kex.active() && !self.common.has_any_pending_data();
-            let rekey_timer = crate::future_or_pending(self.rekey_time_remaining(), tokio::time::sleep);
+            let rekey_timer =
+                crate::future_or_pending(self.rekey_time_remaining(), tokio::time::sleep);
             pin!(rekey_timer);
             tokio::select! {
                 r = &mut reading => {
@@ -1776,32 +1777,27 @@ impl Session {
         Ok(())
     }
 
-    fn read_rekey_limit_reached(&self, read_bytes: usize) -> bool {
+    fn automatic_rekey_allowed(&self) -> bool {
         !self.kex.active()
             && self
                 .common
                 .encrypted
                 .as_ref()
                 .is_some_and(|enc| matches!(enc.state, EncryptedState::Authenticated))
-            && read_bytes >= self.common.config.limits.rekey_read_limit
+    }
+
+    fn read_rekey_limit_reached(&self, read_bytes: usize) -> bool {
+        self.automatic_rekey_allowed() && read_bytes >= self.common.config.limits.rekey_read_limit
     }
 
     fn rekey_time_remaining(&self) -> Option<Duration> {
-        if self.kex.active() {
+        if !self.automatic_rekey_allowed() {
             return None;
         }
-
-        let enc = self.common.encrypted.as_ref()?;
-        if !matches!(enc.state, EncryptedState::Authenticated) {
-            return None;
-        }
-
-        let limit = self.common.config.limits.rekey_time_limit;
-        if limit == Duration::MAX {
-            return None;
-        }
-
-        Some(limit.saturating_sub(Instant::now().duration_since(enc.last_rekey)))
+        self.common
+            .encrypted
+            .as_ref()?
+            .rekey_time_remaining(&self.common.config.limits)
     }
 
     /// Flush the temporary cleartext buffer into the encryption
@@ -2238,12 +2234,11 @@ mod tests {
 
     #[test]
     fn automatic_rekey_waits_until_authentication_completes() {
-        let mut session = session_with_tiny_rekey_limit(
-            EncryptedState::WaitingAuthServiceRequest {
+        let mut session =
+            session_with_tiny_rekey_limit(EncryptedState::WaitingAuthServiceRequest {
                 accepted: false,
                 sent: false,
-            },
-        );
+            });
 
         session.flush().unwrap();
 
@@ -2255,8 +2250,7 @@ mod tests {
 
     #[test]
     fn automatic_rekey_starts_after_authentication() {
-        let mut session =
-            session_with_tiny_rekey_limit(EncryptedState::Authenticated);
+        let mut session = session_with_tiny_rekey_limit(EncryptedState::Authenticated);
 
         session.flush().unwrap();
 
@@ -2271,11 +2265,7 @@ mod tests {
         let (mut session, sender, _replies) = keyboard_interactive_session();
         Arc::get_mut(&mut session.common.config)
             .expect("test session owns its config")
-            .limits = crate::Limits::new(
-            1 << 30,
-            16,
-            std::time::Duration::from_secs(3600),
-        );
+            .limits = crate::Limits::new(1 << 30, 16, std::time::Duration::from_secs(3600));
         let encrypted = session.common.encrypted.as_mut().unwrap();
         encrypted.state = EncryptedState::Authenticated;
         encrypted.kex = KEXES.get(&crate::kex::CURVE25519).unwrap().make();
