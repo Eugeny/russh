@@ -1808,12 +1808,13 @@ impl Session {
             // Tearing down: get the queued packets (incl. DISCONNECT) out in
             // order, kex or not.
             let is_rekeying = self.kex.active() && !self.common.disconnected;
+            let rekey_requested = enc.rekey_wanted; // enc.flush resets rekey_wanted
             if enc.flush(
                 &self.common.config.as_ref().limits,
                 &mut self.common.packet_writer,
                 is_rekeying,
             )? && !self.kex.active()
-                && matches!(enc.state, EncryptedState::Authenticated)
+                && (rekey_requested || matches!(enc.state, EncryptedState::Authenticated))
             {
                 self.begin_rekey()?;
             }
@@ -2267,6 +2268,16 @@ mod tests {
         Arc::get_mut(&mut session.common.config).unwrap().limits = limits;
         session.common.encrypted.as_mut().unwrap().kex =
             KEXES.get(&crate::kex::CURVE25519).unwrap().make();
+    }
+
+    #[test]
+    fn explicit_rekey_is_not_gated_on_authentication() {
+        // `keyboard_interactive_session` is still waiting for authentication.
+        let (mut session, _sender, _replies) = keyboard_interactive_session();
+        allow_rekey(&mut session, crate::Limits::default());
+
+        session.initiate_rekey().unwrap();
+        assert!(session.kex.active());
     }
 
     /// Drives the client event loop on one end of an in-memory stream and
