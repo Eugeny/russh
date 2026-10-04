@@ -1045,9 +1045,12 @@ impl Session {
         }
     }
 
-    /// Send a "failure" reply to a global request.
+    /// Send a "failure" reply to a global request (it checks whether the
+    /// client expects an answer).
     pub fn request_failure(&mut self) {
-        if let Some(ref mut enc) = self.common.encrypted {
+        if self.common.wants_reply
+            && let Some(ref mut enc) = self.common.encrypted
+        {
             self.common.wants_reply = false;
             push_packet!(enc.write, enc.write.push(msg::REQUEST_FAILURE))
         }

@@ -2,9 +2,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use russh::keys::ssh_key;
 use russh::keys::ssh_key::certificate::{Builder, CertType};
-use russh::keys::{PrivateKey, PrivateKeyWithHashAlg, PublicKeyOrCertificate};
+use russh::keys::{PrivateKey, PrivateKeyWithHashAlg, PublicKeyOrCertificate, ssh_key};
 use russh::{MethodKind, MethodSet, client, server};
 
 struct AcceptServerKey;

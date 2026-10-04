@@ -68,6 +68,15 @@ mod tests {
             session.data(channel, data.to_vec())?;
             Ok(())
         }
+
+        async fn tcpip_forward(
+            &mut self,
+            _: &str,
+            _: &mut u32,
+            _: &mut Session,
+        ) -> Result<bool, Self::Error> {
+            Ok(true)
+        }
     }
 
     struct Client {}
@@ -217,11 +226,15 @@ mod tests {
             .await;
         assert!(matches!(denied, Err(Error::RequestDenied)));
 
-        // Without a reply requested the call returns immediately.
+        // Without a reply requested the call returns immediately and the server
+        // must stay silent. Queue a reply-wanting request right behind it: an
+        // unsolicited failure for the first request would be matched to the
+        // forward and turn its success into RequestDenied.
         let no_reply = session
             .send_global_request("custom-request@example.com", b"payload", false)
             .await
             .unwrap();
         assert!(no_reply.is_none());
+        session.tcpip_forward("127.0.0.1", 12345).await.unwrap();
     }
 }
