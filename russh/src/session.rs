@@ -852,6 +852,9 @@ pub(crate) enum GlobalRequestResponse {
         return_channel: oneshot::Sender<Result<(), crate::Error>>,
         keys: Vec<crate::keys::PublicKey>,
     },
+    /// request had a custom name; sends `Some` with the response-specific
+    /// payload on success or `None` on failure
+    Other(oneshot::Sender<Option<CryptoVec>>),
 }
 
 #[cfg(test)]
