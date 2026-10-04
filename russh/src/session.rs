@@ -738,10 +738,18 @@ impl Encrypted {
             || dur >= limits.rekey_time_limit)
     }
 
-    /// Time until time limit based rekey
-    pub(crate) fn rekey_time_remaining(&self, limits: &Limits) -> Option<Duration> {
-        if self.kex.skip_exchange() || limits.rekey_time_limit == Duration::MAX {
+    /// Delay until an automatic rekey is due: zero when the write limit is
+    /// already exceeded, otherwise what is left of the time limit.
+    pub(crate) fn rekey_time_remaining(
+        &self,
+        limits: &Limits,
+        writer: &PacketWriter,
+    ) -> Option<Duration> {
+        if self.kex.skip_exchange() {
             return None;
+        }
+        if writer.bytes_written() >= limits.rekey_write_limit {
+            return Some(Duration::ZERO);
         }
         let elapsed = russh_util::time::Instant::now().duration_since(self.last_rekey);
         Some(limits.rekey_time_limit.saturating_sub(elapsed))

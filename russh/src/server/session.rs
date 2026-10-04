@@ -963,7 +963,7 @@ impl Session {
         self.common
             .encrypted
             .as_ref()?
-            .rekey_time_remaining(&self.common.config.limits)
+            .rekey_time_remaining(&self.common.config.limits, &self.common.packet_writer)
     }
 
     pub fn flush_pending(&mut self, channel: ChannelId) -> Result<usize, Error> {
@@ -1730,10 +1730,12 @@ mod tests {
 
         session.flush().unwrap();
         assert!(!session.kex.active(), "write limit hit before authentication");
+        assert_eq!(session.rekey_time_remaining(), None);
 
         // USERAUTH_SUCCESS has been flushed; the next peer packet would
         // activate delayed compression, but the rekey comes first.
         session.common.encrypted.as_mut().unwrap().state = EncryptedState::InitCompression;
+        assert_eq!(session.rekey_time_remaining(), Some(Duration::ZERO));
         session.flush().unwrap();
         assert!(session.kex.active());
         assert!(matches!(

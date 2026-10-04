@@ -200,8 +200,8 @@ fn installing_a_cipher_starts_a_new_write_key_epoch() {
     assert_eq!(writer.buffer().bytes, b"encrypted epoch".len());
 }
 
-// `#[tokio::test]` expands outside test builds too; keep it out of the WASM
-// build, which has no tokio runtime.
+// `tokio::test` is resolved even in non-test builds, and the WASM target's
+// tokio has no `macros` feature; `#[cfg(test)]` drops the item first.
 #[cfg(test)]
 #[tokio::test]
 async fn automatic_rekey_read_counter_tracks_payload_bytes() {
@@ -584,6 +584,11 @@ impl PacketWriter {
 
     pub fn buffer(&mut self) -> &mut SSHBuffer {
         &mut self.write_buffer
+    }
+
+    /// Payload bytes written since the current cipher was installed.
+    pub fn bytes_written(&self) -> usize {
+        self.write_buffer.bytes
     }
 
     pub fn compress(&mut self) -> &mut Compress {

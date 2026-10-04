@@ -1798,7 +1798,7 @@ impl Session {
         self.common
             .encrypted
             .as_ref()?
-            .rekey_time_remaining(&self.common.config.limits)
+            .rekey_time_remaining(&self.common.config.limits, &self.common.packet_writer)
     }
 
     /// Flush the temporary cleartext buffer into the encryption
@@ -2236,8 +2236,10 @@ mod tests {
 
         session.flush().unwrap();
         assert!(!session.kex.active(), "write limit hit before authentication");
+        assert_eq!(session.rekey_time_remaining(), None);
 
         session.common.encrypted.as_mut().unwrap().state = EncryptedState::Authenticated;
+        assert_eq!(session.rekey_time_remaining(), Some(Duration::ZERO));
         session.flush().unwrap();
         assert!(session.kex.active());
     }
