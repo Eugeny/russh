@@ -127,7 +127,7 @@ mod compress {
         async fn auth_publickey(
             &mut self,
             _: &str,
-            _: &crate::keys::ssh_key::PublicKey,
+            _: server::VerifiedPublicKey<'_>,
         ) -> Result<server::Auth, Self::Error> {
             debug!("auth_publickey");
             Ok(server::Auth::Accept)
@@ -293,7 +293,7 @@ mod channels {
             async fn auth_publickey(
                 &mut self,
                 _: &str,
-                _: &crate::keys::ssh_key::PublicKey,
+                _: server::VerifiedPublicKey<'_>,
             ) -> Result<server::Auth, Self::Error> {
                 Ok(server::Auth::Accept)
             }
@@ -364,7 +364,7 @@ mod channels {
             async fn auth_publickey(
                 &mut self,
                 _: &str,
-                _: &crate::keys::ssh_key::PublicKey,
+                _: server::VerifiedPublicKey<'_>,
             ) -> Result<server::Auth, Self::Error> {
                 Ok(server::Auth::Accept)
             }
@@ -450,7 +450,7 @@ mod channels {
             async fn auth_publickey(
                 &mut self,
                 _: &str,
-                _: &crate::keys::ssh_key::PublicKey,
+                _: server::VerifiedPublicKey<'_>,
             ) -> Result<server::Auth, Self::Error> {
                 Ok(server::Auth::Accept)
             }
@@ -536,7 +536,7 @@ mod channels {
             async fn auth_publickey(
                 &mut self,
                 _: &str,
-                _: &crate::keys::ssh_key::PublicKey,
+                _: server::VerifiedPublicKey<'_>,
             ) -> Result<server::Auth, Self::Error> {
                 Ok(server::Auth::Accept)
             }
@@ -618,7 +618,7 @@ mod channels {
             async fn auth_publickey(
                 &mut self,
                 _: &str,
-                _: &crate::keys::ssh_key::PublicKey,
+                _: server::VerifiedPublicKey<'_>,
             ) -> Result<server::Auth, Self::Error> {
                 Ok(server::Auth::Accept)
             }
@@ -729,7 +729,7 @@ mod channels {
             async fn auth_publickey(
                 &mut self,
                 _: &str,
-                _: &crate::keys::ssh_key::PublicKey,
+                _: server::VerifiedPublicKey<'_>,
             ) -> Result<server::Auth, Self::Error> {
                 Ok(server::Auth::Accept)
             }
@@ -1572,7 +1572,7 @@ mod future_certificate {
                 async fn auth_publickey_offered(
                     &mut self,
                     _user: &str,
-                    _public_key: &ssh_key::PublicKey,
+                    _public_key: server::PublicKeyOffer<'_>,
                 ) -> Result<server::Auth, Self::Error> {
                     // Accept the key/certificate for the probe
                     Ok(server::Auth::Accept)
@@ -1691,7 +1691,7 @@ mod rekey_under_load {
         async fn auth_publickey(
             &mut self,
             _: &str,
-            _: &crate::keys::ssh_key::PublicKey,
+            _: server::VerifiedPublicKey<'_>,
         ) -> Result<server::Auth, Self::Error> {
             Ok(server::Auth::Accept)
         }
