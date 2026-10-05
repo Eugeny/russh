@@ -934,6 +934,39 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
         })
     }
 
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn test_agent_rejects_duplicate_lifetime() {
+        #[derive(Clone)]
+        struct X {}
+        impl agent::server::Agent for X {}
+
+        let dir = tempfile::tempdir().unwrap();
+        let agent_path = dir.path().join("agent");
+        let mut listener = tokio::net::UnixListener::bind(&agent_path).unwrap();
+        tokio::spawn(async move {
+            agent::server::serve(
+                Incoming {
+                    listener: &mut listener,
+                },
+                X {},
+            )
+            .await
+        });
+
+        let key = decode_secret_key(ED25519_KEY, Some("blabla")).unwrap();
+        let stream = tokio::net::UnixStream::connect(&agent_path).await.unwrap();
+        let mut client = agent::client::AgentClient::connect(stream);
+        let lifetime = || agent::Constraint::KeyLifetime { seconds: 60 };
+        assert!(client
+            .add_identity(&key, &[lifetime(), lifetime()])
+            .await
+            .is_err());
+        assert!(client.request_identities().await.unwrap().is_empty());
+        client.add_identity(&key, &[lifetime()]).await.unwrap();
+        assert_eq!(client.request_identities().await.unwrap().len(), 1);
+    }
+
     #[cfg(unix)]
     struct Incoming<'a> {
         listener: &'a mut tokio::net::UnixListener,
