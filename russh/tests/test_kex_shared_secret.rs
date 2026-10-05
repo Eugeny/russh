@@ -103,6 +103,7 @@ async fn test_kex_done_callback_receives_shared_secret() {
 }
 
 /// Test kex_done with different KEX algorithms
+#[cfg(feature = "ecdsa")]
 #[tokio::test]
 async fn test_kex_done_with_ecdh_nistp256() {
     let _ = env_logger::try_init();
@@ -186,6 +187,7 @@ async fn test_kex_done_with_ecdh_nistp256() {
         .unwrap();
 }
 
+#[cfg(feature = "dh-group")]
 #[tokio::test]
 async fn test_kex_done_with_dh_gex_sha256_and_rfc4419_minimum() {
     let _ = env_logger::try_init();

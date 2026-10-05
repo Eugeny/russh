@@ -18,7 +18,9 @@ use bytes::Bytes;
 use log::debug;
 use rand_core::Rng;
 use ssh_encoding::{Decode, Encode};
-use ssh_key::{Algorithm, Certificate, EcdsaCurve, HashAlg, PrivateKey};
+#[cfg(feature = "ecdsa")]
+use ssh_key::EcdsaCurve;
+use ssh_key::{Algorithm, Certificate, HashAlg, PrivateKey};
 
 use crate::cipher::CIPHERS;
 use crate::helpers::{AlgorithmExt, NameList};
@@ -160,14 +162,21 @@ impl Preferred {
 }
 
 const SAFE_KEX_ORDER: &[kex::Name] = &[
+    #[cfg(feature = "ml-kem")]
     kex::MLKEM768X25519_SHA256,
     kex::CURVE25519,
     kex::CURVE25519_PRE_RFC_8731,
+    #[cfg(feature = "dh-group")]
     kex::DH_GEX_SHA256,
+    #[cfg(feature = "dh-group")]
     kex::DH_G18_SHA512,
+    #[cfg(feature = "dh-group")]
     kex::DH_G17_SHA512,
+    #[cfg(feature = "dh-group")]
     kex::DH_G16_SHA512,
+    #[cfg(feature = "dh-group")]
     kex::DH_G15_SHA512,
+    #[cfg(feature = "dh-group")]
     kex::DH_G14_SHA256,
     kex::EXTENSION_SUPPORT_AS_CLIENT,
     kex::EXTENSION_SUPPORT_AS_SERVER,
@@ -184,6 +193,7 @@ const KEX_EXTENSION_NAMES: &[kex::Name] = &[
 
 const CIPHER_ORDER: &[cipher::Name] = &[
     cipher::CHACHA20_POLY1305,
+    #[cfg(feature = "aes-gcm")]
     cipher::AES_256_GCM,
     cipher::AES_256_CTR,
     cipher::AES_192_CTR,
@@ -212,12 +222,15 @@ impl Preferred {
         host_key_certificates: Cow::Borrowed(&[]),
         key: Cow::Borrowed(&[
             Algorithm::Ed25519,
+            #[cfg(feature = "ecdsa")]
             Algorithm::Ecdsa {
                 curve: EcdsaCurve::NistP256,
             },
+            #[cfg(feature = "ecdsa")]
             Algorithm::Ecdsa {
                 curve: EcdsaCurve::NistP384,
             },
+            #[cfg(feature = "ecdsa")]
             Algorithm::Ecdsa {
                 curve: EcdsaCurve::NistP521,
             },
@@ -682,6 +695,7 @@ mod tests {
         buf
     }
 
+    #[cfg(feature = "ml-kem")]
     fn build_kexinit(kex_names: &[&str], follows: bool) -> Vec<u8> {
         let keys = Preferred::DEFAULT
             .key
@@ -699,6 +713,7 @@ mod tests {
     /// algorithm russh does not implement (`sntrup761x25519-sha512`) — while
     /// listing russh's own first choice (`mlkem768x25519-sha256`) second —
     /// must have its guessed packet ignored, not consumed as the negotiated key.
+    #[cfg(feature = "ml-kem")]
     #[test]
     fn wrong_guess_for_unknown_kex_is_ignored() {
         let buf = build_kexinit(
@@ -716,6 +731,7 @@ mod tests {
     }
 
     /// A correct guess (client's first == server's first) must NOT be ignored.
+    #[cfg(feature = "ml-kem")]
     #[test]
     fn correct_guess_is_not_ignored() {
         let buf = build_kexinit(&["mlkem768x25519-sha256", "curve25519-sha256"], true);
@@ -724,7 +740,12 @@ mod tests {
         assert!(!names.ignore_guessed, "correct guess must be honored");
     }
 
+    /// The local first choice, which the tests below need in order to reason
+    /// about `first_kex_packet_follows` guesses.
+    #[cfg(feature = "ml-kem")]
     const KEX_FIRST: &[&str] = &["mlkem768x25519-sha256"];
+    #[cfg(not(feature = "ml-kem"))]
+    const KEX_FIRST: &[&str] = &["curve25519-sha256"];
     const ED25519_CERT: &str = "ssh-ed25519-cert-v01@openssh.com";
 
     fn cert_prefs(certs: &'static [Algorithm]) -> Preferred {
