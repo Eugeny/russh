@@ -2699,7 +2699,6 @@ impl Default for Config {
 ///
 /// Note: this is an async trait. The trait functions return `impl Future`,
 /// and you can simply define them as `async fn` instead.
-#[cfg_attr(feature = "async-trait", async_trait::async_trait)]
 pub trait Handler: Sized + Send {
     type Error: From<crate::Error> + Send + core::fmt::Debug;
 

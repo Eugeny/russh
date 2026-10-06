@@ -46,7 +46,6 @@ pub enum MessageType {
     Unlock,
 }
 
-#[cfg_attr(feature = "async-trait", async_trait::async_trait)]
 pub trait Agent: Clone + Send + 'static {
     fn confirm(
         self,
