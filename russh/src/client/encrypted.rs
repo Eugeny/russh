@@ -293,6 +293,16 @@ impl Session {
                                     self.common.buffer = loop {
                                         match self.receiver.recv().await {
                                             Some(Msg::Signed { data }) => break data[..].to_vec(),
+                                            // The signer could not sign. Leave the PK_OK
+                                            // unanswered, as OpenSSH does when it cannot
+                                            // sign: the server keeps waiting for a userauth
+                                            // request and the next one (any method) replaces
+                                            // this attempt. Going back to the main loop is
+                                            // what lets that next request through.
+                                            Some(Msg::SignFailed) => {
+                                                debug!("signer failed, abandoning the request");
+                                                return Ok(());
+                                            }
                                             None => return Err(crate::Error::RecvError.into()),
                                             _ => {}
                                         }
@@ -327,6 +337,11 @@ impl Session {
                                     self.common.buffer = loop {
                                         match self.receiver.recv().await {
                                             Some(Msg::Signed { data }) => break data,
+                                            // See the public key case above.
+                                            Some(Msg::SignFailed) => {
+                                                debug!("signer failed, abandoning the request");
+                                                return Ok(());
+                                            }
                                             None => return Err(crate::Error::RecvError.into()),
                                             _ => {}
                                         }
