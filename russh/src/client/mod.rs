@@ -708,7 +708,7 @@ impl<H: Handler> Handle<H> {
                     max_packet_size,
                     window_size,
                 }) => {
-                    window_size_ref.update(window_size).await;
+                    window_size_ref.grow(window_size).await;
 
                     return Ok(Channel {
                         write_half: ChannelWriteHalf {
