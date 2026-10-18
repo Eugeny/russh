@@ -26,6 +26,7 @@ use signature::Verifier;
 use ssh_encoding::{Decode, Encode, Reader};
 use ssh_key::{PublicKey, Signature};
 use tokio::time::Instant;
+use zeroize::Zeroizing;
 
 use super::*;
 use crate::helpers::{AlgorithmExt, NameList};
@@ -390,6 +391,39 @@ mod tests {
             result,
             "server accepted a password auth request with trailing bytes",
         );
+    }
+
+    #[tokio::test]
+    async fn password_auth_passes_password_to_handler() {
+        struct PasswordHandler {
+            password: Option<String>,
+        }
+
+        impl Handler for PasswordHandler {
+            type Error = Error;
+
+            async fn auth_password(
+                &mut self,
+                _user: &str,
+                password: &str,
+            ) -> Result<Auth, Self::Error> {
+                self.password = Some(password.to_owned());
+                Ok(Auth::Accept)
+            }
+        }
+
+        let mut session = test_auth_session();
+        let mut handler = PasswordHandler { password: None };
+        let mut packet = vec![msg::USERAUTH_REQUEST];
+        "test".encode(&mut packet).unwrap();
+        "ssh-connection".encode(&mut packet).unwrap();
+        "password".encode(&mut packet).unwrap();
+        0u8.encode(&mut packet).unwrap();
+        "password-sentinel".encode(&mut packet).unwrap();
+
+        session.process_packet(&mut handler, &packet).await.unwrap();
+
+        assert_eq!(handler.password.as_deref(), Some("password-sentinel"));
     }
 
     #[tokio::test]
@@ -815,9 +849,9 @@ impl Encrypted {
                 auth_user.clear();
                 auth_user.push_str(&user);
                 let change = map_err!(u8::decode(r))? != 0;
-                let password = map_err!(String::decode(r))?;
+                let password = Zeroizing::new(map_err!(String::decode(r))?);
                 if change {
-                    let _new_password = map_err!(String::decode(r))?;
+                    let _new_password = Zeroizing::new(map_err!(String::decode(r))?);
                 }
                 map_err!(ensure_end(r))?;
                 let auth = if change {
@@ -826,7 +860,7 @@ impl Encrypted {
                         partial_success: false,
                     }
                 } else {
-                    handler.auth_password(&user, &password).await?
+                    handler.auth_password(&user, password.as_str()).await?
                 };
                 if let Auth::Accept = auth {
                     server_auth_request_success(&mut self.write);

@@ -1016,7 +1016,6 @@ async fn start_reading<R: AsyncRead + Unpin>(
     mut buffer: SSHBuffer,
     mut cipher: Box<dyn OpeningKey + Send>,
 ) -> Result<(usize, R, SSHBuffer, Box<dyn OpeningKey + Send>), Error> {
-    buffer.buffer.clear();
     let n = cipher::read(&mut stream_read, &mut buffer, &mut *cipher).await?;
     Ok((n, stream_read, buffer, cipher))
 }

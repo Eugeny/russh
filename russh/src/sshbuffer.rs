@@ -20,6 +20,7 @@ use std::num::Wrapping;
 use bytes::{Bytes, BytesMut};
 use log::debug;
 use ssh_encoding::Writer;
+use zeroize::Zeroize;
 use super::cipher::SealingKey;
 use compression::Compress;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
@@ -319,8 +320,8 @@ fn packet_bytes_compressed_matches_packet_output() {
     assert_eq!(packet_bytes_writer.buffer().bytes, packet_bytes);
 }
 
-/// SSH packet read/write buffer. Uses Vec<u8> (not CryptoVec/mlocked) because
-/// packet data is not secret material.
+/// SSH packet read/write buffer. Uses Vec<u8> rather than CryptoVec because it
+/// is a transport buffer; its contents are wiped before reuse and on drop.
 #[derive(Debug, Default)]
 pub struct SSHBuffer {
     pub buffer: Vec<u8>,
@@ -329,6 +330,12 @@ pub struct SSHBuffer {
     // Sequence numbers are on 32 bits and wrap.
     // https://tools.ietf.org/html/rfc4253#section-6.4
     pub seqn: Wrapping<u32>,
+}
+
+impl Drop for SSHBuffer {
+    fn drop(&mut self) {
+        self.buffer.zeroize();
+    }
 }
 
 impl SSHBuffer {
@@ -384,11 +391,17 @@ impl PacketBytesWriter {
 }
 
 /// Incoming SSH packet after decryption and optional decompression.
-/// Uses Vec<u8> (not CryptoVec/mlocked) because incoming network data is not secret.
+/// The payload can contain credentials, so it is wiped when the packet drops.
 #[derive(Debug)]
 pub(crate) struct IncomingSshPacket {
     pub buffer: Vec<u8>,
     pub seqn: Wrapping<u32>,
+}
+
+impl Drop for IncomingSshPacket {
+    fn drop(&mut self) {
+        self.buffer.zeroize();
+    }
 }
 
 /// Packet writer for constructing and encrypting outgoing SSH packets.

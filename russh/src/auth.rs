@@ -351,6 +351,22 @@ impl std::fmt::Debug for Method {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn password_debug_output_is_redacted() {
+        let method = Method::Password {
+            password: "password-sentinel".to_owned(),
+        };
+
+        let debug = format!("{method:?}");
+        assert_eq!(debug, "Password { password: \"<redacted>\" }");
+        assert!(!debug.contains("password-sentinel"));
+    }
+}
+
 #[doc(hidden)]
 #[derive(Debug)]
 pub struct AuthRequest {
