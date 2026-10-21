@@ -8,7 +8,7 @@ use ssh_key::{Algorithm, Certificate, HashAlg, PrivateKey, PublicKey, Signature}
 use tokio;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-use super::{AgentIdentity, Constraint, msg};
+use super::{AgentIdentity, AgentSessionBinding, Constraint, msg};
 use crate::CryptoVec;
 use crate::helpers::EncodedExt;
 use crate::keys::{Error, key};
@@ -150,6 +150,30 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
         } else {
             Err(Error::AgentFailure)
         }
+    }
+
+    /// Bind this agent connection to an authenticated SSH server session.
+    ///
+    /// OpenSSH agents require `session-bind@openssh.com` before they expose or
+    /// use destination-constrained identities. Call this before requesting
+    /// identities. Set `forwarding` to `false` for direct client
+    /// authentication and to `true` before relaying a forwarded agent socket.
+    pub async fn bind_session(
+        &mut self,
+        binding: &AgentSessionBinding,
+        forwarding: bool,
+    ) -> Result<(), Error> {
+        self.buf.clear();
+        self.buf.resize(4, 0);
+        msg::EXTENSION.encode(&mut self.buf)?;
+        "session-bind@openssh.com".encode(&mut self.buf)?;
+        binding.host_key.as_slice().encode(&mut self.buf)?;
+        binding.session_id.as_slice().encode(&mut self.buf)?;
+        binding.signature.as_slice().encode(&mut self.buf)?;
+        u8::from(forwarding).encode(&mut self.buf)?;
+        let len = self.buf.len() - 4;
+        BigEndian::write_u32(&mut self.buf, len as u32);
+        self.read_success().await
     }
 
     /// Send a key to the agent, with a (possibly empty) slice of

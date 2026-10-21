@@ -2,6 +2,28 @@ use std::borrow::Cow;
 
 use ssh_key::{Certificate, PublicKey};
 
+/// Cryptographic context that binds an SSH agent to one server connection.
+///
+/// OpenSSH agents use this context to enforce destination constraints. It is
+/// produced by the client key exchange and can be sent to an agent with
+/// [`client::AgentClient::bind_session`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentSessionBinding {
+    pub(crate) host_key: Vec<u8>,
+    pub(crate) session_id: Vec<u8>,
+    pub(crate) signature: Vec<u8>,
+}
+
+impl AgentSessionBinding {
+    pub(crate) fn new(host_key: Vec<u8>, session_id: Vec<u8>, signature: Vec<u8>) -> Self {
+        Self {
+            host_key,
+            session_id,
+            signature,
+        }
+    }
+}
+
 /// Write clients for SSH agents.
 pub mod client;
 mod msg;

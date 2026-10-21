@@ -50,6 +50,7 @@ use crate::cipher::CIPHERS;
 use crate::client::GexParams;
 use crate::mac::{self, MACS};
 use crate::session::{Exchange, NewKeys};
+use crate::keys::agent::AgentSessionBinding;
 use crate::{CryptoVec, Error, cipher};
 
 #[derive(Debug)]
@@ -121,6 +122,8 @@ pub(crate) enum KexProgress<T> {
     },
     Done {
         server_host_key: Option<PublicKey>,
+        /// Initial key-exchange data used by OpenSSH agent session binding.
+        agent_session_binding: Option<AgentSessionBinding>,
         /// The certificate the server presented, when it presented one.
         ///
         /// Carried beside the key rather than replacing it: the key exchange is
