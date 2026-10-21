@@ -21,3 +21,6 @@ pub const CONSTRAIN_LIFETIME: u8 = 1;
 pub const CONSTRAIN_CONFIRM: u8 = 2;
 // pub const CONSTRAIN_MAXSIGN: u8 = 3;
 pub const CONSTRAIN_EXTENSION: u8 = 255;
+
+pub const SSH_AGENT_RSA_SHA2_256: u32 = 2;
+pub const SSH_AGENT_RSA_SHA2_512: u32 = 4;

@@ -8,7 +8,7 @@ use bytes::Bytes;
 use futures::future::Future;
 use futures::stream::{Stream, StreamExt};
 use ssh_encoding::{Decode, Encode, Reader};
-use ssh_key::PrivateKey;
+use ssh_key::{HashAlg, PrivateKey};
 use subtle::ConstantTimeEq;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::time::sleep;
@@ -360,8 +360,17 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
         };
         writebuf.push(msg::SIGN_RESPONSE);
         let data = Bytes::decode(r)?;
+        let flags = u32::decode(r)?;
 
-        sign_with_hash_alg(&PrivateKeyWithHashAlg::new(key, None), &data)?.encode(writebuf)?;
+        let hash_alg = if flags & msg::SSH_AGENT_RSA_SHA2_256 != 0 {
+            Some(HashAlg::Sha256)
+        } else if flags & msg::SSH_AGENT_RSA_SHA2_512 != 0 {
+            Some(HashAlg::Sha512)
+        } else {
+            None
+        };
+
+        sign_with_hash_alg(&PrivateKeyWithHashAlg::new(key, hash_alg), &data)?.encode(writebuf)?;
 
         let len = writebuf.len();
         BigEndian::write_u32(writebuf, (len - 4) as u32);
