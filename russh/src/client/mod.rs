@@ -1847,7 +1847,7 @@ impl Session {
     }
 
     fn rekey_time_remaining(&self) -> Option<Duration> {
-        if !self.automatic_rekey_allowed() {
+        if cfg!(target_arch = "wasm32") || !self.automatic_rekey_allowed() {
             return None;
         }
         self.common
