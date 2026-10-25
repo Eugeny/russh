@@ -312,6 +312,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
                 // Check if blob starts with a certificate algorithm by reading the algorithm string.
                 // Certificate algorithms end with "-cert-v01@openssh.com".
                 // This avoids parsing the blob twice for regular keys.
+                key::check_cert_nesting(&key_blob)?;
                 let identity = if Self::is_certificate_blob(&key_blob) {
                     match Certificate::decode(&mut key_blob.as_ref()) {
                         Ok(cert) => AgentIdentity::Certificate {

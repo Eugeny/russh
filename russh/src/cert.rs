@@ -44,6 +44,7 @@ impl From<PublicKey> for PublicKeyOrCertificate {
 impl PublicKeyOrCertificate {
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn decode(pubkey_algo: &str, buf: &[u8]) -> Result<Self, ssh_key::Error> {
+        crate::keys::key::check_cert_nesting(buf)?;
         let mut reader = buf;
         match Algorithm::new_certificate_ext(pubkey_algo) {
             Ok(Algorithm::Other(_)) | Err(ssh_key::Error::Encoding(_)) => {

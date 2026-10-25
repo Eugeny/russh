@@ -25,6 +25,7 @@ pub trait PublicKeyExt {
 
 impl PublicKeyExt for PublicKey {
     fn decode(mut bytes: &[u8]) -> Result<PublicKey, Error> {
+        check_cert_nesting(bytes)?;
         let key = KeyData::decode(&mut bytes)?;
         Ok(PublicKey::new(key, ""))
     }
@@ -36,8 +37,31 @@ pub trait Verify {
     fn verify_server_auth(&self, buffer: &[u8], sig: &[u8]) -> bool;
 }
 
+/// Upper bound on certificate nesting in a key blob.
+const MAX_CERT_NESTING: usize = 8;
+
+/// Reject key/certificate blobs nested deeply enough to overflow the stack.
+///
+/// `ssh-key` decodes a certificate's `signature_key` with `KeyData::decode`,
+/// which recurses into another certificate with no depth limit, so a crafted
+/// pre-auth blob aborts the process. Every nesting level must carry its own
+/// `*-cert-v01@*` algorithm name, so counting that marker bounds the depth.
+/// A legitimate certificate has one (its CA key is a plain key).
+// ponytail: substring count can over-count markers inside opaque fields; the
+// limit leaves headroom. Drop once ssh-key caps the depth itself.
+pub(crate) fn check_cert_nesting(blob: &[u8]) -> Result<(), ssh_key::Error> {
+    const MARKER: &[u8] = b"-cert-v01@";
+    if blob.windows(MARKER.len()).filter(|w| *w == MARKER).count() > MAX_CERT_NESTING {
+        return Err(ssh_key::Error::CertificateFieldInvalid(
+            ssh_key::certificate::Field::SignatureKey,
+        ));
+    }
+    Ok(())
+}
+
 /// Parse a public key from a byte slice.
 pub fn parse_public_key(mut p: &[u8]) -> Result<PublicKey, Error> {
+    check_cert_nesting(p)?;
     Ok(ssh_key::public::KeyData::decode(&mut p)?.into())
 }
 
@@ -123,3 +147,54 @@ pub const ALL_KEY_TYPES: &[Algorithm] = &[
     Algorithm::SkEcdsaSha2NistP256,
     Algorithm::SkEd25519,
 ];
+
+#[cfg(test)]
+mod test {
+    fn s(v: &mut Vec<u8>, b: &[u8]) {
+        v.extend((b.len() as u32).to_be_bytes());
+        v.extend(b);
+    }
+
+    /// Smallest certificate chain where each level's CA key is the next certificate.
+    fn nested_cert(depth: usize) -> Vec<u8> {
+        let mut inner = Vec::new();
+        s(&mut inner, b"a@b");
+        s(&mut inner, b"");
+        for _ in 0..depth {
+            let mut v = Vec::new();
+            s(&mut v, b"a-cert-v01@x");
+            s(&mut v, b""); // nonce
+            s(&mut v, b""); // opaque public key
+            v.extend(0u64.to_be_bytes()); // serial
+            v.extend(1u32.to_be_bytes()); // user cert
+            s(&mut v, b""); // key id
+            s(&mut v, b""); // principals
+            v.extend(0u64.to_be_bytes());
+            v.extend(u64::MAX.to_be_bytes());
+            s(&mut v, b""); // critical options
+            s(&mut v, b""); // extensions
+            s(&mut v, b""); // reserved
+            s(&mut v, &inner); // signature key
+            let mut sig = Vec::new();
+            s(&mut sig, b"a@b");
+            s(&mut sig, b"x");
+            s(&mut v, &sig);
+            inner = v;
+        }
+        inner
+    }
+
+    #[test]
+    fn deeply_nested_certificate_is_rejected() {
+        // Shallow chain is well-formed and still decodes.
+        assert!(super::parse_public_key(&nested_cert(2)).is_ok());
+        // One packet's worth of nesting; without the guard this aborts on stack overflow.
+        let deep = nested_cert(2848);
+        assert!(super::parse_public_key(&deep).is_err());
+        assert!(crate::cert::PublicKeyOrCertificate::decode("ssh-ed25519", &deep).is_err());
+        assert!(
+            crate::cert::PublicKeyOrCertificate::decode("ssh-ed25519-cert-v01@openssh.com", &deep)
+                .is_err()
+        );
+    }
+}

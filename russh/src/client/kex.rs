@@ -293,6 +293,7 @@ impl ClientKex {
                 // so there is nothing on the wire to compare against.
                 let server_host_key_blob = Bytes::decode(r)?;
                 let server_host_certificate = if names.host_key_is_certificate {
+                    crate::keys::key::check_cert_nesting(&server_host_key_blob)?;
                     Some(Certificate::from_bytes(&server_host_key_blob)?)
                 } else {
                     None
