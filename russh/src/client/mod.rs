@@ -316,6 +316,7 @@ pub struct Handle<H: Handler> {
     receiver: UnboundedReceiver<Reply>,
     join: russh_util::runtime::JoinHandle<Result<(), H::Error>>,
     channel_buffer_size: usize,
+    agent_session_binding: Option<crate::keys::agent::AgentSessionBinding>,
 }
 
 impl<H: Handler> Drop for Handle<H> {
@@ -327,6 +328,15 @@ impl<H: Handler> Drop for Handle<H> {
 impl<H: Handler> Handle<H> {
     pub fn is_closed(&self) -> bool {
         self.sender.is_closed()
+    }
+
+    /// Return the initial key-exchange context for OpenSSH agent session
+    /// binding.
+    ///
+    /// Pass this to [`crate::keys::agent::client::AgentClient::bind_session`]
+    /// before requesting identities or relaying a forwarded agent socket.
+    pub fn agent_session_binding(&self) -> Option<&crate::keys::agent::AgentSessionBinding> {
+        self.agent_session_binding.as_ref()
     }
 
     /// Perform no authentication. This is useful for testing, but should not be
@@ -1248,19 +1258,23 @@ where
     let (kex_done_signal, kex_done_signal_rx) = oneshot::channel();
     let join = russh_util::runtime::spawn(session.run(stream, handler, Some(kex_done_signal)));
 
-    if let Err(err) = kex_done_signal_rx.await {
-        // kex_done_signal Sender is dropped when the session
-        // fails before a succesful key exchange
-        debug!("kex_done_signal sender was dropped {err:?}");
-        join.await.map_err(crate::Error::Join)??;
-        return Err(H::Error::from(crate::Error::Disconnect));
-    }
+    let agent_session_binding = match kex_done_signal_rx.await {
+        Ok(binding) => binding,
+        Err(err) => {
+            // kex_done_signal Sender is dropped when the session
+            // fails before a successful key exchange
+            debug!("kex_done_signal sender was dropped {err:?}");
+            join.await.map_err(crate::Error::Join)??;
+            return Err(H::Error::from(crate::Error::Disconnect));
+        }
+    };
 
     Ok(Handle {
         sender: handle_sender,
         receiver: handle_receiver,
         join,
         channel_buffer_size,
+        agent_session_binding,
     })
 }
 
@@ -1325,7 +1339,9 @@ impl Session {
         mut self,
         stream: SshRead<R>,
         mut handler: H,
-        mut kex_done_signal: Option<oneshot::Sender<()>>,
+        mut kex_done_signal: Option<
+            oneshot::Sender<Option<crate::keys::agent::AgentSessionBinding>>,
+        >,
     ) -> Result<(), H::Error> {
         let (stream_read, mut stream_write) = stream.split();
         let result = self
@@ -1372,7 +1388,9 @@ impl Session {
         stream_read: SshRead<ReadHalf<R>>,
         stream_write: &mut WriteHalf<R>,
         handler: &mut H,
-        kex_done_signal: &mut Option<tokio::sync::oneshot::Sender<()>>,
+        kex_done_signal: &mut Option<
+            tokio::sync::oneshot::Sender<Option<crate::keys::agent::AgentSessionBinding>>,
+        >,
     ) -> Result<RemoteDisconnectInfo, H::Error> {
         let mut result: Result<RemoteDisconnectInfo, H::Error> = Err(Error::Disconnect.into());
         self.flush()?;
@@ -1922,7 +1940,9 @@ impl Session {
 async fn reply<H: Handler>(
     session: &mut Session,
     handler: &mut H,
-    kex_done_signal: &mut Option<tokio::sync::oneshot::Sender<()>>,
+    kex_done_signal: &mut Option<
+        tokio::sync::oneshot::Sender<Option<crate::keys::agent::AgentSessionBinding>>,
+    >,
     pkt: &mut IncomingSshPacket,
 ) -> Result<(), H::Error> {
     if let Some(message_type) = pkt.buffer.first() {
@@ -2003,6 +2023,7 @@ async fn reply<H: Handler>(
                 KexProgress::Done {
                     server_host_key,
                     server_host_certificate,
+                    agent_session_binding,
                     newkeys,
                 } => {
                     debug!("kex impl has completed");
@@ -2058,7 +2079,7 @@ async fn reply<H: Handler>(
                             .encrypted(initial_encrypted_state(session), newkeys);
 
                         if let Some(sender) = kex_done_signal.take() {
-                            sender.send(()).unwrap_or(());
+                            sender.send(agent_session_binding).unwrap_or(());
                         }
                     }
 

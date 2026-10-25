@@ -12,6 +12,7 @@ use super::IncomingSshPacket;
 use crate::client::{Config, NewKeys};
 use crate::kex::dh::groups::DhGroup;
 use crate::kex::{KEXES, KexAlgorithm, KexAlgorithmImplementor, KexCause, KexProgress};
+use crate::keys::agent::AgentSessionBinding;
 use crate::keys::key::parse_public_key;
 use crate::negotiation::{Names, Select};
 use crate::parsing::ensure_end;
@@ -39,6 +40,7 @@ enum ClientKexState {
     WaitingForNewKeys {
         server_host_key: PublicKey,
         server_host_certificate: Option<Certificate>,
+        agent_session_binding: Option<AgentSessionBinding>,
         newkeys: NewKeys,
     },
 }
@@ -171,6 +173,7 @@ impl ClientKex {
 
                     return Ok(KexProgress::Done {
                         server_host_certificate: None,
+                        agent_session_binding: None,
                         newkeys,
                         server_host_key: None,
                     });
@@ -327,8 +330,8 @@ impl ClientKex {
                     }
                 })?;
 
-                let signature = Bytes::decode(r)?;
-                let mut signature_reader = &signature[..];
+                let signature_blob = Bytes::decode(r)?;
+                let mut signature_reader = &signature_blob[..];
                 let signature = Signature::decode(&mut signature_reader)?;
                 ensure_end(&signature_reader)?;
                 ensure_end(r)?;
@@ -340,6 +343,13 @@ impl ClientKex {
                     return Err(Error::WrongServerSig);
                 }
 
+                let agent_session_binding = (!self.cause.is_rekey()).then(|| {
+                    AgentSessionBinding::new(
+                        server_host_key_blob.to_vec(),
+                        CryptoVec::from(&hash[..]),
+                        signature_blob.to_vec(),
+                    )
+                });
                 let newkeys = compute_keys(
                     hash,
                     kex,
@@ -358,6 +368,7 @@ impl ClientKex {
                 self.state = ClientKexState::WaitingForNewKeys {
                     server_host_key,
                     server_host_certificate,
+                    agent_session_binding,
                     newkeys,
                 };
 
@@ -369,6 +380,7 @@ impl ClientKex {
             ClientKexState::WaitingForNewKeys {
                 server_host_key,
                 server_host_certificate,
+                agent_session_binding,
                 newkeys,
             } => {
                 // At this point the exchange is complete
@@ -391,6 +403,7 @@ impl ClientKex {
 
                 Ok(KexProgress::Done {
                     server_host_certificate,
+                    agent_session_binding,
                     newkeys,
                     server_host_key: Some(server_host_key),
                 })
