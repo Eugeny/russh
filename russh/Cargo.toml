@@ -16,7 +16,8 @@ rust-version = "1.89"
 default = ["flate2", "aws-lc-rs", "rsa"]
 # Crypto backends: enable at least one of `aws-lc-rs` or `ring`.
 aws-lc-rs = ["dep:aws-lc-rs"] # Default crypto backend.
-async-trait = ["dep:async-trait"]
+# Deprecated: no-op, kept for compatibility.
+async-trait = []
 # Danger: 3DES cipher is insecure.
 des = ["dep:des"]
 # Danger: DSA algorithm is insecure.
@@ -28,7 +29,6 @@ _bench = ["dep:criterion"]
 
 [dependencies]
 aes.workspace = true
-async-trait = { workspace = true, optional = true }
 aws-lc-rs = { version = "1.16.2", optional = true }
 bitflags = "2.0"
 block-padding = { version = "0.4" }

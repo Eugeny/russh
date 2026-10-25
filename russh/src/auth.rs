@@ -167,7 +167,6 @@ impl AuthResult {
     }
 }
 
-#[cfg_attr(feature = "async-trait", async_trait::async_trait)]
 pub trait Signer: Sized {
     type Error: From<crate::SendError>;
 
@@ -217,7 +216,6 @@ pub enum GssapiError {
     ErrorToken(Vec<u8>),
 }
 
-#[cfg_attr(feature = "async-trait", async_trait::async_trait)]
 pub trait GssapiAuthenticator: Sized {
     type Error: From<crate::SendError>;
 
@@ -254,7 +252,6 @@ pub enum AgentAuthError {
     Key(#[from] crate::keys::Error),
 }
 
-#[cfg_attr(feature = "async-trait", async_trait::async_trait)]
 impl<R: AsyncRead + AsyncWrite + Unpin + Send> Signer
     for crate::keys::agent::client::AgentClient<R>
 {

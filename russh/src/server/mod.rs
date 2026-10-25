@@ -211,7 +211,6 @@ impl Auth {
 ///
 /// Note: this is an async trait. The trait functions return `impl Future`,
 /// and you can simply define them as `async fn` instead.
-#[cfg_attr(feature = "async-trait", async_trait::async_trait)]
 pub trait Handler: Sized {
     type Error: From<crate::Error> + Send;
 
@@ -885,7 +884,6 @@ impl<F: Future<Output = std::io::Result<()>> + Unpin + Send> Future for RunningS
     }
 }
 
-#[cfg_attr(feature = "async-trait", async_trait::async_trait)]
 /// Trait used to create new handlers when clients connect.
 pub trait Server {
     /// The type of handlers.
