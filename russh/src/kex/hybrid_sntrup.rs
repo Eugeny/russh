@@ -28,6 +28,7 @@ impl KexType for Sntrup761X25519KexType {
             x25519_secret: None,
             k_pq: None,
             k_cl: None,
+            combined: None,
         }
         .into()
     }
@@ -39,6 +40,7 @@ pub struct Sntrup761X25519Kex {
     x25519_secret: Option<Zeroizing<[u8; 32]>>,
     k_pq: Option<SntrupSharedSecret>,
     k_cl: Option<Zeroizing<[u8; 32]>>,
+    combined: Option<Zeroizing<[u8; 64]>>,
 }
 
 impl std::fmt::Debug for Sntrup761X25519Kex {
@@ -52,7 +54,7 @@ impl std::fmt::Debug for Sntrup761X25519Kex {
 
 impl Sntrup761X25519Kex {
     #[allow(clippy::indexing_slicing)]
-    fn combined_secret(&self) -> Result<[u8; 64], Error> {
+    fn cache_combined_secret(&mut self) -> Result<(), Error> {
         let k_pq = self.k_pq.as_ref().ok_or(Error::KexInit)?;
         let k_cl = self.k_cl.as_ref().ok_or(Error::KexInit)?;
 
@@ -63,7 +65,12 @@ impl Sntrup761X25519Kex {
         let digest = hasher.finalize();
         let mut combined = [0u8; 64];
         combined.copy_from_slice(&digest);
-        Ok(combined)
+        self.combined = Some(Zeroizing::new(combined));
+        Ok(())
+    }
+
+    fn combined_secret(&self) -> Result<&[u8], Error> {
+        self.combined.as_ref().map(|k| k.as_ref()).ok_or(Error::KexInit)
     }
 }
 
@@ -113,6 +120,7 @@ impl KexAlgorithmImplementor for Sntrup761X25519Kex {
 
         self.k_pq = Some(k_pq);
         self.k_cl = Some(k_cl);
+        self.cache_combined_secret()?;
 
         Ok(())
     }
@@ -170,15 +178,14 @@ impl KexAlgorithmImplementor for Sntrup761X25519Kex {
 
         self.k_pq = Some(k_pq);
         self.k_cl = Some(k_cl);
+        self.cache_combined_secret()?;
 
         Ok(())
     }
 
     #[allow(clippy::indexing_slicing)]
     fn shared_secret_bytes(&self) -> Option<&[u8]> {
-        // Keep this consistent with the existing hybrid KEX implementation.
-        // The combined SHA-512 value is encoded internally by compute_keys.
-        self.k_cl.as_ref().map(|k| &k[..])
+        self.combined.as_ref().map(|k| &k[..])
     }
 
     #[allow(clippy::indexing_slicing)]
@@ -199,7 +206,7 @@ impl KexAlgorithmImplementor for Sntrup761X25519Kex {
         exchange.server_ephemeral.encode(buffer)?;
 
         let combined = self.combined_secret()?;
-        combined.as_slice().encode(buffer)?;
+        combined.encode(buffer)?;
 
         let mut hasher = Sha512::new();
         hasher.update(&buffer[..]);
@@ -216,7 +223,7 @@ impl KexAlgorithmImplementor for Sntrup761X25519Kex {
         is_server: bool,
     ) -> Result<super::cipher::CipherPair, Error> {
         let combined = self.combined_secret()?;
-        let shared_secret = SharedSecret::from_string(&combined)?;
+        let shared_secret = SharedSecret::from_string(combined)?;
 
         compute_keys::<Sha512>(
             Some(&shared_secret),
@@ -241,6 +248,7 @@ mod tests {
             x25519_secret: None,
             k_pq: None,
             k_cl: None,
+            combined: None,
         }
     }
 
@@ -286,6 +294,11 @@ mod tests {
         assert_eq!(client_hash, server_hash);
         assert_eq!(client_hash.len(), 64);
         assert_eq!(client_kex.combined_secret().unwrap(), server_kex.combined_secret().unwrap());
+        assert_eq!(client_kex.shared_secret_bytes().unwrap().len(), 64);
+        assert_eq!(
+            client_kex.shared_secret_bytes(),
+            server_kex.shared_secret_bytes()
+        );
     }
 
     #[test]
