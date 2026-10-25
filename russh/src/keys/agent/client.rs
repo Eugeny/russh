@@ -168,7 +168,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
         msg::EXTENSION.encode(&mut self.buf)?;
         "session-bind@openssh.com".encode(&mut self.buf)?;
         binding.host_key.as_slice().encode(&mut self.buf)?;
-        binding.session_id.as_slice().encode(&mut self.buf)?;
+        binding.session_id.encode(&mut self.buf)?;
         binding.signature.as_slice().encode(&mut self.buf)?;
         u8::from(forwarding).encode(&mut self.buf)?;
         let len = self.buf.len() - 4;
@@ -314,7 +314,10 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
                 // This avoids parsing the blob twice for regular keys.
                 let identity = if Self::is_certificate_blob(&key_blob) {
                     match Certificate::decode(&mut key_blob.as_ref()) {
-                        Ok(cert) => AgentIdentity::Certificate { certificate: cert, comment },
+                        Ok(cert) => AgentIdentity::Certificate {
+                            certificate: cert,
+                            comment,
+                        },
                         Err(_) => {
                             // Fallback to public key if certificate parsing fails
                             let key = key::parse_public_key(&key_blob)?;

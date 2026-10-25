@@ -12,8 +12,8 @@ use super::IncomingSshPacket;
 use crate::client::{Config, NewKeys};
 use crate::kex::dh::groups::DhGroup;
 use crate::kex::{KEXES, KexAlgorithm, KexAlgorithmImplementor, KexCause, KexProgress};
-use crate::keys::key::parse_public_key;
 use crate::keys::agent::AgentSessionBinding;
+use crate::keys::key::parse_public_key;
 use crate::negotiation::{Names, Select};
 use crate::parsing::ensure_end;
 use crate::session::Exchange;
@@ -346,7 +346,7 @@ impl ClientKex {
                 let agent_session_binding = (!self.cause.is_rekey()).then(|| {
                     AgentSessionBinding::new(
                         server_host_key_blob.to_vec(),
-                        hash.clone(),
+                        CryptoVec::from(&hash[..]),
                         signature_blob.to_vec(),
                     )
                 });
