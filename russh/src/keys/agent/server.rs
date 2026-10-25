@@ -293,7 +293,9 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
                     lifetime = Some(seconds);
                     c.push(Constraint::KeyLifetime { seconds });
                 } else if t == msg::CONSTRAIN_CONFIRM {
-                    c.push(Constraint::Confirm)
+                    if !c.contains(&Constraint::Confirm) {
+                        c.push(Constraint::Confirm)
+                    }
                 } else {
                     return Ok(false);
                 }
@@ -418,5 +420,39 @@ mod tests {
         })?;
 
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn duplicate_confirm_constraints_are_stored_once() {
+        use ssh_encoding::Encode;
+
+        let (server, _client) = tokio::io::duplex(64);
+        let connection = Connection {
+            lock: Lock(std::sync::Arc::new(std::sync::RwLock::new(
+                crate::CryptoVec::new(),
+            ))),
+            keys: KeyStore(std::sync::Arc::new(std::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            ))),
+            agent: Some(()),
+            s: server,
+            buf: Vec::new(),
+        };
+
+        let keypair = ssh_key::private::KeypairData::Ed25519(
+            ssh_key::private::Ed25519Keypair::from_seed(&[7u8; 32]),
+        );
+        let mut payload = Vec::new();
+        keypair.encode(&mut payload).unwrap();
+        String::new().encode(&mut payload).unwrap();
+        payload.resize(payload.len() + 10_000, super::msg::CONSTRAIN_CONFIRM);
+
+        let mut writebuf = Vec::new();
+        let mut r = &payload[..];
+        assert!(connection.add_key(&mut r, true, &mut writebuf).await.unwrap());
+
+        let keys = connection.keys.0.read().unwrap();
+        let (_, _, constraints) = keys.values().next().unwrap();
+        assert_eq!(constraints, &[super::Constraint::Confirm]);
     }
 }
