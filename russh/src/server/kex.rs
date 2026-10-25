@@ -1,14 +1,17 @@
 use core::fmt;
 use std::cell::RefCell;
 
+#[cfg(feature = "dh-group")]
 use client::GexParams;
 use log::debug;
+#[cfg(feature = "dh-group")]
 use num_bigint::BigUint;
 use ssh_encoding::Encode;
 use ssh_key::Algorithm;
 
 use super::*;
 use crate::helpers::sign_with_hash_alg;
+#[cfg(feature = "dh-group")]
 use crate::kex::dh::biguint_to_mpint;
 use crate::kex::{KEXES, KexAlgorithm, KexAlgorithmImplementor, KexCause};
 use crate::keys::key::PrivateKeyWithHashAlg;
@@ -24,6 +27,7 @@ thread_local! {
 #[allow(clippy::large_enum_variant)]
 enum ServerKexState {
     Created,
+    #[cfg(feature = "dh-group")]
     WaitingForGexRequest {
         names: Names,
         kex: KexAlgorithm,
@@ -53,6 +57,7 @@ impl Debug for ServerKex {
             ServerKexState::Created => {
                 s.field("state", &"created");
             }
+            #[cfg(feature = "dh-group")]
             ServerKexState::WaitingForGexRequest { .. } => {
                 s.field("state", &"waiting for GEX request");
             }
@@ -91,8 +96,9 @@ impl ServerKex {
     pub fn strict_kex(&self) -> bool {
         match self.state {
             ServerKexState::Created => false,
-            ServerKexState::WaitingForGexRequest { ref names, .. }
-            | ServerKexState::WaitingForDhInit { ref names, .. } => names.strict_kex(),
+            #[cfg(feature = "dh-group")]
+            ServerKexState::WaitingForGexRequest { ref names, .. } => names.strict_kex(),
+            ServerKexState::WaitingForDhInit { ref names, .. } => names.strict_kex(),
             ServerKexState::WaitingForNewKeys { ref newkeys } => newkeys.names.strict_kex(),
         }
     }
@@ -108,7 +114,8 @@ impl ServerKex {
         mut self,
         input: Option<&mut IncomingSshPacket>,
         output: &mut PacketWriter,
-        handler: &mut H,
+        // Only the DH-GEX branch consults the handler.
+        #[cfg_attr(not(feature = "dh-group"), allow(unused_variables))] handler: &mut H,
     ) -> Result<KexProgress<Self>, H::Error> {
         match self.state {
             ServerKexState::Created => {
@@ -166,9 +173,16 @@ impl ServerKex {
                     });
                 }
 
+                // Without the `dh-group` feature no kex algorithm is DH-GEX,
+                // so the GEX request state is unreachable and compiled out.
+                #[cfg(feature = "dh-group")]
                 if kex.is_dh_gex() {
                     self.state = ServerKexState::WaitingForGexRequest { names, kex };
                 } else {
+                    self.state = ServerKexState::WaitingForDhInit { names, kex };
+                }
+                #[cfg(not(feature = "dh-group"))]
+                {
                     self.state = ServerKexState::WaitingForDhInit { names, kex };
                 }
 
@@ -177,6 +191,7 @@ impl ServerKex {
                     reset_seqn: false,
                 })
             }
+            #[cfg(feature = "dh-group")]
             ServerKexState::WaitingForGexRequest { names, mut kex } => {
                 let Some(input) = input else {
                     return Err(Error::KexInit)?;

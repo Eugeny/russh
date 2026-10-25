@@ -22,6 +22,9 @@ jobs:
       - name: Build (all features enabled)
         run: cargo build --verbose --all-features
 
+      - name: Build (minimal algorithm set)
+        run: cargo build --verbose -p russh --no-default-features --features aws-lc-rs
+
   Build-Windows:
     runs-on: windows-latest
 
@@ -51,7 +54,7 @@ jobs:
           rustup target add --toolchain 1.89.0 wasm32-wasip1
 
       - name: Build (WASM-compatible features)
-        run: cargo +1.89.0 build --verbose --target wasm32-wasip1 --no-default-features --features flate2,ring -p russh
+        run: cargo +1.89.0 build --verbose --target wasm32-wasip1 --no-default-features --features flate2,ring,aes-cbc,aes-gcm,dh-group,ecdsa,ml-kem -p russh
 
   Formatting:
     runs-on: ubuntu-24.04
@@ -80,6 +83,9 @@ jobs:
       - name: Clippy (all features enabled)
         run: cargo clippy --all-features -- -D warnings
 
+      - name: Clippy (minimal algorithm set)
+        run: cargo clippy -p russh --no-default-features --features aws-lc-rs -- -D warnings
+
   Test:
     runs-on: ubuntu-24.04
 
@@ -103,6 +109,13 @@ jobs:
         run: |
           eval `ssh-agent`
           cargo test --verbose --all-features
+        env:
+          RUST_BACKTRACE: 1
+
+      - name: Test (minimal algorithm set)
+        run: |
+          eval `ssh-agent`
+          cargo test --verbose -p russh --no-default-features --features aws-lc-rs
         env:
           RUST_BACKTRACE: 1
 

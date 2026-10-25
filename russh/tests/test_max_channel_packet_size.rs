@@ -1,3 +1,4 @@
+#![cfg(feature = "aes-gcm")]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::borrow::Cow;

@@ -43,6 +43,34 @@ russh = { version = "0.63", features = ["aws-lc-rs"] }
 russh = { version = "0.63", default-features = false, features = ["ring", "flate2", "rsa"] }
 ```
 
+## Algorithm features
+
+Algorithm families live behind crate features that are **on by default**, so
+the out-of-the-box algorithm set is unchanged. Turning one off drops its
+algorithms from negotiation — a peer that offers only those simply finds no
+common algorithm — and drops its dependencies from the build.
+
+| Feature | Algorithms |
+| --- | --- |
+| `aes-cbc` | `aes128-cbc`, `aes192-cbc`, `aes256-cbc` (implied by `des`) |
+| `aes-gcm` | `aes128-gcm@openssh.com`, `aes256-gcm@openssh.com` |
+| `dh-group` | `diffie-hellman-group*` and `diffie-hellman-group-exchange-*` |
+| `ecdsa` | `ecdsa-sha2-nistp*` keys and `ecdh-sha2-nistp*` |
+| `ml-kem` | `mlkem768x25519-sha256` |
+| `rsa` | `ssh-rsa`, `rsa-sha2-256`, `rsa-sha2-512`, PKCS#1/#5 key parsing |
+
+`curve25519-sha256`, `chacha20-poly1305@openssh.com`, AES-CTR, the HMAC-SHA2
+family and Ed25519 keys are always available. Encrypted OpenSSH private keys
+keep working with every algorithm feature off.
+
+A minimal client/server — Ed25519, `curve25519-sha256`,
+`chacha20-poly1305@openssh.com`, AES-CTR and HMAC-SHA2 — builds about 30 fewer
+crates:
+
+```toml
+russh = { version = "0.63", default-features = false, features = ["aws-lc-rs"] }
+```
+
 ## Supported algorithms
 
 Russh aims for broad interoperability, so it supports both algorithms currently considered safe and a set of older ones that allow connections to older switches etc. Legacy algorithms are opt in.
@@ -51,32 +79,32 @@ Russh aims for broad interoperability, so it supports both algorithms currently 
 
 **Recommended**
 
-- `mlkem768x25519-sha256` (post-quantum hybrid)
+- `mlkem768x25519-sha256` (post-quantum hybrid, requires the `ml-kem` crate feature, on by default)
 - `curve25519-sha256`, `curve25519-sha256@libssh.org`
-- `diffie-hellman-group-exchange-sha256` (GEX)
-- `diffie-hellman-group18-sha512`, `diffie-hellman-group17-sha512`, `diffie-hellman-group16-sha512`, `diffie-hellman-group15-sha512`
-- `diffie-hellman-group14-sha256`
+- `diffie-hellman-group-exchange-sha256` (GEX, requires the `dh-group` crate feature, on by default)
+- `diffie-hellman-group18-sha512`, `diffie-hellman-group17-sha512`, `diffie-hellman-group16-sha512`, `diffie-hellman-group15-sha512` (`dh-group`)
+- `diffie-hellman-group14-sha256` (`dh-group`)
 - OpenSSH strict key exchange (Terrapin mitigation)
 - Programmatic group choice support for DH-GEX
 
 **Legacy**
 
-- `ecdh-sha2-nistp256`, `ecdh-sha2-nistp384`, `ecdh-sha2-nistp521`
-- `diffie-hellman-group14-sha1`
-- `diffie-hellman-group1-sha1`
-- `diffie-hellman-group-exchange-sha1` (GEX)
+- `ecdh-sha2-nistp256`, `ecdh-sha2-nistp384`, `ecdh-sha2-nistp521` (requires the `ecdsa` crate feature, on by default)
+- `diffie-hellman-group14-sha1` (`dh-group`)
+- `diffie-hellman-group1-sha1` (`dh-group`)
+- `diffie-hellman-group-exchange-sha1` (GEX, `dh-group`)
 
 ### Ciphers
 
 **Recommended**
 
 - `chacha20-poly1305@openssh.com`
-- `aes256-gcm@openssh.com`, `aes128-gcm@openssh.com`
+- `aes256-gcm@openssh.com`, `aes128-gcm@openssh.com` (requires the `aes-gcm` crate feature, on by default)
 - `aes256-ctr`, `aes192-ctr`, `aes128-ctr`
 
 **Legacy**
 
-- `aes256-cbc`, `aes192-cbc`, `aes128-cbc`
+- `aes256-cbc`, `aes192-cbc`, `aes128-cbc` (requires the `aes-cbc` crate feature, on by default)
 - `3des-cbc` (requires the `des` crate feature)
 
 ### MACs
@@ -101,9 +129,9 @@ Russh aims for broad interoperability, so it supports both algorithms currently 
 **Recommended**
 
 - `ssh-ed25519`
-- `ecdsa-sha2-nistp256`, `ecdsa-sha2-nistp384`, `ecdsa-sha2-nistp521`
-- `rsa-sha2-256`, `rsa-sha2-512`
-- `ssh-rsa` (SHA-1)
+- `ecdsa-sha2-nistp256`, `ecdsa-sha2-nistp384`, `ecdsa-sha2-nistp521` (requires the `ecdsa` crate feature, on by default)
+- `rsa-sha2-256`, `rsa-sha2-512` (requires the `rsa` crate feature, on by default)
+- `ssh-rsa` (SHA-1, `rsa`)
 - OpenSSH certificates
 
 ### Authentication methods

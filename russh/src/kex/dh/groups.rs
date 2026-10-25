@@ -2,6 +2,7 @@ use std::fmt::Debug;
 use std::ops::Deref;
 
 use hex_literal::hex;
+#[cfg(feature = "dh-group")]
 use num_bigint::{BigRng010, BigUint};
 
 #[derive(Clone)]
@@ -259,6 +260,7 @@ pub const DH_GROUP18: DhGroup = DhGroup {
     generator: DhGroupUInt::new(&[2]),
 };
 
+#[cfg(feature = "dh-group")]
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub(crate) struct DH {
     prime_num: BigUint,
@@ -268,6 +270,7 @@ pub(crate) struct DH {
     shared_secret: BigUint,
 }
 
+#[cfg(feature = "dh-group")]
 impl DH {
     pub fn new(group: &DhGroup) -> Self {
         Self {

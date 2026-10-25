@@ -13,7 +13,12 @@ mod tests;
 
 pub use self::openssh::*;
 
+// PKCS#5-encrypted PEM only ever wraps a PKCS#1 RSA key here, so it rides on
+// the `rsa` feature -- which also keeps `md5` (needed for its legacy KDF) out
+// of the dependency tree when RSA is off.
+#[cfg(feature = "rsa")]
 pub mod pkcs5;
+#[cfg(feature = "rsa")]
 pub use self::pkcs5::*;
 
 pub mod pkcs8;
@@ -34,6 +39,7 @@ enum Format {
     #[cfg(feature = "rsa")]
     Rsa,
     Openssh,
+    #[cfg(feature = "rsa")]
     Pkcs5Encrypted(Encryption),
     Pkcs8Encrypted,
     Pkcs8,
@@ -64,7 +70,14 @@ pub fn decode_secret_key(secret: &str, password: Option<&str>) -> Result<Private
                     }
                     let mut iv = [0; 16];
                     iv.clone_from_slice(&iv_);
-                    format = Some(Format::Pkcs5Encrypted(Encryption::Aes128Cbc(iv)))
+                    #[cfg(feature = "rsa")]
+                    {
+                        format = Some(Format::Pkcs5Encrypted(Encryption::Aes128Cbc(iv)));
+                    }
+                    #[cfg(not(feature = "rsa"))]
+                    {
+                        let _ = iv;
+                    }
                 }
             }
             if l == "-----BEGIN OPENSSH PRIVATE KEY-----" {
@@ -99,6 +112,7 @@ pub fn decode_secret_key(secret: &str, password: Option<&str>) -> Result<Private
         Some(Format::Openssh) => decode_openssh(&secret, password),
         #[cfg(feature = "rsa")]
         Some(Format::Rsa) => Ok(decode_rsa_pkcs1_der(&secret)?.into()),
+        #[cfg(feature = "rsa")]
         Some(Format::Pkcs5Encrypted(enc)) => decode_pkcs5(&secret, password, enc),
         Some(Format::Pkcs8Encrypted) | Some(Format::Pkcs8) => {
             self::pkcs8::decode_pkcs8(&secret, password.map(|x| x.as_bytes()))
