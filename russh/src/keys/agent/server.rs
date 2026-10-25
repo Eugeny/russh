@@ -347,11 +347,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
             }
         };
         let agent = if needs_confirm {
-            let (agent, ok) = {
-                let _pk = key.clone();
-                Box::new(futures::future::ready((agent, true)))
-            }
-            .await;
+            let (agent, ok) = agent.confirm(key.clone()).await;
             if !ok {
                 return Ok((agent, false));
             }
