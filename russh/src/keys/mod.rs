@@ -967,6 +967,60 @@ Cog3JMeTrb3LiPHgN6gU2P30MRp6L1j1J/MtlOAr5rux
         assert_eq!(client.request_identities().await.unwrap().len(), 1);
     }
 
+    #[tokio::test]
+    #[cfg(all(unix, feature = "rsa"))]
+    async fn test_agent_sign_honors_rsa_hash_flags() {
+        use signature::Verifier;
+
+        #[derive(Clone)]
+        struct X {}
+        impl agent::server::Agent for X {}
+
+        let dir = tempfile::tempdir().unwrap();
+        let agent_path = dir.path().join("agent");
+        let mut listener = tokio::net::UnixListener::bind(&agent_path).unwrap();
+        tokio::spawn(async move {
+            agent::server::serve(
+                Incoming {
+                    listener: &mut listener,
+                },
+                X {},
+            )
+            .await
+        });
+
+        let stream = tokio::net::UnixStream::connect(&agent_path).await.unwrap();
+        let mut client = agent::client::AgentClient::connect(stream);
+
+        let rsa = decode_secret_key(RSA_KEY, None).unwrap();
+        let ed25519 = decode_secret_key(ED25519_KEY, Some("blabla")).unwrap();
+        client.add_identity(&rsa, &[]).await.unwrap();
+        client.add_identity(&ed25519, &[]).await.unwrap();
+
+        let data = b"blabla";
+        for (hash_alg, expected) in [
+            (Some(HashAlg::Sha256), "rsa-sha2-256"),
+            (Some(HashAlg::Sha512), "rsa-sha2-512"),
+            (None, "ssh-rsa"),
+        ] {
+            let sig = client
+                .sign_request_signature(rsa.public_key(), hash_alg, data)
+                .await
+                .unwrap();
+            assert_eq!(sig.algorithm().as_str(), expected);
+            assert!(Verifier::verify(rsa.public_key(), data, &sig).is_ok());
+        }
+
+        for hash_alg in [Some(HashAlg::Sha256), Some(HashAlg::Sha512), None] {
+            let sig = client
+                .sign_request_signature(ed25519.public_key(), hash_alg, data)
+                .await
+                .unwrap();
+            assert_eq!(sig.algorithm(), Algorithm::Ed25519);
+            assert!(Verifier::verify(ed25519.public_key(), data, &sig).is_ok());
+        }
+    }
+
     #[cfg(unix)]
     struct Incoming<'a> {
         listener: &'a mut tokio::net::UnixListener,
