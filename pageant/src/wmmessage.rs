@@ -41,6 +41,12 @@ impl PageantStream {
                     continue;
                 }
                 let len = BigEndian::read_u32(&buf) as usize;
+                // The shared memory mapping is _AGENT_MAX_MSGLEN bytes, so larger
+                // frames can never be sent. Reject before buffering them.
+                if len.saturating_add(4) > _AGENT_MAX_MSGLEN {
+                    debug!("dropping oversized Pageant request: {len} bytes");
+                    break;
+                }
                 if buf.len() < len + 4 {
                     continue;
                 }
