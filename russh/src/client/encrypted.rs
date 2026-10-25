@@ -434,6 +434,12 @@ impl Session {
     }
 
     fn handle_ext_info(&mut self, r: &mut impl Reader) -> Result<(), Error> {
+        // RFC 8308 §2.4: a server sends EXT_INFO at most twice per session.
+        // Refusing more keeps `received_extensions` bounded.
+        self.ext_info_count += 1;
+        if self.ext_info_count > 2 {
+            return Err(Error::Inconsistent);
+        }
         let n_extensions = u32::decode(r)? as usize;
         debug!("Received EXT_INFO, {n_extensions:?} extensions");
         for _ in 0..n_extensions {

@@ -101,6 +101,8 @@ pub struct Session {
     inbound_channel_receiver: Receiver<Msg>,
     open_global_requests: VecDeque<GlobalRequestResponse>,
     server_sig_algs: Option<Vec<Algorithm>>,
+    /// Number of EXT_INFO messages received (RFC 8308 allows at most two).
+    ext_info_count: u8,
 }
 
 impl Drop for Session {
@@ -1332,6 +1334,7 @@ impl Session {
             pending_len: 0,
             open_global_requests: VecDeque::new(),
             server_sig_algs: None,
+            ext_info_count: 0,
         }
     }
 
@@ -2274,6 +2277,30 @@ mod tests {
         assert!(matches!(reply.try_recv(), Ok(Ok(()))));
         assert!(session.common.encrypted.as_ref().unwrap().write.is_empty());
         assert!(session.open_global_requests.is_empty());
+    }
+
+    #[tokio::test]
+    async fn third_ext_info_is_rejected() {
+        let (mut session, _sender, _reply) = keyboard_interactive_session();
+        let mut packet = vec![msg::EXT_INFO];
+        1u32.encode(&mut packet).unwrap();
+        "x".encode(&mut packet).unwrap();
+        b"".as_slice().encode(&mut packet).unwrap();
+
+        for _ in 0..2 {
+            session
+                .process_packet(&mut TestHandler, &packet)
+                .await
+                .unwrap();
+        }
+        assert!(session
+            .process_packet(&mut TestHandler, &packet)
+            .await
+            .is_err());
+        assert_eq!(
+            session.common.encrypted.as_ref().unwrap().received_extensions.len(),
+            2
+        );
     }
 
     #[tokio::test]
