@@ -84,6 +84,7 @@ sec1 = { version = "0.8", features = ["der"] }
 sha1.workspace = true
 sha2.workspace = true
 sha3 = "0.12.0"
+sntrup = { version = "=0.3.0", features = ["force-scalar"] }
 signature.workspace = true
 spki = "0.8"
 ssh-encoding.workspace = true
