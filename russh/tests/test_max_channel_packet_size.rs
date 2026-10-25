@@ -164,7 +164,7 @@ impl server::Handler for EchoServer {
     async fn auth_publickey(
         &mut self,
         _user: &str,
-        _public_key: &ssh_key::PublicKey,
+        _public_key: server::VerifiedPublicKey<'_>,
     ) -> Result<server::Auth, Self::Error> {
         Ok(server::Auth::Accept)
     }

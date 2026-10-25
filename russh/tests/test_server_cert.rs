@@ -226,7 +226,7 @@ impl server::Handler for TestServer {
     async fn auth_publickey(
         &mut self,
         _: &str,
-        _: &ssh_key::PublicKey,
+        _: server::VerifiedPublicKey<'_>,
     ) -> Result<server::Auth, Self::Error> {
         Ok(server::Auth::Accept)
     }

@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use russh::keys::{Certificate, *};
-use russh::server::{Msg, Server as _, Session};
+use russh::keys::Certificate;
+use russh::server::{Msg, Server as _, Session, VerifiedPublicKey};
 use russh::*;
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
@@ -94,7 +94,7 @@ impl server::Handler for Server {
     async fn auth_publickey(
         &mut self,
         _: &str,
-        _key: &ssh_key::PublicKey,
+        _key: VerifiedPublicKey<'_>,
     ) -> Result<server::Auth, Self::Error> {
         Ok(server::Auth::Accept)
     }

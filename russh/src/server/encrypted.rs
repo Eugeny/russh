@@ -229,7 +229,7 @@ mod tests {
             async fn auth_publickey_offered(
                 &mut self,
                 _user: &str,
-                _public_key: &PublicKey,
+                _public_key: PublicKeyOffer<'_>,
             ) -> Result<Auth, Self::Error> {
                 self.offers += 1;
                 Ok(Auth::Accept)
@@ -430,9 +430,9 @@ mod tests {
             async fn auth_publickey_offered(
                 &mut self,
                 _user: &str,
-                public_key: &PublicKey,
+                offer: PublicKeyOffer<'_>,
             ) -> Result<Auth, Self::Error> {
-                if public_key == &self.pk_ok_key {
+                if offer.public_key == &self.pk_ok_key {
                     return Ok(Auth::Accept);
                 }
                 Ok(Auth::reject())
@@ -441,9 +441,9 @@ mod tests {
             async fn auth_publickey(
                 &mut self,
                 _user: &str,
-                public_key: &PublicKey,
+                key: VerifiedPublicKey<'_>,
             ) -> Result<Auth, Self::Error> {
-                if public_key == &self.signed_key {
+                if key.public_key == &self.signed_key {
                     self.final_auth_reached_for_signed_key = true;
                 }
                 Ok(Auth::reject())
@@ -498,7 +498,7 @@ mod tests {
             async fn auth_publickey_offered(
                 &mut self,
                 _user: &str,
-                _public_key: &PublicKey,
+                _public_key: PublicKeyOffer<'_>,
             ) -> Result<Auth, Self::Error> {
                 Ok(Auth::Accept)
             }
@@ -506,7 +506,7 @@ mod tests {
             async fn auth_publickey(
                 &mut self,
                 _user: &str,
-                _public_key: &PublicKey,
+                _public_key: VerifiedPublicKey<'_>,
             ) -> Result<Auth, Self::Error> {
                 self.authenticated = true;
                 Ok(Auth::Accept)
@@ -537,6 +537,138 @@ mod tests {
         );
         session.process_packet(&mut handler, &packet).await.unwrap();
         assert!(handler.authenticated);
+    }
+
+    #[cfg(feature = "rsa")]
+    #[tokio::test]
+    async fn publickey_algorithm_is_passed_to_handler() {
+        use ssh_key::{Algorithm, HashAlg};
+
+        #[derive(Default)]
+        struct Recorder {
+            calls: Vec<(&'static str, Algorithm)>,
+        }
+
+        impl Handler for Recorder {
+            type Error = Error;
+
+            async fn auth_publickey_offered(
+                &mut self,
+                _user: &str,
+                offer: PublicKeyOffer<'_>,
+            ) -> Result<Auth, Self::Error> {
+                self.calls.push(("offered", offer.algorithm.clone()));
+                Ok(Auth::Accept)
+            }
+
+            async fn auth_publickey(
+                &mut self,
+                _user: &str,
+                key: VerifiedPublicKey<'_>,
+            ) -> Result<Auth, Self::Error> {
+                self.calls.push(("verified", key.algorithm.clone()));
+                Ok(Auth::Accept)
+            }
+        }
+
+        let rsa = ssh_key::private::RsaKeypair::random(&mut rand::rng(), 2048).unwrap();
+        let private = Arc::new(PrivateKey::from(rsa));
+        let public = private.public_key().clone();
+        let ssh_rsa = Algorithm::Rsa { hash: None };
+        let rsa_sha2_256 = Algorithm::Rsa {
+            hash: Some(HashAlg::Sha256),
+        };
+
+        // Same key, signed as ssh-rsa (SHA-1).
+        let mut session = test_auth_session();
+        let mut handler = Recorder::default();
+        let packet = publickey_signed_packet_as("alice", private.clone(), "ssh-rsa", None);
+        session.process_packet(&mut handler, &packet).await.unwrap();
+        assert_eq!(
+            handler.calls,
+            vec![("offered", ssh_rsa.clone()), ("verified", ssh_rsa)]
+        );
+
+        // Same key, signed as rsa-sha2-256.
+        let mut session = test_auth_session();
+        let mut handler = Recorder::default();
+        let packet = publickey_signed_packet_as(
+            "alice",
+            private,
+            "rsa-sha2-256",
+            Some(HashAlg::Sha256),
+        );
+        session.process_packet(&mut handler, &packet).await.unwrap();
+        assert_eq!(
+            handler.calls,
+            vec![
+                ("offered", rsa_sha2_256.clone()),
+                ("verified", rsa_sha2_256.clone()),
+            ]
+        );
+
+        // Query without a signature.
+        let mut session = test_auth_session();
+        let mut handler = Recorder::default();
+        let packet = publickey_probe_packet_as("alice", &public, "rsa-sha2-256");
+        session.process_packet(&mut handler, &packet).await.unwrap();
+        assert_eq!(handler.calls, vec![("offered", rsa_sha2_256)]);
+    }
+
+    #[cfg(feature = "rsa")]
+    #[tokio::test]
+    async fn handler_can_refuse_ssh_rsa_and_accept_rsa_sha2() {
+        use ssh_key::{Algorithm, HashAlg};
+
+        /// Accepts any key, except when it is used with SHA-1.
+        #[derive(Default)]
+        struct NoSha1 {
+            authenticated: bool,
+        }
+
+        impl Handler for NoSha1 {
+            type Error = Error;
+
+            async fn auth_publickey_offered(
+                &mut self,
+                _user: &str,
+                offer: PublicKeyOffer<'_>,
+            ) -> Result<Auth, Self::Error> {
+                if *offer.algorithm == (Algorithm::Rsa { hash: None }) {
+                    return Ok(Auth::reject());
+                }
+                Ok(Auth::Accept)
+            }
+
+            async fn auth_publickey(
+                &mut self,
+                _user: &str,
+                _key: VerifiedPublicKey<'_>,
+            ) -> Result<Auth, Self::Error> {
+                self.authenticated = true;
+                Ok(Auth::Accept)
+            }
+        }
+
+        let rsa = ssh_key::private::RsaKeypair::random(&mut rand::rng(), 2048).unwrap();
+        let private = Arc::new(PrivateKey::from(rsa));
+
+        let mut session = test_auth_session();
+        let mut handler = NoSha1::default();
+        let packet = publickey_signed_packet_as("alice", private.clone(), "ssh-rsa", None);
+        session.process_packet(&mut handler, &packet).await.unwrap();
+        assert!(!handler.authenticated, "ssh-rsa was accepted");
+
+        let mut session = test_auth_session();
+        let mut handler = NoSha1::default();
+        let packet = publickey_signed_packet_as(
+            "alice",
+            private,
+            "rsa-sha2-256",
+            Some(HashAlg::Sha256),
+        );
+        session.process_packet(&mut handler, &packet).await.unwrap();
+        assert!(handler.authenticated, "rsa-sha2-256 was refused");
     }
 
     #[tokio::test]
@@ -629,13 +761,18 @@ mod tests {
     }
 
     fn publickey_probe_packet(user: &str, public_key: &PublicKey) -> Vec<u8> {
+        publickey_probe_packet_as(user, public_key, public_key.algorithm().as_str())
+    }
+
+    /// A publickey query without a signature, announcing `announced`.
+    fn publickey_probe_packet_as(user: &str, public_key: &PublicKey, announced: &str) -> Vec<u8> {
         let mut packet = Vec::new();
         packet.push(msg::USERAUTH_REQUEST);
         user.encode(&mut packet).unwrap();
         "ssh-connection".encode(&mut packet).unwrap();
         "publickey".encode(&mut packet).unwrap();
         0u8.encode(&mut packet).unwrap();
-        public_key.algorithm().as_str().encode(&mut packet).unwrap();
+        announced.encode(&mut packet).unwrap();
         public_key.to_bytes().unwrap().encode(&mut packet).unwrap();
         packet
     }
@@ -999,6 +1136,17 @@ impl Encrypted {
                     }
                 };
 
+                // The algorithm named in the request (RFC 4252 §7). For a
+                // certificate, the signature algorithm its type maps to.
+                let requested_algo = match pk_or_cert {
+                    PublicKeyOrCertificate::PublicKey { .. } => {
+                        ssh_key::Algorithm::new(&pubkey_algo)
+                    }
+                    PublicKeyOrCertificate::Certificate(_) => {
+                        ssh_key::Algorithm::new_certificate_ext(&pubkey_algo)
+                    }
+                };
+
                 if is_real != 0 {
                     // SAFETY: both original_packet and pos0 are coming
                     // from the same allocation (pos0 is derived from
@@ -1033,27 +1181,26 @@ impl Encrypted {
                     // RFC 4252 §7 / RFC 8332 §3: the signature must use the
                     // algorithm named in the request. Otherwise a client can
                     // announce rsa-sha2-512 and sign with ssh-rsa (SHA-1).
-                    let requested_algo = match pk_or_cert {
-                        PublicKeyOrCertificate::PublicKey { .. } => {
-                            ssh_key::Algorithm::new(&pubkey_algo)
-                        }
-                        PublicKeyOrCertificate::Certificate(_) => {
-                            ssh_key::Algorithm::new_certificate_ext(&pubkey_algo)
+                    let algorithm = match requested_algo {
+                        Ok(algo) if algo == sig.algorithm() => algo,
+                        _ => {
+                            debug!("signature algorithm does not match the requested one");
+                            auth_user.clear();
+                            reject_auth_request(until, &mut self.write, auth_request).await?;
+                            return Ok(());
                         }
                     };
-                    if requested_algo.ok() != Some(sig.algorithm()) {
-                        debug!("signature algorithm does not match the requested one");
-                        auth_user.clear();
-                        reject_auth_request(until, &mut self.write, auth_request).await?;
-                        return Ok(());
-                    }
 
                     let is_valid = if accepted_probe_matches && user == auth_user {
                         true
                     } else {
                         auth_user.clear();
                         auth_user.push_str(user);
-                        let auth = handler.auth_publickey_offered(user, &pubkey).await?;
+                        let offer = PublicKeyOffer {
+                            public_key: &pubkey,
+                            algorithm: &algorithm,
+                        };
+                        let auth = handler.auth_publickey_offered(user, offer).await?;
                         auth == Auth::Accept
                     };
 
@@ -1071,6 +1218,10 @@ impl Encrypted {
                             debug!("signature verified");
                             let auth = match pk_or_cert {
                                 PublicKeyOrCertificate::PublicKey { ref key, .. } => {
+                                    let key = VerifiedPublicKey {
+                                        public_key: key,
+                                        algorithm: &algorithm,
+                                    };
                                     handler.auth_publickey(user, key).await?
                                 }
                                 PublicKeyOrCertificate::Certificate(ref cert) => {
@@ -1108,8 +1259,19 @@ impl Encrypted {
                 } else {
                     map_err!(ensure_end(r))?;
                     auth_user.clear();
+                    let Ok(algorithm) = requested_algo else {
+                        // Not reached: decoding the key already parsed this
+                        // name. A signed request would be rejected anyway.
+                        debug!("unknown public key algorithm: {pubkey_algo:?}");
+                        reject_auth_request(until, &mut self.write, auth_request).await?;
+                        return Ok(());
+                    };
                     auth_user.push_str(user);
-                    let auth = handler.auth_publickey_offered(user, &pubkey).await?;
+                    let offer = PublicKeyOffer {
+                        public_key: &pubkey,
+                        algorithm: &algorithm,
+                    };
+                    let auth = handler.auth_publickey_offered(user, offer).await?;
                     match auth {
                         Auth::Accept => {
                             let mut public_key = Vec::new();
