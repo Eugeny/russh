@@ -485,7 +485,7 @@ impl Session {
         match buf.split_first() {
             Some((&msg::CHANNEL_OPEN_CONFIRMATION, mut reader)) => {
                 debug!("channel_open_confirmation");
-                let msg = map_err!(ChannelOpenConfirmation::decode(&mut reader))?;
+                let msg = ChannelOpenConfirmation::parse(&mut reader)?;
                 map_err!(ensure_end(&reader))?;
                 let local_id = ChannelId(msg.recipient_channel);
 

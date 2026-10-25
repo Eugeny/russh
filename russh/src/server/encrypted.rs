@@ -1557,7 +1557,7 @@ impl Session {
 
             msg::CHANNEL_OPEN_CONFIRMATION => {
                 debug!("channel_open_confirmation");
-                let msg = map_err!(ChannelOpenConfirmation::decode(r))?;
+                let msg = ChannelOpenConfirmation::parse(r)?;
                 map_err!(ensure_end(r))?;
                 let local_id = ChannelId(msg.recipient_channel);
 
