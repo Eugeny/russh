@@ -1,14 +1,14 @@
 [package]
-authors = ["Pierre-Étienne Meunier <pe@pijul.org>"]
-description = "Utilities to parse .ssh/config files, including helpers to implement ProxyCommand in Russh."
-documentation = "https://docs.rs/russh-config"
-edition = "2024"
-include = ["Cargo.toml", "src/lib.rs", "src/proxy.rs"]
-license = "Apache-2.0"
 name = "russh-config"
-repository = "https://github.com/warp-tech/russh"
 version = "0.58.0"
+description = "Utilities to parse .ssh/config files, including helpers to implement ProxyCommand in Russh."
+authors = ["Pierre-Étienne Meunier <pe@pijul.org>"]
+edition = "2024"
 rust-version = "1.89"
+license = "Apache-2.0"
+documentation = "https://docs.rs/russh-config"
+repository = "https://github.com/warp-tech/russh"
+include = ["Cargo.toml", "src/lib.rs", "src/proxy.rs"]
 
 [dependencies]
 futures.workspace = true

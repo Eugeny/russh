@@ -1,12 +1,12 @@
 [package]
 name = "russh-util"
 version = "0.52.0"
+description = "Runtime abstraction utilities for russh."
 edition = "2024"
 rust-version = "1.89"
-description = "Runtime abstraction utilities for russh."
+license = "Apache-2.0"
 documentation = "https://docs.rs/russh-util"
 homepage = "https://github.com/warp-tech/russh"
-license = "Apache-2.0"
 repository = "https://github.com/warp-tech/russh"
 
 [dependencies]
