@@ -161,6 +161,7 @@ impl Preferred {
 
 const SAFE_KEX_ORDER: &[kex::Name] = &[
     kex::MLKEM768X25519_SHA256,
+    kex::SNTRUP761X25519_SHA512,
     kex::CURVE25519,
     kex::CURVE25519_PRE_RFC_8731,
     kex::DH_GEX_SHA256,
@@ -695,15 +696,14 @@ mod tests {
         )
     }
 
-    /// Regression test for #733: a client that optimistically guesses a kex
-    /// algorithm russh does not implement (`sntrup761x25519-sha512`) — while
-    /// listing russh's own first choice (`mlkem768x25519-sha256`) second —
-    /// must have its guessed packet ignored, not consumed as the negotiated key.
+    /// A client that optimistically guesses an unknown KEX while listing
+    /// russh's own first choice (`mlkem768x25519-sha256`) second must have its
+    /// guessed packet ignored, not consumed as the negotiated key.
     #[test]
     fn wrong_guess_for_unknown_kex_is_ignored() {
         let buf = build_kexinit(
             &[
-                "sntrup761x25519-sha512",
+                "unknown-kex",
                 "mlkem768x25519-sha256",
                 "curve25519-sha256",
             ],

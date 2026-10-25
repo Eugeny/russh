@@ -24,6 +24,7 @@ use bytes::Bytes;
 use log::{debug, trace};
 use ssh_encoding::Encode;
 use tokio::sync::oneshot;
+use zeroize::Zeroize;
 
 use crate::cipher::OpeningKey;
 use crate::client::GexParams;
@@ -47,9 +48,9 @@ pub(crate) struct Encrypted {
     pub session_id: CryptoVec,
     pub channels: HashMap<ChannelId, ChannelParams>,
     pub last_channel_id: Wrapping<u32>,
-    // Non-sensitive packet assembly buffer, analogous to
-    // OpenSSH sshbuf (output side).  Not mlocked because it
-    // holds only protocol framing and ciphertext.
+    // Packet assembly buffer, analogous to OpenSSH sshbuf (output side).
+    // It is not mlocked, but it can temporarily contain credentials before
+    // transport encryption, so it must be wiped before reuse or drop.
     pub write: Vec<u8>,
     pub write_cursor: usize,
     pub last_rekey: russh_util::time::Instant,
@@ -59,6 +60,12 @@ pub(crate) struct Encrypted {
     pub rekey_wanted: bool,
     pub received_extensions: Vec<String>,
     pub extension_info_awaiters: HashMap<String, Vec<oneshot::Sender<()>>>,
+}
+
+impl Drop for Encrypted {
+    fn drop(&mut self) {
+        self.write.zeroize();
+    }
 }
 
 pub(crate) struct CommonSession<Config> {
@@ -265,6 +272,12 @@ impl<C> CommonSession<C> {
 }
 
 impl Encrypted {
+    fn clear_write_buffer(&mut self) {
+        self.write.zeroize();
+        self.write.clear();
+        self.write_cursor = 0;
+    }
+
     pub fn byte(&mut self, channel: ChannelId, msg: u8) -> Result<(), crate::Error> {
         if let Some(channel) = self.channels.get(&channel) {
             push_packet!(self.write, {
@@ -722,9 +735,8 @@ impl Encrypted {
             }
         }
         if self.write_cursor >= self.write.len() {
-            // If all packets have been written, clear.
-            self.write_cursor = 0;
-            self.write.clear();
+            // If all packets have been written, wipe before clearing.
+            self.clear_write_buffer();
         }
 
         if self.kex.skip_exchange() {
