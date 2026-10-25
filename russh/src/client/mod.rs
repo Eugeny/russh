@@ -168,6 +168,11 @@ pub enum Msg {
     Signed {
         data: Vec<u8>,
     },
+    /// The [`Signer`][auth::Signer] could not produce the signature the
+    /// session is waiting for after a `SSH_MSG_USERAUTH_PK_OK`. The session
+    /// abandons that attempt and goes back to its main loop, so the next
+    /// authentication request gets through.
+    SignFailed,
     ChannelOpenSession {
         channel_ref: ChannelRef,
     },
@@ -432,6 +437,16 @@ impl<H: Handler> Handle<H> {
         }
     }
 
+    /// Tells the session that the [`Signer`][auth::Signer] could not produce
+    /// the signature it is waiting for. Without this the session keeps waiting
+    /// for `Msg::Signed` and ignores everything else sent to it, so no later
+    /// authentication attempt on this handle would get through.
+    async fn abandon_sign_request(&mut self) {
+        // A send error means the session is gone; the signer's error is still
+        // the one the caller needs.
+        let _ = self.sender.send(Msg::SignFailed).await;
+    }
+
     async fn wait_recv_reply(&mut self) -> Result<AuthResult, crate::Error> {
         loop {
             match self.receiver.recv().await {
@@ -500,6 +515,11 @@ impl<H: Handler> Handle<H> {
     /// Authenticate using a custom method that implements the
     /// [`Signer`][auth::Signer] trait. Currently, this crate only provides an
     /// implementation for an [SSH agent][crate::keys::agent::client::AgentClient].
+    ///
+    /// If the signer fails (for example an agent that does not hold the key,
+    /// or declines to sign), its error is returned and the attempt is
+    /// abandoned. The handle stays usable: another authentication method can
+    /// be tried on it.
     pub async fn authenticate_publickey_with<U: Into<String>, S: auth::Signer>(
         &mut self,
         user: U,
@@ -536,7 +556,10 @@ impl<H: Handler> Handle<H> {
                     let data = signer.auth_sign(&key.into(), hash_alg, data).await;
                     let data = match data {
                         Ok(data) => data,
-                        Err(e) => return Err(e),
+                        Err(e) => {
+                            self.abandon_sign_request().await;
+                            return Err(e);
+                        }
                     };
                     if self.sender.send(Msg::Signed { data }).await.is_err() {
                         return Err((crate::SendError {}).into());
@@ -638,6 +661,10 @@ impl<H: Handler> Handle<H> {
     /// where the signing is delegated to an external signer (e.g., SSH agent).
     ///
     /// For RSA certificates, you can specify the hash algorithm to use.
+    ///
+    /// If the signer fails, its error is returned and the attempt is
+    /// abandoned; the handle stays usable for further authentication attempts,
+    /// as with [`Handle::authenticate_publickey_with`].
     pub async fn authenticate_certificate_with<U: Into<String>, S: auth::Signer>(
         &mut self,
         user: U,
@@ -678,7 +705,10 @@ impl<H: Handler> Handle<H> {
                     let data = signer.auth_sign(&cert.into(), hash_alg, data).await;
                     let data = match data {
                         Ok(data) => data,
-                        Err(e) => return Err(e),
+                        Err(e) => {
+                            self.abandon_sign_request().await;
+                            return Err(e);
+                        }
                     };
                     if self.sender.send(Msg::Signed { data }).await.is_err() {
                         return Err((crate::SendError {}).into());
@@ -1574,7 +1604,7 @@ impl Session {
             Msg::Authenticate { user, method } => {
                 self.write_auth_request_if_needed(&user, method)?;
             }
-            Msg::Signed { .. } => {}
+            Msg::Signed { .. } | Msg::SignFailed => {}
             Msg::AuthInfoResponse { .. } => {}
             Msg::AuthGssapiToken { token } => {
                 if let Some(ref mut enc) = self.common.encrypted {
