@@ -314,11 +314,15 @@ pub(crate) async fn read<R: AsyncRead + Unpin>(
                 return Err(Error::PacketSize(len));
             }
 
-            // A valid packet_length can never be shorter than the block we
-            // already read to probe it; a smaller value would shrink the
-            // buffer below `l` below and panic on the `buffer.buffer[l..]`
-            // slice. Reject it as a protocol error instead.
-            if len + PACKET_LENGTH_LEN < cipher.packet_length_to_read_for_block_length() {
+            // A valid packet (with its MAC tag) can never be shorter than the
+            // block we already read to probe it; a smaller value would shrink
+            // the buffer below `l` below and panic on the `buffer.buffer[l..]`
+            // slice. Reject it as a protocol error instead. The tag counts:
+            // with an EtM MAC and 8-byte blocks (3des-cbc), packet_length can
+            // be 8, and the probe also reads the start of the tag.
+            if len + PACKET_LENGTH_LEN + cipher.tag_len()
+                < cipher.packet_length_to_read_for_block_length()
+            {
                 return Err(Error::PacketSize(len));
             }
 
@@ -379,3 +383,35 @@ pub(crate) const MAXIMUM_DECOMPRESSED_PACKET_LEN: usize = MAXIMUM_PACKET_LEN;
 
 #[cfg(feature = "_bench")]
 pub mod benchmark;
+
+#[cfg(all(test, feature = "des"))]
+mod tests {
+    use super::*;
+    use crate::mac::_HMAC_SHA512_ETM;
+
+    #[tokio::test]
+    async fn read_accepts_shortest_3des_etm_packet() {
+        let key = [1; 24];
+        let iv = [2; 8];
+        let mac_key = [3; 64];
+        let mut sealing_key = _3DES_CBC.make_sealing_key(&key, &iv, &mac_key, &_HMAC_SHA512_ETM);
+        let mut opening_key = _3DES_CBC.make_opening_key(&key, &iv, &mac_key, &_HMAC_SHA512_ETM);
+
+        // With EtM the packet_length is not encrypted, so with 8-byte blocks
+        // OpenSSH sends packet_length 8 for a one-byte payload: the padding
+        // length, the payload and six bytes of padding.
+        let mut packet = vec![0, 0, 0, 8, 6, 52, 0, 0, 0, 0, 0, 0];
+        let mut tag = vec![0; sealing_key.tag_len()];
+        sealing_key.seal(0, &mut packet, &mut tag);
+        packet.extend_from_slice(&tag);
+
+        let mut buffer = SSHBuffer::new();
+        let n = read(&mut &packet[..], &mut buffer, opening_key.as_mut())
+            .await
+            .unwrap();
+
+        #[allow(clippy::indexing_slicing)]
+        let payload = &buffer.buffer[5..n];
+        assert_eq!(payload, [52]);
+    }
+}
