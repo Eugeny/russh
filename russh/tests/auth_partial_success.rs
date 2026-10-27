@@ -23,6 +23,7 @@ struct PartialSuccessServer;
 
 impl server::Handler for PartialSuccessServer {
     type Error = russh::Error;
+    type Data = ();
 
     async fn auth_none(&mut self, _user: &str) -> Result<server::Auth, Self::Error> {
         Ok(partial_success_reject())
