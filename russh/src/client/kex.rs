@@ -24,6 +24,63 @@ thread_local! {
     static HASH_BUFFER: RefCell<CryptoVec> = RefCell::new(CryptoVec::new());
 }
 
+// A few SSH servers encode ECDSA P-521 signature scalars as non-canonical
+// positive mpints with redundant leading zeros. Keep strict decoding as the
+// default, and normalize only this specific signature format as a fallback.
+fn normalize_noncanonical_p521_signature(encoded: &[u8]) -> Option<Vec<u8>> {
+    fn read_ssh_string<'a>(input: &mut &'a [u8]) -> Option<&'a [u8]> {
+        let len = u32::from_be_bytes(input.get(..4)?.try_into().ok()?) as usize;
+        let remaining = input.get(4..)?;
+        let value = remaining.get(..len)?;
+        *input = remaining.get(len..)?;
+        Some(value)
+    }
+
+    let mut outer = encoded;
+    if read_ssh_string(&mut outer)? != b"ecdsa-sha2-nistp521" {
+        return None;
+    }
+    let mut scalars = read_ssh_string(&mut outer)?;
+    if !outer.is_empty() {
+        return None;
+    }
+
+    let mut normalized_scalars = Vec::new();
+    let mut changed = false;
+    for _ in 0..2 {
+        let scalar = read_ssh_string(&mut scalars)?;
+        // P-521 needs at most 66 magnitude bytes, plus any sign and padding.
+        if scalar.is_empty() || scalar.len() > 68 || scalar[0] & 0x80 != 0 {
+            return None;
+        }
+
+        let mut magnitude = scalar;
+        while magnitude.first() == Some(&0) {
+            magnitude = &magnitude[1..];
+        }
+        if magnitude.is_empty() || magnitude.len() > 66 {
+            return None;
+        }
+
+        let canonical = Mpint::from_positive_bytes(magnitude);
+        // Bound the interoperability exception to at most two extra zeros.
+        if scalar.len().checked_sub(canonical.as_bytes().len())? > 2 {
+            return None;
+        }
+
+        changed |= canonical.as_bytes() != scalar;
+        canonical.encode(&mut normalized_scalars).ok()?;
+    }
+    if !changed || !scalars.is_empty() {
+        return None;
+    }
+
+    let mut normalized = Vec::new();
+    "ecdsa-sha2-nistp521".encode(&mut normalized).ok()?;
+    normalized_scalars.encode(&mut normalized).ok()?;
+    Some(normalized)
+}
+
 #[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
 enum ClientKexState {
@@ -333,8 +390,29 @@ impl ClientKex {
 
                 let signature_blob = Bytes::decode(r)?;
                 let mut signature_reader = &signature_blob[..];
-                let signature = Signature::decode(&mut signature_reader)?;
-                ensure_end(&signature_reader)?;
+                let signature = match Signature::decode(&mut signature_reader) {
+                    Ok(signature) => {
+                        ensure_end(&signature_reader)?;
+                        signature
+                    }
+                    Err(err) => {
+                        if !matches!(
+                            &err,
+                            ssh_key::Error::Encoding(ssh_encoding::Error::MpintEncoding)
+                        ) {
+                            return Err(err.into());
+                        }
+                        let Some(normalized) =
+                            normalize_noncanonical_p521_signature(&signature_blob)
+                        else {
+                            return Err(err.into());
+                        };
+                        let mut normalized_reader = normalized.as_slice();
+                        let signature = Signature::decode(&mut normalized_reader)?;
+                        ensure_end(&normalized_reader)?;
+                        signature
+                    }
+                };
                 ensure_end(r)?;
 
                 if let Err(e) =
@@ -453,4 +531,99 @@ fn compute_keys(
         cipher: c,
         session_id: session_id_cv,
     })
+}
+
+#[cfg(test)]
+mod p521_signature_compat_tests {
+    use super::normalize_noncanonical_p521_signature;
+    use ssh_encoding::{Decode, Encode};
+    use ssh_key::Signature;
+
+    fn signature_blob(algorithm: &str, r: &[u8], s: &[u8]) -> Vec<u8> {
+        let mut scalars = Vec::new();
+        r.encode(&mut scalars).unwrap();
+        s.encode(&mut scalars).unwrap();
+        let mut encoded = Vec::new();
+        algorithm.encode(&mut encoded).unwrap();
+        scalars.encode(&mut encoded).unwrap();
+        encoded
+    }
+
+    #[test]
+    fn normalizes_observed_p521_scalar_lengths() {
+        // Same non-canonical lengths used in the successful 0.63.3 diagnostic.
+        let mut r = vec![0];
+        r.extend([0x42; 65]);
+        let mut s = vec![0, 0];
+        s.extend([0x23; 65]);
+        let encoded = signature_blob("ecdsa-sha2-nistp521", &r, &s);
+        let mut strict = encoded.as_slice();
+        assert!(matches!(
+            Signature::decode(&mut strict),
+            Err(ssh_key::Error::Encoding(ssh_encoding::Error::MpintEncoding))
+        ));
+
+        let normalized = normalize_noncanonical_p521_signature(&encoded).unwrap();
+        let mut reader = normalized.as_slice();
+        assert!(Signature::decode(&mut reader).is_ok());
+        assert!(reader.is_empty());
+    }
+
+    #[test]
+    fn keeps_canonical_and_sign_padded_scalars_unchanged() {
+        let canonical = signature_blob("ecdsa-sha2-nistp521", &[1], &[2]);
+        assert!(normalize_noncanonical_p521_signature(&canonical).is_none());
+        let sign_padded = signature_blob("ecdsa-sha2-nistp521", &[0, 0x80], &[1]);
+        assert!(normalize_noncanonical_p521_signature(&sign_padded).is_none());
+
+        // One redundant zero before a necessary sign byte is also normalizable.
+        let redundant_sign = signature_blob("ecdsa-sha2-nistp521", &[0, 0, 0x80], &[1]);
+        let normalized = normalize_noncanonical_p521_signature(&redundant_sign).unwrap();
+        assert_eq!(
+            normalized,
+            signature_blob("ecdsa-sha2-nistp521", &[0, 0x80], &[1])
+        );
+    }
+
+    #[test]
+    fn rejects_negative_zero_and_oversize_scalars() {
+        for r in [
+            vec![],
+            vec![0],
+            vec![0x80],
+            vec![0; 69],
+            vec![0, 0, 0, 1], // more than two redundant zeros
+        ] {
+            let encoded = signature_blob("ecdsa-sha2-nistp521", &r, &[2]);
+            assert!(normalize_noncanonical_p521_signature(&encoded).is_none());
+        }
+        let too_wide = signature_blob("ecdsa-sha2-nistp521", &[0, 1], &[1; 67]);
+        assert!(normalize_noncanonical_p521_signature(&too_wide).is_none());
+    }
+
+    #[test]
+    fn rejects_other_algorithms_and_malformed_structures() {
+        for algorithm in ["ecdsa-sha2-nistp256", "ecdsa-sha2-nistp384", "ssh-rsa"] {
+            let encoded = signature_blob(algorithm, &[0, 1], &[2]);
+            assert!(normalize_noncanonical_p521_signature(&encoded).is_none());
+        }
+
+        let encoded = signature_blob("ecdsa-sha2-nistp521", &[0, 1], &[2]);
+        let mut trailing = encoded.clone();
+        trailing.push(0xff);
+        assert!(normalize_noncanonical_p521_signature(&trailing).is_none());
+        assert!(normalize_noncanonical_p521_signature(&encoded[..encoded.len() - 1]).is_none());
+
+        let mut extra_scalar = encoded.clone();
+        // Append a third scalar inside the embedded signature SSH string.
+        // Reconstruct a well-formed outer envelope with unexpected inner data.
+        let mut scalars = Vec::new();
+        (&[0, 1][..]).encode(&mut scalars).unwrap();
+        (&[2][..]).encode(&mut scalars).unwrap();
+        (&[3][..]).encode(&mut scalars).unwrap();
+        extra_scalar.clear();
+        "ecdsa-sha2-nistp521".encode(&mut extra_scalar).unwrap();
+        scalars.encode(&mut extra_scalar).unwrap();
+        assert!(normalize_noncanonical_p521_signature(&extra_scalar).is_none());
+    }
 }
