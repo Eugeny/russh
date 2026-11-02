@@ -218,8 +218,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
         let len = self.buf.len() - 4;
         BigEndian::write_u32(&mut self.buf[..], len as u32);
 
-        self.read_success().await?;
-        Ok(())
+        self.read_success().await
     }
 
     /// Add a smart card to the agent, with a (possibly empty) set of
@@ -261,8 +260,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
         }
         let len = self.buf.len() - 4;
         BigEndian::write_u32(&mut self.buf[..], len as u32);
-        self.read_response().await?;
-        Ok(())
+        self.read_success().await
     }
 
     /// Lock the agent, making it refuse to sign until unlocked.
@@ -273,8 +271,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
         passphrase.encode(&mut self.buf)?;
         let len = self.buf.len() - 4;
         BigEndian::write_u32(&mut self.buf[..], len as u32);
-        self.read_response().await?;
-        Ok(())
+        self.read_success().await
     }
 
     /// Unlock the agent, allowing it to sign again.
@@ -286,8 +283,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
         let len = self.buf.len() - 4;
         #[allow(clippy::indexing_slicing)] // static length
         BigEndian::write_u32(&mut self.buf[..], len as u32);
-        self.read_response().await?;
-        Ok(())
+        self.read_success().await
     }
 
     /// Ask the agent for a list of identities, including certificates.
@@ -558,8 +554,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
         public.key_data().encoded()?.encode(&mut self.buf)?;
         let len = self.buf.len() - 4;
         BigEndian::write_u32(&mut self.buf[..], len as u32);
-        self.read_response().await?;
-        Ok(())
+        self.read_success().await
     }
 
     /// Ask the agent to remove a smartcard from its memory.
@@ -571,8 +566,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
         pin.encode(&mut self.buf)?;
         let len = self.buf.len() - 4;
         BigEndian::write_u32(&mut self.buf[..], len as u32);
-        self.read_response().await?;
-        Ok(())
+        self.read_success().await
     }
 
     /// Ask the agent to forget all known keys.
@@ -581,8 +575,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
         self.buf.resize(4, 0);
         msg::REMOVE_ALL_IDENTITIES.encode(&mut self.buf)?;
         1u32.encode(&mut self.buf)?;
-        self.read_success().await?;
-        Ok(())
+        self.read_success().await
     }
 
     /// Send a custom message to the agent.
@@ -594,8 +587,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
         ext.encode(&mut self.buf)?;
         let len = self.buf.len() - 4;
         (len as u32).encode(&mut self.buf)?;
-        self.read_response().await?;
-        Ok(())
+        self.read_success().await
     }
 
     /// Ask the agent what extensions about supported extensions.
