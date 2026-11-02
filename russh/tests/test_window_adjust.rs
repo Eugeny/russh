@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use russh::keys::{PrivateKeyWithHashAlg, PublicKeyOrCertificate};
-use russh::server::{self, Auth, Msg, Server as _, Session};
+use russh::server::{self, Auth, Msg, Server as _, Session, VerifiedPublicKey};
 use russh::{Channel, ChannelId, ChannelMsg, Disconnect, client};
 use ssh_key::PrivateKey;
 use tokio::io::AsyncWriteExt;
@@ -109,7 +109,7 @@ impl server::Handler for Server {
     async fn auth_publickey(
         &mut self,
         _: &str,
-        _: &ssh_key::PublicKey,
+        _: VerifiedPublicKey<'_>,
     ) -> Result<Auth, Self::Error> {
         Ok(Auth::Accept)
     }
