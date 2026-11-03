@@ -24,6 +24,33 @@ thread_local! {
     static HASH_BUFFER: RefCell<CryptoVec> = RefCell::new(CryptoVec::new());
 }
 
+// Some servers (Huawei VRP among them) pad ECDSA signature scalars with leading
+// zeros. ssh-key rejects that as a non-canonical mpint; OpenSSH accepts it.
+// Re-encodes r and s canonically so the strict decoder can take it from there.
+fn canonicalize_ecdsa_signature(blob: &[u8]) -> Option<Vec<u8>> {
+    let mut reader = blob;
+    let algorithm = String::decode(&mut reader).ok()?;
+    if !algorithm.starts_with("ecdsa-sha2-") {
+        return None;
+    }
+    let inner = Vec::<u8>::decode(&mut reader).ok()?;
+    let mut scalars = inner.as_slice();
+    let mut canonical_scalars = Vec::new();
+    for _ in 0..2 {
+        let scalar = Vec::<u8>::decode(&mut scalars).ok()?;
+        Mpint::from_positive_bytes(&scalar)
+            .encode(&mut canonical_scalars)
+            .ok()?;
+    }
+    if !reader.is_empty() || !scalars.is_empty() {
+        return None;
+    }
+    let mut out = Vec::new();
+    algorithm.encode(&mut out).ok()?;
+    canonical_scalars.encode(&mut out).ok()?;
+    Some(out)
+}
+
 #[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
 enum ClientKexState {
@@ -333,8 +360,18 @@ impl ClientKex {
 
                 let signature_blob = Bytes::decode(r)?;
                 let mut signature_reader = &signature_blob[..];
-                let signature = Signature::decode(&mut signature_reader)?;
-                ensure_end(&signature_reader)?;
+                let signature = match Signature::decode(&mut signature_reader) {
+                    Err(err @ ssh_key::Error::Encoding(ssh_encoding::Error::MpintEncoding)) => {
+                        let canonical =
+                            canonicalize_ecdsa_signature(&signature_blob).ok_or(err)?;
+                        Signature::decode(&mut canonical.as_slice())?
+                    }
+                    result => {
+                        let signature = result?;
+                        ensure_end(&signature_reader)?;
+                        signature
+                    }
+                };
                 ensure_end(r)?;
 
                 if let Err(e) =
@@ -453,4 +490,61 @@ fn compute_keys(
         cipher: c,
         session_id: session_id_cv,
     })
+}
+
+#[cfg(test)]
+mod ecdsa_signature_canonicalization_tests {
+    use ssh_encoding::{Decode, Encode};
+    use ssh_key::Signature;
+
+    use super::canonicalize_ecdsa_signature;
+
+    fn blob(algorithm: &str, r: &[u8], s: &[u8]) -> Vec<u8> {
+        let mut scalars = Vec::new();
+        r.encode(&mut scalars).unwrap();
+        s.encode(&mut scalars).unwrap();
+        let mut out = Vec::new();
+        algorithm.encode(&mut out).unwrap();
+        scalars.encode(&mut out).unwrap();
+        out
+    }
+
+    #[test]
+    fn strips_leading_zeros() {
+        let r = [vec![0, 0, 0], vec![0x42; 65]].concat();
+        let s = [vec![0, 0], vec![0x80; 66]].concat();
+        let padded = blob("ecdsa-sha2-nistp521", &r, &s);
+        assert!(matches!(
+            Signature::decode(&mut padded.as_slice()),
+            Err(ssh_key::Error::Encoding(ssh_encoding::Error::MpintEncoding))
+        ));
+
+        let canonical = canonicalize_ecdsa_signature(&padded).unwrap();
+        assert_eq!(canonical, blob("ecdsa-sha2-nistp521", &r[3..], &s[1..]));
+        assert!(Signature::decode(&mut canonical.as_slice()).is_ok());
+
+        let p256 = blob("ecdsa-sha2-nistp256", &[0, 1], &[2]);
+        assert_eq!(
+            canonicalize_ecdsa_signature(&p256).unwrap(),
+            blob("ecdsa-sha2-nistp256", &[1], &[2])
+        );
+    }
+
+    #[test]
+    fn rejects_other_algorithms_and_malformed_blobs() {
+        assert!(canonicalize_ecdsa_signature(&blob("ssh-rsa", &[0, 1], &[2])).is_none());
+
+        let good = blob("ecdsa-sha2-nistp521", &[0, 1], &[2]);
+        assert!(canonicalize_ecdsa_signature(&good[..good.len() - 1]).is_none());
+        assert!(canonicalize_ecdsa_signature(&[good.clone(), vec![0xff]].concat()).is_none());
+
+        let mut scalars = Vec::new();
+        for s in [&[0, 1][..], &[2], &[3]] {
+            s.encode(&mut scalars).unwrap();
+        }
+        let mut three_scalars = Vec::new();
+        "ecdsa-sha2-nistp521".encode(&mut three_scalars).unwrap();
+        scalars.encode(&mut three_scalars).unwrap();
+        assert!(canonicalize_ecdsa_signature(&three_scalars).is_none());
+    }
 }
