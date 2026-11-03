@@ -56,7 +56,7 @@ use crate::ssh_read::*;
 use crate::sshbuffer::*;
 use crate::*;
 
-mod kex;
+pub(crate) mod kex;
 mod session;
 pub use self::session::*;
 mod encrypted;

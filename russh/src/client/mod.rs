@@ -2436,24 +2436,56 @@ mod tests {
         assert!(session.kex.active());
     }
 
-    /// Client handler with a fixed verdict for `check_server_key_rekey`.
-    struct RekeyVerdict(bool);
+    /// Client handler for the rekey tests below: answers
+    /// `check_server_key_rekey` with a fixed verdict and records what it was
+    /// asked, as `(presented, previous)` pairs.
+    #[derive(Default)]
+    struct RekeyProbe {
+        reject: bool,
+        seen: Vec<(PublicKeyOrCertificate, PublicKeyOrCertificate)>,
+    }
 
-    impl Handler for RekeyVerdict {
+    impl RekeyProbe {
+        fn rejecting() -> Self {
+            Self {
+                reject: true,
+                ..Self::default()
+            }
+        }
+    }
+
+    impl Handler for RekeyProbe {
         type Error = crate::Error;
 
         async fn check_server_key_rekey(
             &mut self,
-            _: RekeyServerKey<'_>,
+            server_key: RekeyServerKey<'_>,
         ) -> Result<bool, Self::Error> {
-            Ok(self.0)
+            self.seen
+                .push((copy_identity(server_key.presented), copy_identity(server_key.previous)));
+            Ok(!self.reject)
         }
     }
 
-    /// Payloads of the cleartext packets the client has written so far. The
-    /// write buffer is emptied, so later writes can be told apart.
-    fn take_clear_packets(session: &mut Session) -> Vec<Vec<u8>> {
-        let buffer = &mut session.common.packet_writer.buffer().buffer;
+    /// `PublicKeyOrCertificate` is not `Clone`; tests copy what they compare.
+    fn copy_identity(identity: &PublicKeyOrCertificate) -> PublicKeyOrCertificate {
+        match identity {
+            PublicKeyOrCertificate::PublicKey { key, .. } => key.clone().into(),
+            PublicKeyOrCertificate::Certificate(certificate) => certificate.clone().into(),
+        }
+    }
+
+    /// Server handler for `ServerKex`; the rekeys below need no callbacks.
+    struct ServerSide;
+
+    impl crate::server::Handler for ServerSide {
+        type Error = crate::Error;
+    }
+
+    /// Takes the payloads of the cleartext packets written to `writer` so
+    /// far, leaving it empty so later writes can be told apart.
+    fn take_packets(writer: &mut PacketWriter) -> Vec<Vec<u8>> {
+        let buffer = &mut writer.buffer().buffer;
         let mut payloads = Vec::new();
         let mut rest = &buffer[..];
         while !rest.is_empty() {
@@ -2466,47 +2498,103 @@ mod tests {
         payloads
     }
 
+    fn packet(payload: Vec<u8>) -> IncomingSshPacket {
+        IncomingSshPacket {
+            buffer: payload,
+            seqn: Wrapping(0),
+        }
+    }
+
     /// Hands one packet from the server to the client.
     async fn feed<H: Handler>(
         session: &mut Session,
         handler: &mut H,
-        payload: &[u8],
+        payload: Vec<u8>,
     ) -> Result<(), H::Error> {
-        let mut pkt = IncomingSshPacket {
-            buffer: payload.to_vec(),
-            seqn: Wrapping(0),
-        };
-        super::reply(session, handler, &mut None, &mut pkt).await
+        super::reply(session, handler, &mut None, &mut packet(payload)).await
+    }
+
+    fn ed25519_key() -> PrivateKey {
+        PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap()
+    }
+
+    /// A host certificate for `host_key`, signed by a throwaway CA.
+    fn host_certificate(host_key: &PrivateKey) -> Certificate {
+        use ssh_key::certificate::{Builder, CertType};
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let mut builder = Builder::new_with_random_nonce(
+            &mut rand::rng(),
+            host_key.public_key().clone(),
+            now,
+            now + 3600,
+        )
+        .unwrap();
+        builder.cert_type(CertType::Host).unwrap();
+        builder.valid_principal("localhost").unwrap();
+        builder.sign(&ed25519_key()).unwrap()
+    }
+
+    /// What the server presents in the rekey.
+    enum Presents {
+        Key,
+        Certificate,
+        /// The `none` exchange, which presents no host key.
+        Nothing,
     }
 
     const REKEY_DATA: &[u8] = b"written while the rekey runs";
 
-    /// An authenticated session with one open channel that starts a rekey and
-    /// queues `REKEY_DATA` on the channel while it runs. The server side of
-    /// the exchange is played here, presenting a fresh Ed25519 host key, up to
-    /// the point where only the server's NEWKEYS is missing. `previous` is the
-    /// host key the session accepted before; `None` is what an initial `none`
-    /// exchange leaves behind.
-    ///
-    /// The server messages are built by hand from the negotiation and kex
-    /// primitives rather than by `ServerKex`, because the `server::kex`
-    /// module is private to `server` and not reachable from here.
-    async fn rekey_awaiting_server_newkeys(
-        previous: Option<PublicKeyOrCertificate>,
-    ) -> (Session, crate::ChannelId) {
-        use crate::negotiation::Select;
+    /// A rekey in progress on an authenticated session with one open channel.
+    struct Rekey {
+        session: Session,
+        channel: crate::ChannelId,
+        /// What the server presented in the rekey.
+        presented: Option<PublicKeyOrCertificate>,
+    }
 
-        // Both sides offer only curve25519, so the exchange is the ECDH
-        // exchange this harness plays, whatever the default order or the
-        // enabled features.
-        const PINNED_KEX: &[crate::kex::Name] = &[crate::kex::CURVE25519];
+    /// Starts a rekey on an authenticated session that has `previous` as its
+    /// accepted host key, queues `REKEY_DATA` on a channel while it runs, and
+    /// plays the server side with the crate's own `ServerKex` up to its
+    /// NEWKEYS. `handler` receives every packet the client processes, so with
+    /// `Presents::Nothing`, whose exchange completes on the server's KEXINIT,
+    /// the rekey has already finished when this returns.
+    async fn start_rekey<H: Handler>(
+        handler: &mut H,
+        previous: Option<PublicKeyOrCertificate>,
+        presents: Presents,
+    ) -> Rekey {
+        // Both sides offer one exchange: curve25519 for a host key, `none`
+        // for no host key, whatever the default order or enabled features.
+        let kex: &'static [crate::kex::Name] = match presents {
+            Presents::Nothing => &[NONE],
+            Presents::Key | Presents::Certificate => &[crate::kex::CURVE25519],
+        };
+
+        let host_key = ed25519_key();
+        let mut server_config = crate::server::Config::default();
+        server_config.preferred.kex = Cow::Borrowed(kex);
+        let presented = match presents {
+            Presents::Key => Some(host_key.public_key().clone().into()),
+            Presents::Certificate => {
+                let certificate = host_certificate(&host_key);
+                server_config.certificates.push(certificate.clone());
+                Some(certificate.into())
+            }
+            Presents::Nothing => None,
+        };
+        server_config.keys.push(host_key);
 
         let (mut session, _sender, _replies) = keyboard_interactive_session();
         allow_rekey(&mut session, crate::Limits::default());
-        Arc::get_mut(&mut session.common.config)
-            .unwrap()
-            .preferred
-            .kex = Cow::Borrowed(PINNED_KEX);
+        let client_config = Arc::get_mut(&mut session.common.config).unwrap();
+        client_config.preferred.kex = Cow::Borrowed(kex);
+        if let Presents::Certificate = presents {
+            client_config.preferred.host_key_certificates = Cow::Borrowed(&[Algorithm::Ed25519]);
+        }
         session.accepted_server_key = previous;
         let channel = crate::ChannelId(7);
         let enc = session.common.encrypted.as_mut().unwrap();
@@ -2530,92 +2618,102 @@ mod tests {
 
         session.initiate_rekey().unwrap();
         session.data(channel, REKEY_DATA).unwrap();
-        let enc = session.common.encrypted.as_ref().unwrap();
-        assert!(enc.has_pending_data(channel), "data must wait for the rekey");
-        let client_kexinit = take_clear_packets(&mut session).pop().unwrap();
-        assert_eq!(client_kexinit.first(), Some(&msg::KEXINIT));
+        assert!(session.common.encrypted.as_ref().unwrap().has_pending_data(channel));
+        let [client_kexinit] = &take_packets(&mut session.common.packet_writer)[..] else {
+            panic!("expected exactly the client's KEXINIT");
+        };
+        let client_kexinit = client_kexinit.clone();
 
-        // Server KEXINIT.
-        let host_key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
-        let mut server_config = crate::server::Config::default();
-        server_config.keys.push(host_key.clone());
-        server_config.preferred.kex = Cow::Borrowed(PINNED_KEX);
-        let server_kexinit = crate::negotiation::write_kex(
-            &server_config.preferred,
-            &mut PacketWriter::clear(),
-            Some(&server_config),
-        )
-        .unwrap();
-        let names = crate::negotiation::Server::read_kex(
-            &client_kexinit,
-            &server_config.preferred,
-            Some(&server_config.keys),
-            Some(&server_config.certificates),
-            &KexCause::Rekey {
+        let mut server = crate::server::kex::ServerKex::new(
+            Arc::new(server_config),
+            session.common.config.client_id.as_kex_hash_bytes(),
+            &SshId::Standard(Cow::Borrowed("SSH-2.0-test")),
+            KexCause::Rekey {
                 strict: false,
                 session_id: CryptoVec::new(),
             },
-        )
-        .unwrap();
-        feed(&mut session, &mut TestHandler, &server_kexinit)
+        );
+        let mut server_out = PacketWriter::clear();
+        server.kexinit(&mut server_out).unwrap();
+        let [server_kexinit] = &take_packets(&mut server_out)[..] else {
+            panic!("expected exactly the server's KEXINIT");
+        };
+        feed(&mut session, handler, server_kexinit.clone())
+            .await
+            .unwrap_or_else(|_| panic!("client rejected the server's KEXINIT"));
+
+        let mut server_side = ServerSide;
+        let mut client_kexinit = packet(client_kexinit);
+        let progress = server
+            .step(Some(&mut client_kexinit), &mut server_out, &mut server_side)
             .await
             .unwrap();
-        let [client_dh] = &take_clear_packets(&mut session)[..] else {
-            panic!("expected exactly one key exchange packet from the client");
-        };
+        if let KexProgress::NeedsReply { kex: server, .. } = progress {
+            let [client_dh] = &take_packets(&mut session.common.packet_writer)[..] else {
+                panic!("expected exactly one key exchange packet from the client");
+            };
+            let mut client_dh = packet(client_dh.clone());
+            server
+                .step(Some(&mut client_dh), &mut server_out, &mut server_side)
+                .await
+                .unwrap();
+            let [reply, newkeys] = &take_packets(&mut server_out)[..] else {
+                panic!("expected the server's key exchange reply and NEWKEYS");
+            };
+            assert_eq!(newkeys, &[msg::NEWKEYS]);
+            // The client verifies the signature and sends its own NEWKEYS.
+            feed(&mut session, handler, reply.clone())
+                .await
+                .unwrap_or_else(|_| panic!("client rejected the server's key exchange reply"));
+            assert_eq!(
+                take_packets(&mut session.common.packet_writer),
+                [vec![msg::NEWKEYS]]
+            );
+            assert!(session.common.encrypted.as_ref().unwrap().has_pending_data(channel));
+        }
 
-        // Server key exchange reply, signed by `host_key`.
-        let mut exchange = Exchange::new(
-            session.common.config.client_id.as_kex_hash_bytes(),
-            &session.common.remote_sshid,
-        );
-        exchange.client_kex_init = client_kexinit.into();
-        exchange.server_kex_init = server_kexinit;
-        exchange.client_ephemeral = Vec::<u8>::decode(&mut &client_dh[1..]).unwrap();
-        let mut kex = KEXES.get(&names.kex).unwrap().make();
-        kex.server_dh(&mut exchange, client_dh).unwrap();
-        let host_key_blob = host_key.public_key().to_bytes().unwrap();
-        let mut hashed_key = Vec::new();
-        host_key_blob.encode(&mut hashed_key).unwrap();
-        let hash = kex
-            .compute_exchange_hash(&hashed_key, &exchange, &mut CryptoVec::new())
-            .unwrap();
-        let signature = crate::helpers::sign_with_hash_alg(
-            &PrivateKeyWithHashAlg::new(Arc::new(host_key), None),
-            &hash,
-        )
-        .unwrap();
-        let mut reply = vec![msg::KEX_ECDH_REPLY];
-        host_key_blob.encode(&mut reply).unwrap();
-        exchange.server_ephemeral.encode(&mut reply).unwrap();
-        signature.encode(&mut reply).unwrap();
-        feed(&mut session, &mut TestHandler, &reply).await.unwrap();
-
-        // The client has verified the signature and sent its own NEWKEYS;
-        // the channel data still waits.
-        assert_eq!(take_clear_packets(&mut session), [vec![msg::NEWKEYS]]);
-        let enc = session.common.encrypted.as_ref().unwrap();
-        assert!(enc.has_pending_data(channel));
-        (session, channel)
+        Rekey {
+            session,
+            channel,
+            presented,
+        }
     }
 
-    fn previous_host_key() -> Option<PublicKeyOrCertificate> {
-        let key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
-        Some(key.public_key().clone().into())
+    impl Rekey {
+        /// Feeds the server's NEWKEYS, which completes the rekey.
+        async fn finish(&mut self, handler: &mut RekeyProbe) -> Result<(), crate::Error> {
+            feed(&mut self.session, handler, vec![msg::NEWKEYS]).await
+        }
+
+        fn wrote_nothing(&mut self) -> bool {
+            self.session.common.packet_writer.buffer().buffer.is_empty()
+        }
+
+        fn data_pending(&self) -> bool {
+            let enc = self.session.common.encrypted.as_ref().unwrap();
+            enc.has_pending_data(self.channel)
+        }
+    }
+
+    fn some_key() -> Option<PublicKeyOrCertificate> {
+        Some(ed25519_key().public_key().clone().into())
+    }
+
+    fn is_certificate(identity: &PublicKeyOrCertificate) -> bool {
+        matches!(identity, PublicKeyOrCertificate::Certificate(_))
     }
 
     /// Control for the tests below: once the rekey is accepted, the data
     /// queued during it is written under the new keys right away.
     #[tokio::test]
     async fn accepted_rekey_writes_queued_data_under_the_new_keys() {
-        let (mut session, channel) = rekey_awaiting_server_newkeys(previous_host_key()).await;
-        feed(&mut session, &mut RekeyVerdict(true), &[msg::NEWKEYS])
-            .await
-            .unwrap();
+        let mut probe = RekeyProbe::default();
+        let mut rekey = start_rekey(&mut probe, some_key(), Presents::Key).await;
+        rekey.finish(&mut probe).await.unwrap();
 
-        assert!(!session.common.packet_writer.buffer().buffer.is_empty());
-        let enc = session.common.encrypted.as_ref().unwrap();
-        assert!(!enc.has_pending_data(channel));
+        assert_eq!(probe.seen.len(), 1);
+        assert!(!rekey.wrote_nothing());
+        assert!(!rekey.data_pending());
     }
 
     /// A rekey rejected by `check_server_key_rekey` writes nothing under the
@@ -2623,32 +2721,101 @@ mod tests {
     /// packet at all follows the server's NEWKEYS.
     #[tokio::test]
     async fn rejected_rekey_writes_nothing_under_the_new_keys() {
-        let (mut session, channel) = rekey_awaiting_server_newkeys(previous_host_key()).await;
-        let err = feed(&mut session, &mut RekeyVerdict(false), &[msg::NEWKEYS])
-            .await
-            .unwrap_err();
+        let mut probe = RekeyProbe::rejecting();
+        let mut rekey = start_rekey(&mut probe, some_key(), Presents::Key).await;
+        let err = rekey.finish(&mut probe).await.unwrap_err();
 
         assert!(matches!(err, crate::Error::UnknownKey), "{err:?}");
-        assert!(session.common.packet_writer.buffer().buffer.is_empty());
-        let enc = session.common.encrypted.as_ref().unwrap();
-        assert!(enc.has_pending_data(channel));
+        assert!(rekey.wrote_nothing());
+        assert!(rekey.data_pending());
     }
 
     /// After an initial `none` exchange there is no accepted key, so a rekey
     /// that presents one closes the session with `Inconsistent` instead of
-    /// asking the (here accepting) handler, and writes nothing.
+    /// asking the handler, and writes nothing.
     #[tokio::test]
     async fn rekey_presenting_a_key_after_none_exchange_is_inconsistent() {
-        let (mut session, channel) = rekey_awaiting_server_newkeys(None).await;
-        let err = feed(&mut session, &mut RekeyVerdict(true), &[msg::NEWKEYS])
-            .await
-            .unwrap_err();
+        let mut probe = RekeyProbe::default();
+        let mut rekey = start_rekey(&mut probe, None, Presents::Key).await;
+        let err = rekey.finish(&mut probe).await.unwrap_err();
 
         assert!(matches!(err, crate::Error::Inconsistent), "{err:?}");
-        assert!(session.common.packet_writer.buffer().buffer.is_empty());
-        let enc = session.common.encrypted.as_ref().unwrap();
-        assert!(enc.has_pending_data(channel));
-        assert!(session.accepted_server_key.is_none());
+        assert!(probe.seen.is_empty());
+        assert!(rekey.wrote_nothing());
+        assert!(rekey.data_pending());
+        assert!(rekey.session.accepted_server_key.is_none());
+    }
+
+    /// A rekey negotiated with `none` presents no host key: the check is
+    /// skipped, the previously accepted key is kept, and the queued data is
+    /// written.
+    #[tokio::test]
+    async fn none_rekey_skips_the_check_and_keeps_the_accepted_key() {
+        let mut probe = RekeyProbe::default();
+        let previous = ed25519_key().public_key().clone();
+        let rekey = start_rekey(&mut probe, Some(previous.clone().into()), Presents::Nothing).await;
+
+        assert!(rekey.presented.is_none());
+        assert!(probe.seen.is_empty(), "no host key, no check");
+        assert!(!rekey.data_pending());
+        match &rekey.session.accepted_server_key {
+            Some(PublicKeyOrCertificate::PublicKey { key, .. }) => assert_eq!(key, &previous),
+            other => panic!("accepted key changed: {other:?}"),
+        }
+    }
+
+    /// A rekey that switches from a plain key to a certificate passes both
+    /// as they are, and the certificate becomes the accepted identity.
+    #[tokio::test]
+    async fn rekey_from_key_to_certificate_passes_both() {
+        let mut probe = RekeyProbe::default();
+        let mut rekey = start_rekey(&mut probe, some_key(), Presents::Certificate).await;
+        rekey.finish(&mut probe).await.unwrap();
+
+        let [(presented, previous)] = &probe.seen[..] else {
+            panic!("expected one check, got {}", probe.seen.len());
+        };
+        assert!(is_certificate(presented));
+        assert!(!is_certificate(previous));
+        let accepted = rekey.session.accepted_server_key.as_ref().unwrap();
+        assert!(is_certificate(accepted));
+    }
+
+    /// A rekey that switches from a certificate to a plain key passes both
+    /// as they are, and the key becomes the accepted identity.
+    #[tokio::test]
+    async fn rekey_from_certificate_to_key_passes_both() {
+        let mut probe = RekeyProbe::default();
+        let previous = host_certificate(&ed25519_key()).into();
+        let mut rekey = start_rekey(&mut probe, Some(previous), Presents::Key).await;
+        rekey.finish(&mut probe).await.unwrap();
+
+        let [(presented, previous)] = &probe.seen[..] else {
+            panic!("expected one check, got {}", probe.seen.len());
+        };
+        assert!(!is_certificate(presented));
+        assert!(is_certificate(previous));
+        let accepted = rekey.session.accepted_server_key.as_ref().unwrap();
+        assert!(!is_certificate(accepted));
+    }
+
+    /// A rejected certificate closes the session with `UnknownKey`, writes
+    /// nothing under the new keys and keeps the previously accepted key.
+    #[tokio::test]
+    async fn rejected_certificate_rekey_writes_nothing() {
+        let mut probe = RekeyProbe::rejecting();
+        let mut rekey = start_rekey(&mut probe, some_key(), Presents::Certificate).await;
+        let err = rekey.finish(&mut probe).await.unwrap_err();
+
+        assert!(matches!(err, crate::Error::UnknownKey), "{err:?}");
+        let [(presented, _)] = &probe.seen[..] else {
+            panic!("expected one check, got {}", probe.seen.len());
+        };
+        assert!(is_certificate(presented));
+        assert!(rekey.wrote_nothing());
+        assert!(rekey.data_pending());
+        let accepted = rekey.session.accepted_server_key.as_ref().unwrap();
+        assert!(!is_certificate(accepted));
     }
 
     /// Drives the client event loop on one end of an in-memory stream and

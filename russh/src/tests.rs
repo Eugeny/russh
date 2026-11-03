@@ -2355,6 +2355,24 @@ mod rekey_host_key_check {
         assert_eq!(kex_done, 1, "kex_done must not run for a rejected rekey");
     }
 
+    /// A handler error in the check of a server-initiated rekey closes the
+    /// session with that error, and `kex_done` is not called.
+    #[tokio::test]
+    async fn server_initiated_rekey_handler_error_closes_session() {
+        let mut options = Options::new(Policy::Fail);
+        options.server_limits = true;
+        let mut f = setup(options).await;
+
+        let (_, streaming) = f.stream_until_check().await;
+
+        let (error, disc, kex_done) = f.finish_failed().await;
+        streaming.writer.abort();
+        streaming.drain.abort();
+        assert!(matches!(error, TestError::PolicyFailure), "{error:?}");
+        assert_eq!(disc, Disc::PolicyFailure);
+        assert_eq!(kex_done, 1, "kex_done must not run after a handler error");
+    }
+
     // Certificates.
 
     /// A same-certificate rekey passes the callback the `Certificate` variant
