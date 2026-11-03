@@ -1,6 +1,6 @@
 [package]
 name = "russh"
-version = "0.65.0"
+version = "0.65.1"
 description = "A client and server SSH library."
 authors = ["Pierre-Étienne Meunier <pe@pijul.org>"]
 edition = "2024"
