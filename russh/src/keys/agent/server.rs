@@ -57,6 +57,10 @@ pub trait Agent: Clone + Send + 'static {
     fn confirm_request(&self, _msg: MessageType) -> impl Future<Output = bool> + Send {
         async { true }
     }
+
+    fn max_identities(&self) -> usize {
+        256
+    }
 }
 
 pub async fn serve<S, L, A>(mut listener: L, agent: A) -> Result<(), Error>
@@ -302,11 +306,13 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
             }
         }
         let now = SystemTime::now();
-        self.keys
-            .0
-            .write()
-            .or(Err(Error::AgentFailure))?
-            .insert(blob.clone(), (Arc::new(key_pair), now, c));
+        let mut keys = self.keys.0.write().or(Err(Error::AgentFailure))?;
+        if !keys.contains_key(&blob)
+            && keys.len() >= self.agent.as_ref().ok_or(Error::AgentFailure)?.max_identities()
+        {
+            return Ok(false);
+        }
+        keys.insert(blob.clone(), (Arc::new(key_pair), now, c));
         if let Some(seconds) = lifetime {
             let keys = self.keys.clone();
             russh_util::runtime::spawn(async move {
