@@ -193,12 +193,23 @@ pub fn load_public_key<P: AsRef<Path>>(path: P) -> Result<ssh_key::PublicKey, Er
     let mut file = File::open(path.as_ref())?;
     file.read_to_string(&mut pubkey)?;
 
-    let mut split = pubkey.split_whitespace();
-    match (split.next(), split.next()) {
-        (Some(_), Some(key)) => parse_public_key_base64(key),
-        (Some(key), None) => parse_public_key_base64(key),
-        _ => Err(Error::CouldNotReadKey),
-    }
+    // First non-blank, non-`#` line: `<algorithm> <base64> [comment]` or a
+    // bare base64 blob. The comment may contain spaces.
+    let line = pubkey
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty() && !l.starts_with('#'))
+        .ok_or(Error::CouldNotReadKey)?;
+    let Some((_, rest)) = line.split_once(char::is_whitespace) else {
+        return parse_public_key_base64(line);
+    };
+    let rest = rest.trim_start();
+    let (key, comment) = rest
+        .split_once(char::is_whitespace)
+        .unwrap_or((rest, ""));
+    let mut key = parse_public_key_base64(key)?;
+    key.set_comment(comment.trim_start());
+    Ok(key)
 }
 
 /// Reads a public key from the standard encoding. In some cases, the
@@ -323,6 +334,38 @@ d3Ae1+k3YLZ0kapSQGVIMT2lkrhKV35tj7HIFpUPa4vitHzcUwtjYhqFezVF+JyPbJ/Fsp
 XmEc0g1fFnQp5/SkUwoN2zm8Up52GBelkq2Jk57mOMzWO0QzzNuNV/feJk02b2aE8rrAqP
 QR+u0AypRPmzHnOPAAAAEXJvb3RAMTQwOTExNTQ5NDBkAQ==
 -----END OPENSSH PRIVATE KEY-----";
+
+    #[test]
+    fn test_load_public_key_comment() {
+        const KEY: &str = "AAAAC3NzaC1lZDI1NTE5AAAAIK2pr+Bfus1hvPof4Wb/plZCzSbqadHH0u+/f4ODtKnE";
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("key.pub");
+        let load = |contents: &str| {
+            std::fs::write(&path, contents).unwrap();
+            load_public_key(&path).unwrap()
+        };
+
+        let key = load(&format!("ssh-ed25519 {KEY} my comment\n"));
+        assert_eq!(key.comment().to_string(), "my comment");
+        assert_eq!(
+            key.to_openssh().unwrap(),
+            format!("ssh-ed25519 {KEY} my comment")
+        );
+
+        let key = load(&format!("ssh-ed25519 {KEY}\n"));
+        assert!(key.comment().is_empty());
+
+        let key = load(&format!("{KEY}\n"));
+        assert!(key.comment().is_empty());
+
+        let key = load(&format!("# a comment line\r\n\r\nssh-ed25519\t{KEY}  tabs and crlf \r\n"));
+        assert_eq!(key.comment().to_string(), "tabs and crlf");
+
+        for bad in ["", "\n# only a comment\n", "ssh-ed25519 not-base64\n"] {
+            std::fs::write(&path, bad).unwrap();
+            assert!(load_public_key(&path).is_err(), "{bad:?}");
+        }
+    }
 
     #[test]
     fn test_decode_ed25519_secret_key() {
