@@ -1176,12 +1176,17 @@ async fn reply<H: Handler + Send>(
             pkt.seqn.0,
             pkt.buffer.len()
         );
-        let strict_kex = match session.kex {
-            SessionKexState::InProgress(ref kex) => kex.strict_kex(),
-            _ => session.common.strict_kex,
+        let (strict_kex, guess_ignored) = match session.kex {
+            SessionKexState::InProgress(ref kex) => (kex.strict_kex(), kex.guess_ignored()),
+            _ => (session.common.strict_kex, false),
         };
         if strict_kex && session.common.encrypted.is_none() {
-            let seqno = pkt.seqn.0 - 1; // was incremented after read()
+            let mut seqno = pkt.seqn.0 - 1; // was incremented after read()
+            // A wrong first_kex_packet_follows guess took sequence number 1 (and was validated as
+            // the KEX packet it is): the real KEX packet and NEWKEYS follow one later.
+            if guess_ignored && seqno >= 2 {
+                seqno -= 1;
+            }
             validate_client_msg_strict_kex(*message_type, seqno as usize)?;
         }
 

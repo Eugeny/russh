@@ -97,6 +97,18 @@ impl ServerKex {
         }
     }
 
+    /// A wrong `first_kex_packet_follows` guess was ignored in this exchange, so the peer's packets
+    /// after KEXINIT sit one sequence number later than the strict-kex order expects (RFC 4253 §7.1
+    /// requires the guess to be ignored and the correct packet to follow).
+    pub fn guess_ignored(&self) -> bool {
+        match self.state {
+            ServerKexState::Created => false,
+            ServerKexState::WaitingForGexRequest { ref names, .. }
+            | ServerKexState::WaitingForDhInit { ref names, .. } => names.guessed_ignored,
+            ServerKexState::WaitingForNewKeys { ref newkeys } => newkeys.names.guessed_ignored,
+        }
+    }
+
     pub fn kexinit(&mut self, output: &mut PacketWriter) -> Result<(), Error> {
         self.exchange.server_kex_init =
             negotiation::write_kex(&self.config.preferred, output, Some(self.config.as_ref()))?;
@@ -230,8 +242,11 @@ impl ServerKex {
 
                 if names.ignore_guessed {
                     // Ignore the next packet if (1) it follows and (2) it's not the correct guess.
+                    // Dropbear always guesses (its list starts with kexguess2@matt.ucc.asn.au), so with
+                    // strict kex its real KEX_ECDH_INIT then arrives at sequence number 2; see `guess_ignored`.
                     debug!("ignoring guessed kex");
                     names.ignore_guessed = false;
+                    names.guessed_ignored = true;
                     self.state = ServerKexState::WaitingForDhInit { names, kex };
                     return Ok(KexProgress::NeedsReply {
                         kex: self,

@@ -50,6 +50,9 @@ pub struct Names {
     pub server_compression: compression::Compression,
     pub client_compression: compression::Compression,
     pub ignore_guessed: bool,
+    /// A wrong `first_kex_packet_follows` guess was received and ignored: the peer's real KEX packet
+    /// and everything after it arrive one sequence number later than the strict-kex order expects.
+    pub guessed_ignored: bool,
     /// Whether `key` was negotiated as a certificate algorithm or not
     pub(crate) host_key_is_certificate: bool,
     // Prevent accidentally contructing [Names] without a [KeyCause]
@@ -446,6 +449,7 @@ pub(crate) trait Select {
             host_key_is_certificate,
             // Ignore the next packet if (1) it follows and (2) it's not the correct guess.
             ignore_guessed: follows && !(kex_both_first && key_both_first),
+            guessed_ignored: false,
             strict_kex: (strict_kex_requested && strict_kex_provided) || cause.is_strict_rekey(),
         })
     }
