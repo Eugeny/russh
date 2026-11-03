@@ -6,15 +6,26 @@ on:
   pull_request:
     branches: [main]
 
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
   Build:
-    runs-on: ubuntu-24.04
+    name: Build
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read # to check out the repository
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Build (no features enabled)
         run: cargo build --verbose
@@ -23,10 +34,15 @@ jobs:
         run: cargo build --verbose --all-features
 
   Build-Windows:
-    runs-on: windows-latest
+    name: Build-Windows
+    runs-on: windows-2025
+    permissions:
+      contents: read # to check out the repository
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: install nasm
         run: |
@@ -40,10 +56,15 @@ jobs:
         run: cargo build --verbose --all-features
 
   Build-WASM:
-    runs-on: ubuntu-24.04
+    name: Build-WASM
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read # to check out the repository
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install target
         run: |
@@ -54,10 +75,15 @@ jobs:
         run: cargo +1.89.0 build --verbose --target wasm32-wasip1 --no-default-features --features flate2,ring -p russh
 
   Formatting:
-    runs-on: ubuntu-24.04
+    name: Formatting
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read # to check out the repository
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install rustfmt
         run: rustup component add rustfmt
@@ -66,10 +92,15 @@ jobs:
         run: cargo fmt --check
 
   Clippy:
-    runs-on: ubuntu-24.04
+    name: Clippy
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read # to check out the repository
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install Clippy
         run: rustup component add clippy
@@ -81,10 +112,15 @@ jobs:
         run: cargo clippy --all-features -- -D warnings
 
   Test:
-    runs-on: ubuntu-24.04
+    name: Test
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read # to check out the repository
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install OpenSSH
         run: |
@@ -107,13 +143,24 @@ jobs:
           RUST_BACKTRACE: 1
 
   Minimal-versions:
-    runs-on: ubuntu-24.04
+    name: Minimal-versions
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read # to check out the repository
 
     steps:
-      - uses: actions/checkout@v2
-      - uses: dtolnay/rust-toolchain@nightly
-      - uses: taiki-e/install-action@cargo-hack
-      - uses: taiki-e/install-action@cargo-minimal-versions
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install nightly toolchain
+        run: |
+          rustup toolchain install nightly --profile minimal
+          rustup default nightly
+
+      - uses: taiki-e/install-action@b80e2bb2635f28eb98b9fce1e2f0887e1535c6b2 # v2.90.0
+        with:
+          tool: cargo-hack,cargo-minimal-versions
 
       - name: Check with minimal dependency versions
         run: |
