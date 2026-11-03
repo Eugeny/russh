@@ -334,10 +334,10 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
         writebuf: &mut Vec<u8>,
     ) -> Result<(A, bool), Error> {
         let mut needs_confirm = false;
+        let blob = Bytes::decode(r)?.to_vec();
         let key = {
-            let blob = Bytes::decode(r)?;
             let k = self.keys.0.read().or(Err(Error::AgentFailure))?;
-            if let Some((key, _, constraints)) = k.get(&blob.to_vec()) {
+            if let Some((key, _, constraints)) = k.get(&blob) {
                 if constraints.contains(&Constraint::Confirm) {
                     needs_confirm = true;
                 }
@@ -349,6 +349,18 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
         let agent = if needs_confirm {
             let (agent, ok) = agent.confirm(key.clone()).await;
             if !ok {
+                return Ok((agent, false));
+            }
+            // The agent may have been locked or the key removed while
+            // confirmation was pending.
+            let locked = self.lock.0.read().map(|p| !p.is_empty()).unwrap_or(true);
+            let present = self
+                .keys
+                .0
+                .read()
+                .map(|k| k.contains_key(&blob))
+                .unwrap_or(false);
+            if locked || !present {
                 return Ok((agent, false));
             }
             agent
@@ -450,5 +462,78 @@ mod tests {
         let keys = connection.keys.0.read().unwrap();
         let (_, _, constraints) = keys.values().next().unwrap();
         assert_eq!(constraints, &[super::Constraint::Confirm]);
+    }
+
+    #[tokio::test]
+    async fn sign_is_rejected_when_locked_during_confirm() {
+        use std::future::Future;
+        use std::sync::Arc;
+
+        use ssh_encoding::Encode;
+        use tokio::sync::Notify;
+
+        use super::{Agent, Constraint};
+        use crate::keys::PrivateKey;
+
+        #[derive(Clone)]
+        struct Delayed(Arc<Notify>, Arc<Notify>);
+        impl Agent for Delayed {
+            fn confirm(
+                self,
+                _: Arc<PrivateKey>,
+            ) -> Box<dyn Future<Output = (Self, bool)> + Unpin + Send> {
+                Box::new(Box::pin(async move {
+                    self.0.notify_one();
+                    self.1.notified().await;
+                    (self, true)
+                }))
+            }
+        }
+
+        let entered = Arc::new(Notify::new());
+        let release = Arc::new(Notify::new());
+        let lock = Lock(std::sync::Arc::new(std::sync::RwLock::new(
+            crate::CryptoVec::new(),
+        )));
+        let (server, _client) = tokio::io::duplex(64);
+        let connection = Connection {
+            lock: lock.clone(),
+            keys: KeyStore(std::sync::Arc::new(std::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            ))),
+            agent: Some(Delayed(entered.clone(), release.clone())),
+            s: server,
+            buf: Vec::new(),
+        };
+
+        let key = PrivateKey::random(&mut rand::rng(), crate::keys::Algorithm::Ed25519)
+            .unwrap();
+        let blob = key.public_key().to_bytes().unwrap();
+        connection.keys.0.write().unwrap().insert(
+            blob.clone(),
+            (Arc::new(key), std::time::SystemTime::now(), vec![Constraint::Confirm]),
+        );
+
+        let mut payload = Vec::new();
+        blob.encode(&mut payload).unwrap();
+        b"data".encode(&mut payload).unwrap();
+        0u32.encode(&mut payload).unwrap();
+
+        let signer = async {
+            let mut writebuf = Vec::new();
+            let agent = connection.agent.clone().unwrap();
+            connection
+                .try_sign(agent, &mut &payload[..], &mut writebuf)
+                .await
+                .unwrap()
+                .1
+        };
+        let locker = async {
+            entered.notified().await;
+            lock.0.write().unwrap().extend(b"pw");
+            release.notify_one();
+        };
+        let (signed, ()) = tokio::join!(signer, locker);
+        assert!(!signed);
     }
 }
