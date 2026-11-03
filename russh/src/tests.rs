@@ -1798,3 +1798,631 @@ mod rekey_under_load {
         assert!(echoed == payload, "echoed data differs from what was sent");
     }
 }
+
+/// The client's `check_server_key_rekey` callback: which keys it receives, how
+/// its verdict shapes the session, and that a rejection ends the session so
+/// nothing written afterwards is sent. Where the check sits relative to the
+/// new keys is covered by the unit tests in `client`.
+mod rekey_host_key_check {
+    use std::borrow::Cow;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    use keys::PrivateKeyWithHashAlg;
+    use ssh_key::certificate::{Builder, CertType};
+    use ssh_key::public::KeyData;
+    use ssh_key::{Algorithm, Certificate, PrivateKey};
+    use tokio::sync::mpsc;
+
+    use super::*;
+    use crate::cert::PublicKeyOrCertificate;
+    use crate::channels::{ChannelReadHalf, ChannelWriteHalf};
+    use crate::client::{DisconnectReason, RekeyServerKey};
+    use crate::server::Session;
+
+    const TIMEOUT: Duration = Duration::from_secs(10);
+    const MARKER: &[u8] = b"MARKER-AFTER-REJECTED-REKEY";
+
+    #[derive(Debug)]
+    enum TestError {
+        Russh(crate::Error),
+        PolicyFailure,
+    }
+
+    impl From<crate::Error> for TestError {
+        fn from(e: crate::Error) -> Self {
+            TestError::Russh(e)
+        }
+    }
+
+    /// What the client handler saw in `disconnected`.
+    #[derive(Debug, PartialEq)]
+    enum Disc {
+        UnknownKey,
+        PolicyFailure,
+        OtherError(String),
+        Remote,
+    }
+
+    #[derive(Clone, Copy)]
+    enum Policy {
+        /// Accept whatever is presented.
+        Accept,
+        /// Accept only a key or certificate equal to the previous one.
+        PinToPrevious,
+        /// Fail with a handler error.
+        Fail,
+    }
+
+    /// A host key or certificate as the callback saw it.
+    #[derive(Debug, PartialEq)]
+    struct Ident {
+        certificate: Option<Certificate>,
+        key: KeyData,
+    }
+
+    impl Ident {
+        fn of(k: &PublicKeyOrCertificate) -> Self {
+            Ident {
+                certificate: k.certificate().cloned(),
+                key: k.public_key().key_data().clone(),
+            }
+        }
+    }
+
+    #[derive(Debug)]
+    struct Seen {
+        presented: Ident,
+        previous: Ident,
+    }
+
+    type Slot = Arc<Mutex<Option<ChannelWriteHalf<client::Msg>>>>;
+
+    struct Probe {
+        policy: Policy,
+        events: mpsc::UnboundedSender<Seen>,
+        kex_done: Arc<AtomicUsize>,
+        disc: Arc<Mutex<Option<Disc>>>,
+        initial_was_certificate: Arc<Mutex<Option<bool>>>,
+        /// When set, the callback writes `MARKER` through this channel half
+        /// before returning its verdict.
+        marker_slot: Option<Slot>,
+    }
+
+    impl client::Handler for Probe {
+        type Error = TestError;
+
+        async fn check_server_key(
+            &mut self,
+            server_public_key: &PublicKeyOrCertificate,
+        ) -> Result<bool, Self::Error> {
+            *self.initial_was_certificate.lock().unwrap() =
+                Some(server_public_key.certificate().is_some());
+            Ok(true)
+        }
+
+        async fn check_server_key_rekey(
+            &mut self,
+            server_key: RekeyServerKey<'_>,
+        ) -> Result<bool, Self::Error> {
+            let seen = Seen {
+                presented: Ident::of(server_key.presented),
+                previous: Ident::of(server_key.previous),
+            };
+            let verdict = match self.policy {
+                Policy::Accept => Ok(true),
+                Policy::PinToPrevious => Ok(seen.presented == seen.previous),
+                Policy::Fail => Err(TestError::PolicyFailure),
+            };
+            if let Some(slot) = &self.marker_slot {
+                let writer = slot.lock().unwrap().take();
+                if let Some(writer) = writer {
+                    tokio::time::timeout(TIMEOUT, writer.data(MARKER))
+                        .await
+                        .expect("marker write timed out")
+                        .expect("marker write failed");
+                    *slot.lock().unwrap() = Some(writer);
+                }
+            }
+            let _ = self.events.send(seen);
+            verdict
+        }
+
+        async fn kex_done(
+            &mut self,
+            _shared_secret: Option<&[u8]>,
+            _names: &crate::negotiation::Names,
+            _session: &mut client::Session,
+        ) -> Result<(), Self::Error> {
+            self.kex_done.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+
+        async fn disconnected(
+            &mut self,
+            reason: DisconnectReason<Self::Error>,
+        ) -> Result<(), Self::Error> {
+            match reason {
+                DisconnectReason::ReceivedDisconnect(_) => {
+                    *self.disc.lock().unwrap() = Some(Disc::Remote);
+                    Ok(())
+                }
+                DisconnectReason::Error(e) => {
+                    *self.disc.lock().unwrap() = Some(match &e {
+                        TestError::Russh(crate::Error::UnknownKey) => Disc::UnknownKey,
+                        TestError::PolicyFailure => Disc::PolicyFailure,
+                        other => Disc::OtherError(format!("{other:?}")),
+                    });
+                    Err(e)
+                }
+            }
+        }
+    }
+
+    /// Server handler that records the channel data it receives and echoes it.
+    struct Recorder {
+        received: Arc<Mutex<Vec<u8>>>,
+    }
+
+    impl server::Handler for Recorder {
+        type Error = crate::Error;
+
+        async fn auth_publickey(
+            &mut self,
+            _: &str,
+            _: server::VerifiedPublicKey<'_>,
+        ) -> Result<server::Auth, Self::Error> {
+            Ok(server::Auth::Accept)
+        }
+
+        async fn channel_open_session(
+            &mut self,
+            _channel: Channel<server::Msg>,
+            reply: server::ChannelOpenHandle,
+            _session: &mut Session,
+        ) -> Result<(), Self::Error> {
+            reply.accept().await;
+            Ok(())
+        }
+
+        async fn data(
+            &mut self,
+            channel: ChannelId,
+            data: &[u8],
+            session: &mut Session,
+        ) -> Result<(), Self::Error> {
+            self.received.lock().unwrap().extend_from_slice(data);
+            session.data(channel, data.to_vec())?;
+            Ok(())
+        }
+    }
+
+    struct Options {
+        policy: Policy,
+        /// Host key the server presents in every rekey instead of its own.
+        rekey_key: Option<PrivateKey>,
+        /// Rekey the server side after 64 KiB written.
+        server_limits: bool,
+        certificate: bool,
+        marker: bool,
+    }
+
+    impl Options {
+        fn new(policy: Policy) -> Self {
+            Options {
+                policy,
+                rekey_key: None,
+                server_limits: false,
+                certificate: false,
+                marker: false,
+            }
+        }
+    }
+
+    struct Fixture {
+        handle: client::Handle<Probe>,
+        /// Taken by `stream_until_check`, which keeps draining it.
+        reader: Option<ChannelReadHalf>,
+        writer: Option<ChannelWriteHalf<client::Msg>>,
+        events: mpsc::UnboundedReceiver<Seen>,
+        kex_done: Arc<AtomicUsize>,
+        disc: Arc<Mutex<Option<Disc>>>,
+        initial_was_certificate: Arc<Mutex<Option<bool>>>,
+        server: tokio::task::JoinHandle<()>,
+        server_received: Arc<Mutex<Vec<u8>>>,
+    }
+
+    fn ed25519() -> PrivateKey {
+        PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap()
+    }
+
+    async fn setup(options: Options) -> Fixture {
+        let _ = env_logger::try_init();
+
+        let host_key = ed25519();
+        let mut config = server::Config::default();
+        config.inactivity_timeout = None;
+        if options.server_limits {
+            config.limits = Limits::new(64 * 1024, 1 << 30, Duration::from_secs(3600));
+        }
+        if options.certificate {
+            let ca = ed25519();
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+            let mut builder = Builder::new_with_random_nonce(
+                &mut rand::rng(),
+                host_key.public_key().clone(),
+                now,
+                now + 3600,
+            )
+            .unwrap();
+            builder.serial(7).unwrap();
+            builder.key_id("rekey-test-host").unwrap();
+            builder.cert_type(CertType::Host).unwrap();
+            builder.valid_principal("localhost").unwrap();
+            config.certificates.push(builder.sign(&ca).unwrap());
+        }
+        config.keys.push(host_key);
+        config.rekey_host_key = options.rekey_key;
+        let config = Arc::new(config);
+
+        let server_received = Arc::new(Mutex::new(Vec::new()));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = {
+            let received = server_received.clone();
+            tokio::spawn(async move {
+                let (socket, _) = listener.accept().await.unwrap();
+                let session = server::run_stream(config, socket, Recorder { received })
+                    .await
+                    .unwrap();
+                let _ = session.await;
+            })
+        };
+
+        let mut client_config = client::Config::default();
+        if options.certificate {
+            client_config.preferred.host_key_certificates =
+                Cow::Owned(vec![Algorithm::Ed25519]);
+        }
+
+        let (events_tx, mut events) = mpsc::unbounded_channel();
+        let kex_done = Arc::new(AtomicUsize::new(0));
+        let disc = Arc::new(Mutex::new(None));
+        let initial_was_certificate = Arc::new(Mutex::new(None));
+        let marker_slot: Option<Slot> = options.marker.then(|| Arc::new(Mutex::new(None)));
+        let probe = Probe {
+            policy: options.policy,
+            events: events_tx,
+            kex_done: kex_done.clone(),
+            disc: disc.clone(),
+            initial_was_certificate: initial_was_certificate.clone(),
+            marker_slot: marker_slot.clone(),
+        };
+
+        let mut handle = tokio::time::timeout(
+            TIMEOUT,
+            client::connect(Arc::new(client_config), addr, probe),
+        )
+        .await
+        .expect("connect timed out")
+        .unwrap();
+        let auth = tokio::time::timeout(
+            TIMEOUT,
+            handle.authenticate_publickey(
+                "user",
+                PrivateKeyWithHashAlg::new(Arc::new(ed25519()), None),
+            ),
+        )
+        .await
+        .expect("auth timed out")
+        .unwrap();
+        assert!(auth.success());
+        let channel = tokio::time::timeout(TIMEOUT, handle.channel_open_session())
+            .await
+            .expect("channel open timed out")
+            .unwrap();
+        let (reader, writer) = channel.split();
+        let writer = match marker_slot {
+            Some(slot) => {
+                *slot.lock().unwrap() = Some(writer);
+                None
+            }
+            None => Some(writer),
+        };
+
+        // The initial exchange called `kex_done` once and never the rekey check.
+        assert_eq!(kex_done.load(Ordering::SeqCst), 1);
+        assert!(
+            events.try_recv().is_err(),
+            "the rekey check ran for the initial exchange"
+        );
+
+        Fixture {
+            handle,
+            reader: Some(reader),
+            writer,
+            events,
+            kex_done,
+            disc,
+            initial_was_certificate,
+            server,
+            server_received,
+        }
+    }
+
+    /// Background tasks started by `Fixture::stream_until_check`.
+    struct Streaming {
+        writer: tokio::task::JoinHandle<()>,
+        drain: tokio::task::JoinHandle<()>,
+    }
+
+    impl Fixture {
+        /// Waits for the next rekey check, without relying on `rekey_soon`.
+        async fn next_check(&mut self) -> Seen {
+            tokio::time::timeout(TIMEOUT, self.events.recv())
+                .await
+                .expect("no rekey check within the timeout")
+                .expect("client handler dropped before a rekey check")
+        }
+
+        async fn wait_kex_done(&self, count: usize) {
+            tokio::time::timeout(TIMEOUT, async {
+                while self.kex_done.load(Ordering::SeqCst) < count {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+            })
+            .await
+            .expect("kex_done did not reach the expected count");
+        }
+
+        /// Client-initiated rekey: queue it and wait for the check it causes.
+        async fn rekey_and_check(&mut self) -> Seen {
+            tokio::time::timeout(TIMEOUT, self.handle.rekey_soon())
+                .await
+                .expect("rekey_soon timed out")
+                .unwrap();
+            self.next_check().await
+        }
+
+        /// Starts streaming data so the server's byte limit triggers rekeys,
+        /// and waits for the first check while draining incoming messages.
+        /// The returned tasks keep writing and draining, so the server's echo
+        /// cannot fill the client's channel buffer and stall the session.
+        async fn stream_until_check(&mut self) -> (Seen, Streaming) {
+            let writer = self.writer.as_ref().unwrap().make_writer();
+            let mut reader = self.reader.take().expect("reader already taken");
+            let writer = tokio::spawn(async move {
+                use tokio::io::AsyncWriteExt;
+                let mut writer = Box::pin(writer);
+                for _ in 0..64 {
+                    if writer.write_all(&[0x5a; 4096]).await.is_err() {
+                        return;
+                    }
+                }
+                let _ = writer.flush().await;
+            });
+            let seen = tokio::time::timeout(TIMEOUT, async {
+                loop {
+                    tokio::select! {
+                        seen = self.events.recv() => break seen,
+                        msg = reader.wait() => {
+                            if msg.is_none() {
+                                break self.events.recv().await;
+                            }
+                        }
+                    }
+                }
+            })
+            .await
+            .expect("no rekey check within the timeout")
+            .expect("client handler dropped before a rekey check");
+            let drain = tokio::spawn(async move { while reader.wait().await.is_some() {} });
+            (seen, Streaming { writer, drain })
+        }
+
+        /// The client session task ends with the error; the server side ends too.
+        async fn finish_failed(mut self) -> (TestError, Disc, usize) {
+            let result = tokio::time::timeout(TIMEOUT, &mut self.handle)
+                .await
+                .expect("client session did not end");
+            let error = result.expect_err("client session ended without an error");
+            tokio::time::timeout(TIMEOUT, &mut self.server)
+                .await
+                .expect("server session did not end")
+                .unwrap();
+            let disc = self.disc.lock().unwrap().take().expect("disconnected not called");
+            (error, disc, self.kex_done.load(Ordering::SeqCst))
+        }
+
+        async fn disconnect(self) {
+            let _ = tokio::time::timeout(
+                TIMEOUT,
+                self.handle.disconnect(Disconnect::ByApplication, "", ""),
+            )
+            .await
+            .expect("disconnect timed out");
+            tokio::time::timeout(TIMEOUT, self.server)
+                .await
+                .expect("server session did not end")
+                .unwrap();
+        }
+    }
+
+    // Client-initiated rekeys.
+
+    /// Two rekeys with an unchanged key pass a pinning policy; each check
+    /// sees the same key as presented and previous, and `kex_done` runs per rekey.
+    #[tokio::test]
+    async fn same_key_rekeys_are_accepted() {
+        let mut f = setup(Options::new(Policy::PinToPrevious)).await;
+        for round in 1..=2 {
+            let seen = f.rekey_and_check().await;
+            assert_eq!(seen.presented, seen.previous);
+            assert!(seen.presented.certificate.is_none());
+            f.wait_kex_done(1 + round).await;
+        }
+        f.disconnect().await;
+    }
+
+    /// A changed key (A, then B) is accepted when the policy allows it, and the
+    /// following rekey receives B as the previous value.
+    #[tokio::test]
+    async fn changed_key_accepted_by_policy_becomes_previous() {
+        let key_b = ed25519();
+        let mut options = Options::new(Policy::Accept);
+        options.rekey_key = Some(key_b.clone());
+        let mut f = setup(options).await;
+
+        let first = f.rekey_and_check().await;
+        assert_eq!(first.presented.key, *key_b.public_key().key_data());
+        assert_ne!(first.previous.key, first.presented.key);
+        f.wait_kex_done(2).await;
+
+        let second = f.rekey_and_check().await;
+        assert_eq!(second.presented.key, *key_b.public_key().key_data());
+        assert_eq!(second.previous.key, *key_b.public_key().key_data());
+        f.wait_kex_done(3).await;
+        f.disconnect().await;
+    }
+
+    /// A changed key rejected by policy ends both sessions with `UnknownKey`,
+    /// and `kex_done` is not called for the rejected rekey.
+    #[tokio::test]
+    async fn changed_key_rejected_by_policy_closes_session() {
+        let mut options = Options::new(Policy::PinToPrevious);
+        options.rekey_key = Some(ed25519());
+        let mut f = setup(options).await;
+
+        let seen = f.rekey_and_check().await;
+        assert_ne!(seen.presented.key, seen.previous.key);
+
+        let (error, disc, kex_done) = f.finish_failed().await;
+        assert!(matches!(error, TestError::Russh(crate::Error::UnknownKey)), "{error:?}");
+        assert_eq!(disc, Disc::UnknownKey);
+        assert_eq!(kex_done, 1, "kex_done must not run for a rejected rekey");
+    }
+
+    /// An error returned by the callback reaches `disconnected` and the session
+    /// result unchanged, and `kex_done` is not called.
+    #[tokio::test]
+    async fn handler_error_during_rekey_check_closes_session() {
+        let mut f = setup(Options::new(Policy::Fail)).await;
+        f.rekey_and_check().await;
+
+        let (error, disc, kex_done) = f.finish_failed().await;
+        assert!(matches!(error, TestError::PolicyFailure), "{error:?}");
+        assert_eq!(disc, Disc::PolicyFailure);
+        assert_eq!(kex_done, 1, "kex_done must not run after a handler error");
+    }
+
+    // Server-initiated rekeys.
+
+    /// A server-initiated rekey with the same key passes a pinning policy.
+    #[tokio::test]
+    async fn server_initiated_rekey_same_key_is_accepted() {
+        let mut options = Options::new(Policy::PinToPrevious);
+        options.server_limits = true;
+        let mut f = setup(options).await;
+
+        let (seen, streaming) = f.stream_until_check().await;
+        assert_eq!(seen.presented, seen.previous);
+        f.wait_kex_done(2).await;
+        streaming.writer.abort();
+        f.disconnect().await;
+        streaming.drain.abort();
+    }
+
+    /// A server-initiated rekey that presents a different key is rejected.
+    #[tokio::test]
+    async fn server_initiated_rekey_changed_key_is_rejected() {
+        let mut options = Options::new(Policy::PinToPrevious);
+        options.server_limits = true;
+        options.rekey_key = Some(ed25519());
+        let mut f = setup(options).await;
+
+        let (seen, streaming) = f.stream_until_check().await;
+        assert_ne!(seen.presented.key, seen.previous.key);
+
+        let (error, disc, kex_done) = f.finish_failed().await;
+        streaming.writer.abort();
+        streaming.drain.abort();
+        assert!(matches!(error, TestError::Russh(crate::Error::UnknownKey)), "{error:?}");
+        assert_eq!(disc, Disc::UnknownKey);
+        assert_eq!(kex_done, 1, "kex_done must not run for a rejected rekey");
+    }
+
+    // Certificates.
+
+    /// A same-certificate rekey passes the callback the `Certificate` variant
+    /// as both presented and previous value.
+    #[tokio::test]
+    async fn same_certificate_rekey_passes_certificate_variant() {
+        let mut options = Options::new(Policy::PinToPrevious);
+        options.certificate = true;
+        let mut f = setup(options).await;
+        assert_eq!(*f.initial_was_certificate.lock().unwrap(), Some(true));
+
+        let seen = f.rekey_and_check().await;
+        let presented = seen.presented.certificate.as_ref().expect("presented is a certificate");
+        let previous = seen.previous.certificate.as_ref().expect("previous is a certificate");
+        assert_eq!(presented, previous);
+        f.wait_kex_done(2).await;
+        f.disconnect().await;
+    }
+
+    // Nothing written after a rejection reaches the server.
+
+    /// Control: with an accepting policy, the marker written by the callback
+    /// does reach the server, so the test below can detect a leak.
+    #[tokio::test]
+    async fn marker_written_during_accepted_rekey_reaches_server() {
+        let mut options = Options::new(Policy::PinToPrevious);
+        options.marker = true;
+        let mut f = setup(options).await;
+        f.rekey_and_check().await;
+        f.wait_kex_done(2).await;
+
+        tokio::time::timeout(TIMEOUT, async {
+            while !f
+                .server_received
+                .lock()
+                .unwrap()
+                .windows(MARKER.len())
+                .any(|w| w == MARKER)
+            {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("marker never reached the server");
+        f.disconnect().await;
+    }
+
+    /// A marker queued by the rejecting callback is never sent: the server's
+    /// handler does not see it once the client session has ended.
+    #[tokio::test]
+    async fn marker_queued_by_rejecting_callback_never_reaches_server() {
+        let mut options = Options::new(Policy::PinToPrevious);
+        options.rekey_key = Some(ed25519());
+        options.marker = true;
+        let mut f = setup(options).await;
+        let received = f.server_received.clone();
+
+        let seen = f.rekey_and_check().await;
+        assert_ne!(seen.presented.key, seen.previous.key);
+
+        let (error, disc, kex_done) = f.finish_failed().await;
+        assert!(matches!(error, TestError::Russh(crate::Error::UnknownKey)), "{error:?}");
+        assert_eq!(disc, Disc::UnknownKey);
+        assert_eq!(kex_done, 1);
+        let received = received.lock().unwrap();
+        assert!(
+            !received.windows(MARKER.len()).any(|w| w == MARKER),
+            "the server received data queued by the rejecting callback"
+        );
+    }
+}
