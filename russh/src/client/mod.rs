@@ -2033,14 +2033,11 @@ async fn reply<H: Handler>(
                     session.common.strict_kex =
                         session.common.strict_kex || newkeys.names.strict_kex();
 
-                    // Call the kex_done handler before consuming newkeys
-                    let shared_secret = newkeys.kex.shared_secret_bytes();
-                    handler
-                        .kex_done(shared_secret, &newkeys.names, session)
-                        .await?;
-
                     if session.common.encrypted.is_some() {
                         // This is a rekey
+                        handler
+                            .kex_done(newkeys.kex.shared_secret_bytes(), &newkeys.names, session)
+                            .await?;
                         {
                             let common = &mut session.common;
                             common.newkeys(newkeys);
@@ -2076,6 +2073,10 @@ async fn reply<H: Handler>(
                                 return Err(crate::Error::UnknownKey.into());
                             }
                         }
+
+                        handler
+                            .kex_done(newkeys.kex.shared_secret_bytes(), &newkeys.names, session)
+                            .await?;
 
                         session
                             .common
@@ -2811,6 +2812,11 @@ pub trait Handler: Sized + Send {
     }
 
     /// Called when key exchange has completed.
+    ///
+    /// For the initial key exchange this runs only after
+    /// [`check_server_key`](Self::check_server_key) has accepted the server,
+    /// so the shared secret never reaches the application for a server that
+    /// is about to be rejected.
     ///
     /// This callback provides access to the raw shared secret from the KEX,
     /// which is useful for protocols that derive additional keys from the
