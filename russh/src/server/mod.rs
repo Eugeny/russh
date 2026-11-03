@@ -1181,7 +1181,7 @@ async fn reply<H: Handler + Send>(
             _ => (session.common.strict_kex, false),
         };
         if strict_kex && session.common.encrypted.is_none() {
-            // a KEX packet, and `guess_ignored` is set only after that, so this cannot underflow.
+            // seqn was incremented after read(). The ignored guess was validated at seqno 1 as a KEX packet, and `guess_ignored` is set only after that, so this cannot underflow.
             let seqno = pkt.seqn.0 - 1 - u32::from(guess_ignored);
             validate_client_msg_strict_kex(*message_type, seqno as usize)?;
         }
