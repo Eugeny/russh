@@ -193,32 +193,23 @@ pub fn load_public_key<P: AsRef<Path>>(path: P) -> Result<ssh_key::PublicKey, Er
     let mut file = File::open(path.as_ref())?;
     file.read_to_string(&mut pubkey)?;
 
-    let line = pubkey.trim_start().lines().next().unwrap_or_default();
-    let (first, rest) = split_field(line);
-    if first.is_empty() {
-        return Err(Error::CouldNotReadKey);
-    }
-    if rest.is_empty() {
-        return parse_public_key_base64(first);
-    }
-
-    // `<algorithm> <base64> [comment]`, where the comment may contain spaces.
-    let (key, comment) = split_field(rest);
+    // First non-blank, non-`#` line: `<algorithm> <base64> [comment]` or a
+    // bare base64 blob. The comment may contain spaces.
+    let line = pubkey
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty() && !l.starts_with('#'))
+        .ok_or(Error::CouldNotReadKey)?;
+    let Some((_, rest)) = line.split_once(char::is_whitespace) else {
+        return parse_public_key_base64(line);
+    };
+    let rest = rest.trim_start();
+    let (key, comment) = rest
+        .split_once(char::is_whitespace)
+        .unwrap_or((rest, ""));
     let mut key = parse_public_key_base64(key)?;
-    if !comment.is_empty() {
-        key.set_comment(comment);
-    }
+    key.set_comment(comment.trim_start());
     Ok(key)
-}
-
-/// Splits off the first whitespace-delimited field, returning it and the
-/// remainder with surrounding whitespace removed.
-fn split_field(s: &str) -> (&str, &str) {
-    let s = s.trim();
-    match s.find(char::is_whitespace) {
-        Some(i) => (&s[..i], s[i..].trim_start()),
-        None => (s, ""),
-    }
 }
 
 /// Reads a public key from the standard encoding. In some cases, the
@@ -366,6 +357,14 @@ QR+u0AypRPmzHnOPAAAAEXJvb3RAMTQwOTExNTQ5NDBkAQ==
 
         let key = load(&format!("{KEY}\n"));
         assert!(key.comment().is_empty());
+
+        let key = load(&format!("# a comment line\r\n\r\nssh-ed25519\t{KEY}  tabs and crlf \r\n"));
+        assert_eq!(key.comment().to_string(), "tabs and crlf");
+
+        for bad in ["", "\n# only a comment\n", "ssh-ed25519 not-base64\n"] {
+            std::fs::write(&path, bad).unwrap();
+            assert!(load_public_key(&path).is_err(), "{bad:?}");
+        }
     }
 
     #[test]
