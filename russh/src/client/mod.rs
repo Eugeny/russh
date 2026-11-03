@@ -1954,12 +1954,14 @@ async fn reply<H: Handler>(
             pkt.seqn.0,
             pkt.buffer.len()
         );
-        let strict_kex = match session.kex {
-            SessionKexState::InProgress(ref kex) => kex.strict_kex(),
-            _ => session.common.strict_kex,
+        let (strict_kex, guess_ignored) = match session.kex {
+            SessionKexState::InProgress(ref kex) => (kex.strict_kex(), kex.guess_ignored()),
+            _ => (session.common.strict_kex, false),
         };
         if strict_kex && session.common.encrypted.is_none() {
-            let seqno = pkt.seqn.0 - 1; // was incremented after read()
+            // seqn was incremented after read(). The ignored guess was validated at seqno 1 as
+            // a KEX packet, and `guess_ignored` is set only after that, so this cannot underflow.
+            let seqno = pkt.seqn.0 - 1 - u32::from(guess_ignored);
             validate_server_msg_strict_kex(*message_type, seqno as usize)?;
         }
 

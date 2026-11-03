@@ -50,9 +50,9 @@ pub struct Names {
     pub server_compression: compression::Compression,
     pub client_compression: compression::Compression,
     pub ignore_guessed: bool,
-    /// A wrong `first_kex_packet_follows` guess was received and ignored: the peer's real KEX packet
-    /// and everything after it arrive one sequence number later than the strict-kex order expects.
-    pub guessed_ignored: bool,
+    /// A wrong `first_kex_packet_follows` guess was ignored (RFC 4253 §7.1). The peer's
+    /// remaining KEX packets are one sequence number later than the strict-kex order expects.
+    pub(crate) guessed_ignored: bool,
     /// Whether `key` was negotiated as a certificate algorithm or not
     pub(crate) host_key_is_certificate: bool,
     // Prevent accidentally contructing [Names] without a [KeyCause]

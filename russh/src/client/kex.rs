@@ -106,6 +106,16 @@ impl ClientKex {
         }
     }
 
+    /// See [`Names::guessed_ignored`].
+    pub fn guess_ignored(&self) -> bool {
+        match self.state {
+            ClientKexState::Created => false,
+            ClientKexState::WaitingForGexReply { ref names, .. }
+            | ClientKexState::WaitingForDhReply { ref names, .. } => names.guessed_ignored,
+            ClientKexState::WaitingForNewKeys { ref newkeys, .. } => newkeys.names.guessed_ignored,
+        }
+    }
+
     pub fn kexinit(&mut self, output: &mut PacketWriter) -> Result<(), Error> {
         self.exchange.client_kex_init =
             negotiation::write_kex(&self.config.preferred, output, None)?;
@@ -262,6 +272,7 @@ impl ClientKex {
                     // Ignore the next packet if (1) it follows and (2) it's not the correct guess.
                     debug!("ignoring guessed kex");
                     names.ignore_guessed = false;
+                    names.guessed_ignored = true;
                     self.state = ClientKexState::WaitingForDhReply { names, kex };
                     return Ok(KexProgress::NeedsReply {
                         kex: self,
