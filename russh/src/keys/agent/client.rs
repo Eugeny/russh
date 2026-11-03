@@ -218,8 +218,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
         let len = self.buf.len() - 4;
         BigEndian::write_u32(&mut self.buf[..], len as u32);
 
-        self.read_success().await?;
-        Ok(())
+        self.read_success().await
     }
 
     /// Add a smart card to the agent, with a (possibly empty) set of
@@ -261,8 +260,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
         }
         let len = self.buf.len() - 4;
         BigEndian::write_u32(&mut self.buf[..], len as u32);
-        self.read_response().await?;
-        Ok(())
+        self.read_success().await
     }
 
     /// Lock the agent, making it refuse to sign until unlocked.
@@ -273,8 +271,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
         passphrase.encode(&mut self.buf)?;
         let len = self.buf.len() - 4;
         BigEndian::write_u32(&mut self.buf[..], len as u32);
-        self.read_response().await?;
-        Ok(())
+        self.read_success().await
     }
 
     /// Unlock the agent, allowing it to sign again.
@@ -286,8 +283,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
         let len = self.buf.len() - 4;
         #[allow(clippy::indexing_slicing)] // static length
         BigEndian::write_u32(&mut self.buf[..], len as u32);
-        self.read_response().await?;
-        Ok(())
+        self.read_success().await
     }
 
     /// Ask the agent for a list of identities, including certificates.
@@ -558,8 +554,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
         public.key_data().encoded()?.encode(&mut self.buf)?;
         let len = self.buf.len() - 4;
         BigEndian::write_u32(&mut self.buf[..], len as u32);
-        self.read_response().await?;
-        Ok(())
+        self.read_success().await
     }
 
     /// Ask the agent to remove a smartcard from its memory.
@@ -571,8 +566,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
         pin.encode(&mut self.buf)?;
         let len = self.buf.len() - 4;
         BigEndian::write_u32(&mut self.buf[..], len as u32);
-        self.read_response().await?;
-        Ok(())
+        self.read_success().await
     }
 
     /// Ask the agent to forget all known keys.
@@ -581,8 +575,7 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
         self.buf.resize(4, 0);
         msg::REMOVE_ALL_IDENTITIES.encode(&mut self.buf)?;
         1u32.encode(&mut self.buf)?;
-        self.read_success().await?;
-        Ok(())
+        self.read_success().await
     }
 
     /// Send a custom message to the agent.
@@ -595,7 +588,12 @@ impl<S: AgentStream + Unpin> AgentClient<S> {
         let len = self.buf.len() - 4;
         (len as u32).encode(&mut self.buf)?;
         self.read_response().await?;
-        Ok(())
+        // draft-miller-ssh-agent 4.7: a supported extension may reply with
+        // SUCCESS or EXTENSION_RESPONSE; anything else is a failure.
+        match self.buf.first() {
+            Some(&msg::SUCCESS) | Some(&msg::EXTENSION_RESPONSE) => Ok(()),
+            _ => Err(Error::AgentFailure),
+        }
     }
 
     /// Ask the agent what extensions about supported extensions.
@@ -623,8 +621,55 @@ mod tests {
     use byteorder::{BigEndian, ByteOrder};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-    use super::{AgentClient, MAX_AGENT_FRAME_LEN};
+    use super::{msg, AgentClient, MAX_AGENT_FRAME_LEN};
     use crate::keys::Error;
+
+    /// Runs `op` against an agent that answers every request with `reply`.
+    fn with_reply<F, T>(reply: &'static [u8], op: F) -> Result<T, Error>
+    where
+        F: for<'a> FnOnce(
+            &'a mut AgentClient<tokio::io::DuplexStream>,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<T, Error>> + 'a>,
+        >,
+    {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let (mut writer, reader) = tokio::io::duplex(64);
+            tokio::spawn(async move {
+                let mut frame = [0u8; 4];
+                writer.read_exact(&mut frame).await?;
+                let mut body = vec![0; BigEndian::read_u32(&frame) as usize];
+                writer.read_exact(&mut body).await?;
+                BigEndian::write_u32(&mut frame, reply.len() as u32);
+                writer.write_all(&frame).await?;
+                writer.write_all(reply).await?;
+                Ok::<(), std::io::Error>(())
+            });
+            let mut client = AgentClient::connect(reader);
+            op(&mut client).await
+        })
+    }
+
+    #[test]
+    fn failure_reply_is_an_error() {
+        let err = with_reply(&[msg::FAILURE], |c| Box::pin(c.lock(b"pw"))).unwrap_err();
+        assert!(matches!(err, Error::AgentFailure));
+        let err = with_reply(&[msg::FAILURE], |c| Box::pin(c.extension(b"x", b""))).unwrap_err();
+        assert!(matches!(err, Error::AgentFailure));
+    }
+
+    #[test]
+    fn extension_accepts_success_and_extension_response() {
+        with_reply(&[msg::SUCCESS], |c| Box::pin(c.extension(b"x", b""))).unwrap();
+        with_reply(&[msg::EXTENSION_RESPONSE, 1, 2, 3], |c| {
+            Box::pin(c.extension(b"x", b""))
+        })
+        .unwrap();
+    }
 
     #[test]
     fn oversized_agent_response_is_rejected_before_allocation() -> std::io::Result<()> {
