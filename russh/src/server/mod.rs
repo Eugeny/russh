@@ -56,7 +56,7 @@ use crate::ssh_read::*;
 use crate::sshbuffer::*;
 use crate::*;
 
-mod kex;
+pub(crate) mod kex;
 mod session;
 pub use self::session::*;
 mod encrypted;
@@ -99,6 +99,12 @@ pub struct Config {
     pub keepalive_max: usize,
     /// If active, invoke `set_nodelay(true)` on client sockets; disabled by default (i.e. Nagle's algorithm is active).
     pub nodelay: bool,
+    /// Test-only host key presented instead of the configured one in every
+    /// rekey (never in the initial exchange), so tests can rotate the host
+    /// key between exchanges. It is used only when it is compatible with
+    /// the negotiated host key algorithm and no certificate was negotiated.
+    #[cfg(test)]
+    pub(crate) rekey_host_key: Option<PrivateKey>,
 }
 
 impl Default for Config {
@@ -126,6 +132,8 @@ impl Default for Config {
             keepalive_interval: None,
             keepalive_max: 3,
             nodelay: false,
+            #[cfg(test)]
+            rekey_host_key: None,
         }
     }
 }

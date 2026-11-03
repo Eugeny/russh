@@ -109,6 +109,33 @@ impl ServerKex {
         }
     }
 
+    /// Test-only host key that replaces the configured one in a rekey, so
+    /// tests can rotate the host key between exchanges. It applies only to
+    /// rekeys and only when it is compatible with the negotiated algorithm.
+    /// Takes the fields it reads rather than `&self`, because the caller
+    /// holds a mutable borrow of the exchange at that point.
+    #[cfg(test)]
+    fn rekey_override_key<'a>(
+        config: &'a Config,
+        cause: &KexCause,
+        names: &Names,
+    ) -> Option<&'a PrivateKey> {
+        config
+            .rekey_host_key
+            .as_ref()
+            .filter(|key| cause.is_rekey() && is_key_compatible_with_algo(key, &names.key))
+    }
+
+    /// Release builds always present the configured host keys.
+    #[cfg(not(test))]
+    fn rekey_override_key<'a>(
+        _config: &'a Config,
+        _cause: &KexCause,
+        _names: &Names,
+    ) -> Option<&'a PrivateKey> {
+        None
+    }
+
     pub fn kexinit(&mut self, output: &mut PacketWriter) -> Result<(), Error> {
         self.exchange.server_kex_init =
             negotiation::write_kex(&self.config.preferred, output, Some(self.config.as_ref()))?;
@@ -309,12 +336,15 @@ impl ServerKex {
                         })
                         .ok_or(Error::UnknownKey)?
                 } else {
-                    let key = self
-                        .config
-                        .keys
-                        .iter()
-                        .find(|key| is_key_compatible_with_algo(key, &names.key))
-                        .ok_or(Error::UnknownKey)?;
+                    let key = match Self::rekey_override_key(&self.config, &self.cause, &names) {
+                        Some(key) => key,
+                        None => self
+                            .config
+                            .keys
+                            .iter()
+                            .find(|key| is_key_compatible_with_algo(key, &names.key))
+                            .ok_or(Error::UnknownKey)?,
+                    };
                     (key, None)
                 };
 
