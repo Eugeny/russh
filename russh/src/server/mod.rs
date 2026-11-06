@@ -239,6 +239,53 @@ pub struct VerifiedPublicKey<'a> {
     /// algorithm named in the request (`ssh-rsa`, `rsa-sha2-256`,
     /// `ssh-ed25519`, ...).
     pub algorithm: &'a ssh_key::Algorithm,
+    /// The verified signature.
+    ///
+    /// For a FIDO key (`sk-ssh-ed25519@openssh.com`,
+    /// `sk-ecdsa-sha2-nistp256@openssh.com`, see OpenSSH's PROTOCOL.u2f),
+    /// the signature bytes end with the authenticator's flags byte and its
+    /// big-endian 32-bit counter, both covered by the signature.
+    /// [`sk_flags`](Self::sk_flags) and [`sk_counter`](Self::sk_counter)
+    /// read them.
+    pub signature: &'a ssh_key::Signature,
+}
+
+impl VerifiedPublicKey<'_> {
+    /// User presence flag of a FIDO signature: the key was touched.
+    pub const SK_USER_PRESENT: u8 = 0x01;
+    /// User verification flag of a FIDO signature: the authenticator
+    /// verified the user (PIN or biometrics).
+    pub const SK_USER_VERIFIED: u8 = 0x04;
+
+    /// The authenticator flags of a FIDO (`sk-*`) signature, or `None`
+    /// for any other algorithm.
+    ///
+    /// russh verifies the signature but does not judge these flags: the
+    /// handler decides which ones it requires. OpenSSH requires
+    /// [`SK_USER_PRESENT`](Self::SK_USER_PRESENT) unless the key has the
+    /// `no-touch-required` option, and also
+    /// [`SK_USER_VERIFIED`](Self::SK_USER_VERIFIED) for a key with the
+    /// `verify-required` option.
+    pub fn sk_flags(&self) -> Option<u8> {
+        self.sk_trailer().map(|(flags, _)| flags)
+    }
+
+    /// The signature counter of a FIDO (`sk-*`) signature, or `None` for
+    /// any other algorithm.
+    pub fn sk_counter(&self) -> Option<u32> {
+        self.sk_trailer().map(|(_, counter)| counter)
+    }
+
+    fn sk_trailer(&self) -> Option<(u8, u32)> {
+        match self.signature.algorithm() {
+            ssh_key::Algorithm::SkEd25519 | ssh_key::Algorithm::SkEcdsaSha2NistP256 => {
+                let (_, [flags, counter @ ..]) =
+                    self.signature.as_bytes().split_last_chunk::<5>()?;
+                Some((*flags, u32::from_be_bytes(*counter)))
+            }
+            _ => None,
+        }
+    }
 }
 
 /// Server handler. Each client will have their own handler.
