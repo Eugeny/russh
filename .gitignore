@@ -2,7 +2,6 @@
 .DS_Store
 .pijul
 target
-Cargo.lock
 .cargo-ok
 ca-test*
 /.vscode
