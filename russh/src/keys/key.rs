@@ -186,8 +186,10 @@ mod test {
 
     #[test]
     fn deeply_nested_certificate_is_rejected() {
-        // Shallow chain is well-formed and still decodes.
-        assert!(super::parse_public_key(&nested_cert(2)).is_ok());
+        // A single certificate is well-formed and still decodes.
+        assert!(super::parse_public_key(&nested_cert(1)).is_ok());
+        // A certificate key used as a CA key is rejected (draft-ietf-sshm-cert §2.1.1).
+        assert!(super::parse_public_key(&nested_cert(2)).is_err());
         // One packet's worth of nesting; without the guard this aborts on stack overflow.
         let deep = nested_cert(2848);
         assert!(super::parse_public_key(&deep).is_err());

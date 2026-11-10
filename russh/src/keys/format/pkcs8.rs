@@ -46,8 +46,8 @@ fn pkcs8_pki_into_keypair_data(pki: PrivateKeyInfoRef<'_>) -> Result<KeypairData
     // Temporary if {} due to multiple const_oid crate versions
     #[cfg(feature = "rsa")]
     if pki.algorithm.oid.as_bytes() == pkcs1::ALGORITHM_OID.as_bytes() {
-        let sk = &pkcs1::RsaPrivateKey::try_from(pki.private_key)?;
-        let pk = rsa::RsaPrivateKey::from_components(
+        let sk = &pkcs1::RsaPrivateKeyRef::try_from(pki.private_key)?;
+        let pk = rsa::PrivateKey::from_components(
             rsa::BoxedUint::from_be_slice_vartime(sk.modulus.as_bytes()),
             rsa::BoxedUint::from_be_slice_vartime(sk.public_exponent.as_bytes()),
             rsa::BoxedUint::from_be_slice_vartime(sk.private_exponent.as_bytes()),
@@ -244,7 +244,7 @@ pub fn encode_pkcs8(key: &ssh_key::PrivateKey) -> Result<Vec<u8>, Error> {
         #[cfg(feature = "rsa")]
         ssh_key::private::KeypairData::Rsa(pair) => {
             use rsa::pkcs8::EncodePrivateKey;
-            let sk: rsa::RsaPrivateKey = pair.try_into()?;
+            let sk: rsa::PrivateKey = pair.try_into()?;
             sk.to_pkcs8_der()?.as_bytes().to_vec()
         }
         ssh_key::private::KeypairData::Ecdsa(pair) => match pair {
