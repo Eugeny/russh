@@ -103,6 +103,12 @@ pub struct Session {
     server_sig_algs: Option<Vec<Algorithm>>,
     /// Number of EXT_INFO messages received (RFC 8308 allows at most two).
     ext_info_count: u8,
+    /// Host key or certificate accepted in the most recent successful key
+    /// exchange: set once [`Handler::check_server_key`] accepts the server,
+    /// and replaced whenever [`Handler::check_server_key_rekey`] accepts a
+    /// rekey. A rejected key is never stored. `None` until the initial
+    /// exchange completes, or when no exchange presented a key (`none` KEX).
+    accepted_server_key: Option<PublicKeyOrCertificate>,
 }
 
 impl Drop for Session {
@@ -1068,6 +1074,11 @@ impl<H: Handler> Handle<H> {
     }
 
     /// Asynchronously perform a session re-key at the next opportunity
+    ///
+    /// This only queues the request and returns before the rekey completes.
+    /// When the rekey completes, the server's host key or certificate is
+    /// passed to [`Handler::check_server_key_rekey`], and a rejection closes
+    /// the connection.
     pub async fn rekey_soon(&self) -> Result<(), Error> {
         self.sender
             .send(Msg::Rekey)
@@ -1335,6 +1346,7 @@ impl Session {
             open_global_requests: VecDeque::new(),
             server_sig_algs: None,
             ext_info_count: 0,
+            accepted_server_key: None,
         }
     }
 
@@ -2033,8 +2045,51 @@ async fn reply<H: Handler>(
                     session.common.strict_kex =
                         session.common.strict_kex || newkeys.names.strict_kex();
 
+                    // A certificate replaces the key check rather than
+                    // adding to it. The key inside a certificate is not
+                    // something the client was ever told to trust — asking
+                    // about it as well would invite an implementation to
+                    // answer yes to the wrong question.
+                    let presented: Option<PublicKeyOrCertificate> =
+                        match (server_host_certificate, server_host_key) {
+                            (Some(certificate), _) => Some(certificate.into()),
+                            (None, Some(server_host_key)) => Some(server_host_key.into()),
+                            // The `none` KEX presents no host key, so there
+                            // is nothing to check.
+                            (None, None) => None,
+                        };
+
                     if session.common.encrypted.is_some() {
                         // This is a rekey
+                        //
+                        // The check runs before `kex_done`, before the new
+                        // keys take effect and before any pending data is
+                        // flushed, so a rejected server never receives
+                        // application data under the new keys and the shared
+                        // secret never reaches the application.
+                        if let Some(presented) = presented {
+                            let Some(previous) = session.accepted_server_key.as_ref() else {
+                                // Nothing is stored when the initial exchange
+                                // negotiated `none` (possible when the client
+                                // allows it) and so presented no host key. A
+                                // rekey that now presents one has nothing to
+                                // be compared with, and accepting it unchecked
+                                // would let the server choose its identity
+                                // after the fact, so the connection is closed.
+                                return Err(crate::Error::Inconsistent.into());
+                            };
+                            let accepted = handler
+                                .check_server_key_rekey(RekeyServerKey {
+                                    presented: &presented,
+                                    previous,
+                                })
+                                .await?;
+                            if !accepted {
+                                return Err(crate::Error::UnknownKey.into());
+                            }
+                            session.accepted_server_key = Some(presented);
+                        }
+
                         handler
                             .kex_done(newkeys.kex.shared_secret_bytes(), &newkeys.names, session)
                             .await?;
@@ -2058,20 +2113,11 @@ async fn reply<H: Handler>(
                         session.pending_len = 0;
                     } else {
                         // This is the initial kex
-                        // A certificate replaces the key check rather than
-                        // adding to it. The key inside a certificate is not
-                        // something the client was ever told to trust — asking
-                        // about it as well would invite an implementation to
-                        // answer yes to the wrong question.
-                        if let Some(certificate) = server_host_certificate {
-                            if !handler.check_server_key(&certificate.into()).await? {
+                        if let Some(presented) = presented {
+                            if !handler.check_server_key(&presented).await? {
                                 return Err(crate::Error::UnknownKey.into());
                             }
-                        } else if let Some(server_host_key) = server_host_key {
-                            let check = handler.check_server_key(&server_host_key.into()).await?;
-                            if !check {
-                                return Err(crate::Error::UnknownKey.into());
-                            }
+                            session.accepted_server_key = Some(presented);
                         }
 
                         handler
@@ -2388,6 +2434,388 @@ mod tests {
 
         session.initiate_rekey().unwrap();
         assert!(session.kex.active());
+    }
+
+    /// Client handler for the rekey tests below: answers
+    /// `check_server_key_rekey` with a fixed verdict and records what it was
+    /// asked, as `(presented, previous)` pairs.
+    #[derive(Default)]
+    struct RekeyProbe {
+        reject: bool,
+        seen: Vec<(PublicKeyOrCertificate, PublicKeyOrCertificate)>,
+    }
+
+    impl RekeyProbe {
+        fn rejecting() -> Self {
+            Self {
+                reject: true,
+                ..Self::default()
+            }
+        }
+    }
+
+    impl Handler for RekeyProbe {
+        type Error = crate::Error;
+
+        async fn check_server_key_rekey(
+            &mut self,
+            server_key: RekeyServerKey<'_>,
+        ) -> Result<bool, Self::Error> {
+            self.seen
+                .push((copy_identity(server_key.presented), copy_identity(server_key.previous)));
+            Ok(!self.reject)
+        }
+    }
+
+    /// `PublicKeyOrCertificate` is not `Clone`; tests copy what they compare.
+    fn copy_identity(identity: &PublicKeyOrCertificate) -> PublicKeyOrCertificate {
+        match identity {
+            PublicKeyOrCertificate::PublicKey { key, .. } => key.clone().into(),
+            PublicKeyOrCertificate::Certificate(certificate) => certificate.clone().into(),
+        }
+    }
+
+    /// Server handler for `ServerKex`; the rekeys below need no callbacks.
+    struct ServerSide;
+
+    impl crate::server::Handler for ServerSide {
+        type Error = crate::Error;
+    }
+
+    /// Takes the payloads of the cleartext packets written to `writer` so
+    /// far, leaving it empty so later writes can be told apart.
+    fn take_packets(writer: &mut PacketWriter) -> Vec<Vec<u8>> {
+        let buffer = &mut writer.buffer().buffer;
+        let mut payloads = Vec::new();
+        let mut rest = &buffer[..];
+        while !rest.is_empty() {
+            let packet_len = u32::from_be_bytes(rest[..4].try_into().unwrap()) as usize;
+            let padding_len = rest[4] as usize;
+            payloads.push(rest[5..4 + packet_len - padding_len].to_vec());
+            rest = &rest[4 + packet_len..];
+        }
+        buffer.clear();
+        payloads
+    }
+
+    fn packet(payload: Vec<u8>) -> IncomingSshPacket {
+        IncomingSshPacket {
+            buffer: payload,
+            seqn: Wrapping(0),
+        }
+    }
+
+    /// Hands one packet from the server to the client.
+    async fn feed<H: Handler>(
+        session: &mut Session,
+        handler: &mut H,
+        payload: Vec<u8>,
+    ) -> Result<(), H::Error> {
+        super::reply(session, handler, &mut None, &mut packet(payload)).await
+    }
+
+    fn ed25519_key() -> PrivateKey {
+        PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap()
+    }
+
+    /// A host certificate for `host_key`, signed by a throwaway CA.
+    fn host_certificate(host_key: &PrivateKey) -> Certificate {
+        use ssh_key::certificate::{Builder, CertType};
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let mut builder = Builder::new_with_random_nonce(
+            &mut rand::rng(),
+            host_key.public_key().clone(),
+            now,
+            now + 3600,
+        )
+        .unwrap();
+        builder.cert_type(CertType::Host).unwrap();
+        builder.valid_principal("localhost").unwrap();
+        builder.sign(&ed25519_key()).unwrap()
+    }
+
+    /// What the server presents in the rekey.
+    enum Presents {
+        Key,
+        Certificate,
+        /// The `none` exchange, which presents no host key.
+        Nothing,
+    }
+
+    const REKEY_DATA: &[u8] = b"written while the rekey runs";
+
+    /// A rekey in progress on an authenticated session with one open channel.
+    struct Rekey {
+        session: Session,
+        channel: crate::ChannelId,
+        /// What the server presented in the rekey.
+        presented: Option<PublicKeyOrCertificate>,
+    }
+
+    /// Starts a rekey on an authenticated session that has `previous` as its
+    /// accepted host key, queues `REKEY_DATA` on a channel while it runs, and
+    /// plays the server side with the crate's own `ServerKex` up to its
+    /// NEWKEYS. `handler` receives every packet the client processes, so with
+    /// `Presents::Nothing`, whose exchange completes on the server's KEXINIT,
+    /// the rekey has already finished when this returns.
+    async fn start_rekey<H: Handler>(
+        handler: &mut H,
+        previous: Option<PublicKeyOrCertificate>,
+        presents: Presents,
+    ) -> Rekey {
+        // Both sides offer one exchange: curve25519 for a host key, `none`
+        // for no host key, whatever the default order or enabled features.
+        let kex: &'static [crate::kex::Name] = match presents {
+            Presents::Nothing => &[NONE],
+            Presents::Key | Presents::Certificate => &[crate::kex::CURVE25519],
+        };
+
+        let host_key = ed25519_key();
+        let mut server_config = crate::server::Config::default();
+        server_config.preferred.kex = Cow::Borrowed(kex);
+        let presented = match presents {
+            Presents::Key => Some(host_key.public_key().clone().into()),
+            Presents::Certificate => {
+                let certificate = host_certificate(&host_key);
+                server_config.certificates.push(certificate.clone());
+                Some(certificate.into())
+            }
+            Presents::Nothing => None,
+        };
+        server_config.keys.push(host_key);
+
+        let (mut session, _sender, _replies) = keyboard_interactive_session();
+        allow_rekey(&mut session, crate::Limits::default());
+        let client_config = Arc::get_mut(&mut session.common.config).unwrap();
+        client_config.preferred.kex = Cow::Borrowed(kex);
+        if let Presents::Certificate = presents {
+            client_config.preferred.host_key_certificates = Cow::Borrowed(&[Algorithm::Ed25519]);
+        }
+        session.accepted_server_key = previous;
+        let channel = crate::ChannelId(7);
+        let enc = session.common.encrypted.as_mut().unwrap();
+        enc.state = EncryptedState::Authenticated;
+        enc.channels.insert(
+            channel,
+            crate::ChannelParams {
+                recipient_channel: 7,
+                sender_channel: channel,
+                recipient_window_size: 1 << 20,
+                sender_window_size: 1 << 20,
+                recipient_maximum_packet_size: 32768,
+                sender_maximum_packet_size: 32768,
+                confirmed: true,
+                wants_reply: false,
+                pending_data: VecDeque::new(),
+                pending_eof: false,
+                pending_close: false,
+            },
+        );
+
+        session.initiate_rekey().unwrap();
+        session.data(channel, REKEY_DATA).unwrap();
+        assert!(session.common.encrypted.as_ref().unwrap().has_pending_data(channel));
+        let [client_kexinit] = &take_packets(&mut session.common.packet_writer)[..] else {
+            panic!("expected exactly the client's KEXINIT");
+        };
+        let client_kexinit = client_kexinit.clone();
+
+        let mut server = crate::server::kex::ServerKex::new(
+            Arc::new(server_config),
+            session.common.config.client_id.as_kex_hash_bytes(),
+            &SshId::Standard(Cow::Borrowed("SSH-2.0-test")),
+            KexCause::Rekey {
+                strict: false,
+                session_id: CryptoVec::new(),
+            },
+        );
+        let mut server_out = PacketWriter::clear();
+        server.kexinit(&mut server_out).unwrap();
+        let [server_kexinit] = &take_packets(&mut server_out)[..] else {
+            panic!("expected exactly the server's KEXINIT");
+        };
+        feed(&mut session, handler, server_kexinit.clone())
+            .await
+            .unwrap_or_else(|_| panic!("client rejected the server's KEXINIT"));
+
+        let mut server_side = ServerSide;
+        let mut client_kexinit = packet(client_kexinit);
+        let progress = server
+            .step(Some(&mut client_kexinit), &mut server_out, &mut server_side)
+            .await
+            .unwrap();
+        if let KexProgress::NeedsReply { kex: server, .. } = progress {
+            let [client_dh] = &take_packets(&mut session.common.packet_writer)[..] else {
+                panic!("expected exactly one key exchange packet from the client");
+            };
+            let mut client_dh = packet(client_dh.clone());
+            server
+                .step(Some(&mut client_dh), &mut server_out, &mut server_side)
+                .await
+                .unwrap();
+            let [reply, newkeys] = &take_packets(&mut server_out)[..] else {
+                panic!("expected the server's key exchange reply and NEWKEYS");
+            };
+            assert_eq!(newkeys, &[msg::NEWKEYS]);
+            // The client verifies the signature and sends its own NEWKEYS.
+            feed(&mut session, handler, reply.clone())
+                .await
+                .unwrap_or_else(|_| panic!("client rejected the server's key exchange reply"));
+            assert_eq!(
+                take_packets(&mut session.common.packet_writer),
+                [vec![msg::NEWKEYS]]
+            );
+            assert!(session.common.encrypted.as_ref().unwrap().has_pending_data(channel));
+        }
+
+        Rekey {
+            session,
+            channel,
+            presented,
+        }
+    }
+
+    impl Rekey {
+        /// Feeds the server's NEWKEYS, which completes the rekey.
+        async fn finish(&mut self, handler: &mut RekeyProbe) -> Result<(), crate::Error> {
+            feed(&mut self.session, handler, vec![msg::NEWKEYS]).await
+        }
+
+        fn wrote_nothing(&mut self) -> bool {
+            self.session.common.packet_writer.buffer().buffer.is_empty()
+        }
+
+        fn data_pending(&self) -> bool {
+            let enc = self.session.common.encrypted.as_ref().unwrap();
+            enc.has_pending_data(self.channel)
+        }
+    }
+
+    fn some_key() -> Option<PublicKeyOrCertificate> {
+        Some(ed25519_key().public_key().clone().into())
+    }
+
+    fn is_certificate(identity: &PublicKeyOrCertificate) -> bool {
+        matches!(identity, PublicKeyOrCertificate::Certificate(_))
+    }
+
+    /// Control for the tests below: once the rekey is accepted, the data
+    /// queued during it is written under the new keys right away.
+    #[tokio::test]
+    async fn accepted_rekey_writes_queued_data_under_the_new_keys() {
+        let mut probe = RekeyProbe::default();
+        let mut rekey = start_rekey(&mut probe, some_key(), Presents::Key).await;
+        rekey.finish(&mut probe).await.unwrap();
+
+        assert_eq!(probe.seen.len(), 1);
+        assert!(!rekey.wrote_nothing());
+        assert!(!rekey.data_pending());
+    }
+
+    /// A rekey rejected by `check_server_key_rekey` writes nothing under the
+    /// new keys: the data queued during the rekey is not flushed, and no
+    /// packet at all follows the server's NEWKEYS.
+    #[tokio::test]
+    async fn rejected_rekey_writes_nothing_under_the_new_keys() {
+        let mut probe = RekeyProbe::rejecting();
+        let mut rekey = start_rekey(&mut probe, some_key(), Presents::Key).await;
+        let err = rekey.finish(&mut probe).await.unwrap_err();
+
+        assert!(matches!(err, crate::Error::UnknownKey), "{err:?}");
+        assert!(rekey.wrote_nothing());
+        assert!(rekey.data_pending());
+    }
+
+    /// After an initial `none` exchange there is no accepted key, so a rekey
+    /// that presents one closes the session with `Inconsistent` instead of
+    /// asking the handler, and writes nothing.
+    #[tokio::test]
+    async fn rekey_presenting_a_key_after_none_exchange_is_inconsistent() {
+        let mut probe = RekeyProbe::default();
+        let mut rekey = start_rekey(&mut probe, None, Presents::Key).await;
+        let err = rekey.finish(&mut probe).await.unwrap_err();
+
+        assert!(matches!(err, crate::Error::Inconsistent), "{err:?}");
+        assert!(probe.seen.is_empty());
+        assert!(rekey.wrote_nothing());
+        assert!(rekey.data_pending());
+        assert!(rekey.session.accepted_server_key.is_none());
+    }
+
+    /// A rekey negotiated with `none` presents no host key: the check is
+    /// skipped, the previously accepted key is kept, and the queued data is
+    /// written.
+    #[tokio::test]
+    async fn none_rekey_skips_the_check_and_keeps_the_accepted_key() {
+        let mut probe = RekeyProbe::default();
+        let previous = ed25519_key().public_key().clone();
+        let rekey = start_rekey(&mut probe, Some(previous.clone().into()), Presents::Nothing).await;
+
+        assert!(rekey.presented.is_none());
+        assert!(probe.seen.is_empty(), "no host key, no check");
+        assert!(!rekey.data_pending());
+        match &rekey.session.accepted_server_key {
+            Some(PublicKeyOrCertificate::PublicKey { key, .. }) => assert_eq!(key, &previous),
+            other => panic!("accepted key changed: {other:?}"),
+        }
+    }
+
+    /// A rekey that switches from a plain key to a certificate passes both
+    /// as they are, and the certificate becomes the accepted identity.
+    #[tokio::test]
+    async fn rekey_from_key_to_certificate_passes_both() {
+        let mut probe = RekeyProbe::default();
+        let mut rekey = start_rekey(&mut probe, some_key(), Presents::Certificate).await;
+        rekey.finish(&mut probe).await.unwrap();
+
+        let [(presented, previous)] = &probe.seen[..] else {
+            panic!("expected one check, got {}", probe.seen.len());
+        };
+        assert!(is_certificate(presented));
+        assert!(!is_certificate(previous));
+        let accepted = rekey.session.accepted_server_key.as_ref().unwrap();
+        assert!(is_certificate(accepted));
+    }
+
+    /// A rekey that switches from a certificate to a plain key passes both
+    /// as they are, and the key becomes the accepted identity.
+    #[tokio::test]
+    async fn rekey_from_certificate_to_key_passes_both() {
+        let mut probe = RekeyProbe::default();
+        let previous = host_certificate(&ed25519_key()).into();
+        let mut rekey = start_rekey(&mut probe, Some(previous), Presents::Key).await;
+        rekey.finish(&mut probe).await.unwrap();
+
+        let [(presented, previous)] = &probe.seen[..] else {
+            panic!("expected one check, got {}", probe.seen.len());
+        };
+        assert!(!is_certificate(presented));
+        assert!(is_certificate(previous));
+        let accepted = rekey.session.accepted_server_key.as_ref().unwrap();
+        assert!(!is_certificate(accepted));
+    }
+
+    /// A rejected certificate closes the session with `UnknownKey`, writes
+    /// nothing under the new keys and keeps the previously accepted key.
+    #[tokio::test]
+    async fn rejected_certificate_rekey_writes_nothing() {
+        let mut probe = RekeyProbe::rejecting();
+        let mut rekey = start_rekey(&mut probe, some_key(), Presents::Certificate).await;
+        let err = rekey.finish(&mut probe).await.unwrap_err();
+
+        assert!(matches!(err, crate::Error::UnknownKey), "{err:?}");
+        let [(presented, _)] = &probe.seen[..] else {
+            panic!("expected one check, got {}", probe.seen.len());
+        };
+        assert!(is_certificate(presented));
+        assert!(rekey.wrote_nothing());
+        assert!(rekey.data_pending());
+        let accepted = rekey.session.accepted_server_key.as_ref().unwrap();
+        assert!(!is_certificate(accepted));
     }
 
     /// Drives the client event loop on one end of an in-memory stream and
@@ -2772,6 +3200,29 @@ impl Default for Config {
     }
 }
 
+/// The server host key or certificate presented in a rekey, passed to
+/// [`Handler::check_server_key_rekey`].
+///
+/// Only russh creates values of this type, after verifying the server's
+/// signature over the exchange hash of the rekey.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy)]
+pub struct RekeyServerKey<'a> {
+    /// The host key or certificate the server presented in this rekey.
+    ///
+    /// When the server presented a certificate, this is the certificate
+    /// only, never the key embedded in it, as in
+    /// [`Handler::check_server_key`].
+    pub presented: &'a PublicKeyOrCertificate,
+    /// The host key or certificate most recently accepted, by
+    /// [`Handler::check_server_key`] or by a previous
+    /// [`Handler::check_server_key_rekey`]. A rekey negotiated with `none`
+    /// presents no key and does not replace it. It is not necessarily the
+    /// key of the initial exchange; a handler that wants continuity with
+    /// that key keeps it itself.
+    pub previous: &'a PublicKeyOrCertificate,
+}
+
 /// A client handler. Note that messages can be received from the
 /// server at any time during a session.
 ///
@@ -2803,6 +3254,11 @@ pub trait Handler: Sized + Send {
     /// The library verifies the key exchange signature before this call,
     /// but it's up to the implementation to decide whether the key or certificate
     /// is trusted.
+    ///
+    /// This runs only for the initial key exchange. The key or certificate
+    /// presented in a later rekey goes to
+    /// [`check_server_key_rekey`](Self::check_server_key_rekey) instead,
+    /// which accepts it by default.
     #[allow(unused_variables)]
     fn check_server_key(
         &mut self,
@@ -2811,12 +3267,99 @@ pub trait Handler: Sized + Send {
         async { Ok(false) }
     }
 
-    /// Called when key exchange has completed.
+    /// Called to check the server's host key or certificate on every
+    /// completed rekey, whether the client or the server initiated it.
+    ///
+    /// It runs after russh has verified the server's signature over the
+    /// exchange hash of the rekey, and before the new keys take effect and
+    /// [`kex_done`](Self::kex_done) is called. At that point russh has
+    /// already sent its own NEWKEYS message, but nothing is sent or processed
+    /// under the new keys yet. It never runs for the initial
+    /// key exchange, which [`check_server_key`](Self::check_server_key)
+    /// covers. `server_key` carries the presented key or certificate and the
+    /// one most recently accepted, by `check_server_key` or a previous
+    /// `check_server_key_rekey` (see [`RekeyServerKey`]); as in `check_server_key`, a certificate is passed
+    /// on its own, never the key embedded in it.
+    ///
+    /// # Default policy
+    ///
+    /// The default implementation accepts every key whose signature
+    /// verifies, which is how russh has always treated rekeys. RFC 4253 §9
+    /// allows the host key to change on a rekey. A rekey runs inside the
+    /// already authenticated, encrypted connection, and the signature over
+    /// the exchange hash shows that the holder of the new key is the peer of
+    /// that connection; short of a compromised session or key, only the
+    /// server accepted at connect time can present a new key. Override this
+    /// method to pin the host identity, for example to accept only the
+    /// previous key or keys the application already trusts.
+    ///
+    /// Compare key data explicitly, for example
+    /// `presented.public_key().key_data() == previous.public_key().key_data()`,
+    /// or the relevant certificate fields. [`PublicKeyOrCertificate`] does
+    /// not implement `PartialEq`, and received keys carry neither a comment
+    /// nor a `hash_alg`. Keys the server announced through
+    /// `hostkeys-00@openssh.com` (see
+    /// [`openssh_ext_host_keys_announced`](Self::openssh_ext_host_keys_announced)
+    /// and [`Handle::hostkeys_prove`]) are a source of keys the application
+    /// may choose to accept on rotation.
+    ///
+    /// As with `check_server_key`, russh does not validate a certificate's
+    /// CA signature, validity window or principals. A handler that trusts
+    /// host certificates must check them here as well, not only in
+    /// `check_server_key`.
+    ///
+    /// # Rekeys without a host key
+    ///
+    /// When the rekey presents no host key (the `none` key exchange), this
+    /// method is not called, just as `check_server_key` is skipped in that
+    /// case. A handler that relies on this method to pin the host identity
+    /// must therefore not list [`kex::NONE`](crate::kex::NONE) in
+    /// [`Preferred::kex`](crate::Preferred::kex); otherwise a server can
+    /// negotiate `none` for a rekey and skip the check.
+    ///
+    /// Conversely, when the initial exchange negotiated `none` and a later
+    /// rekey presents a host key, there is no accepted key to compare it
+    /// with. russh then closes the connection with [`Error::Inconsistent`]
+    /// without calling this method.
+    ///
+    /// # Rejection
+    ///
+    /// Returning `Ok(false)` closes the connection with
+    /// [`Error::UnknownKey`]; returning an error closes it with that error.
+    /// [`disconnected`](Self::disconnected) receives the error as
+    /// [`DisconnectReason::Error`]. The session task ends with that error
+    /// only if `disconnected` returns it, as the default implementation
+    /// does; if `disconnected` returns `Ok(())`, the task ends with
+    /// [`Error::Disconnect`] instead. Either way, no
+    /// further application data is delivered or sent, including data queued
+    /// during the rekey. No SSH disconnect message is sent, as with a
+    /// rejection in `check_server_key`. A rekey rejected
+    /// during authentication makes the pending authentication call return
+    /// [`AuthResult::Failure`] with no remaining methods; the actual cause is
+    /// reported to `disconnected`, and to the session task as described above.
+    ///
+    /// # Blocking the session
+    ///
+    /// The session does not process anything while this method runs: no
+    /// I/O, keepalives, or inactivity timers. Awaiting a [`Handle`] request
+    /// that the same session has to answer therefore deadlocks.
+    #[allow(unused_variables)]
+    fn check_server_key_rekey(
+        &mut self,
+        server_key: RekeyServerKey<'_>,
+    ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
+        async { Ok(true) }
+    }
+
+    /// Called when key exchange has completed, for the initial key
+    /// exchange and for every rekey.
     ///
     /// For the initial key exchange this runs only after
     /// [`check_server_key`](Self::check_server_key) has accepted the server,
-    /// so the shared secret never reaches the application for a server that
-    /// is about to be rejected.
+    /// and for a rekey only after
+    /// [`check_server_key_rekey`](Self::check_server_key_rekey) has accepted
+    /// it, so the shared secret never reaches the application for a server
+    /// that is about to be rejected.
     ///
     /// This callback provides access to the raw shared secret from the KEX,
     /// which is useful for protocols that derive additional keys from the
