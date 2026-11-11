@@ -30,6 +30,7 @@ use block::CtrWrapper;
 use ctr::Ctr128BE;
 use delegate::delegate;
 use log::trace;
+use zeroize::Zeroize;
 #[cfg(all(not(feature = "aws-lc-rs"), feature = "ring"))]
 use ring::aead::{AES_128_GCM as ALGORITHM_AES_128_GCM, AES_256_GCM as ALGORITHM_AES_256_GCM};
 use ssh_encoding::Encode;
@@ -304,6 +305,7 @@ pub(crate) async fn read<R: AsyncRead + Unpin>(
         trace!("reading, len = {len:?}");
         {
             let seqn = buffer.seqn.0;
+            buffer.buffer.zeroize();
             buffer.buffer.clear();
             buffer.buffer.extend_from_slice(&len);
             trace!("reading, seqn = {seqn:?}");
