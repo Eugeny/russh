@@ -1,0 +1,39 @@
+name: Latest dependencies
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions: {}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  Test:
+    name: Test (latest dependencies)
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read # to check out the repository
+
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install OpenSSH
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y openssh-client openssh-server
+          sudo mkdir -p /run/sshd
+
+      - name: Update dependencies
+        run: cargo update
+
+      - name: Test (all features enabled)
+        run: |
+          eval `ssh-agent`
+          cargo test --verbose --all-features
+        env:
+          RUST_BACKTRACE: 1
