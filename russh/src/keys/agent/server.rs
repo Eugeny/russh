@@ -7,6 +7,7 @@ use byteorder::{BigEndian, ByteOrder};
 use bytes::Bytes;
 use futures::future::Future;
 use futures::stream::{Stream, StreamExt};
+use log::warn;
 use ssh_encoding::{Decode, Encode, Reader};
 use ssh_key::{HashAlg, PrivateKey};
 use subtle::ConstantTimeEq;
@@ -49,8 +50,12 @@ pub enum MessageType {
 pub trait Agent: Clone + Send + 'static {
     fn confirm(
         self,
-        _pk: Arc<PrivateKey>,
+        pk: Arc<PrivateKey>,
     ) -> Box<dyn Future<Output = (Self, bool)> + Unpin + Send> {
+        warn!(
+            "default Agent::confirm implementation used, auto-confirming use of key {}",
+            pk.fingerprint(Default::default())
+        );
         Box::new(futures::future::ready((self, true)))
     }
 
