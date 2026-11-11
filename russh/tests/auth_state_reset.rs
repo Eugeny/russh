@@ -21,6 +21,7 @@ struct RemainingMethodsUserSwitchServer;
 
 impl server::Handler for RemainingMethodsUserSwitchServer {
     type Error = russh::Error;
+    type Data = ();
 
     async fn auth_none(&mut self, user: &str) -> Result<server::Auth, Self::Error> {
         if user == "alice" {
