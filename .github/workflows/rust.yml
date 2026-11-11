@@ -89,7 +89,7 @@ jobs:
         run: rustup component add rustfmt
 
       - name: rustfmt
-        run: cargo --locked fmt --check
+        run: cargo fmt --check
 
   Clippy:
     name: Clippy
@@ -164,4 +164,4 @@ jobs:
 
       - name: Check with minimal dependency versions
         run: |
-          cargo minimal-versions --locked check --all-features --no-dev-deps
+          cargo minimal-versions check --all-features --no-dev-deps
