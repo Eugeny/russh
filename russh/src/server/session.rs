@@ -6,6 +6,7 @@ use std::time::Duration;
 use channels::WindowSizeRef;
 use kex::ServerKex;
 use log::debug;
+use ssh_key::Algorithm;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc::{Receiver, Sender, UnboundedReceiver, UnboundedSender, channel};
 use tokio::sync::oneshot;
@@ -1539,16 +1540,8 @@ impl Session {
                 1u32.encode(&mut enc.write)?;
                 "server-sig-algs".encode(&mut enc.write)?;
 
-                NameList(
-                    self.common
-                        .config
-                        .preferred
-                        .key
-                        .iter()
-                        .map(|x| x.to_string())
-                        .collect(),
-                )
-                .encode(&mut enc.write)?;
+                NameList(server_sig_algs(&self.common.config.preferred.key))
+                    .encode(&mut enc.write)?;
             });
         }
         Ok(())
@@ -1573,6 +1566,56 @@ impl Session {
         kex.kexinit(&mut self.common.packet_writer)?;
         self.kex = SessionKexState::InProgress(kex);
         Ok(())
+    }
+}
+
+/// FIDO algorithms: accepted for user authentication, but not host key
+/// algorithms, so not in `Preferred::key`.
+const SK_SIG_ALGS: &[Algorithm] = &[Algorithm::SkEd25519, Algorithm::SkEcdsaSha2NistP256];
+
+/// `server-sig-algs`: `Preferred::key`, then the FIDO algorithms not
+/// already listed.
+fn server_sig_algs(key: &[Algorithm]) -> Vec<String> {
+    key.iter()
+        .chain(SK_SIG_ALGS.iter().filter(|a| !key.contains(a)))
+        .map(|a| a.to_string())
+        .collect()
+}
+
+#[cfg(test)]
+mod server_sig_algs_tests {
+    use super::*;
+
+    #[test]
+    fn default_advertises_fido_algorithms_after_the_configured_ones() {
+        let key = crate::Preferred::DEFAULT.key;
+        let algs = server_sig_algs(&key);
+        let n = key.len();
+        assert_eq!(algs.len(), n + 2);
+        assert_eq!(
+            algs[..n],
+            key.iter().map(|a| a.to_string()).collect::<Vec<_>>()[..]
+        );
+        assert_eq!(
+            algs[n..],
+            [
+                "sk-ssh-ed25519@openssh.com".to_string(),
+                "sk-ecdsa-sha2-nistp256@openssh.com".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn fido_algorithms_already_configured_are_not_repeated() {
+        let key = [Algorithm::SkEd25519, Algorithm::Ed25519];
+        assert_eq!(
+            server_sig_algs(&key),
+            [
+                "sk-ssh-ed25519@openssh.com",
+                "ssh-ed25519",
+                "sk-ecdsa-sha2-nistp256@openssh.com",
+            ]
+        );
     }
 }
 

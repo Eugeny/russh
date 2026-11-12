@@ -239,6 +239,39 @@ pub struct VerifiedPublicKey<'a> {
     /// algorithm named in the request (`ssh-rsa`, `rsa-sha2-256`,
     /// `ssh-ed25519`, ...).
     pub algorithm: &'a ssh_key::Algorithm,
+    /// The verified signature. For a FIDO key, see
+    /// [`sk_flags`](Self::sk_flags) and [`sk_counter`](Self::sk_counter).
+    pub signature: &'a ssh_key::Signature,
+}
+
+impl VerifiedPublicKey<'_> {
+    /// FIDO flag: user present (key touched).
+    pub const SK_USER_PRESENT: u8 = 0x01;
+    /// FIDO flag: user verified (PIN or biometrics).
+    pub const SK_USER_VERIFIED: u8 = 0x04;
+
+    /// Flags of a FIDO (`sk-*`) signature, `None` otherwise. russh does
+    /// not judge them; OpenSSH requires
+    /// [`SK_USER_PRESENT`](Self::SK_USER_PRESENT) by default.
+    pub fn sk_flags(&self) -> Option<u8> {
+        self.sk_trailer().map(|(flags, _)| flags)
+    }
+
+    /// Counter of a FIDO (`sk-*`) signature, `None` otherwise.
+    pub fn sk_counter(&self) -> Option<u32> {
+        self.sk_trailer().map(|(_, counter)| counter)
+    }
+
+    fn sk_trailer(&self) -> Option<(u8, u32)> {
+        match self.signature.algorithm() {
+            ssh_key::Algorithm::SkEd25519 | ssh_key::Algorithm::SkEcdsaSha2NistP256 => {
+                let (_, [flags, counter @ ..]) =
+                    self.signature.as_bytes().split_last_chunk::<5>()?;
+                Some((*flags, u32::from_be_bytes(*counter)))
+            }
+            _ => None,
+        }
+    }
 }
 
 /// Server handler. Each client will have their own handler.
