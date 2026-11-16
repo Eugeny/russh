@@ -1,6 +1,6 @@
 [package]
 name = "russh"
-version = "0.65.1"
+version = "0.65.2"
 description = "A client and server SSH library."
 authors = ["Pierre-Étienne Meunier <pe@pijul.org>"]
 edition = "2024"
@@ -21,7 +21,10 @@ harness = false
 
 [dependencies]
 aes.workspace = true
-aws-lc-rs = { version = "1.16.2", optional = true, default-features = false, features = ["alloc", "aws-lc-sys"] }
+aws-lc-rs = { version = "1.16.2", optional = true, default-features = false, features = [
+    "alloc",
+    "aws-lc-sys",
+] }
 bitflags = "2.0"
 block-padding = { version = "0.4" }
 byteorder.workspace = true
