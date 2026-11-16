@@ -104,6 +104,7 @@ Russh aims for broad interoperability, so it supports both algorithms currently 
 - `ecdsa-sha2-nistp256`, `ecdsa-sha2-nistp384`, `ecdsa-sha2-nistp521`
 - `rsa-sha2-256`, `rsa-sha2-512`
 - `ssh-rsa` (SHA-1)
+- `sk-ssh-ed25519@openssh.com`, `sk-ecdsa-sha2-nistp256@openssh.com` (FIDO security keys, public-key authentication only)
 - OpenSSH certificates
 
 ### Authentication methods

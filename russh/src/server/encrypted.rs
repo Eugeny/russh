@@ -672,6 +672,82 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn verified_signature_and_sk_flags_are_passed_to_handler() {
+        use ssh_key::Algorithm;
+
+        #[derive(Default)]
+        struct Recorder {
+            calls: Vec<(Algorithm, Signature, Option<u8>, Option<u32>)>,
+        }
+
+        impl Handler for Recorder {
+            type Error = Error;
+
+            async fn auth_publickey_offered(
+                &mut self,
+                _user: &str,
+                _offer: PublicKeyOffer<'_>,
+            ) -> Result<Auth, Self::Error> {
+                Ok(Auth::Accept)
+            }
+
+            async fn auth_publickey(
+                &mut self,
+                _user: &str,
+                key: VerifiedPublicKey<'_>,
+            ) -> Result<Auth, Self::Error> {
+                self.calls.push((
+                    key.algorithm.clone(),
+                    key.signature.clone(),
+                    key.sk_flags(),
+                    key.sk_counter(),
+                ));
+                Ok(Auth::Accept)
+            }
+        }
+
+        let keypair = ssh_key::private::Ed25519Keypair::random(&mut rand::rng());
+        let up_uv = VerifiedPublicKey::SK_USER_PRESENT | VerifiedPublicKey::SK_USER_VERIFIED;
+
+        // FIDO signature: signature, flags and counter reach the handler.
+        let mut session = test_auth_session();
+        let mut handler = Recorder::default();
+        let (packet, signature) = sk_ed25519_signed_packet("alice", &keypair, up_uv, up_uv, 42);
+        session.process_packet(&mut handler, &packet).await.unwrap();
+        assert_eq!(
+            handler.calls,
+            vec![(Algorithm::SkEd25519, signature, Some(up_uv), Some(42))]
+        );
+
+        // The flags are signed: altered flags are rejected.
+        let mut session = test_auth_session();
+        let mut handler = Recorder::default();
+        let (packet, _) = sk_ed25519_signed_packet(
+            "alice",
+            &keypair,
+            VerifiedPublicKey::SK_USER_PRESENT,
+            up_uv,
+            43,
+        );
+        session.process_packet(&mut handler, &packet).await.unwrap();
+        assert!(handler.calls.is_empty(), "altered sk flags were accepted");
+
+        // Other algorithms: no flags or counter.
+        let private = Arc::new(PrivateKey::from(keypair));
+        let public = private.public_key().clone();
+        let mut session = test_auth_session();
+        let mut handler = Recorder::default();
+        let packet = publickey_signed_packet("alice", private, &public);
+        session.process_packet(&mut handler, &packet).await.unwrap();
+        let [(algorithm, signature, flags, counter)] = handler.calls.as_slice() else {
+            panic!("expected one auth_publickey call, got {:?}", handler.calls);
+        };
+        assert_eq!(*algorithm, Algorithm::Ed25519);
+        assert_eq!(signature.algorithm(), Algorithm::Ed25519);
+        assert_eq!((*flags, *counter), (None, None));
+    }
+
+    #[tokio::test]
     async fn channel_request_for_unconfirmed_server_open_does_not_call_handler() {
         let mut session = test_authenticated_session();
         let channel = insert_unconfirmed_server_open(&mut session);
@@ -814,6 +890,53 @@ mod tests {
             sign_with_hash_alg(&PrivateKeyWithHashAlg::new(private_key, hash), &signed).unwrap();
         signature.encode(&mut packet).unwrap();
         packet
+    }
+
+    /// A request signed as `sk-ssh-ed25519@openssh.com`; the signed and
+    /// sent flags may differ.
+    fn sk_ed25519_signed_packet(
+        user: &str,
+        keypair: &ssh_key::private::Ed25519Keypair,
+        signed_flags: u8,
+        sent_flags: u8,
+        counter: u32,
+    ) -> (Vec<u8>, Signature) {
+        use sha2::{Digest, Sha256};
+        use signature::Signer;
+
+        let application = "ssh:";
+        let public = PublicKey::from(ssh_key::public::SkEd25519::new(
+            keypair.public,
+            application,
+        ));
+
+        let mut packet = Vec::new();
+        packet.push(msg::USERAUTH_REQUEST);
+        user.encode(&mut packet).unwrap();
+        "ssh-connection".encode(&mut packet).unwrap();
+        "publickey".encode(&mut packet).unwrap();
+        1u8.encode(&mut packet).unwrap();
+        public.algorithm().as_str().encode(&mut packet).unwrap();
+        public.to_bytes().unwrap().encode(&mut packet).unwrap();
+
+        let mut message = Vec::new();
+        CryptoVec::new().as_ref().encode(&mut message).unwrap();
+        message.extend_from_slice(&packet);
+
+        // SHA256(application) || flags || counter || SHA256(message)
+        let mut signed = Vec::new();
+        signed.extend(Sha256::digest(application));
+        signed.push(signed_flags);
+        signed.extend(counter.to_be_bytes());
+        signed.extend(Sha256::digest(&message));
+        let raw: Signature = keypair.try_sign(&signed).unwrap();
+
+        let mut blob = raw.as_bytes().to_vec();
+        blob.push(sent_flags);
+        blob.extend(counter.to_be_bytes());
+        let signature = Signature::new(ssh_key::Algorithm::SkEd25519, blob).unwrap();
+        signature.encode_vec().unwrap().encode(&mut packet).unwrap();
+        (packet, signature)
     }
 
     fn test_auth_session() -> Session {
@@ -1221,6 +1344,7 @@ impl Encrypted {
                                     let key = VerifiedPublicKey {
                                         public_key: key,
                                         algorithm: &algorithm,
+                                        signature: &sig,
                                     };
                                     handler.auth_publickey(user, key).await?
                                 }
