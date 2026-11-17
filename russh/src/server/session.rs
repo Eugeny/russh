@@ -31,6 +31,15 @@ pub struct Session {
     pub(crate) kex: SessionKexState<ServerKex>,
 }
 
+impl Drop for Session {
+    fn drop(&mut self) {
+        // No more window comes for any channel: writers waiting for it fail.
+        for chan in self.channels.values() {
+            chan.window_size().close();
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum Msg {
     ChannelOpenAgent {

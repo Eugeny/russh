@@ -21,7 +21,7 @@ async fn closing_a_channel_with_its_window_used_up_does_not_stall_the_session()
 -> Result<(), anyhow::Error> {
     let _ = env_logger::try_init();
 
-    let addr = start_server().await?;
+    let addr = start_server(WhenIdle::Close).await?;
 
     for round in 0..ROUNDS {
         let session = connect(addr).await?;
@@ -43,7 +43,11 @@ async fn closing_a_channel_with_its_window_used_up_does_not_stall_the_session()
         })
         .await
         .expect("the server closes the channel");
-        uploading.abort();
+        timeout(Duration::from_secs(5), uploading)
+            .await
+            .unwrap_or_else(|_| {
+                panic!("round {round}: the upload still waits for window on a closed channel")
+            })?;
 
         timeout(Duration::from_secs(5), session.send_ping())
             .await
@@ -62,7 +66,40 @@ async fn closing_a_channel_with_its_window_used_up_does_not_stall_the_session()
     Ok(())
 }
 
-async fn start_server() -> Result<SocketAddr, anyhow::Error> {
+/// A write waiting for window fails when the connection ends, rather than waiting for good.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_write_waiting_for_window_fails_when_the_connection_ends() -> Result<(), anyhow::Error> {
+    let _ = env_logger::try_init();
+
+    let addr = start_server(WhenIdle::Disconnect).await?;
+    let session = connect(addr).await?;
+    let channel = session.channel_open_session().await?;
+
+    let mut writer = channel.make_writer();
+    let uploading = tokio::spawn(async move {
+        let chunk = vec![0u8; 256 * 1024];
+        while writer.write_all(&chunk).await.is_ok() {}
+    });
+
+    timeout(Duration::from_secs(30), uploading)
+        .await
+        .expect("the upload still waits for window after the connection ended")?;
+    drop(channel);
+
+    Ok(())
+}
+
+/// What the server does once a channel's upload stops coming.
+#[derive(Clone, Copy, Default)]
+enum WhenIdle {
+    /// Close the channel.
+    #[default]
+    Close,
+    /// End the connection.
+    Disconnect,
+}
+
+async fn start_server(when_idle: WhenIdle) -> Result<SocketAddr, anyhow::Error> {
     let config = Arc::new(server::Config {
         keys: vec![PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap()],
         ..Default::default()
@@ -72,7 +109,14 @@ async fn start_server() -> Result<SocketAddr, anyhow::Error> {
     socket.bind(([127, 0, 0, 1], 0).into())?;
     let socket = socket.listen(16)?;
     let addr = socket.local_addr()?;
-    tokio::spawn(async move { Server::default().run_on_socket(config, &socket).await });
+    tokio::spawn(async move {
+        Server {
+            when_idle,
+            adjusts: 0,
+        }
+        .run_on_socket(config, &socket)
+        .await
+    });
     Ok(addr)
 }
 
@@ -90,8 +134,8 @@ async fn connect(addr: SocketAddr) -> Result<client::Handle<Client>, anyhow::Err
     Ok(session)
 }
 
-#[derive(Default)]
 struct Server {
+    when_idle: WhenIdle,
     adjusts: usize,
 }
 
@@ -99,7 +143,10 @@ impl server::Server for Server {
     type Handler = Self;
 
     fn new_client(&mut self, _: Option<SocketAddr>) -> Self::Handler {
-        Self::default()
+        Self {
+            when_idle: self.when_idle,
+            adjusts: 0,
+        }
     }
 }
 
@@ -123,9 +170,10 @@ impl server::Handler for Server {
         &mut self,
         mut channel: Channel<Msg>,
         reply: server::ChannelOpenHandle,
-        _: &mut Session,
+        session: &mut Session,
     ) -> Result<(), Self::Error> {
         reply.accept().await;
+        let (when_idle, handle) = (self.when_idle, session.handle());
         tokio::spawn(async move {
             loop {
                 match timeout(Duration::from_millis(200), channel.wait()).await {
@@ -134,7 +182,16 @@ impl server::Handler for Server {
                     Err(_) => break,
                 }
             }
-            let _ = channel.close().await;
+            match when_idle {
+                WhenIdle::Close => {
+                    let _ = channel.close().await;
+                }
+                WhenIdle::Disconnect => {
+                    let _ = handle
+                        .disconnect(Disconnect::ByApplication, String::new(), String::new())
+                        .await;
+                }
+            }
         });
         Ok(())
     }
