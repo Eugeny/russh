@@ -1455,6 +1455,8 @@ impl Session {
                 // consumers waiting on `Channel::wait()` receive an explicit
                 // `ChannelMsg::Close` instead of just seeing `None`.
                 if let Some(chan) = self.channels.get(&channel_num) {
+                    // The client grants no more window: writers waiting for it fail.
+                    chan.window_size().close();
                     chan.send(ChannelMsg::Close).await.unwrap_or(())
                 }
                 self.channels.remove(&channel_num);
