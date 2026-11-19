@@ -2357,6 +2357,23 @@ mod tests {
         ));
     }
 
+    #[tokio::test]
+    async fn global_request_is_answered_only_if_it_wants_a_reply() {
+        let (mut session, _sender, _replies) = keyboard_interactive_session();
+        session.common.encrypted.as_mut().unwrap().state = EncryptedState::Authenticated;
+        for want_reply in [0, 1] {
+            let packet = [msg::GLOBAL_REQUEST, 0, 0, 0, 1, b'x', want_reply];
+            session
+                .process_packet(&mut TestHandler, &packet)
+                .await
+                .unwrap();
+        }
+        assert_eq!(
+            session.common.encrypted.as_ref().unwrap().write,
+            [0, 0, 0, 1, msg::REQUEST_FAILURE]
+        );
+    }
+
     /// `keyboard_interactive_session` negotiates the `none` kex, which cannot
     /// be repeated; swap in one that can and install `limits`.
     fn allow_rekey(session: &mut Session, limits: crate::Limits) {
