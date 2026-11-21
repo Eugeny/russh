@@ -1589,8 +1589,8 @@ impl Encrypted {
                 })
             }
             auth::Method::OpenSshCertificate { key, cert } => {
-                // The certificate type named in the request and the signature
-                // must use the same hash (RFC 8332 §3).
+                // The certificate type in the request and the signature must
+                // use the same hash (RFC 8332 §3)
                 let i0 = self.client_make_to_sign(
                     user,
                     &PublicKeyOrCertificate::Certificate(cert.clone()),

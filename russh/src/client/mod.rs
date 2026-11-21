@@ -48,7 +48,7 @@ use kex::ClientKex;
 use log::{debug, error, trace, warn};
 use russh_util::time::Instant;
 use ssh_encoding::{Decode, Encode};
-use ssh_key::{Algorithm, Certificate, HashAlg, PrivateKey, PublicKey};
+use ssh_key::{Algorithm, Certificate, HashAlg, PublicKey};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadHalf, WriteHalf};
 use tokio::pin;
 use tokio::sync::mpsc::{
@@ -506,29 +506,13 @@ impl<H: Handler> Handle<H> {
         self.wait_recv_reply().await
     }
 
-    /// Perform public OpenSSH Certificate-based SSH authentication.
+    /// Perform public OpenSSH Certificate-based SSH authentication
     ///
-    /// RSA keys sign with SHA-512 (`rsa-sha2-512-cert-v01@openssh.com`). Use
-    /// [`Handle::authenticate_openssh_cert_with_hash_alg`] to pick another hash.
+    /// For RSA keys, the hash algorithm of `key` is used for both the
+    /// certificate type in the request and the signature.
+    /// [`Handle::best_supported_rsa_hash`] returns the best hash the server
+    /// supports
     pub async fn authenticate_openssh_cert<U: Into<String>>(
-        &mut self,
-        user: U,
-        key: Arc<PrivateKey>,
-        cert: Certificate,
-    ) -> Result<AuthResult, crate::Error> {
-        let key = PrivateKeyWithHashAlg::new(key, Some(HashAlg::Sha512));
-        self.authenticate_openssh_cert_with_hash_alg(user, key, cert)
-            .await
-    }
-
-    /// Same as [`Handle::authenticate_openssh_cert`], but with the hash
-    /// algorithm for RSA keys chosen by the caller, e.g. for servers that do
-    /// not support `rsa-sha2-512`. The hash selects both the certificate type
-    /// named in the request and the signature algorithm.
-    ///
-    /// You can use [Handle::best_supported_rsa_hash] to automatically
-    /// figure out the best hash algorithm for RSA keys.
-    pub async fn authenticate_openssh_cert_with_hash_alg<U: Into<String>>(
         &mut self,
         user: U,
         key: PrivateKeyWithHashAlg,
@@ -2136,6 +2120,7 @@ mod tests {
     use std::sync::Arc;
 
     use ssh_encoding::Encode;
+    use ssh_key::PrivateKey;
     use tokio::sync::mpsc::{channel, unbounded_channel};
 
     use super::*;

@@ -1,6 +1,6 @@
 #![cfg(all(feature = "rsa", not(target_arch = "wasm32")))]
-//! RSA certificate authentication must name the certificate type that matches
-//! the signature hash, for every hash the caller can pick.
+//! The certificate type in an RSA certificate auth request must match the
+//! signature hash
 use std::sync::Arc;
 
 use russh::keys::ssh_key::certificate::{Builder, CertType};
@@ -68,7 +68,7 @@ async fn rsa_certificate_authenticates_with_every_hash() {
     for hash in [None, Some(HashAlg::Sha256), Some(HashAlg::Sha512)] {
         let result = connect()
             .await
-            .authenticate_openssh_cert_with_hash_alg(
+            .authenticate_openssh_cert(
                 "alice",
                 PrivateKeyWithHashAlg::new(key.clone(), hash),
                 cert.clone(),
@@ -77,11 +77,4 @@ async fn rsa_certificate_authenticates_with_every_hash() {
             .unwrap();
         assert!(result.success(), "hash {hash:?}: {result:?}");
     }
-
-    let result = connect()
-        .await
-        .authenticate_openssh_cert("alice", key, cert)
-        .await
-        .unwrap();
-    assert!(result.success(), "default hash: {result:?}");
 }
