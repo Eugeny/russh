@@ -249,6 +249,11 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
     fn lock<R: Reader>(&self, r: &mut R) -> Result<(), Error> {
         let password = Bytes::decode(r)?;
         let mut lock = self.lock.0.write().or(Err(Error::AgentFailure))?;
+        // Two LOCK requests can both pass `confirm_request`. The second must
+        // not append to the stored password
+        if !lock.is_empty() {
+            return Err(Error::AgentFailure);
+        }
         lock.extend(&password);
         Ok(())
     }
@@ -345,23 +350,24 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
             if !ok {
                 return Ok((agent, false));
             }
-            // The agent may have been locked, or the key removed or expired,
-            // while confirmation was pending
-            self.keys.purge_expired();
-            let locked = self.lock.0.read().map(|p| !p.is_empty()).unwrap_or(true);
-            let present = self
-                .keys
-                .0
-                .read()
-                .map(|k| k.contains_key(&blob))
-                .unwrap_or(false);
-            if locked || !present {
-                return Ok((agent, false));
-            }
             agent
         } else {
             agent
         };
+        // The agent may have been locked, or the key removed or expired,
+        // while `confirm_request` or `confirm` was pending. Nothing may await
+        // between this check and the signature
+        self.keys.purge_expired();
+        let locked = self.lock.0.read().map(|p| !p.is_empty()).unwrap_or(true);
+        let present = self
+            .keys
+            .0
+            .read()
+            .map(|k| k.contains_key(&blob))
+            .unwrap_or(false);
+        if locked || !present {
+            return Ok((agent, false));
+        }
         writebuf.push(msg::SIGN_RESPONSE);
         let data = Bytes::decode(r)?;
         let flags = u32::decode(r)?;
@@ -587,5 +593,95 @@ mod tests {
         };
         let (signed, ()) = tokio::join!(signer, locker);
         assert!(!signed);
+    }
+
+    #[tokio::test]
+    async fn sign_is_rejected_when_locked_during_confirm_request() {
+        use std::future::Future;
+        use std::sync::Arc;
+
+        use ssh_encoding::Encode;
+        use tokio::sync::Notify;
+
+        use super::{Agent, MessageType, msg};
+        use crate::keys::PrivateKey;
+
+        #[derive(Clone)]
+        struct Delayed(Arc<Notify>, Arc<Notify>);
+        impl Agent for Delayed {
+            fn confirm_request(&self, _: MessageType) -> impl Future<Output = bool> + Send {
+                async move {
+                    self.0.notify_one();
+                    self.1.notified().await;
+                    true
+                }
+            }
+        }
+
+        let entered = Arc::new(Notify::new());
+        let release = Arc::new(Notify::new());
+        let lock = Lock(std::sync::Arc::new(std::sync::RwLock::new(
+            crate::CryptoVec::new(),
+        )));
+        let (server, _client) = tokio::io::duplex(64);
+        let mut connection = Connection {
+            lock: lock.clone(),
+            keys: KeyStore(std::sync::Arc::new(std::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            ))),
+            agent: Some(Delayed(entered.clone(), release.clone())),
+            s: server,
+            buf: Vec::new(),
+        };
+
+        // Without a confirm constraint `Agent::confirm` is never called
+        let key = PrivateKey::random(&mut rand::rng(), crate::keys::Algorithm::Ed25519)
+            .unwrap();
+        let blob = key.public_key().to_bytes().unwrap();
+        connection.keys.0.write().unwrap().insert(
+            blob.clone(),
+            (Arc::new(key), None, vec![]),
+        );
+
+        connection.buf.push(msg::SIGN_REQUEST);
+        blob.encode(&mut connection.buf).unwrap();
+        b"data".as_slice().encode(&mut connection.buf).unwrap();
+        0u32.encode(&mut connection.buf).unwrap();
+
+        let mut writebuf = Vec::new();
+        let signer = async {
+            connection.respond(&mut writebuf).await.unwrap();
+        };
+        let locker = async {
+            entered.notified().await;
+            lock.0.write().unwrap().extend(b"pw");
+            release.notify_one();
+        };
+        tokio::join!(signer, locker);
+        assert_eq!(writebuf, [0, 0, 0, 1, msg::FAILURE]);
+    }
+
+    #[test]
+    fn lock_does_not_append_to_an_existing_password() {
+        use ssh_encoding::Encode;
+
+        let (server, _client) = tokio::io::duplex(64);
+        let connection = Connection {
+            lock: Lock(std::sync::Arc::new(std::sync::RwLock::new(
+                crate::CryptoVec::new(),
+            ))),
+            keys: KeyStore(std::sync::Arc::new(std::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            ))),
+            agent: Some(()),
+            s: server,
+            buf: Vec::new(),
+        };
+
+        let mut payload = Vec::new();
+        b"pw".as_slice().encode(&mut payload).unwrap();
+        connection.lock(&mut &payload[..]).unwrap();
+        assert!(connection.lock(&mut &payload[..]).is_err());
+        assert_eq!(&connection.lock.0.read().unwrap()[..], b"pw");
     }
 }
