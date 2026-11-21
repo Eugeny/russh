@@ -39,6 +39,7 @@ use crate::{
 fn verify_hostkeys_proof(
     session_id: &[u8],
     keys: &[PublicKey],
+    allowed_algorithms: &[Algorithm],
     mut r: &[u8],
 ) -> Result<(), crate::Error> {
     for key in keys {
@@ -46,6 +47,14 @@ fn verify_hostkeys_proof(
         let mut signature_reader = &signature[..];
         let signature = Signature::decode(&mut signature_reader)?;
         ensure_end(&signature_reader)?;
+
+        // An RSA signature chooses its hash, so ssh-rsa (SHA-1) would pass
+        // even when the client does not allow it
+        if matches!(signature.algorithm(), Algorithm::Rsa { .. })
+            && !allowed_algorithms.contains(&signature.algorithm())
+        {
+            return Err(crate::Error::WrongServerSig);
+        }
 
         // CryptoVec: the session id is key material and is zeroized on drop.
         let mut signed = CryptoVec::new();
@@ -1031,7 +1040,12 @@ impl Session {
                         keys,
                     }) => {
                         let result = match self.common.encrypted {
-                            Some(ref enc) => verify_hostkeys_proof(&enc.session_id, &keys, r),
+                            Some(ref enc) => verify_hostkeys_proof(
+                                &enc.session_id,
+                                &keys,
+                                &self.common.config.preferred.key,
+                                r,
+                            ),
                             None => Err(crate::Error::Inconsistent),
                         };
                         if let Err(ref e) = result {
@@ -1146,6 +1160,41 @@ mod tests {
     use crate::kex::{KEXES, NONE};
     use crate::session::Exchange;
     use crate::{CryptoVec, MethodKind};
+
+    #[cfg(feature = "rsa")]
+    #[test]
+    fn hostkeys_proof_rsa_hash_must_be_an_allowed_algorithm() {
+        use ssh_key::{HashAlg, PrivateKey};
+
+        let key = PrivateKey::random(&mut rand::rng(), Algorithm::Rsa { hash: None }).unwrap();
+        let ssh_key::private::KeypairData::Rsa(keypair) = key.key_data() else {
+            unreachable!()
+        };
+        let mut signed = Vec::new();
+        "hostkeys-prove-00@openssh.com".encode(&mut signed).unwrap();
+        b"session".as_slice().encode(&mut signed).unwrap();
+        key.public_key()
+            .to_bytes()
+            .unwrap()
+            .encode(&mut signed)
+            .unwrap();
+        // ssh-rsa (SHA-1)
+        let signature: Signature =
+            signature::Signer::try_sign(&(keypair, None), signed.as_slice()).unwrap();
+        let mut proof = Vec::new();
+        signature.encoded().unwrap().encode(&mut proof).unwrap();
+
+        let keys = [key.public_key().clone()];
+        let sha2_only = [Algorithm::Rsa {
+            hash: Some(HashAlg::Sha512),
+        }];
+        assert!(matches!(
+            verify_hostkeys_proof(b"session", &keys, &sha2_only, &proof),
+            Err(crate::Error::WrongServerSig)
+        ));
+        let with_ssh_rsa = [Algorithm::Rsa { hash: None }];
+        assert!(verify_hostkeys_proof(b"session", &keys, &with_ssh_rsa, &proof).is_ok());
+    }
 
     fn test_encrypted() -> Encrypted {
         Encrypted {
