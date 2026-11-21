@@ -168,12 +168,12 @@ impl Handle {
     /// Never waits, so it can be called from a handler, another task or a
     /// non-async thread. The grant is sent after an ongoing key exchange.
     /// A grant for an unknown or closed channel, an empty grant, or one that
-    /// would take the window past `u32::MAX` is ignored. Returns `Err(())`
-    /// only if the session is gone.
-    pub fn grant_window(&self, id: ChannelId, bytes: u32) -> Result<(), ()> {
+    /// would take the window past `u32::MAX` is ignored. Fails only if the
+    /// session has ended.
+    pub fn grant_window(&self, id: ChannelId, bytes: u32) -> Result<(), crate::SendError> {
         self.priority_sender
             .send(Msg::WindowGrant { id, bytes })
-            .map_err(|_| ())
+            .map_err(|_| crate::SendError {})
     }
 
     /// Send success to the session referenced by this handler.
