@@ -88,6 +88,11 @@ pub enum Msg {
         pending: PendingChannelOpen,
         result: Result<(), ChannelOpenFailure>,
     },
+    /// Grow a channel's receive window (see [`Config::manual_window`]).
+    WindowGrant {
+        id: ChannelId,
+        bytes: u32,
+    },
 }
 
 impl From<(ChannelId, ChannelMsg)> for Msg {
@@ -154,6 +159,20 @@ impl Handle {
         self.sender
             .send(Msg::Channel(id, ChannelMsg::Eof))
             .await
+            .map_err(|_| ())
+    }
+
+    /// Grow a channel's receive window by `bytes`, for use with
+    /// [`Config::manual_window`].
+    ///
+    /// Never waits, so it can be called from a handler, another task or a
+    /// non-async thread. The grant is sent after an ongoing key exchange.
+    /// A grant for an unknown or closed channel, an empty grant, or one that
+    /// would take the window past `u32::MAX` is ignored. Returns `Err(())`
+    /// only if the session is gone.
+    pub fn grant_window(&self, id: ChannelId, bytes: u32) -> Result<(), ()> {
+        self.priority_sender
+            .send(Msg::WindowGrant { id, bytes })
             .map_err(|_| ())
     }
 
@@ -619,6 +638,11 @@ impl Session {
             }
             Msg::ChannelOpenReply { pending, result } => {
                 self.finalize_channel_open_reply(pending, result)?;
+            }
+            Msg::WindowGrant { id, bytes } => {
+                if let Some(ref mut enc) = self.common.encrypted {
+                    enc.grant_window(id, bytes)?;
+                }
             }
             other => {
                 // should be unreachable, since the receiver only gets

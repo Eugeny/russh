@@ -99,6 +99,13 @@ pub struct Config {
     pub keepalive_max: usize,
     /// If active, invoke `set_nodelay(true)` on client sockets; disabled by default (i.e. Nagle's algorithm is active).
     pub nodelay: bool,
+    /// If active, data received on a channel only uses up that channel's
+    /// receive window, and the window grows only through
+    /// [`Handle::grant_window`], so the application decides per channel how
+    /// much more the client may send (RFC 4254 §5.2). [`Handler::adjust_window`]
+    /// is not called in this mode. Disabled by default: the window is refilled
+    /// as data arrives.
+    pub manual_window: bool,
 }
 
 impl Default for Config {
@@ -126,6 +133,7 @@ impl Default for Config {
             keepalive_interval: None,
             keepalive_max: 3,
             nodelay: false,
+            manual_window: false,
         }
     }
 }
@@ -153,6 +161,7 @@ impl Debug for Config {
             .field("inactivity_timeout", &self.inactivity_timeout)
             .field("keepalive_interval", &self.keepalive_interval)
             .field("keepalive_max", &self.keepalive_max)
+            .field("manual_window", &self.manual_window)
             .finish()
     }
 }

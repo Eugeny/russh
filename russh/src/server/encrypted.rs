@@ -1568,7 +1568,9 @@ impl Session {
 
                 #[allow(clippy::collapsible_if)]
                 if let Some(ref mut enc) = self.common.encrypted {
-                    if enc.adjust_window_size(channel_num, &data, target)? {
+                    if self.common.config.manual_window {
+                        enc.consume_window(channel_num, data.len());
+                    } else if enc.adjust_window_size(channel_num, &data, target)? {
                         let window = handler.adjust_window(channel_num, self.target_window_size);
                         if window > 0 {
                             self.target_window_size = window
