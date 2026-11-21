@@ -212,11 +212,13 @@ pub(crate) trait KexAlgorithmImplementor {
         buffer: &mut CryptoVec,
     ) -> Result<Vec<u8>, Error>;
 
+    #[allow(clippy::too_many_arguments)]
     fn compute_keys(
         &self,
         session_id: &[u8],
         exchange_hash: &[u8],
-        cipher: cipher::Name,
+        remote_to_local_cipher: cipher::Name,
+        local_to_remote_cipher: cipher::Name,
         remote_to_local_mac: mac::Name,
         local_to_remote_mac: mac::Name,
         is_server: bool,
@@ -392,16 +394,23 @@ impl SharedSecret {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn compute_keys<D: Digest>(
     shared_secret: Option<&SharedSecret>,
     session_id: &[u8],
     exchange_hash: &[u8],
-    cipher: cipher::Name,
+    remote_to_local_cipher: cipher::Name,
+    local_to_remote_cipher: cipher::Name,
     remote_to_local_mac: mac::Name,
     local_to_remote_mac: mac::Name,
     is_server: bool,
 ) -> Result<super::cipher::CipherPair, Error> {
-    let cipher = CIPHERS.get(&cipher).ok_or(Error::UnknownAlgo)?;
+    let remote_to_local_cipher = CIPHERS
+        .get(&remote_to_local_cipher)
+        .ok_or(Error::UnknownAlgo)?;
+    let local_to_remote_cipher = CIPHERS
+        .get(&local_to_remote_cipher)
+        .ok_or(Error::UnknownAlgo)?;
     let remote_to_local_mac = MACS.get(&remote_to_local_mac).ok_or(Error::UnknownAlgo)?;
     let local_to_remote_mac = MACS.get(&local_to_remote_mac).ok_or(Error::UnknownAlgo)?;
 
@@ -471,26 +480,42 @@ pub(crate) fn compute_keys<D: Digest>(
                     let mut nonce = nonce.borrow_mut();
                     let mut mac = mac.borrow_mut();
 
-                    compute_key(local_to_remote, &mut key, cipher.key_len())?;
-                    compute_key(local_to_remote_nonce, &mut nonce, cipher.nonce_len())?;
+                    compute_key(local_to_remote, &mut key, local_to_remote_cipher.key_len())?;
+                    compute_key(
+                        local_to_remote_nonce,
+                        &mut nonce,
+                        local_to_remote_cipher.nonce_len(),
+                    )?;
                     compute_key(
                         local_to_remote_mac_key,
                         &mut mac,
                         local_to_remote_mac.key_len(),
                     )?;
 
-                    let local_to_remote =
-                        cipher.make_sealing_key(&key, &nonce, &mac, *local_to_remote_mac);
+                    let local_to_remote = local_to_remote_cipher.make_sealing_key(
+                        &key,
+                        &nonce,
+                        &mac,
+                        *local_to_remote_mac,
+                    );
 
-                    compute_key(remote_to_local, &mut key, cipher.key_len())?;
-                    compute_key(remote_to_local_nonce, &mut nonce, cipher.nonce_len())?;
+                    compute_key(remote_to_local, &mut key, remote_to_local_cipher.key_len())?;
+                    compute_key(
+                        remote_to_local_nonce,
+                        &mut nonce,
+                        remote_to_local_cipher.nonce_len(),
+                    )?;
                     compute_key(
                         remote_to_local_mac_key,
                         &mut mac,
                         remote_to_local_mac.key_len(),
                     )?;
-                    let remote_to_local =
-                        cipher.make_opening_key(&key, &nonce, &mac, *remote_to_local_mac);
+                    let remote_to_local = remote_to_local_cipher.make_opening_key(
+                        &key,
+                        &nonce,
+                        &mac,
+                        *remote_to_local_mac,
+                    );
 
                     Ok(super::cipher::CipherPair {
                         local_to_remote,
