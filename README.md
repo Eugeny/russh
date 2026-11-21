@@ -322,6 +322,7 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/t8y2"><img src="https://avatars.githubusercontent.com/u/77960507?v=4?s=100" width="100px;" alt="t8y2"/><br /><sub><b>t8y2</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=t8y2" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/mdevolde"><img src="https://avatars.githubusercontent.com/u/73021358?v=4?s=100" width="100px;" alt="mdevolde"/><br /><sub><b>mdevolde</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=mdevolde" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/Eric-D"><img src="https://avatars.githubusercontent.com/u/3263894?v=4?s=100" width="100px;" alt="Eric-D"/><br /><sub><b>Eric-D</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=Eric-D" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/gugahartmann"><img src="https://avatars.githubusercontent.com/u/157382509?v=4?s=100" width="100px;" alt="gugahartmann"/><br /><sub><b>gugahartmann</b></sub></a><br /><a href="https://github.com/Eugeny/russh/commits?author=gugahartmann" title="Code">💻</a></td>
     </tr>
   </tbody>
 </table>
