@@ -123,7 +123,14 @@ impl Session {
             }
         } else {
             let auth_res = session
-                .authenticate_openssh_cert(user, Arc::new(key_pair), openssh_cert.unwrap())
+                .authenticate_openssh_cert(
+                    user,
+                    PrivateKeyWithHashAlg::new(
+                        Arc::new(key_pair),
+                        session.best_supported_rsa_hash().await?.flatten(),
+                    ),
+                    openssh_cert.unwrap(),
+                )
                 .await?;
 
             if !auth_res.success() {

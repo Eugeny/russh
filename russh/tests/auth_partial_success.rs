@@ -252,7 +252,7 @@ async fn handlerless_rejection_after_partial_success() {
     let expired_cert = builder.sign(&ca).unwrap();
 
     let second = session
-        .authenticate_openssh_cert("alice", key, expired_cert)
+        .authenticate_openssh_cert("alice", PrivateKeyWithHashAlg::new(key, None), expired_cert)
         .await
         .unwrap();
     // An empty method set means the server disconnected instead of answering.
