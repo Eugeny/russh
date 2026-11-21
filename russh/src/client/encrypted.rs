@@ -508,6 +508,9 @@ impl Session {
                 map_err!(ensure_end(&reader))?;
                 let local_id = ChannelId(msg.recipient_channel);
 
+                if !self.common.is_pending_channel_open(local_id) {
+                    return Err(crate::Error::Inconsistent.into());
+                }
                 if let Some(ref mut enc) = self.common.encrypted {
                     if let Some(parameters) = enc.channels.get_mut(&local_id) {
                         parameters.confirm(&msg);
@@ -582,16 +585,14 @@ impl Session {
                 let descr = map_err!(String::decode(&mut r))?;
                 let language = map_err!(String::decode(&mut r))?;
                 map_err!(ensure_end(&r))?;
-                // Unlike other channel-scoped messages this arrives for a
-                // channel the client opened but that is not yet confirmed, so
-                // gate on existence in the encrypted table rather than
-                // `is_established_channel` (which requires `confirmed`).
-                let known = match self.common.encrypted {
-                    Some(ref mut enc) => enc.channels.remove(&channel_num).is_some(),
-                    None => false,
-                };
-                if !known {
+                // Only valid for a channel the client opened that is not yet
+                // confirmed; an established channel must go through
+                // CHANNEL_CLOSE instead.
+                if !self.common.is_pending_channel_open(channel_num) {
                     return Ok(());
+                }
+                if let Some(ref mut enc) = self.common.encrypted {
+                    enc.channels.remove(&channel_num);
                 }
 
                 if let Some(sender) = self.channels.remove(&channel_num) {

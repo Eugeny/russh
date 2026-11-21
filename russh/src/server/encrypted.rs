@@ -704,6 +704,42 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn open_replies_for_established_channel_are_rejected() {
+        let mut session = test_authenticated_session();
+        let channel = insert_unconfirmed_server_open(&mut session);
+        let mut handler = ChannelCallbackProbe::default();
+
+        let mut confirmation = vec![msg::CHANNEL_OPEN_CONFIRMATION];
+        for x in [channel.0, 100, 1 << 20, 32768] {
+            x.encode(&mut confirmation).unwrap();
+        }
+        session
+            .process_packet(&mut handler, &confirmation)
+            .await
+            .unwrap();
+        assert!(session.common.is_established_channel(channel));
+
+        assert!(
+            session
+                .process_packet(&mut handler, &confirmation)
+                .await
+                .is_err(),
+            "second CHANNEL_OPEN_CONFIRMATION was accepted"
+        );
+
+        let mut failure = vec![msg::CHANNEL_OPEN_FAILURE];
+        channel.encode(&mut failure).unwrap();
+        2u32.encode(&mut failure).unwrap();
+        "".encode(&mut failure).unwrap();
+        "".encode(&mut failure).unwrap();
+        session.process_packet(&mut handler, &failure).await.unwrap();
+        assert!(
+            session.common.is_established_channel(channel),
+            "CHANNEL_OPEN_FAILURE removed an established channel"
+        );
+    }
+
     #[derive(Default)]
     struct ChannelCallbackProbe {
         exec_called: bool,
@@ -1566,6 +1602,9 @@ impl Session {
                 map_err!(ensure_end(r))?;
                 let local_id = ChannelId(msg.recipient_channel);
 
+                if !self.common.is_pending_channel_open(local_id) {
+                    return Err(Error::Inconsistent.into());
+                }
                 if let Some(ref mut enc) = self.common.encrypted {
                     if let Some(parameters) = enc.channels.get_mut(&local_id) {
                         parameters.confirm(&msg);
@@ -1942,6 +1981,9 @@ impl Session {
                 trace!("Channel open failure description: {description}");
                 trace!("Channel open failure language tag: {language_tag}");
 
+                if !self.common.is_pending_channel_open(channel_num) {
+                    return Ok(());
+                }
                 if let Some(ref mut enc) = self.common.encrypted {
                     enc.channels.remove(&channel_num);
                 }
