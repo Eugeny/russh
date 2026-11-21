@@ -96,7 +96,6 @@ impl Session {
                 debug!("request: {request:?}");
                 if request == "ssh-userauth" {
                     let auth_request = server_accept_service(
-                        handler.authentication_banner().await?,
                         self.common.config.as_ref().methods.clone(),
                         &mut enc.write,
                     )?;
@@ -891,7 +890,6 @@ mod tests {
 }
 
 fn server_accept_service(
-    banner: Option<String>,
     methods: MethodSet,
     buffer: &mut Vec<u8>,
 ) -> Result<AuthRequest, crate::Error> {
@@ -899,14 +897,6 @@ fn server_accept_service(
         buffer.push(msg::SERVICE_ACCEPT);
         "ssh-userauth".encode(buffer)?;
     });
-
-    if let Some(banner) = banner {
-        push_packet!(buffer, {
-            buffer.push(msg::USERAUTH_BANNER);
-            banner.encode(buffer)?;
-            "".encode(buffer)?;
-        })
-    }
 
     Ok(AuthRequest::server(methods))
 }
@@ -927,6 +917,21 @@ impl Encrypted {
         let service_name = map_err!(String::decode(r))?;
         let method = map_err!(String::decode(r))?;
         debug!("name: {user:?} {service_name:?} {method:?}",);
+
+        // OpenSSH's sshd sends the banner on the first auth request. Some
+        // clients ignore a banner sent earlier
+        #[allow(clippy::collapsible_if)]
+        if let EncryptedState::WaitingAuthRequest(ref mut a) = self.state {
+            if !std::mem::replace(&mut a.banner_sent, true) {
+                if let Some(banner) = handler.authentication_banner().await? {
+                    push_packet!(self.write, {
+                        self.write.push(msg::USERAUTH_BANNER);
+                        map_err!(banner.encode(&mut self.write))?;
+                        map_err!("".encode(&mut self.write))?;
+                    });
+                }
+            }
+        }
 
         if service_name == "ssh-connection" {
             {
