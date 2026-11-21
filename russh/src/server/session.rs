@@ -1602,8 +1602,9 @@ impl Session {
     /// [`Config::manual_window`] channel data counts by its payload (at least
     /// one byte), which is what the grants in `pending_limit` measure. Data
     /// for a channel that is not open, such as one we closed while the peer's
-    /// data was in flight, counts one byte: it is dropped on arrival, and that
-    /// channel's credit is no longer in `pending_limit`.
+    /// data was in flight, counts nothing: it is dropped on arrival without
+    /// keeping anything, and that channel's credit is no longer in
+    /// `pending_limit`.
     pub(crate) fn pending_cost(&self, packet: &[u8]) -> u64 {
         let header = match packet.first() {
             Some(&msg::CHANNEL_DATA) => 9,
@@ -1621,7 +1622,7 @@ impl Session {
                     .is_established_channel(ChannelId(u32::from_be_bytes(id)))
             });
         if !open {
-            return 1;
+            return 0;
         }
         packet.len().saturating_sub(header).max(1) as u64
     }
@@ -2001,17 +2002,18 @@ mod tests {
     }
 
     #[test]
-    fn pending_cost_counts_data_for_a_channel_that_is_not_open_as_one_byte() {
+    fn pending_cost_counts_nothing_for_data_on_a_channel_that_is_not_open() {
         let mut session = authenticated_session();
         with_manual_window(&mut session, true);
         // Channel 7 is closed (gone) or not confirmed: its data is dropped.
-        assert_eq!(session.pending_cost(&channel_data(1000)), 1);
-        assert_eq!(session.pending_cost(&channel_extended_data(1000)), 1);
+        assert_eq!(session.pending_cost(&channel_data(1000)), 0);
+        assert_eq!(session.pending_cost(&channel_extended_data(1000)), 0);
+        assert_eq!(session.pending_cost(&channel_data(1)), 0);
         let enc = session.common.encrypted.as_mut().unwrap();
         enc.channels.insert(ChannelId(7), open_channel(7, 0, false));
-        assert_eq!(session.pending_cost(&channel_data(1000)), 1);
+        assert_eq!(session.pending_cost(&channel_data(1000)), 0);
         // A truncated message has no channel to look up.
-        assert_eq!(session.pending_cost(&[msg::CHANNEL_DATA, 0, 0]), 1);
+        assert_eq!(session.pending_cost(&[msg::CHANNEL_DATA, 0, 0]), 0);
     }
 
     #[test]

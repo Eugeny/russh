@@ -368,15 +368,26 @@ async fn with_manual_window_a_server_rekey_accepts_small_packets_in_flight() {
 /// data is in flight, and then rekeys. The data for the closed channel is
 /// dropped on arrival and must not end the session: a channel opened after it
 /// still works.
-#[tokio::test]
-async fn with_manual_window_a_server_rekey_accepts_data_in_flight_for_a_closed_channel() {
-    let pair = upload_in_flight(4 << 20, PACKET as usize, true).await;
+async fn rekey_with_upload_in_flight_for_a_closed_channel(upload: u32, chunk: usize) {
+    let pair = upload_in_flight(upload, chunk, true).await;
     let mut channel = tokio::time::timeout(LIVENESS, pair._client.channel_open_session())
         .await
         .expect("the channel opened in time")
         .expect("the session survived the key exchange");
     // It gets the same grant on open.
-    assert_eq!(next(&mut channel).await, Some(4 << 20));
+    assert_eq!(next(&mut channel).await, Some(upload));
     send_window(&channel, WINDOW).await;
     assert_eq!(next(&mut channel).await, None);
+}
+
+#[tokio::test]
+async fn with_manual_window_a_server_rekey_accepts_data_in_flight_for_a_closed_channel() {
+    rekey_with_upload_in_flight_for_a_closed_channel(4 << 20, PACKET as usize).await;
+}
+
+/// One-byte packets for a closed channel, more of them than twice
+/// `window_size`: dropped data counts nothing, not a byte per message.
+#[tokio::test]
+async fn with_manual_window_a_server_rekey_accepts_small_packets_in_flight_for_a_closed_channel() {
+    rekey_with_upload_in_flight_for_a_closed_channel(5 * WINDOW / 2, 1).await;
 }
