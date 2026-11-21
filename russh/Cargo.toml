@@ -80,7 +80,7 @@ sec1 = { version = "0.8", features = ["der"] }
 sha1.workspace = true
 sha2.workspace = true
 sha3 = "0.12.0"
-sntrup = { version = "=0.3.0", features = ["force-scalar"] }
+sntrup-kem = { version = "=0.1.0-rc.0", features = ["force-scalar"], optional = true }
 signature.workspace = true
 spki = "0.8"
 ssh-encoding.workspace = true
@@ -122,6 +122,8 @@ dsa = ["ssh-key/dsa"]
 ring = ["dep:ring"]                           # Alternative crypto backend.
 rsa = ["dep:rsa", "dep:pkcs1", "ssh-key/rsa"]
 serde = ["ssh-key/serde"]
+# sntrup761x25519-sha512 key exchange. Off by default: `sntrup-kem` is a pre-release.
+sntrup = ["dep:sntrup-kem"]
 _bench = ["dep:criterion"]
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

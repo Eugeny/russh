@@ -3,7 +3,7 @@ use curve25519_dalek::montgomery::MontgomeryPoint;
 use log::debug;
 use sha2::Digest;
 use sha2::Sha512;
-use sntrup::sntrup761::{
+use sntrup_kem::sntrup761::{
     Ciphertext as SntrupCiphertext, DecapsulationKey as SntrupDecapsulationKey,
     EncapsulationKey as SntrupEncapsulationKey, SharedSecret as SntrupSharedSecret,
 };
@@ -15,8 +15,8 @@ use crate::mac;
 use crate::session::Exchange;
 use crate::{cipher, msg, CryptoVec, Error};
 
-const SNTRUP761_PUBLIC_KEY_SIZE: usize = sntrup::sntrup761::PUBLIC_KEY_SIZE;
-const SNTRUP761_CIPHERTEXT_SIZE: usize = sntrup::sntrup761::CIPHERTEXT_SIZE;
+const SNTRUP761_PUBLIC_KEY_SIZE: usize = sntrup_kem::sntrup761::PUBLIC_KEY_SIZE;
+const SNTRUP761_CIPHERTEXT_SIZE: usize = sntrup_kem::sntrup761::CIPHERTEXT_SIZE;
 const X25519_PUBLIC_KEY_SIZE: usize = 32;
 
 pub struct Sntrup761X25519KexType {}
@@ -131,7 +131,7 @@ impl KexAlgorithmImplementor for Sntrup761X25519Kex {
         writer: &mut impl Writer,
     ) -> Result<(), Error> {
         let mut rng = rand::rng();
-        let (sntrup_pk, sntrup_secret) = sntrup::sntrup761::generate_key(&mut rng);
+        let (sntrup_pk, sntrup_secret) = sntrup_kem::sntrup761::generate_key(&mut rng);
 
         let x25519_secret = Zeroizing::new(rand::random::<[u8; 32]>());
         let x25519_pk = MontgomeryPoint::mul_base_clamped(*x25519_secret);

@@ -164,7 +164,9 @@ impl Preferred {
 
 const SAFE_KEX_ORDER: &[kex::Name] = &[
     kex::MLKEM768X25519_SHA256,
+    #[cfg(feature = "sntrup")]
     kex::SNTRUP761X25519_SHA512,
+    #[cfg(feature = "sntrup")]
     kex::SNTRUP761X25519_SHA512_OPENSSH,
     kex::CURVE25519,
     kex::CURVE25519_PRE_RFC_8731,
@@ -729,6 +731,7 @@ mod tests {
         assert!(!names.ignore_guessed, "correct guess must be honored");
     }
 
+    #[cfg(feature = "sntrup")]
     #[test]
     fn sntrup_openssh_alias_is_supported() {
         let buf = build_kexinit(&["sntrup761x25519-sha512@openssh.com"], false);
