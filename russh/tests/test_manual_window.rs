@@ -15,7 +15,7 @@ use std::time::Duration;
 use russh::keys::PrivateKey;
 use russh::keys::ssh_key::private::Ed25519Keypair;
 use russh::server::{Auth, ChannelOpenHandle, Msg, Session};
-use russh::{Channel, ChannelId, ChannelMsg, MethodKind, MethodSet};
+use russh::{Channel, ChannelId, ChannelMsg, Limits, MethodKind, MethodSet};
 use tokio::sync::mpsc;
 
 /// The initial window, two packets.
@@ -26,6 +26,7 @@ const LIVENESS: Duration = Duration::from_secs(30);
 
 struct Server {
     opened: mpsc::UnboundedSender<ChannelId>,
+    grant_on_open: u32,
     received: u64,
     next_ack: u64,
 }
@@ -41,10 +42,16 @@ impl russh::server::Handler for Server {
         &mut self,
         channel: Channel<Msg>,
         reply: ChannelOpenHandle,
-        _session: &mut Session,
+        session: &mut Session,
     ) -> Result<(), Self::Error> {
         let _ = self.opened.send(channel.id());
         reply.accept().await;
+        if self.grant_on_open > 0 {
+            session
+                .handle()
+                .grant_window(channel.id(), self.grant_on_open)
+                .expect("the session is running");
+        }
         Ok(())
     }
 
@@ -83,7 +90,29 @@ struct Pair {
     _client: russh::client::Handle<Client>,
 }
 
+#[derive(Default)]
+struct Options {
+    manual_window: bool,
+    /// Granted as soon as the channel is accepted.
+    grant_on_open: u32,
+    limits: Option<Limits>,
+}
+
 async fn connect(manual_window: bool) -> Pair {
+    connect_with(Options {
+        manual_window,
+        ..Default::default()
+    })
+    .await
+}
+
+async fn connect_with(options: Options) -> Pair {
+    tokio::time::timeout(LIVENESS, setup(options))
+        .await
+        .expect("setup finished in time")
+}
+
+async fn setup(options: Options) -> Pair {
     let key = PrivateKey::from(Ed25519Keypair::from_seed(&[7; 32]));
     let config = russh::server::Config {
         methods: MethodSet::from(&[MethodKind::None][..]),
@@ -92,13 +121,15 @@ async fn connect(manual_window: bool) -> Pair {
         keys: vec![key],
         window_size: WINDOW,
         maximum_packet_size: PACKET,
-        manual_window,
+        manual_window: options.manual_window,
+        limits: options.limits.unwrap_or_default(),
         ..Default::default()
     };
     let (client_io, server_io) = tokio::io::duplex(1 << 20);
     let (opened, mut open) = mpsc::unbounded_channel();
     let handler = Server {
         opened,
+        grant_on_open: options.grant_on_open,
         received: 0,
         next_ack: u64::from(WINDOW),
     };
@@ -116,10 +147,7 @@ async fn connect(manual_window: bool) -> Pair {
     let auth = client.authenticate_none("anyone").await.unwrap();
     assert!(auth.success(), "{auth:?}");
     let channel = client.channel_open_session().await.unwrap();
-    let server_channel = tokio::time::timeout(LIVENESS, open.recv())
-        .await
-        .unwrap()
-        .unwrap();
+    let server_channel = open.recv().await.unwrap();
     Pair {
         server,
         server_channel,
@@ -192,4 +220,39 @@ async fn without_manual_window_russh_refills_the_window_on_receipt() {
         refills += 1;
     }
     assert!(refills > 0, "russh's own refill came before the ack");
+}
+
+#[tokio::test]
+async fn with_manual_window_received_data_uses_up_the_window() {
+    let mut pair = connect(true).await;
+    send_window(&pair.channel, WINDOW).await;
+    assert_eq!(next(&mut pair.channel).await, None);
+    // The server's window is now empty, so the largest possible grant fits.
+    // Had the data not been counted, this grant would pass `u32::MAX` and be
+    // dropped.
+    pair.server
+        .grant_window(pair.server_channel, u32::MAX)
+        .unwrap();
+    assert_eq!(next(&mut pair.channel).await, Some(u32::MAX));
+}
+
+/// The server starts a key exchange every 256 KiB it reads, while the client
+/// still has data in flight inside a grant much larger than `window_size`. That
+/// data is legitimate and must not end the session.
+#[tokio::test]
+async fn with_manual_window_a_server_rekey_accepts_granted_data_in_flight() {
+    // At most one `ack` per window, fewer than the client's channel buffer
+    // holds, since nothing reads them until the upload is done.
+    const UPLOAD: u32 = 4 << 20;
+    let mut pair = connect_with(Options {
+        manual_window: true,
+        grant_on_open: UPLOAD - WINDOW,
+        limits: Some(Limits::new(1 << 30, 256 << 10, Duration::from_secs(3600))),
+    })
+    .await;
+    assert_eq!(next(&mut pair.channel).await, Some(UPLOAD));
+    send_window(&pair.channel, UPLOAD).await;
+    for _ in 0..UPLOAD / WINDOW {
+        assert_eq!(next(&mut pair.channel).await, None, "no refill on receipt");
+    }
 }

@@ -361,14 +361,17 @@ impl Encrypted {
     }
 
     /// Grow `channel`'s receive window by `add` bytes with a
-    /// `CHANNEL_WINDOW_ADJUST`. Does nothing for an unknown channel, an empty
-    /// grant, or a grant that would take the window past `u32::MAX`
-    /// (RFC 4254 §5.2).
+    /// `CHANNEL_WINDOW_ADJUST`. Does nothing for an unknown channel, one the
+    /// peer has not confirmed yet, one that is closing, an empty grant, or a
+    /// grant that would take the window past `u32::MAX` (RFC 4254 §5.2).
     pub fn grant_window(&mut self, channel: ChannelId, add: u32) -> Result<(), crate::Error> {
         if add == 0 {
             return Ok(());
         }
         if let Some(channel) = self.channels.get_mut(&channel) {
+            if !channel.confirmed || channel.pending_close {
+                return Ok(());
+            }
             let Some(size) = channel.sender_window_size.checked_add(add) else {
                 return Ok(());
             };
@@ -380,6 +383,14 @@ impl Encrypted {
             channel.sender_window_size = size;
         }
         Ok(())
+    }
+
+    /// The receive window currently open to the peer, summed over all channels.
+    pub fn receive_window_total(&self) -> u64 {
+        self.channels
+            .values()
+            .map(|channel| u64::from(channel.sender_window_size))
+            .sum()
     }
 
     fn flush_channel(
@@ -1662,5 +1673,36 @@ mod tests {
         encrypted.grant_window(channel_id, u32::MAX - 1024).unwrap();
         assert_eq!(encrypted.channels[&channel_id].sender_window_size, u32::MAX);
         assert_eq!(packet_types(&encrypted.write), vec![msg::CHANNEL_WINDOW_ADJUST]);
+    }
+
+    #[test]
+    fn grant_window_ignores_unconfirmed_and_closing_channels() {
+        let unconfirmed = ChannelId(10);
+        let closing = ChannelId(11);
+        let mut encrypted = test_encrypted();
+        let mut channel = test_ready_channel(unconfirmed, 0);
+        channel.confirmed = false;
+        encrypted.channels.insert(unconfirmed, channel);
+        encrypted
+            .channels
+            .insert(closing, test_channel(closing, 43, false, true));
+
+        encrypted.grant_window(unconfirmed, 4096).unwrap();
+        encrypted.grant_window(closing, 4096).unwrap();
+
+        assert_eq!(encrypted.channels[&unconfirmed].sender_window_size, 1024);
+        assert_eq!(encrypted.channels[&closing].sender_window_size, 1024);
+        assert!(encrypted.write.is_empty());
+    }
+
+    #[test]
+    fn receive_window_total_sums_all_channels() {
+        let mut encrypted = test_encrypted();
+        for id in 0..3 {
+            let mut channel = test_ready_channel(ChannelId(id), id);
+            channel.sender_window_size = u32::MAX;
+            encrypted.channels.insert(ChannelId(id), channel);
+        }
+        assert_eq!(encrypted.receive_window_total(), 3 * u64::from(u32::MAX));
     }
 }

@@ -929,6 +929,7 @@ mod tests {
             sender: handle,
             pending_reads: Vec::new(),
             pending_len: 0,
+            pending_limit: 0,
             channels: std::collections::HashMap::new(),
             open_global_requests: std::collections::VecDeque::new(),
             kex: SessionKexState::Idle,

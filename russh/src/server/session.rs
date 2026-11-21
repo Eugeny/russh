@@ -25,7 +25,10 @@ pub struct Session {
     pub(crate) receiver: Receiver<Msg>,
     pub(crate) target_window_size: u32,
     pub(crate) pending_reads: Vec<Vec<u8>>,
-    pub(crate) pending_len: u32,
+    pub(crate) pending_len: u64,
+    /// Bound on `pending_len` for the current key exchange, set by
+    /// `begin_rekey`.
+    pub(crate) pending_limit: u64,
     pub(crate) channels: HashMap<ChannelId, ChannelRef>,
     pub(crate) open_global_requests: VecDeque<GlobalRequestResponse>,
     pub(crate) kex: SessionKexState<ServerKex>,
@@ -167,9 +170,11 @@ impl Handle {
     ///
     /// Never waits, so it can be called from a handler, another task or a
     /// non-async thread. The grant is sent after an ongoing key exchange.
-    /// A grant for an unknown or closed channel, an empty grant, or one that
-    /// would take the window past `u32::MAX` is ignored. Fails only if the
-    /// session has ended.
+    ///
+    /// Grants are ignored for a channel that is not open yet (grant after
+    /// accepting a channel, or after the client confirmed one the server
+    /// opened), that is closing or closed, and when empty or when they would
+    /// take the window past `u32::MAX`. Fails only if the session has ended.
     pub fn grant_window(&self, id: ChannelId, bytes: u32) -> Result<(), crate::SendError> {
         self.priority_sender
             .send(Msg::WindowGrant { id, bytes })
@@ -1578,9 +1583,24 @@ impl Session {
         Ok(())
     }
 
+    /// How much non-kex traffic the peer may send before it sees our KEXINIT:
+    /// twice the larger of `window_size` and, with
+    /// [`Config::manual_window`], the receive window granted across all
+    /// channels (grants can open more than `window_size`, and none are sent
+    /// during the key exchange).
+    fn rekey_pending_limit(&self) -> u64 {
+        let window = u64::from(self.common.config.window_size);
+        let granted = match &self.common.encrypted {
+            Some(enc) if self.common.config.manual_window => enc.receive_window_total(),
+            _ => 0,
+        };
+        2 * window.max(granted)
+    }
+
     pub(crate) fn begin_rekey(&mut self) -> Result<(), Error> {
         debug!("beginning re-key");
         self.pending_len = 0;
+        self.pending_limit = self.rekey_pending_limit();
         let mut kex = ServerKex::new(
             self.common.config.clone(),
             &self.common.remote_sshid,
@@ -1693,6 +1713,7 @@ mod tests {
             target_window_size: config.window_size,
             pending_reads: Vec::new(),
             pending_len: 0,
+            pending_limit: 0,
             channels: HashMap::new(),
             open_global_requests: VecDeque::new(),
             kex: SessionKexState::Idle,
