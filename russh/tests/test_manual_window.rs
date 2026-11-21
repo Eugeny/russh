@@ -98,7 +98,8 @@ struct Pair {
     server_channel: ChannelId,
     channel: Channel<russh::client::Msg>,
     _client: russh::client::Handle<Client>,
-    /// Bytes the client has written into the pipe so far.
+    /// Bytes the client has written into the pipe so far (packets, so with
+    /// framing, padding and MACs on top of the channel data).
     written: Arc<AtomicUsize>,
     /// Opens `Options::gate_first_data`.
     gate: Arc<Notify>,
@@ -302,8 +303,10 @@ async fn with_manual_window_received_data_uses_up_the_window() {
 /// flight inside its grant, which is legitimate and must not end the session.
 ///
 /// The server stops reading at the first data packet until the client has
-/// written the whole upload into the pipe. Then it reads again and starts a
-/// key exchange after every 256 KiB, with the rest of the upload in flight.
+/// written at least as many bytes as the upload into the pipe (counting packet
+/// overhead, so part of the upload may still wait in the client). Then it
+/// reads again and starts a key exchange after every 256 KiB, with the rest of
+/// the upload in flight.
 async fn rekey_with_upload_in_flight(upload: u32, chunk: usize) {
     let mut pair = connect_with(Options {
         manual_window: true,
@@ -326,7 +329,7 @@ async fn rekey_with_upload_in_flight(upload: u32, chunk: usize) {
         }
     })
     .await
-    .expect("the client wrote the upload into the pipe");
+    .expect("the client wrote the upload's size into the pipe");
     pair.gate.notify_one();
     for _ in 0..upload / WINDOW {
         assert_eq!(next(&mut pair.channel).await, None, "no refill on receipt");
