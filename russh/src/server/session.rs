@@ -1590,12 +1590,11 @@ impl Session {
     /// channels (grants can open more than `window_size`, and none are sent
     /// during the key exchange).
     fn rekey_pending_limit(&self) -> u64 {
-        let window = u64::from(self.common.config.window_size);
         let granted = match &self.common.encrypted {
             Some(enc) if self.common.config.manual_window => enc.receive_window_total(),
             _ => 0,
         };
-        2 * window.max(granted)
+        rekey_pending_bound(self.common.config.window_size, granted)
     }
 
     /// What a non-kex message received during a key exchange counts against
@@ -1635,6 +1634,12 @@ impl Session {
         self.kex = SessionKexState::InProgress(kex);
         Ok(())
     }
+}
+
+/// Twice the larger of `window_size` and `granted`, saturating (see
+/// `Session::rekey_pending_limit`).
+fn rekey_pending_bound(window_size: u32, granted: u64) -> u64 {
+    u64::from(window_size).max(granted).saturating_mul(2)
 }
 
 #[cfg(all(test, feature = "flate2"))]
@@ -1925,5 +1930,87 @@ mod tests {
             first_packet_from_event_loop(session, &mut peer, stream).await,
             Some(msg::KEXINIT)
         );
+    }
+
+    // manual receive window (Config::manual_window): the rekey bound
+
+    fn channel_data(payload: usize) -> Vec<u8> {
+        let mut packet = vec![msg::CHANNEL_DATA];
+        7u32.encode(&mut packet).unwrap();
+        vec![b'x'; payload].encode(&mut packet).unwrap();
+        packet
+    }
+
+    fn channel_extended_data(payload: usize) -> Vec<u8> {
+        let mut packet = vec![msg::CHANNEL_EXTENDED_DATA];
+        7u32.encode(&mut packet).unwrap();
+        1u32.encode(&mut packet).unwrap();
+        vec![b'x'; payload].encode(&mut packet).unwrap();
+        packet
+    }
+
+    fn with_manual_window(session: &mut Session, manual_window: bool) {
+        session.common.config = Arc::new(crate::server::Config {
+            manual_window,
+            ..Default::default()
+        });
+    }
+
+    #[test]
+    fn pending_cost_counts_channel_data_by_payload_with_manual_window() {
+        let mut session = authenticated_session();
+        with_manual_window(&mut session, true);
+        assert_eq!(session.pending_cost(&channel_data(1000)), 1000);
+        assert_eq!(session.pending_cost(&channel_extended_data(1000)), 1000);
+        // An empty payload still costs a byte, so a flood of them is bounded.
+        assert_eq!(session.pending_cost(&channel_data(0)), 1);
+        assert_eq!(session.pending_cost(&channel_extended_data(0)), 1);
+        // Other messages count whole.
+        assert_eq!(session.pending_cost(&[msg::IGNORE; 100]), 100);
+    }
+
+    #[test]
+    fn pending_cost_counts_whole_messages_without_manual_window() {
+        let mut session = authenticated_session();
+        with_manual_window(&mut session, false);
+        assert_eq!(session.pending_cost(&channel_data(1000)), 1009);
+        assert_eq!(session.pending_cost(&channel_extended_data(1000)), 1013);
+        assert_eq!(session.pending_cost(&[msg::IGNORE; 100]), 100);
+    }
+
+    #[test]
+    fn rekey_pending_limit_covers_the_granted_window() {
+        let mut session = authenticated_session();
+        let window = session.common.config.window_size;
+        let enc = session.common.encrypted.as_mut().unwrap();
+        for id in 0..3 {
+            enc.channels.insert(
+                ChannelId(id),
+                crate::ChannelParams {
+                    recipient_channel: id,
+                    sender_channel: ChannelId(id),
+                    recipient_window_size: 0,
+                    sender_window_size: window,
+                    recipient_maximum_packet_size: 0,
+                    sender_maximum_packet_size: 0,
+                    confirmed: true,
+                    wants_reply: false,
+                    pending_data: VecDeque::new(),
+                    pending_eof: false,
+                    pending_close: false,
+                },
+            );
+        }
+        with_manual_window(&mut session, false);
+        assert_eq!(session.rekey_pending_limit(), 2 * u64::from(window));
+        with_manual_window(&mut session, true);
+        assert_eq!(session.rekey_pending_limit(), 6 * u64::from(window));
+    }
+
+    #[test]
+    fn rekey_pending_bound_saturates() {
+        assert_eq!(rekey_pending_bound(1024, 0), 2048);
+        assert_eq!(rekey_pending_bound(1024, 5000), 10000);
+        assert_eq!(rekey_pending_bound(u32::MAX, u64::MAX / 2 + 1), u64::MAX);
     }
 }
