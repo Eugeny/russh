@@ -509,8 +509,7 @@ impl<H: Handler> Handle<H> {
     /// Perform public key-based SSH authentication without first probing
     /// whether the server accepts the key.
     ///
-    /// This sends the signed authentication request directly. It can be used
-    /// with servers that reject the optional unsigned public key probe.
+    /// Some servers reject the unsigned probe
     pub async fn authenticate_publickey_direct<U: Into<String>>(
         &mut self,
         user: U,

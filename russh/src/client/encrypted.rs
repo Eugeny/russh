@@ -1454,7 +1454,7 @@ impl Encrypted {
                     key.public_key().to_bytes()?.encode(&mut self.write)?;
                     true
                 }
-                // Sent signed by the early return above.
+                // Handled by the early return above
                 auth::Method::PublicKeyDirect { .. } => {
                     return Err(crate::Error::Inconsistent);
                 }
