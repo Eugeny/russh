@@ -109,11 +109,10 @@ pub struct Config {
     /// stops only its own channel. [`Handler::adjust_window`] is not called
     /// in this mode.
     ///
-    /// Data is still delivered to [`Handler::data`] and to the
-    /// [`Channel`](crate::Channel) as it arrives, also data a misbehaving
-    /// client sends past the window. A `Channel` buffers at most
-    /// `channel_buffer_size` messages whatever their size, so a `Channel`
-    /// user still has to keep reading it.
+    /// Data is still delivered to [`Handler::data`] and to the [`Channel`] as
+    /// it arrives, also data a misbehaving client sends past the window. A
+    /// `Channel` buffers at most `channel_buffer_size` messages whatever their
+    /// size, so a `Channel` user still has to keep reading it.
     pub manual_window: bool,
 }
 
