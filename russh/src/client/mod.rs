@@ -109,7 +109,11 @@ pub struct Session {
 
 impl Drop for Session {
     fn drop(&mut self) {
-        debug!("drop session")
+        debug!("drop session");
+        // No more window comes for any channel: writers waiting for it fail.
+        for chan in self.channels.values() {
+            chan.window_size().close();
+        }
     }
 }
 

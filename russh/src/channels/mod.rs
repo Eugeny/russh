@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -117,6 +118,7 @@ pub enum ChannelMsg {
 pub(crate) struct WindowSizeRef {
     value: Arc<Mutex<u32>>,
     notifier: Arc<Notify>,
+    closed: Arc<AtomicBool>,
 }
 
 impl WindowSizeRef {
@@ -125,6 +127,7 @@ impl WindowSizeRef {
         Self {
             value: Arc::new(Mutex::new(initial)),
             notifier,
+            closed: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -137,6 +140,19 @@ impl WindowSizeRef {
 
     pub(crate) fn subscribe(&self) -> Arc<Notify> {
         Arc::clone(&self.notifier)
+    }
+
+    /// Marks the channel as closed: the peer will grant no more window, so writers
+    /// waiting for it are woken and fail, and so does any later write.
+    pub(crate) fn close(&self) {
+        self.closed.store(true, Ordering::Release);
+        self.notifier.notify_waiters();
+        // A writer that checked before the store but isn't waiting yet takes this permit.
+        self.notifier.notify_one();
+    }
+
+    pub(crate) fn is_closed(&self) -> bool {
+        self.closed.load(Ordering::Acquire)
     }
 }
 
@@ -367,6 +383,11 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + Sync + 'static> ChannelWriteHalf<
         }
         loop {
             let mut window_size = self.window_size.value.lock().await;
+            if self.window_size.is_closed() {
+                // Pass the wake-up on to the next writer waiting on this channel.
+                self.window_size.notifier.notify_one();
+                return Err(Error::SendError);
+            }
             let writable = (self.max_packet_size as usize)
                 .min(*window_size as usize)
                 .min(remaining);
@@ -438,6 +459,7 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + Sync + 'static> ChannelWriteHalf<
             self.id,
             self.window_size.value.clone(),
             self.window_size.subscribe(),
+            self.window_size.closed.clone(),
             self.max_packet_size,
             ext,
         )
@@ -667,6 +689,7 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + Sync + 'static> Channel<S> {
                 self.write_half.id,
                 self.write_half.window_size.value.clone(),
                 self.write_half.window_size.subscribe(),
+                self.write_half.window_size.closed.clone(),
                 self.write_half.max_packet_size,
                 None,
             ),
@@ -701,7 +724,11 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + Sync + 'static> Channel<S> {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
+    use tokio::io::AsyncWriteExt;
     use tokio::sync::mpsc;
+    use tokio::time::timeout;
 
     use super::*;
 
@@ -841,5 +868,84 @@ mod tests {
             }
             msg => panic!("unexpected message: {msg:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn data_bytes_waiting_for_window_fails_once_the_channel_is_closed() {
+        let window_size = WindowSizeRef::new(0);
+        let (write_half, mut receiver) = test_write_half(window_size.clone(), 1024);
+        let send = tokio::spawn(async move {
+            write_half
+                .data_bytes(Bytes::from_static(b"never sent"))
+                .await
+        });
+
+        tokio::task::yield_now().await;
+        assert!(!send.is_finished());
+
+        window_size.close();
+        let result = timeout(Duration::from_secs(5), send).await.unwrap().unwrap();
+
+        assert!(matches!(result, Err(Error::SendError)));
+        assert!(receiver.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn writer_waiting_for_window_fails_once_the_channel_is_closed() {
+        let window_size = WindowSizeRef::new(0);
+        let (write_half, mut receiver) = test_write_half(window_size.clone(), 1024);
+        let mut writer = write_half.make_writer();
+        let send = tokio::spawn(async move { writer.write_all(b"never sent").await });
+
+        tokio::task::yield_now().await;
+        assert!(!send.is_finished());
+
+        window_size.close();
+        let result = timeout(Duration::from_secs(5), send).await.unwrap().unwrap();
+
+        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::BrokenPipe);
+        assert!(receiver.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn every_writer_waiting_for_window_fails_once_the_channel_is_closed() {
+        let window_size = WindowSizeRef::new(0);
+        let (write_half, _receiver) = test_write_half(window_size.clone(), 1024);
+        let write_half = Arc::new(write_half);
+        let mut writers = Vec::new();
+        for _ in 0..3 {
+            let mut writer = write_half.make_writer();
+            writers.push(tokio::spawn(async move {
+                writer.write_all(b"never sent").await.is_err()
+            }));
+            let write_half = write_half.clone();
+            writers.push(tokio::spawn(async move {
+                write_half
+                    .data_bytes(Bytes::from_static(b"never sent"))
+                    .await
+                    .is_err()
+            }));
+        }
+
+        tokio::task::yield_now().await;
+        window_size.close();
+
+        for writer in writers {
+            assert!(timeout(Duration::from_secs(5), writer).await.unwrap().unwrap());
+        }
+    }
+
+    #[tokio::test]
+    async fn writes_fail_once_the_channel_is_closed_even_with_window_left() {
+        let window_size = WindowSizeRef::new(1024);
+        let (write_half, mut receiver) = test_write_half(window_size.clone(), 1024);
+
+        window_size.close();
+
+        let result = write_half.data_bytes(Bytes::from_static(b"never sent")).await;
+        assert!(matches!(result, Err(Error::SendError)));
+        let result = write_half.make_writer().write_all(b"never sent").await;
+        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::BrokenPipe);
+        assert!(receiver.try_recv().is_err());
     }
 }
