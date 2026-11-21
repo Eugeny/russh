@@ -52,6 +52,7 @@ Russh aims for broad interoperability, so it supports both algorithms currently 
 **Recommended**
 
 - `mlkem768x25519-sha256` (post-quantum hybrid)
+- `sntrup761x25519-sha512`, `sntrup761x25519-sha512@openssh.com` (post-quantum hybrid, requires the `sntrup` feature)
 - `curve25519-sha256`, `curve25519-sha256@libssh.org`
 - `diffie-hellman-group-exchange-sha256` (GEX)
 - `diffie-hellman-group18-sha512`, `diffie-hellman-group17-sha512`, `diffie-hellman-group16-sha512`, `diffie-hellman-group15-sha512`
