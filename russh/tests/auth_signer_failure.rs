@@ -30,6 +30,7 @@ struct AcceptAnyKeyServer;
 
 impl server::Handler for AcceptAnyKeyServer {
     type Error = russh::Error;
+    type Data = ();
 
     async fn auth_publickey(
         &mut self,

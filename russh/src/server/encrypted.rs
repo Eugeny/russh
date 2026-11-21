@@ -224,6 +224,7 @@ mod tests {
 
         impl Handler for Probe {
             type Error = Error;
+            type Data = ();
 
             async fn auth_publickey_offered(
                 &mut self,
@@ -425,6 +426,7 @@ mod tests {
 
         impl Handler for Probe {
             type Error = Error;
+            type Data = ();
 
             async fn auth_publickey_offered(
                 &mut self,
@@ -493,6 +495,7 @@ mod tests {
 
         impl Handler for AcceptAnyKey {
             type Error = Error;
+            type Data = ();
 
             async fn auth_publickey_offered(
                 &mut self,
@@ -550,6 +553,7 @@ mod tests {
 
         impl Handler for Recorder {
             type Error = Error;
+            type Data = ();
 
             async fn auth_publickey_offered(
                 &mut self,
@@ -627,6 +631,7 @@ mod tests {
 
         impl Handler for NoSha1 {
             type Error = Error;
+            type Data = ();
 
             async fn auth_publickey_offered(
                 &mut self,
@@ -712,6 +717,7 @@ mod tests {
 
     impl Handler for ChannelCallbackProbe {
         type Error = Error;
+        type Data = ();
 
         async fn exec_request(
             &mut self,
