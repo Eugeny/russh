@@ -13,7 +13,6 @@
 // limitations under the License.
 //
 use std::convert::TryInto;
-use std::ops::Deref;
 use std::str::FromStr;
 
 use bytes::Bytes;
@@ -25,7 +24,7 @@ use super::IncomingSshPacket;
 use crate::auth::AuthRequest;
 use crate::cert::PublicKeyOrCertificate;
 use crate::client::{ChannelOpenHandle, Handler, Msg, Prompt, Reply, Session};
-use crate::helpers::{AlgorithmExt, EncodedExt, NameList, sign_with_hash_alg};
+use crate::helpers::{AlgorithmExt, NameList, sign_with_hash_alg};
 use crate::keys::key::parse_public_key;
 use crate::parsing::{ChannelOpenConfirmation, ChannelType, OpenChannelMessage, ensure_end};
 use crate::session::{Encrypted, EncryptedState, GlobalRequestResponse};
@@ -261,7 +260,7 @@ impl Session {
                                         &mut self.common.buffer,
                                     )?
                                 }
-                                Some(auth_method @ auth::Method::OpenSshCertificate { .. }) | Some(auth_method @ auth::Method::OpenSshCertificateWithHashAlg { .. })=> {
+                                Some(auth_method @ auth::Method::OpenSshCertificate { .. }) => {
                                     self.common.buffer.clear();
                                     enc.client_send_signature(
                                         &self.common.auth_user,
@@ -1419,7 +1418,7 @@ impl Encrypted {
                     key.public_key().to_bytes()?.encode(&mut self.write)?;
                     true
                 }
-                auth::Method::OpenSshCertificate { ref cert, .. } | auth::Method::OpenSshCertificateWithHashAlg { ref cert, .. } => {
+                auth::Method::OpenSshCertificate { ref key, ref cert } => {
                     user.as_bytes().encode(&mut self.write)?;
                     "ssh-connection".encode(&mut self.write)?;
                     "publickey".encode(&mut self.write)?;
@@ -1427,6 +1426,7 @@ impl Encrypted {
 
                     debug!("write_auth_request: cert - {:?}", cert.algorithm());
                     cert.algorithm()
+                        .with_hash_alg(key.hash_alg())
                         .to_certificate_type()
                         .encode(&mut self.write)?;
                     cert.to_bytes()?.as_slice().encode(&mut self.write)?;
@@ -1589,35 +1589,21 @@ impl Encrypted {
                 })
             }
             auth::Method::OpenSshCertificate { key, cert } => {
+                // The certificate type named in the request and the signature
+                // must use the same hash (RFC 8332 §3).
                 let i0 = self.client_make_to_sign(
                     user,
                     &PublicKeyOrCertificate::Certificate(cert.clone()),
-                    None,
+                    key.hash_alg(),
                     buffer,
                 )?;
 
                 // Extend with self-signature.
-                signature::Signer::try_sign(key.deref(), buffer)?
-                    .encoded()?
-                    .encode(&mut *buffer)?;
-
-                push_packet!(self.write, {
-                    #[allow(clippy::indexing_slicing)] // length checked
-                    self.write.extend_from_slice(&buffer[i0..]);
-                })
-            }
-            auth::Method::OpenSshCertificateWithHashAlg { key, cert} => {
-                let i0 = self.client_make_to_sign(
-                    user,
-                    &PublicKeyOrCertificate::Certificate(cert.clone()),
-                    buffer,
-                )?;
-
                 sign_with_hash_alg(key, buffer)?.encode(&mut *buffer)?;
 
                 push_packet!(self.write, {
                     #[allow(clippy::indexing_slicing)] // length checked
-                    self.write.extend(&buffer[i0..]);
+                    self.write.extend_from_slice(&buffer[i0..]);
                 })
             }
             _ => {}

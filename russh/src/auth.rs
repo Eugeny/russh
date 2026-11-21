@@ -16,9 +16,8 @@
 use std::future::Future;
 use std::ops::Deref;
 use std::str::FromStr;
-use std::sync::Arc;
 
-use ssh_key::{Certificate, HashAlg, PrivateKey};
+use ssh_key::{Certificate, HashAlg};
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite};
 use zeroize::Zeroize;
@@ -282,10 +281,6 @@ pub enum Method {
         key: PrivateKeyWithHashAlg,
     },
     OpenSshCertificate {
-        key: Arc<PrivateKey>,
-        cert: Certificate,
-    },
-    OpenSshCertificateWithHashAlg {
         key: PrivateKeyWithHashAlg,
         cert: Certificate,
     },

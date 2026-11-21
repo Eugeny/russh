@@ -506,27 +506,28 @@ impl<H: Handler> Handle<H> {
         self.wait_recv_reply().await
     }
 
-    /// Perform public OpenSSH Certificate-based SSH authentication
+    /// Perform public OpenSSH Certificate-based SSH authentication.
+    ///
+    /// RSA keys sign with SHA-512 (`rsa-sha2-512-cert-v01@openssh.com`). Use
+    /// [`Handle::authenticate_openssh_cert_with_hash_alg`] to pick another hash.
     pub async fn authenticate_openssh_cert<U: Into<String>>(
         &mut self,
         user: U,
         key: Arc<PrivateKey>,
         cert: Certificate,
     ) -> Result<AuthResult, crate::Error> {
-        let user = user.into();
-        self.sender
-            .send(Msg::Authenticate {
-                user,
-                method: auth::Method::OpenSshCertificate { key, cert },
-            })
+        let key = PrivateKeyWithHashAlg::new(key, Some(HashAlg::Sha512));
+        self.authenticate_openssh_cert_with_hash_alg(user, key, cert)
             .await
-            .map_err(|_| crate::Error::SendError)?;
-        self.wait_recv_reply().await
     }
 
-    /// Same as [`Handle::authenticate_openssh_cert`], but allows specifying a hash algorithm for RSA keys in the certificate. 
-    /// This is necessary for authentication to succeed with some old servers that does not support `rsa-sha2-512`.
-    /// Perform public OpenSSH Certificate-based SSH authentication with a specified hash algorithm for RSA keys
+    /// Same as [`Handle::authenticate_openssh_cert`], but with the hash
+    /// algorithm for RSA keys chosen by the caller, e.g. for servers that do
+    /// not support `rsa-sha2-512`. The hash selects both the certificate type
+    /// named in the request and the signature algorithm.
+    ///
+    /// You can use [Handle::best_supported_rsa_hash] to automatically
+    /// figure out the best hash algorithm for RSA keys.
     pub async fn authenticate_openssh_cert_with_hash_alg<U: Into<String>>(
         &mut self,
         user: U,
@@ -537,7 +538,7 @@ impl<H: Handler> Handle<H> {
         self.sender
             .send(Msg::Authenticate {
                 user,
-                method: auth::Method::OpenSshCertificateWithHashAlg { key, cert },
+                method: auth::Method::OpenSshCertificate { key, cert },
             })
             .await
             .map_err(|_| crate::Error::SendError)?;
