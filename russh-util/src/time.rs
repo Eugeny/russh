@@ -1,27 +1,9 @@
 #[cfg(not(target_arch = "wasm32"))]
 pub use std::time::Instant;
 
+// `web-time` uses `Performance.now()` on wasm32-unknown-unknown (where
+// `std::time::Instant::now()` panics) and re-exports `std::time` on other
+// wasm32 targets such as WASI. Unlike the previous `chrono::Utc::now()` based
+// implementation, it is monotonic.
 #[cfg(target_arch = "wasm32")]
-pub use wasm::Instant;
-
-#[cfg(target_arch = "wasm32")]
-mod wasm {
-    #[derive(Debug, Clone, Copy)]
-    pub struct Instant {
-        inner: chrono::DateTime<chrono::Utc>,
-    }
-
-    impl Instant {
-        pub fn now() -> Self {
-            Instant {
-                inner: chrono::Utc::now(),
-            }
-        }
-
-        pub fn duration_since(&self, earlier: Instant) -> std::time::Duration {
-            (self.inner - earlier.inner)
-                .to_std()
-                .expect("Duration is negative")
-        }
-    }
-}
+pub use web_time::Instant;

@@ -1,12 +1,13 @@
 use std::collections::{HashMap, VecDeque};
 use std::io::ErrorKind;
 use std::sync::Arc;
+use std::time::Duration;
 
 use channels::WindowSizeRef;
 use kex::ServerKex;
 use log::debug;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
-use tokio::sync::mpsc::{Receiver, Sender, channel};
+use tokio::sync::mpsc::{Receiver, Sender, UnboundedReceiver, UnboundedSender, channel};
 use tokio::sync::oneshot;
 
 use super::*;
@@ -20,6 +21,7 @@ use crate::{ChannelOpenFailure, map_err, msg};
 pub struct Session {
     pub(crate) common: CommonSession<Arc<Config>>,
     pub(crate) sender: Handle,
+    pub(crate) priority_receiver: UnboundedReceiver<Msg>,
     pub(crate) receiver: Receiver<Msg>,
     pub(crate) target_window_size: u32,
     pub(crate) pending_reads: Vec<Vec<u8>>,
@@ -108,6 +110,7 @@ pub type ChannelOpenHandle = crate::ChannelOpenHandleInner<Msg>;
 /// Handle to a session, used to send messages to a client outside of
 /// the request/response cycle.
 pub struct Handle {
+    pub(crate) priority_sender: UnboundedSender<Msg>,
     pub(crate) sender: Sender<Msg>,
     pub(crate) channel_buffer_size: usize,
 }
@@ -402,7 +405,7 @@ impl Handle {
                     max_packet_size,
                     window_size,
                 }) => {
-                    window_size_ref.update(window_size).await;
+                    window_size_ref.grow(window_size).await;
 
                     return Ok(Channel {
                         write_half: ChannelWriteHalf {
@@ -611,7 +614,8 @@ impl Session {
                 description,
                 language_tag,
             } => {
-                self.common.disconnect(reason, &description, &language_tag)?;
+                self.common
+                    .disconnect(reason, &description, &language_tag)?;
             }
             Msg::ChannelOpenReply { pending, result } => {
                 self.finalize_channel_open_reply(pending, result)?;
@@ -671,31 +675,44 @@ impl Session {
             // to `select!`, which picks up any client-side event first. Gated on
             // `!kex.active()` to match the `select!` receiver arm.
             const MAX_MESSAGES_PER_BATCH: usize = 64;
-            if !self.kex.active() {
+            // Leave application messages in the bounded receiver once a peer's
+            // channel window is exhausted. Network reads remain active so a
+            // window adjustment can release the queued data.
+            if !self.kex.active() && !self.common.has_any_pending_data() {
                 let mut drained = 0;
                 while drained < MAX_MESSAGES_PER_BATCH {
                     // Only Empty/Disconnected end the drain; both mean "nothing
                     // more to hand off right now", so treat them the same.
-                    let Ok(msg) = self.receiver.try_recv() else {
-                        break;
+                    let msg = match self.priority_receiver.try_recv() {
+                        Ok(msg) => msg,
+                        Err(_) => match self.receiver.try_recv() {
+                            Ok(msg) => msg,
+                            Err(_) => break,
+                        },
                     };
                     self.dispatch_msg(msg)?;
                     drained += 1;
+                    if self.common.has_any_pending_data() {
+                        break;
+                    }
                 }
                 if drained > 0 {
                     self.flush()?;
-                    map_err!(
-                        self.common
-                            .packet_writer
-                            .flush_into(&mut stream_write)
-                            .await
-                    )?;
+                    crate::flush_or_timeout(
+                        &mut self.common.packet_writer,
+                        &mut stream_write,
+                        inactivity_timer.as_mut(),
+                    )
+                    .await?;
                 }
                 // A drained Disconnect sets this; don't block in `select!` after.
                 if self.common.disconnected {
                     continue;
                 }
             }
+
+            let rekey_timer = future_or_pending(self.rekey_time_remaining(), tokio::time::sleep);
+            pin!(rekey_timer);
 
             tokio::select! {
                 r = &mut reading => {
@@ -722,16 +739,33 @@ impl Session {
                             // TODO it'd be cleaner to just pass cipher to reply()
                             std::mem::swap(&mut opening_cipher, &mut self.common.remote_to_local);
 
+                            let kex_was_active = self.kex.active();
                             match reply(&mut self, &mut handler, &mut pkt).await {
                                 Ok(_) => {},
                                 Err(e) => return Err(e),
                             }
                             buffer.seqn = pkt.seqn; // TODO reply changes seqn internall, find cleaner way
 
+                            if kex_was_active && !self.kex.active() {
+                                buffer.bytes = 0;
+                            } else if self.automatic_rekey_allowed()
+                                && buffer.bytes >= self.common.config.limits.rekey_read_limit
+                            {
+                                debug!("rekey read limit reached after {} inbound bytes", buffer.bytes);
+                                if let Some(enc) = self.common.encrypted.as_mut() {
+                                    // flush checks this
+                                    enc.rekey_wanted = true;
+                                }
+                            }
+
                             std::mem::swap(&mut opening_cipher, &mut self.common.remote_to_local);
                         }
                     }
                     reading.set(start_reading(stream_read, buffer, opening_cipher));
+                }
+                () = &mut rekey_timer => {
+                    // The flush after the select sees the elapsed limit.
+                    debug!("rekey time limit reached");
                 }
                 () = &mut keepalive_timer => {
                     self.common.alive_timeouts = self.common.alive_timeouts.saturating_add(1);
@@ -746,7 +780,24 @@ impl Session {
                     debug!("timeout");
                     return Err(crate::Error::InactivityTimeout.into());
                 }
-                msg = self.receiver.recv(), if !self.kex.active() => {
+                msg = self.priority_receiver.recv(), if !self.kex.active() => {
+                    match msg {
+                        Some(msg) => self.dispatch_msg(msg)?,
+                        None => {
+                            debug!("self.priority_receiver: received None");
+                        }
+                    }
+                }
+                msg = self.receiver.recv(), if !self.kex.active() && !self.common.has_any_pending_data() => {
+                    // Channel open replies must be dispatched before any
+                    // channel traffic queued after them: `msg` may be data for
+                    // a channel whose confirmation is still sitting in the
+                    // priority queue, and dispatching that data first would
+                    // silently drop it (the channel is only registered when
+                    // its open reply is processed).
+                    while let Ok(reply) = self.priority_receiver.try_recv() {
+                        self.dispatch_msg(reply)?;
+                    }
                     match msg {
                         Some(msg) => self.dispatch_msg(msg)?,
                         None => {
@@ -757,12 +808,12 @@ impl Session {
             }
             self.flush()?;
 
-            map_err!(
-                self.common
-                    .packet_writer
-                    .flush_into(&mut stream_write)
-                    .await
-            )?;
+            crate::flush_or_timeout(
+                &mut self.common.packet_writer,
+                &mut stream_write,
+                inactivity_timer.as_mut(),
+            )
+            .await?;
 
             if self.common.received_data {
                 // Reset the number of failed keepalive attempts. We don't
@@ -772,21 +823,21 @@ impl Session {
                 // data from it.
                 self.common.alive_timeouts = 0;
             }
-            if self.common.received_data || sent_keepalive {
-                if let (futures::future::Either::Right(ref mut sleep), Some(d)) = (
+            if (self.common.received_data || sent_keepalive)
+                && let (futures::future::Either::Right(ref mut sleep), Some(d)) = (
                     keepalive_timer.as_mut().as_pin_mut(),
                     self.common.config.keepalive_interval,
-                ) {
-                    sleep.as_mut().reset(tokio::time::Instant::now() + d);
-                }
+                )
+            {
+                sleep.as_mut().reset(tokio::time::Instant::now() + d);
             }
-            if !sent_keepalive {
-                if let (futures::future::Either::Right(ref mut sleep), Some(d)) = (
+            if !sent_keepalive
+                && let (futures::future::Either::Right(ref mut sleep), Some(d)) = (
                     inactivity_timer.as_mut().as_pin_mut(),
                     self.common.config.inactivity_timeout,
-                ) {
-                    sleep.as_mut().reset(tokio::time::Instant::now() + d);
-                }
+                )
+            {
+                sleep.as_mut().reset(tokio::time::Instant::now() + d);
             }
         }
         debug!("disconnected");
@@ -796,14 +847,22 @@ impl Session {
             if let Some((stream_read, buffer, opening_cipher)) = is_reading.take() {
                 reading.set(start_reading(stream_read, buffer, opening_cipher));
             }
-            match (&mut reading).await {
-                Ok((0, _, _, _)) => break,
-                Ok((_, r, b, opening_cipher)) => {
-                    is_reading = Some((r, b, opening_cipher));
+            tokio::select! {
+                r = &mut reading => match r {
+                    Ok((0, _, _, _)) => break,
+                    Ok((_, r, b, opening_cipher)) => {
+                        is_reading = Some((r, b, opening_cipher));
+                    }
+                    // at this stage of session shutdown, EOF is not unexpected
+                    Err(Error::IO(ref e)) if e.kind() == ErrorKind::UnexpectedEof => break,
+                    Err(e) => return Err(e.into()),
+                },
+                // The client was told to disconnect and never closed its side;
+                // dropping the stream closes it for them.
+                () = &mut inactivity_timer => {
+                    debug!("timeout waiting for the client to close");
+                    break;
                 }
-                // at this stage of session shutdown, EOF is not unexpected
-                Err(Error::IO(ref e)) if e.kind() == ErrorKind::UnexpectedEof => break,
-                Err(e) => return Err(e.into()),
             }
         }
 
@@ -816,30 +875,30 @@ impl Session {
     }
 
     pub fn writable_packet_size(&self, channel: &ChannelId) -> u32 {
-        if let Some(ref enc) = self.common.encrypted {
-            if let Some(channel) = enc.channels.get(channel) {
-                return channel
-                    .sender_window_size
-                    .min(channel.sender_maximum_packet_size);
-            }
+        if let Some(ref enc) = self.common.encrypted
+            && let Some(channel) = enc.channels.get(channel)
+        {
+            return channel
+                .sender_window_size
+                .min(channel.sender_maximum_packet_size);
         }
         0
     }
 
     pub fn window_size(&self, channel: &ChannelId) -> u32 {
-        if let Some(ref enc) = self.common.encrypted {
-            if let Some(channel) = enc.channels.get(channel) {
-                return channel.sender_window_size;
-            }
+        if let Some(ref enc) = self.common.encrypted
+            && let Some(channel) = enc.channels.get(channel)
+        {
+            return channel.sender_window_size;
         }
         0
     }
 
     pub fn max_packet_size(&self, channel: &ChannelId) -> u32 {
-        if let Some(ref enc) = self.common.encrypted {
-            if let Some(channel) = enc.channels.get(channel) {
-                return channel.sender_maximum_packet_size;
-            }
+        if let Some(ref enc) = self.common.encrypted
+            && let Some(channel) = enc.channels.get(channel)
+        {
+            return channel.sender_maximum_packet_size;
         }
         0
     }
@@ -847,18 +906,64 @@ impl Session {
     /// Flush the session, i.e. encrypt the pending buffer.
     pub fn flush(&mut self) -> Result<(), Error> {
         if let Some(ref mut enc) = self.common.encrypted {
+            // Tearing down: get the queued packets (incl. DISCONNECT) out in
+            // order, kex or not.
+            let is_rekeying = self.kex.active() && !self.common.disconnected;
             if enc.flush(
                 &self.common.config.as_ref().limits,
                 &mut self.common.packet_writer,
+                is_rekeying,
             )? && self.kex == SessionKexState::Idle
+                && Self::automatic_rekey_eligible(&enc.state)
             {
                 debug!("starting rekeying");
                 if enc.exchange.take().is_some() {
+                    // USERAUTH_SUCCESS was just flushed with the pre-authentication
+                    // compression state. If automatic rekeying is the first
+                    // post-authentication traffic, activate delayed server
+                    // compression before emitting KEXINIT, just as the next peer
+                    // packet would normally do.
+                    if matches!(enc.state, EncryptedState::InitCompression) {
+                        if enc.server_compression.is_deferred() {
+                            enc.server_compression
+                                .init_compress(self.common.packet_writer.compress());
+                        }
+                        enc.state = EncryptedState::Authenticated;
+                    }
                     self.begin_rekey()?;
                 }
             }
         }
         Ok(())
+    }
+
+    /// `InitCompression` counts: USERAUTH_SUCCESS is flushed in that state and
+    /// an idle peer never sends the packet that would advance it.
+    fn automatic_rekey_eligible(state: &EncryptedState) -> bool {
+        matches!(
+            state,
+            EncryptedState::InitCompression | EncryptedState::Authenticated
+        )
+    }
+
+    /// Is a limit-triggered rekey allowed now? no kex in flight & authed
+    fn automatic_rekey_allowed(&self) -> bool {
+        !self.kex.active()
+            && self
+                .common
+                .encrypted
+                .as_ref()
+                .is_some_and(|enc| Self::automatic_rekey_eligible(&enc.state))
+    }
+
+    fn rekey_time_remaining(&self) -> Option<Duration> {
+        if !self.automatic_rekey_allowed() {
+            return None;
+        }
+        self.common
+            .encrypted
+            .as_ref()?
+            .rekey_time_remaining(&self.common.config.limits, &self.common.packet_writer)
     }
 
     pub fn flush_pending(&mut self, channel: ChannelId) -> Result<usize, Error> {
@@ -932,17 +1037,20 @@ impl Session {
     /// cancelling). Always call this function if the request was
     /// successful (it checks whether the client expects an answer).
     pub fn request_success(&mut self) {
-        if self.common.wants_reply {
-            if let Some(ref mut enc) = self.common.encrypted {
-                self.common.wants_reply = false;
-                push_packet!(enc.write, enc.write.push(msg::REQUEST_SUCCESS))
-            }
+        if self.common.wants_reply
+            && let Some(ref mut enc) = self.common.encrypted
+        {
+            self.common.wants_reply = false;
+            push_packet!(enc.write, enc.write.push(msg::REQUEST_SUCCESS))
         }
     }
 
-    /// Send a "failure" reply to a global request.
+    /// Send a "failure" reply to a global request (it checks whether the
+    /// client expects an answer).
     pub fn request_failure(&mut self) {
-        if let Some(ref mut enc) = self.common.encrypted {
+        if self.common.wants_reply
+            && let Some(ref mut enc) = self.common.encrypted
+        {
             self.common.wants_reply = false;
             push_packet!(enc.write, enc.write.push(msg::REQUEST_FAILURE))
         }
@@ -952,17 +1060,17 @@ impl Session {
     /// function if the request was successful (it checks whether the
     /// client expects an answer).
     pub fn channel_success(&mut self, channel: ChannelId) -> Result<(), crate::Error> {
-        if let Some(ref mut enc) = self.common.encrypted {
-            if let Some(channel) = enc.channels.get_mut(&channel) {
-                assert!(channel.confirmed);
-                if channel.wants_reply {
-                    channel.wants_reply = false;
-                    debug!("channel_success {channel:?}");
-                    push_packet!(enc.write, {
-                        msg::CHANNEL_SUCCESS.encode(&mut enc.write)?;
-                        channel.recipient_channel.encode(&mut enc.write)?;
-                    })
-                }
+        if let Some(ref mut enc) = self.common.encrypted
+            && let Some(channel) = enc.channels.get_mut(&channel)
+        {
+            assert!(channel.confirmed);
+            if channel.wants_reply {
+                channel.wants_reply = false;
+                debug!("channel_success {channel:?}");
+                push_packet!(enc.write, {
+                    msg::CHANNEL_SUCCESS.encode(&mut enc.write)?;
+                    channel.recipient_channel.encode(&mut enc.write)?;
+                })
             }
         }
         Ok(())
@@ -970,16 +1078,16 @@ impl Session {
 
     /// Send a "failure" reply to a global request.
     pub fn channel_failure(&mut self, channel: ChannelId) -> Result<(), crate::Error> {
-        if let Some(ref mut enc) = self.common.encrypted {
-            if let Some(channel) = enc.channels.get_mut(&channel) {
-                assert!(channel.confirmed);
-                if channel.wants_reply {
-                    channel.wants_reply = false;
-                    push_packet!(enc.write, {
-                        enc.write.push(msg::CHANNEL_FAILURE);
-                        channel.recipient_channel.encode(&mut enc.write)?;
-                    })
-                }
+        if let Some(ref mut enc) = self.common.encrypted
+            && let Some(channel) = enc.channels.get_mut(&channel)
+        {
+            assert!(channel.confirmed);
+            if channel.wants_reply {
+                channel.wants_reply = false;
+                push_packet!(enc.write, {
+                    enc.write.push(msg::CHANNEL_FAILURE);
+                    channel.recipient_channel.encode(&mut enc.write)?;
+                })
             }
         }
         Ok(())
@@ -1108,18 +1216,18 @@ impl Session {
         channel: ChannelId,
         client_can_do: bool,
     ) -> Result<(), Error> {
-        if let Some(ref mut enc) = self.common.encrypted {
-            if let Some(channel) = enc.channels.get(&channel) {
-                assert!(channel.confirmed);
-                push_packet!(enc.write, {
-                    msg::CHANNEL_REQUEST.encode(&mut enc.write)?;
+        if let Some(ref mut enc) = self.common.encrypted
+            && let Some(channel) = enc.channels.get(&channel)
+        {
+            assert!(channel.confirmed);
+            push_packet!(enc.write, {
+                msg::CHANNEL_REQUEST.encode(&mut enc.write)?;
 
-                    channel.recipient_channel.encode(&mut enc.write)?;
-                    "xon-xoff".encode(&mut enc.write)?;
-                    0u8.encode(&mut enc.write)?;
-                    (client_can_do as u8).encode(&mut enc.write)?;
-                })
-            }
+                channel.recipient_channel.encode(&mut enc.write)?;
+                "xon-xoff".encode(&mut enc.write)?;
+                0u8.encode(&mut enc.write)?;
+                (client_can_do as u8).encode(&mut enc.write)?;
+            })
         }
         Ok(())
     }
@@ -1160,18 +1268,18 @@ impl Session {
         channel: ChannelId,
         exit_status: u32,
     ) -> Result<(), Error> {
-        if let Some(ref mut enc) = self.common.encrypted {
-            if let Some(channel) = enc.channels.get(&channel) {
-                assert!(channel.confirmed);
-                push_packet!(enc.write, {
-                    msg::CHANNEL_REQUEST.encode(&mut enc.write)?;
+        if let Some(ref mut enc) = self.common.encrypted
+            && let Some(channel) = enc.channels.get(&channel)
+        {
+            assert!(channel.confirmed);
+            push_packet!(enc.write, {
+                msg::CHANNEL_REQUEST.encode(&mut enc.write)?;
 
-                    channel.recipient_channel.encode(&mut enc.write)?;
-                    "exit-status".encode(&mut enc.write)?;
-                    0u8.encode(&mut enc.write)?;
-                    exit_status.encode(&mut enc.write)?;
-                })
-            }
+                channel.recipient_channel.encode(&mut enc.write)?;
+                "exit-status".encode(&mut enc.write)?;
+                0u8.encode(&mut enc.write)?;
+                exit_status.encode(&mut enc.write)?;
+            })
         }
         Ok(())
     }
@@ -1185,21 +1293,21 @@ impl Session {
         error_message: &str,
         language_tag: &str,
     ) -> Result<(), Error> {
-        if let Some(ref mut enc) = self.common.encrypted {
-            if let Some(channel) = enc.channels.get(&channel) {
-                assert!(channel.confirmed);
-                push_packet!(enc.write, {
-                    msg::CHANNEL_REQUEST.encode(&mut enc.write)?;
+        if let Some(ref mut enc) = self.common.encrypted
+            && let Some(channel) = enc.channels.get(&channel)
+        {
+            assert!(channel.confirmed);
+            push_packet!(enc.write, {
+                msg::CHANNEL_REQUEST.encode(&mut enc.write)?;
 
-                    channel.recipient_channel.encode(&mut enc.write)?;
-                    "exit-signal".encode(&mut enc.write)?;
-                    0u8.encode(&mut enc.write)?;
-                    signal.name().encode(&mut enc.write)?;
-                    (core_dumped as u8).encode(&mut enc.write)?;
-                    error_message.encode(&mut enc.write)?;
-                    language_tag.encode(&mut enc.write)?;
-                })
-            }
+                channel.recipient_channel.encode(&mut enc.write)?;
+                "exit-signal".encode(&mut enc.write)?;
+                0u8.encode(&mut enc.write)?;
+                signal.name().encode(&mut enc.write)?;
+                (core_dumped as u8).encode(&mut enc.write)?;
+                error_message.encode(&mut enc.write)?;
+                language_tag.encode(&mut enc.write)?;
+            })
         }
         Ok(())
     }
@@ -1448,6 +1556,7 @@ impl Session {
 
     pub(crate) fn begin_rekey(&mut self) -> Result<(), Error> {
         debug!("beginning re-key");
+        self.pending_len = 0;
         let mut kex = ServerKex::new(
             self.common.config.clone(),
             &self.common.remote_sshid,
@@ -1474,8 +1583,11 @@ mod tests {
     use std::num::Wrapping;
     use std::sync::Arc;
 
+    use ssh_encoding::Encode;
+
     use super::*;
-    use crate::compression::{Compression, Decompress};
+    use crate::auth::{AuthRequest, MethodSet};
+    use crate::compression::{Compress, Compression, Decompress};
     use crate::kex::{KEXES, NONE, SessionKexState};
     use crate::session::{CommonSession, Encrypted, EncryptedState, Exchange};
     use crate::sshbuffer::{IncomingSshPacket, PacketWriter, SSHBuffer};
@@ -1487,10 +1599,30 @@ mod tests {
         type Error = crate::Error;
     }
 
+    struct AcceptNoneHandler;
+
+    impl crate::server::Handler for AcceptNoneHandler {
+        type Error = crate::Error;
+
+        async fn auth_none(&mut self, _user: &str) -> Result<Auth, Self::Error> {
+            Ok(Auth::Accept)
+        }
+    }
+
+    fn none_auth_request(user: &str) -> Vec<u8> {
+        let mut packet = vec![crate::msg::USERAUTH_REQUEST];
+        user.encode(&mut packet).unwrap();
+        "ssh-connection".encode(&mut packet).unwrap();
+        "none".encode(&mut packet).unwrap();
+        packet
+    }
+
     fn authenticated_session() -> Session {
         let config = Arc::new(crate::server::Config::default());
+        let (priority_sender, priority_receiver) = tokio::sync::mpsc::unbounded_channel();
         let (sender, receiver) = tokio::sync::mpsc::channel(config.event_buffer_size);
         let handle = Handle {
+            priority_sender,
             sender,
             channel_buffer_size: config.channel_buffer_size,
         };
@@ -1532,6 +1664,7 @@ mod tests {
                 received_data: false,
             },
             sender: handle,
+            priority_receiver,
             receiver,
             target_window_size: config.window_size,
             pending_reads: Vec::new(),
@@ -1584,6 +1717,151 @@ mod tests {
         let err = session.maybe_decompress(&buffer).unwrap_err();
         assert!(
             matches!(err, crate::Error::PacketSize(len) if len > crate::cipher::MAXIMUM_DECOMPRESSED_PACKET_LEN)
+        );
+    }
+
+    #[test]
+    fn limit_triggered_rekey_waits_for_authentication() {
+        let mut session = authenticated_session();
+        allow_rekey(&mut session, crate::Limits::new(0, 0, Duration::from_secs(3600)));
+        let enc = session.common.encrypted.as_mut().unwrap();
+        enc.state = EncryptedState::WaitingAuthServiceRequest {
+            accepted: false,
+            sent: false,
+        };
+        enc.server_compression = Compression::ZlibOpenSSH;
+
+        session.flush().unwrap();
+        assert!(!session.kex.active(), "write limit hit before authentication");
+        assert_eq!(session.rekey_time_remaining(), None);
+
+        // USERAUTH_SUCCESS has been flushed; the next peer packet would
+        // activate delayed compression, but the rekey comes first.
+        session.common.encrypted.as_mut().unwrap().state = EncryptedState::InitCompression;
+        assert_eq!(session.rekey_time_remaining(), Some(Duration::ZERO));
+        session.flush().unwrap();
+        assert!(session.kex.active());
+        assert!(matches!(
+            session.common.encrypted.as_ref().unwrap().state,
+            EncryptedState::Authenticated
+        ));
+        assert!(matches!(
+            session.common.packet_writer.compress(),
+            Compress::Zlib(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn auth_success_arms_the_rekey_deadline_before_the_next_packet() {
+        let mut session = authenticated_session();
+        allow_rekey(
+            &mut session,
+            crate::Limits::new(1 << 30, 1 << 30, Duration::ZERO),
+        );
+        let enc = session.common.encrypted.as_mut().unwrap();
+        enc.state =
+            EncryptedState::WaitingAuthRequest(AuthRequest::server(MethodSet::server_supported()));
+        enc.server_compression = Compression::ZlibOpenSSH;
+
+        session
+            .process_packet(&mut AcceptNoneHandler, &none_auth_request("user"))
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            session.common.encrypted.as_ref().unwrap().state,
+            EncryptedState::InitCompression
+        ));
+        assert!(matches!(
+            session.common.packet_writer.compress(),
+            Compress::None
+        ));
+        assert_eq!(session.rekey_time_remaining(), Some(Duration::ZERO));
+
+        // What the event loop does once that deadline fires.
+        session.flush().unwrap();
+
+        assert!(session.kex.active());
+        assert!(matches!(
+            session.common.encrypted.as_ref().unwrap().state,
+            EncryptedState::Authenticated
+        ));
+        assert!(matches!(
+            session.common.packet_writer.compress(),
+            Compress::Zlib(_)
+        ));
+    }
+
+    /// `authenticated_session` negotiates the `none` kex, which cannot be
+    /// repeated, and expects compressed input; undo both and install `limits`.
+    fn allow_rekey(session: &mut Session, limits: crate::Limits) {
+        Arc::get_mut(&mut session.common.config).unwrap().limits = limits;
+        let enc = session.common.encrypted.as_mut().unwrap();
+        enc.kex = KEXES.get(&crate::kex::CURVE25519).unwrap().make();
+        enc.decompress = Decompress::None;
+    }
+
+    #[test]
+    fn no_rekey_deadline_when_the_kex_cannot_be_repeated() {
+        let mut session = authenticated_session();
+        Arc::get_mut(&mut session.common.config).unwrap().limits =
+            crate::Limits::new(1 << 30, 1 << 30, Duration::ZERO);
+        assert_eq!(session.rekey_time_remaining(), None, "`none` kex");
+
+        allow_rekey(
+            &mut session,
+            crate::Limits::new(1 << 30, 1 << 30, Duration::ZERO),
+        );
+        assert_eq!(session.rekey_time_remaining(), Some(Duration::ZERO));
+    }
+
+    /// Runs the server event loop on one end of an in-memory stream and
+    /// returns the type of the first packet it writes.
+    async fn first_packet_from_event_loop(
+        session: Session,
+        peer: &mut tokio::io::DuplexStream,
+        stream: tokio::io::DuplexStream,
+    ) -> Option<u8> {
+        let event_loop = tokio::spawn(session.run(SshRead::new(stream), TestHandler));
+        let mut buffer = SSHBuffer::new();
+        let mut opening_key = cipher::clear::Key;
+        let packet = cipher::read(peer, &mut buffer, &mut opening_key);
+        let result = tokio::time::timeout(Duration::from_secs(5), packet).await;
+        event_loop.abort();
+        result.ok()?.unwrap();
+        buffer.buffer.get(5).copied()
+    }
+
+    #[tokio::test]
+    async fn read_limit_starts_rekey_from_the_event_loop() {
+        let mut session = authenticated_session();
+        allow_rekey(
+            &mut session,
+            crate::Limits::new(1 << 30, 16, Duration::from_secs(3600)),
+        );
+        let (mut peer, stream) = tokio::io::duplex(64 * 1024);
+        let mut ignore = PacketWriter::clear();
+        ignore.packet_raw(&[msg::IGNORE; 32]).unwrap();
+        peer.write_all(&ignore.buffer().buffer).await.unwrap();
+
+        assert_eq!(
+            first_packet_from_event_loop(session, &mut peer, stream).await,
+            Some(msg::KEXINIT)
+        );
+    }
+
+    #[tokio::test]
+    async fn time_limit_starts_rekey_from_the_event_loop() {
+        let mut session = authenticated_session();
+        allow_rekey(
+            &mut session,
+            crate::Limits::new(1 << 30, 1 << 30, Duration::from_millis(50)),
+        );
+        let (mut peer, stream) = tokio::io::duplex(64 * 1024);
+
+        assert_eq!(
+            first_packet_from_event_loop(session, &mut peer, stream).await,
+            Some(msg::KEXINIT)
         );
     }
 }

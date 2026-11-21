@@ -7,13 +7,14 @@ mod tests {
     use ssh_key::PrivateKey;
     use tokio::net::TcpListener;
 
+    use crate::cert::PublicKeyOrCertificate;
     // Import client types directly since we're in the client module
+    use crate::Error;
     use crate::client::{Config, Handler, connect};
     use crate::keys::PrivateKeyWithHashAlg;
-    use rand::rng;
     use crate::server::{self, Auth, Handler as ServerHandler, Server, Session};
     use crate::{ChannelId, SshId}; // Import directly from crate root
-    use crate::Error;
+    use rand::rng;
 
     #[derive(Clone)]
     struct TestServer {
@@ -51,7 +52,7 @@ mod tests {
         async fn auth_publickey(
             &mut self,
             _: &str,
-            _: &ssh_key::PublicKey,
+            _: server::VerifiedPublicKey<'_>,
         ) -> Result<Auth, Self::Error> {
             debug!("auth_publickey");
             Ok(Auth::Accept)
@@ -67,6 +68,15 @@ mod tests {
             session.data(channel, data.to_vec())?;
             Ok(())
         }
+
+        async fn tcpip_forward(
+            &mut self,
+            _: &str,
+            _: &mut u32,
+            _: &mut Session,
+        ) -> Result<bool, Self::Error> {
+            Ok(true)
+        }
     }
 
     struct Client {}
@@ -74,7 +84,10 @@ mod tests {
     impl Handler for Client {
         type Error = Error;
 
-        async fn check_server_key(&mut self, _: &ssh_key::PublicKey) -> Result<bool, Self::Error> {
+        async fn check_server_key(
+            &mut self,
+            _: &PublicKeyOrCertificate,
+        ) -> Result<bool, Self::Error> {
             Ok(true)
         }
     }
@@ -159,5 +172,69 @@ mod tests {
             }
             msg => panic!("Unexpected message {msg:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn test_send_custom_global_request() {
+        let _ = env_logger::try_init();
+
+        let client_key = PrivateKey::random(&mut rng(), ssh_key::Algorithm::Ed25519).unwrap();
+
+        let mut config = server::Config::default();
+        config.auth_rejection_time = std::time::Duration::from_secs(1);
+        config.inactivity_timeout = None;
+        config
+            .keys
+            .push(PrivateKey::random(&mut rng(), ssh_key::Algorithm::Ed25519).unwrap());
+        let config = Arc::new(config);
+
+        let mut server = TestServer {
+            clients: Arc::new(Mutex::new(HashMap::new())),
+            id: 0,
+        };
+
+        let socket = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = socket.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            let (socket, _) = socket.accept().await.unwrap();
+            let server_handler = server.new_client(None);
+            server::run_stream(config, socket, server_handler)
+                .await
+                .unwrap();
+        });
+
+        let client_config = Arc::new(Config::default());
+        let mut session = connect(client_config, addr, Client {}).await.unwrap();
+
+        let auth_result = session
+            .authenticate_publickey(
+                std::env::var("USER").unwrap_or("user".to_string()),
+                PrivateKeyWithHashAlg::new(
+                    Arc::new(client_key),
+                    session.best_supported_rsa_hash().await.unwrap().flatten(),
+                ),
+            )
+            .await
+            .unwrap();
+        assert!(auth_result.success());
+
+        // The default server has no handler for this request name, so it replies
+        // with a failure, which surfaces as RequestDenied.
+        let denied = session
+            .send_global_request("custom-request@example.com", b"payload", true)
+            .await;
+        assert!(matches!(denied, Err(Error::RequestDenied)));
+
+        // Without a reply requested the call returns immediately and the server
+        // must stay silent. Queue a reply-wanting request right behind it: an
+        // unsolicited failure for the first request would be matched to the
+        // forward and turn its success into RequestDenied.
+        let no_reply = session
+            .send_global_request("custom-request@example.com", b"payload", false)
+            .await
+            .unwrap();
+        assert!(no_reply.is_none());
+        session.tcpip_forward("127.0.0.1", 12345).await.unwrap();
     }
 }

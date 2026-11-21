@@ -1,13 +1,15 @@
 use std::convert::TryFrom;
 use std::fmt::{Debug, Display, Formatter};
 use std::future::{Future, Pending};
+use std::pin::Pin;
 
 use futures::future::Either as EitherFuture;
-use log::warn;
+use log::{debug, warn};
 use parsing::ChannelOpenConfirmation;
 pub use russh_cryptovec::CryptoVec;
 use ssh_encoding::{Decode, Encode};
 use thiserror::Error;
+use tokio::io::AsyncWrite;
 
 #[cfg(test)]
 mod tests;
@@ -291,7 +293,9 @@ impl Default for Limits {
     }
 }
 
-pub use auth::{AgentAuthError, MethodKind, MethodSet, Signer};
+pub use auth::{
+    AgentAuthError, GssapiAuthenticator, GssapiError, GssapiStep, MethodKind, MethodSet, Signer,
+};
 
 /// A reason for disconnection.
 #[allow(missing_docs)] // This should be relatively self-explanatory.
@@ -526,6 +530,20 @@ impl ChannelParams {
     }
 }
 
+pub(crate) async fn flush_or_timeout<W: AsyncWrite + Unpin>(
+    writer: &mut sshbuffer::PacketWriter,
+    stream: &mut W,
+    inactivity_timer: Pin<&mut impl Future<Output = ()>>,
+) -> Result<(), Error> {
+    tokio::select! {
+        r = writer.flush_into(stream) => Ok(r?),
+        _ = inactivity_timer => {
+            debug!("timeout while writing");
+            Err(Error::InactivityTimeout)
+        }
+    }
+}
+
 /// Returns `f(val)` if `val` it is [Some], or a forever pending [Future] if it is [None].
 pub(crate) fn future_or_pending<R, F: Future<Output = R>, T>(
     val: Option<T>,
@@ -556,14 +574,14 @@ pub struct PendingChannelOpen {
 /// [`reject`](ChannelOpenHandle::reject) automatically sends an
 /// `AdministrativelyProhibited` rejection.
 pub struct ChannelOpenHandleInner<M: Send> {
-    sender: tokio::sync::mpsc::Sender<M>,
+    sender: tokio::sync::mpsc::UnboundedSender<M>,
     inner: Option<PendingChannelOpen>,
     make_msg: fn(PendingChannelOpen, Result<(), ChannelOpenFailure>) -> M,
 }
 
 impl<M: Send> ChannelOpenHandleInner<M> {
     pub(crate) fn new(
-        sender: tokio::sync::mpsc::Sender<M>,
+        sender: tokio::sync::mpsc::UnboundedSender<M>,
         pending: PendingChannelOpen,
         make_msg: fn(PendingChannelOpen, Result<(), ChannelOpenFailure>) -> M,
     ) -> Self {
@@ -574,32 +592,28 @@ impl<M: Send> ChannelOpenHandleInner<M> {
         }
     }
 
-    fn try_send_reply(&mut self, result: Result<(), ChannelOpenFailure>) {
-        if let Some(pending) = self.inner.take() {
-            let _ = self.sender.try_send((self.make_msg)(pending, result));
-        }
-    }
-
     /// Accept the channel open request.
     pub async fn accept(mut self) {
         if let Some(pending) = self.inner.take() {
-            let _ = self.sender.send((self.make_msg)(pending, Ok(()))).await;
+            let _ = self.sender.send((self.make_msg)(pending, Ok(())));
         }
     }
 
     /// Reject the channel open request with a reason.
     pub async fn reject(mut self, reason: ChannelOpenFailure) {
         if let Some(pending) = self.inner.take() {
-            let _ = self
-                .sender
-                .send((self.make_msg)(pending, Err(reason)))
-                .await;
+            let _ = self.sender.send((self.make_msg)(pending, Err(reason)));
         }
     }
 }
 
 impl<M: Send> Drop for ChannelOpenHandleInner<M> {
     fn drop(&mut self) {
-        self.try_send_reply(Err(ChannelOpenFailure::AdministrativelyProhibited));
+        if let Some(pending) = self.inner.take() {
+            let _ = self.sender.send((self.make_msg)(
+                pending,
+                Err(ChannelOpenFailure::AdministrativelyProhibited),
+            ));
+        }
     }
 }

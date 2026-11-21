@@ -9,16 +9,11 @@ use delegate::delegate;
 use log::debug;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, DuplexStream, ReadBuf};
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND, INVALID_HANDLE_VALUE, LPARAM, WPARAM};
-use windows::Win32::Security::{
-    GetTokenInformation, InitializeSecurityDescriptor, PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES,
-    SECURITY_DESCRIPTOR, SetSecurityDescriptorOwner, TOKEN_QUERY, TOKEN_USER, TokenUser,
-};
 use windows::Win32::System::DataExchange::COPYDATASTRUCT;
 use windows::Win32::System::Memory::{
     CreateFileMappingW, FILE_MAP_WRITE, MEMORY_MAPPED_VIEW_ADDRESS, MapViewOfFile, PAGE_READWRITE,
     UnmapViewOfFile,
 };
-use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, SendMessageA, WM_COPYDATA};
 use windows::core::HSTRING;
 
@@ -46,6 +41,12 @@ impl PageantStream {
                     continue;
                 }
                 let len = BigEndian::read_u32(&buf) as usize;
+                // The shared memory mapping is _AGENT_MAX_MSGLEN bytes, so larger
+                // frames can never be sent. Reject before buffering them.
+                if len.saturating_add(4) > _AGENT_MAX_MSGLEN {
+                    debug!("dropping oversized Pageant request: {len} bytes");
+                    break;
+                }
                 if buf.len() < len + 4 {
                     continue;
                 }
@@ -112,15 +113,13 @@ struct MemoryMap {
 }
 
 impl MemoryMap {
-    fn new(
-        name: String,
-        length: usize,
-        security_attributes: Option<SECURITY_ATTRIBUTES>,
-    ) -> Result<Self, Error> {
+    fn new(name: String, length: usize) -> Result<Self, Error> {
         let filemap = unsafe {
             CreateFileMappingW(
                 INVALID_HANDLE_VALUE,
-                security_attributes.map(|sa| &sa as *const _),
+                // Default security descriptor from the process token: owned by the
+                // current user, which is what Pageant's owner check expects
+                None,
                 PAGE_READWRITE,
                 0,
                 length as u32,
@@ -164,7 +163,10 @@ impl MemoryMap {
         Ok(())
     }
 
-    fn read(&mut self, n: usize) -> Vec<u8> {
+    fn read(&mut self, n: usize) -> Result<Vec<u8>, Error> {
+        if self.pos.checked_add(n).is_none_or(|end| end > self.length) {
+            return Err(Error::Overflow);
+        }
         let out = vec![0; n];
         unsafe {
             std::ptr::copy_nonoverlapping(
@@ -174,7 +176,7 @@ impl MemoryMap {
             );
         }
         self.pos += n;
-        out
+        Ok(out)
     }
 }
 
@@ -202,61 +204,20 @@ pub fn is_pageant_running() -> bool {
     find_pageant_window().is_ok()
 }
 
-fn get_current_process_user() -> Result<TOKEN_USER, Error> {
-    unsafe {
-        let mut process_token = HANDLE::default();
-        OpenProcessToken(
-            GetCurrentProcess(),
-            TOKEN_QUERY,
-            &mut process_token as *mut _,
-        )?;
-
-        let mut info_size = 0;
-        let _ = GetTokenInformation(process_token, TokenUser, None, 0, &mut info_size);
-
-        let mut buffer = vec![0; info_size as usize];
-        GetTokenInformation(
-            process_token,
-            TokenUser,
-            Some(buffer.as_mut_ptr() as *mut _),
-            buffer.len() as u32,
-            &mut info_size,
-        )?;
-        let user: TOKEN_USER = *(buffer.as_ptr() as *const _);
-        let _ = CloseHandle(process_token);
-        Ok(user)
-    }
-}
-
 /// Send a one-off query to Pageant and return a response.
 pub fn query_pageant_direct(cookie: String, msg: &[u8]) -> Result<Vec<u8>, Error> {
     let hwnd = find_pageant_window()?;
     let map_name = format!("PageantRequest{cookie}");
 
-    let user = get_current_process_user()?;
-
-    let mut sd = SECURITY_DESCRIPTOR::default();
-    let sa = SECURITY_ATTRIBUTES {
-        lpSecurityDescriptor: &mut sd as *mut _ as *mut _,
-        bInheritHandle: true.into(),
-        nLength: size_of::<SECURITY_ATTRIBUTES>() as u32,
-    };
-
-    let psd = PSECURITY_DESCRIPTOR(&mut sd as *mut _ as *mut _);
-
-    unsafe {
-        InitializeSecurityDescriptor(psd, 1)?;
-        SetSecurityDescriptorOwner(psd, Some(user.User.Sid), false)?;
-    }
-
-    let mut map: MemoryMap = MemoryMap::new(map_name.clone(), _AGENT_MAX_MSGLEN, Some(sa))?;
+    let mut map: MemoryMap = MemoryMap::new(map_name.clone(), _AGENT_MAX_MSGLEN)?;
     map.write(msg)?;
 
     let char_buffer = CString::new(map_name.as_bytes()).map_err(|_| Error::InvalidCookie)?;
+    let char_buffer_bytes = char_buffer.as_bytes_with_nul();
     let cds = COPYDATASTRUCT {
         dwData: _AGENT_COPYDATA_ID as usize,
-        cbData: char_buffer.as_bytes().len() as u32,
-        lpData: char_buffer.as_bytes().as_ptr() as *mut _,
+        cbData: char_buffer_bytes.len() as u32,
+        lpData: char_buffer_bytes.as_ptr() as *mut _,
     };
 
     let response = unsafe {
@@ -273,13 +234,13 @@ pub fn query_pageant_direct(cookie: String, msg: &[u8]) -> Result<Vec<u8>, Error
     }
 
     map.seek(0);
-    let mut buf = map.read(4);
+    let mut buf = map.read(4)?;
     if buf.len() < 4 {
         return Err(Error::NoResponse);
     }
     #[allow(clippy::indexing_slicing)] // length checked
     let size = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]) as usize;
-    buf.extend(map.read(size));
+    buf.extend(map.read(size)?);
 
     Ok(buf)
 }

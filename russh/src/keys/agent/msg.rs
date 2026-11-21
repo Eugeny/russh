@@ -3,6 +3,7 @@ pub const SUCCESS: u8 = 6;
 pub const IDENTITIES_ANSWER: u8 = 12;
 pub const SIGN_RESPONSE: u8 = 14;
 // pub const EXTENSION_FAILURE: u8 = 28;
+pub const EXTENSION_RESPONSE: u8 = 29;
 
 pub const REQUEST_IDENTITIES: u8 = 11;
 pub const SIGN_REQUEST: u8 = 13;
@@ -21,3 +22,6 @@ pub const CONSTRAIN_LIFETIME: u8 = 1;
 pub const CONSTRAIN_CONFIRM: u8 = 2;
 // pub const CONSTRAIN_MAXSIGN: u8 = 3;
 pub const CONSTRAIN_EXTENSION: u8 = 255;
+
+pub const SSH_AGENT_RSA_SHA2_256: u32 = 2;
+pub const SSH_AGENT_RSA_SHA2_512: u32 = 4;

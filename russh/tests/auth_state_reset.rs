@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use russh::keys::PrivateKey;
+use russh::keys::{PrivateKey, PublicKeyOrCertificate};
 use russh::{MethodKind, MethodSet, client, server};
 
 struct AcceptTestServerKey;
@@ -11,7 +11,7 @@ impl client::Handler for AcceptTestServerKey {
 
     async fn check_server_key(
         &mut self,
-        _server_public_key: &russh::keys::ssh_key::PublicKey,
+        _server_public_key: &PublicKeyOrCertificate,
     ) -> Result<bool, Self::Error> {
         Ok(true)
     }

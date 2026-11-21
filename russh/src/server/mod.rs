@@ -75,6 +75,8 @@ pub struct Config {
     pub auth_rejection_time_initial: Option<std::time::Duration>,
     /// The server's keys. The first key pair in the client's preference order will be chosen.
     pub keys: Vec<PrivateKey>,
+    /// The server's host certificates.
+    pub certificates: Vec<Certificate>,
     /// The bytes and time limits before key re-exchange.
     pub limits: Limits,
     /// The initial size of a channel (used for flow control).
@@ -108,10 +110,11 @@ impl Default for Config {
                 "_",
                 env!("CARGO_PKG_VERSION")
             ))),
-            methods: auth::MethodSet::all(),
+            methods: auth::MethodSet::server_supported(),
             auth_rejection_time: std::time::Duration::from_secs(1),
             auth_rejection_time_initial: None,
             keys: Vec::new(),
+            certificates: Vec::new(),
             window_size: 2097152,
             maximum_packet_size: 32768,
             channel_buffer_size: 100,
@@ -139,6 +142,7 @@ impl Debug for Config {
                 &self.auth_rejection_time_initial,
             )
             .field("keys", &"***")
+            .field("certificates", &"***")
             .field("window_size", &self.window_size)
             .field("maximum_packet_size", &self.maximum_packet_size)
             .field("channel_buffer_size", &self.channel_buffer_size)
@@ -203,11 +207,44 @@ impl Auth {
     }
 }
 
+/// A public key offered in a `publickey` authentication request
+/// (RFC 4252 §7), passed to [`Handler::auth_publickey_offered`].
+///
+/// Ownership of the key has not been verified at this stage.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy)]
+pub struct PublicKeyOffer<'a> {
+    /// The offered public key.
+    pub public_key: &'a ssh_key::PublicKey,
+    /// The public key algorithm named in the request.
+    ///
+    /// The same RSA key can be offered as `ssh-rsa` (SHA-1), `rsa-sha2-256`
+    /// or `rsa-sha2-512` (RFC 8332). For an OpenSSH certificate, this is the
+    /// signature algorithm the certificate type maps to (for example
+    /// `rsa-sha2-256` for `rsa-sha2-256-cert-v01@openssh.com`).
+    pub algorithm: &'a ssh_key::Algorithm,
+}
+
+/// A public key whose ownership has been verified, passed to
+/// [`Handler::auth_publickey`].
+///
+/// Only russh creates values of this type, after verifying the signature
+/// of the request.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy)]
+pub struct VerifiedPublicKey<'a> {
+    /// The verified public key.
+    pub public_key: &'a ssh_key::PublicKey,
+    /// The algorithm of the verified signature, which is also the
+    /// algorithm named in the request (`ssh-rsa`, `rsa-sha2-256`,
+    /// `ssh-ed25519`, ...).
+    pub algorithm: &'a ssh_key::Algorithm,
+}
+
 /// Server handler. Each client will have their own handler.
 ///
 /// Note: this is an async trait. The trait functions return `impl Future`,
 /// and you can simply define them as `async fn` instead.
-#[cfg_attr(feature = "async-trait", async_trait::async_trait)]
 pub trait Handler: Sized {
     type Error: From<crate::Error> + Send;
 
@@ -252,6 +289,10 @@ pub trait Handler: Sized {
     /// in most cases not be counted towards an eventual authentication
     /// attempt limit.
     ///
+    /// [`PublicKeyOffer::algorithm`] gives the algorithm named in the
+    /// request, which lets a server apply a policy similar to OpenSSH's
+    /// `PubkeyAcceptedAlgorithms`.
+    ///
     /// The default implementation accepts all keys, allowing them to
     /// proceed to [`Handler::auth_publickey`].
     ///
@@ -261,7 +302,7 @@ pub trait Handler: Sized {
     fn auth_publickey_offered(
         &mut self,
         user: &str,
-        public_key: &ssh_key::PublicKey,
+        offer: PublicKeyOffer<'_>,
     ) -> impl Future<Output = Result<Auth, Self::Error>> + Send {
         async { Ok(Auth::Accept) }
     }
@@ -270,13 +311,16 @@ pub trait Handler: Sized {
     /// is called after the signature has been verified and key
     /// ownership has been confirmed.
     ///
+    /// [`VerifiedPublicKey::algorithm`] gives the algorithm of the
+    /// verified signature.
+    ///
     /// Russh makes sure rejection takes a constant [`Config::auth_rejection_time`],
     /// except if this method takes more than that.
     #[allow(unused_variables)]
     fn auth_publickey(
         &mut self,
         user: &str,
-        public_key: &ssh_key::PublicKey,
+        key: VerifiedPublicKey<'_>,
     ) -> impl Future<Output = Result<Auth, Self::Error>> + Send {
         async { Ok(Auth::reject()) }
     }
@@ -881,7 +925,6 @@ impl<F: Future<Output = std::io::Result<()>> + Unpin + Send> Future for RunningS
     }
 }
 
-#[cfg_attr(feature = "async-trait", async_trait::async_trait)]
 /// Trait used to create new handlers when clients connect.
 pub trait Server {
     /// The type of handlers.
@@ -931,6 +974,7 @@ pub trait Server {
                                 let error_tx = error_tx.clone();
 
                                 russh_util::runtime::spawn(async move {
+                                    #[allow(clippy::collapsible_if)]
                                     if config.nodelay {
                                         if let Err(e) = socket.set_nodelay(true) {
                                             warn!("set_nodelay() failed: {e:?}");
@@ -1062,8 +1106,10 @@ where
 
     // Reading SSH id and allocating a session.
     let mut stream = SshRead::new(stream);
+    let (priority_sender, priority_receiver) = tokio::sync::mpsc::unbounded_channel();
     let (sender, receiver) = tokio::sync::mpsc::channel(config.event_buffer_size);
     let handle = server::session::Handle {
+        priority_sender,
         sender,
         channel_buffer_size: config.channel_buffer_size,
     };
@@ -1072,6 +1118,7 @@ where
     let mut session = Session {
         target_window_size: common.config.window_size,
         common,
+        priority_receiver,
         receiver,
         sender: handle.clone(),
         pending_reads: Vec::new(),
@@ -1129,8 +1176,17 @@ async fn reply<H: Handler + Send>(
             pkt.seqn.0,
             pkt.buffer.len()
         );
-        if session.common.strict_kex && session.common.encrypted.is_none() {
-            let seqno = pkt.seqn.0 - 1; // was incremented after read()
+        let (strict_kex, guess_ignored) = match session.kex {
+            SessionKexState::InProgress(ref kex) => (kex.strict_kex(), kex.guess_ignored()),
+            _ => (session.common.strict_kex, false),
+        };
+        if strict_kex && session.common.encrypted.is_none() {
+            let mut seqno = pkt.seqn.0 - 1; // was incremented after read()
+            // A wrong first_kex_packet_follows guess took sequence number 1 (and was validated as
+            // the KEX packet it is): the real KEX packet and NEWKEYS follow one later.
+            if guess_ignored && seqno >= 2 {
+                seqno -= 1;
+            }
             validate_client_msg_strict_kex(*message_type, seqno as usize)?;
         }
 
@@ -1148,6 +1204,39 @@ async fn reply<H: Handler + Send>(
 
     let is_kex_msg = pkt.buffer.first().cloned().map(is_kex_msg).unwrap_or(false);
 
+    // RFC 4253 s7.1: after a KEXINIT, only transport (1-19) and kex (20-49)
+    // messages may flow until NEWKEYS. Non-transport messages (>= 50: auth and
+    // channel traffic) are the DoS vector -- their replies queue on an
+    // unbounded channel that is not drained until the rekey the peer may never
+    // finish completes.
+    //
+    //   * Once the PEER's own KEXINIT has arrived, nothing of theirs is
+    //     legitimately still in flight, so such a message is a protocol
+    //     violation -- reject it.
+    //   * Before it arrives (we initiated the rekey; the peer may not have seen
+    //     our KEXINIT yet) their in-flight messages are legal. Handle them as
+    //     usual, but bound the total so a peer that stalls the rekey and floods
+    //     cannot grow memory without limit. `pending_len` is reset when the
+    //     rekey completes (see `begin_rekey` and the kex-done path).
+    #[allow(clippy::collapsible_if)]
+    if !is_kex_msg && session.common.encrypted.is_some() {
+        if let (Some(&msg_type), SessionKexState::InProgress(kex)) =
+            (pkt.buffer.first(), &session.kex)
+        {
+            if msg_type >= msg::USERAUTH_REQUEST {
+                if kex.peer_kexinit_received() {
+                    return Err(crate::Error::Inconsistent.into());
+                }
+                session.pending_len = session.pending_len.saturating_add(pkt.buffer.len() as u32);
+                if u64::from(session.pending_len) > 2 * u64::from(session.common.config.window_size)
+                {
+                    return Err(crate::Error::Pending.into());
+                }
+            }
+        }
+    }
+
+    #[allow(clippy::collapsible_if)]
     if is_kex_msg {
         if let SessionKexState::InProgress(kex) = session.kex.take() {
             let progress = kex
@@ -1173,10 +1262,12 @@ async fn reply<H: Handler + Send>(
                         {
                             let common = &mut session.common;
                             common.newkeys(newkeys);
-                            common.packet_writer.buffer().bytes = 0;
                             if let Some(enc) = common.encrypted.as_mut() {
                                 enc.last_rekey = Instant::now();
-                                enc.flush_all_pending_with_writer(&mut common.packet_writer)?;
+                                enc.flush_all_pending_with_writer(
+                                    &mut common.packet_writer,
+                                    false,
+                                )?;
                             }
                         }
 

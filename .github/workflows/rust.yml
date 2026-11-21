@@ -2,113 +2,166 @@ name: Rust
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
   Build:
-    runs-on: ubuntu-24.04
+    name: Build
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read # to check out the repository
 
     steps:
-    - uses: actions/checkout@v2
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
 
-    - name: Build (no features enabled)
-      run: cargo build --verbose
+      - name: Build (no features enabled)
+        run: cargo --locked build --verbose
 
-    - name: Build (all features enabled)
-      run: cargo build --verbose --all-features
+      - name: Build (all features enabled)
+        run: cargo --locked build --verbose --all-features
 
   Build-Windows:
-    runs-on: windows-latest
+    name: Build-Windows
+    runs-on: windows-2025
+    permissions:
+      contents: read # to check out the repository
 
     steps:
-    - uses: actions/checkout@v2
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
 
-    - name: install nasm
-      run: |
-        choco install nasm
-        echo "C:\Program Files\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: install nasm
+        run: |
+          choco install nasm
+          echo "C:\Program Files\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-    - name: Build (no features enabled)
-      run: cargo build --verbose
+      - name: Build (no features enabled)
+        run: cargo --locked build --verbose
 
-    - name: Build (all features enabled)
-      run: cargo build --verbose --all-features
+      - name: Build (all features enabled)
+        run: cargo --locked build --verbose --all-features
 
   Build-WASM:
-    runs-on: ubuntu-24.04
+    name: Build-WASM
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read # to check out the repository
 
     steps:
-    - uses: actions/checkout@v2
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
 
-    - name: Install target
-      run: |
-        rustup toolchain add 1.88.0
-        rustup target add --toolchain 1.88.0 wasm32-wasip1
+      - name: Install target
+        run: |
+          rustup toolchain add 1.89.0
+          rustup target add --toolchain 1.89.0 wasm32-wasip1
 
-    - name: Build (WASM-compatible features)
-      run: cargo +1.88.0 build --verbose --target wasm32-wasip1 --no-default-features --features flate2,ring -p russh
+      - name: Build (WASM-compatible features)
+        run: cargo +1.89.0 --locked build --verbose --target wasm32-wasip1 --no-default-features --features flate2,ring -p russh
 
   Formatting:
-    runs-on: ubuntu-24.04
+    name: Formatting
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read # to check out the repository
 
     steps:
-    - uses: actions/checkout@v2
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
 
-    - name: Install rustfmt
-      run: rustup component add rustfmt
+      - name: Install rustfmt
+        run: rustup component add rustfmt
 
-    - name: rustfmt
-      run: cargo fmt --check
+      - name: rustfmt
+        run: cargo fmt --check
 
   Clippy:
-    runs-on: ubuntu-24.04
+    name: Clippy
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read # to check out the repository
 
     steps:
-    - uses: actions/checkout@v2
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
 
-    - name: Install Clippy
-      run: rustup component add clippy
+      - name: Install Clippy
+        run: rustup component add clippy
 
-    - name: Clippy (no features enabled)
-      run: cargo clippy -- -D warnings
+      - name: Clippy (no features enabled)
+        run: cargo --locked clippy -- -D warnings
 
-    - name: Clippy (all features enabled)
-      run: cargo clippy --all-features -- -D warnings
+      - name: Clippy (all features enabled)
+        run: cargo --locked clippy --all-features -- -D warnings
 
   Test:
-    runs-on: ubuntu-24.04
+    name: Test
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read # to check out the repository
 
     steps:
-    - uses: actions/checkout@v2
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
 
-    - name: Test (no features enabled)
-      run: |
-        eval `ssh-agent`
-        cargo test --verbose
-      env:
-        RUST_BACKTRACE: 1
+      - name: Install OpenSSH
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y openssh-client openssh-server
+          sudo mkdir -p /run/sshd
 
-    - name: Test (all features enabled)
-      run: |
-        eval `ssh-agent`
-        cargo test --verbose --all-features
-      env:
-        RUST_BACKTRACE: 1
+      - name: Test (no features enabled)
+        run: |
+          eval `ssh-agent`
+          cargo --locked test --verbose
+        env:
+          RUST_BACKTRACE: 1
+
+      - name: Test (all features enabled)
+        run: |
+          eval `ssh-agent`
+          cargo --locked test --verbose --all-features
+        env:
+          RUST_BACKTRACE: 1
 
   Minimal-versions:
-    runs-on: ubuntu-24.04
+    name: Minimal-versions
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read # to check out the repository
 
     steps:
-    - uses: actions/checkout@v2
-    - uses: dtolnay/rust-toolchain@nightly
-    - uses: taiki-e/install-action@cargo-hack
-    - uses: taiki-e/install-action@cargo-minimal-versions
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
 
-    - name: Check with minimal dependency versions
-      run: |
-        cargo minimal-versions check --all-features --no-dev-deps
+      - name: Install nightly toolchain
+        run: |
+          rustup toolchain install nightly --profile minimal
+          rustup default nightly
+
+      - uses: taiki-e/install-action@v2.90.0
+        with:
+          tool: cargo-hack,cargo-minimal-versions
+
+      - name: Check with minimal dependency versions
+        run: |
+          cargo minimal-versions check --all-features --no-dev-deps

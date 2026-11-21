@@ -189,11 +189,11 @@ impl<R: AsyncRead + Unpin> SshRead<R> {
                 if i >= 8 {
                     // Check if we have a valid SSH protocol identifier
                     #[allow(clippy::indexing_slicing)]
-                    if let Ok(s) = std::str::from_utf8(&ssh_id.buf[..i]) {
-                        if s.starts_with("SSH-1.99-") || s.starts_with("SSH-2.0-") {
-                            ssh_id.sshid_len = i;
-                            return Ok(ssh_id.id());
-                        }
+                    if let Ok(s) = std::str::from_utf8(&ssh_id.buf[..i])
+                        && (s.starts_with("SSH-1.99-") || s.starts_with("SSH-2.0-"))
+                    {
+                        ssh_id.sshid_len = i;
+                        return Ok(ssh_id.id());
                     }
                 }
                 if !allow_pre_banner_lines {

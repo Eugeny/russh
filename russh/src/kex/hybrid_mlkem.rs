@@ -1,21 +1,18 @@
 use byteorder::{BigEndian, ByteOrder};
-use curve25519_dalek::constants::ED25519_BASEPOINT_TABLE;
 use curve25519_dalek::montgomery::MontgomeryPoint;
-use curve25519_dalek::scalar::Scalar;
 use log::debug;
 use ml_kem::Kem;
 use ml_kem::{
-    MlKem768,
     kem::{Decapsulate, DecapsulationKey, Encapsulate, EncapsulationKey},
-    KeyExport, TryKeyInit,
+    KeyExport, MlKem768, TryKeyInit,
 };
 use sha2::Digest;
 use ssh_encoding::{Encode, Writer};
 
-use super::{KexAlgorithm, KexAlgorithmImplementor, KexType, SharedSecret, compute_keys};
+use super::{compute_keys, KexAlgorithm, KexAlgorithmImplementor, KexType, SharedSecret};
 use crate::mac;
 use crate::session::Exchange;
-use crate::{CryptoVec, Error, cipher, msg};
+use crate::{cipher, msg, CryptoVec, Error};
 
 const MLKEM768_PUBLIC_KEY_SIZE: usize = 1184;
 const MLKEM768_CIPHERTEXT_SIZE: usize = 1088;
@@ -42,7 +39,7 @@ impl KexType for MlKem768X25519KexType {
 #[doc(hidden)]
 pub struct MlKem768X25519Kex {
     mlkem_secret: Option<Box<MlKem768PrivateKey>>,
-    x25519_secret: Option<Scalar>,
+    x25519_secret: Option<[u8; 32]>,
     k_pq: Option<ml_kem::SharedKey>,
     k_cl: Option<MontgomeryPoint>,
 }
@@ -94,10 +91,14 @@ impl KexAlgorithmImplementor for MlKem768X25519Kex {
 
         let (s_ct2, k_pq_shared_secret) = c_pk2.encapsulate_with_rng(&mut rand::rng());
 
-        let s_secret = Scalar::from_bytes_mod_order(rand::random::<[u8; 32]>());
-        let s_pk1 = (ED25519_BASEPOINT_TABLE * &s_secret).to_montgomery();
+        let s_secret = rand::random::<[u8; 32]>();
+        let s_pk1 = MontgomeryPoint::mul_base_clamped(s_secret);
 
-        let k_cl = s_secret * c_pk1;
+        let k_cl = c_pk1.mul_clamped(s_secret);
+        if k_cl.0 == [0u8; 32] {
+            debug!("client sent a low-order curve25519 pubkey");
+            return Err(Error::Kex);
+        }
 
         exchange.server_ephemeral.clear();
         exchange
@@ -118,8 +119,8 @@ impl KexAlgorithmImplementor for MlKem768X25519Kex {
     ) -> Result<(), Error> {
         let (mlkem_sk, mlkem_pk) = MlKem768::generate_keypair_from_rng(&mut rand::rng());
 
-        let x25519_secret = Scalar::from_bytes_mod_order(rand::random::<[u8; 32]>());
-        let x25519_pk = (ED25519_BASEPOINT_TABLE * &x25519_secret).to_montgomery();
+        let x25519_secret = rand::random::<[u8; 32]>();
+        let x25519_pk = MontgomeryPoint::mul_base_clamped(x25519_secret);
 
         client_ephemeral.clear();
         client_ephemeral.extend(&mlkem_pk.to_bytes());
@@ -155,7 +156,11 @@ impl KexAlgorithmImplementor for MlKem768X25519Kex {
         s_pk1.0.copy_from_slice(s_pk1_bytes);
 
         let x25519_secret = self.x25519_secret.take().ok_or(Error::KexInit)?;
-        let k_cl = x25519_secret * s_pk1;
+        let k_cl = s_pk1.mul_clamped(x25519_secret);
+        if k_cl.0 == [0u8; 32] {
+            debug!("server sent a low-order curve25519 pubkey");
+            return Err(Error::Kex);
+        }
 
         self.k_pq = Some(k_pq_shared_secret);
         self.k_cl = Some(k_cl);

@@ -42,6 +42,10 @@ impl OpenChannelMessage {
         let sender = map_err!(u32::decode(r))?;
         let window = map_err!(u32::decode(r))?;
         let maxpacket = map_err!(u32::decode(r))?;
+        // A zero max packet size can never be satisfied, so writes would stall forever.
+        if maxpacket == 0 {
+            return Err(crate::Error::Inconsistent);
+        }
 
         let typ = match typ.as_str() {
             "session" => {
@@ -188,14 +192,16 @@ pub(crate) struct ChannelOpenConfirmation {
     pub maximum_packet_size: u32,
 }
 
-impl Decode for ChannelOpenConfirmation {
-    type Error = ssh_encoding::Error;
-
-    fn decode(r: &mut impl Reader) -> Result<Self, Self::Error> {
+impl ChannelOpenConfirmation {
+    pub fn parse(r: &mut impl Reader) -> Result<Self, crate::Error> {
         let recipient_channel = u32::decode(r)?;
         let sender_channel = u32::decode(r)?;
         let initial_window_size = u32::decode(r)?;
         let maximum_packet_size = u32::decode(r)?;
+        // See OpenChannelMessage::parse.
+        if maximum_packet_size == 0 {
+            return Err(crate::Error::Inconsistent);
+        }
 
         Ok(Self {
             recipient_channel,
@@ -208,7 +214,7 @@ impl Decode for ChannelOpenConfirmation {
 
 #[cfg(test)]
 mod tests {
-    use super::{ChannelType, OpenChannelMessage};
+    use super::{ChannelOpenConfirmation, ChannelType, OpenChannelMessage};
     use crate::tests::raw_no_crypto::{channel_open_payload, encode_string, push_u32};
 
     #[test]
@@ -251,5 +257,39 @@ mod tests {
         let parsed = OpenChannelMessage::parse(&mut forwarded.as_slice())
             .expect("forwarded streamlocal reserved field should be consumed");
         assert!(matches!(parsed.typ, ChannelType::ForwardedStreamLocal(_)));
+    }
+
+    #[test]
+    fn channel_open_with_zero_max_packet_size_is_rejected() {
+        let mut payload = Vec::new();
+        encode_string(&mut payload, b"session");
+        push_u32(&mut payload, 0); // sender channel
+        push_u32(&mut payload, 1024 * 1024); // window
+        push_u32(&mut payload, 0); // max packet size
+
+        assert!(matches!(
+            OpenChannelMessage::parse(&mut payload.as_slice()),
+            Err(crate::Error::Inconsistent)
+        ));
+    }
+
+    #[test]
+    fn channel_open_confirmation_with_zero_max_packet_size_is_rejected() {
+        let confirmation = |max_packet: u32| {
+            let mut payload = Vec::new();
+            push_u32(&mut payload, 0); // recipient channel
+            push_u32(&mut payload, 1); // sender channel
+            push_u32(&mut payload, 1024 * 1024); // window
+            push_u32(&mut payload, max_packet);
+            payload
+        };
+
+        assert!(matches!(
+            ChannelOpenConfirmation::parse(&mut confirmation(0).as_slice()),
+            Err(crate::Error::Inconsistent)
+        ));
+        let ok = ChannelOpenConfirmation::parse(&mut confirmation(32 * 1024).as_slice())
+            .expect("non-zero max packet size should be accepted");
+        assert_eq!(ok.maximum_packet_size, 32 * 1024);
     }
 }
