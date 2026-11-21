@@ -304,6 +304,12 @@ impl Encrypted {
         Ok(())
     }
 
+    pub(crate) fn close_from_peer(&mut self, channel: ChannelId) -> Result<(), crate::Error> {
+        self.byte(channel, msg::CHANNEL_CLOSE)?;
+        self.channels.remove(&channel);
+        Ok(())
+    }
+
     pub fn sender_window_size(&self, channel: ChannelId) -> usize {
         if let Some(channel) = self.channels.get(&channel) {
             channel.sender_window_size as usize

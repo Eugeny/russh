@@ -740,6 +740,42 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn peer_close_with_queued_output_ends_channel() {
+        let mut session = test_authenticated_session();
+        let channel = insert_unconfirmed_server_open(&mut session);
+        let mut handler = ChannelCallbackProbe::default();
+
+        // Peer window of 0, so anything we write stays queued.
+        let mut confirmation = vec![msg::CHANNEL_OPEN_CONFIRMATION];
+        for x in [channel.0, 100, 0, 32768] {
+            x.encode(&mut confirmation).unwrap();
+        }
+        session
+            .process_packet(&mut handler, &confirmation)
+            .await
+            .unwrap();
+        session.data(channel, Bytes::from_static(b"queued")).unwrap();
+        assert!(session.common.has_any_pending_data());
+
+        let mut close = vec![msg::CHANNEL_CLOSE];
+        channel.encode(&mut close).unwrap();
+        session.process_packet(&mut handler, &close).await.unwrap();
+        assert!(
+            !session.common.is_established_channel(channel),
+            "peer-closed channel with queued output is still established"
+        );
+        assert!(!session.common.has_any_pending_data());
+
+        let mut exec = vec![msg::CHANNEL_REQUEST];
+        channel.encode(&mut exec).unwrap();
+        "exec".encode(&mut exec).unwrap();
+        exec.push(0);
+        "true".encode(&mut exec).unwrap();
+        session.process_packet(&mut handler, &exec).await.unwrap();
+        assert!(!handler.exec_called, "exec_request fired after channel_close");
+    }
+
     #[derive(Default)]
     struct ChannelCallbackProbe {
         exec_called: bool,
@@ -1490,7 +1526,7 @@ impl Session {
                 }
                 if let Some(ref mut enc) = self.common.encrypted {
                     // Reply with CHANNEL_CLOSE per RFC 4254 Section 5.3.
-                    enc.close(channel_num)?;
+                    enc.close_from_peer(channel_num)?;
                 }
                 // Forward the close to the channel before removing it, so that
                 // consumers waiting on `Channel::wait()` receive an explicit
