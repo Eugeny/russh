@@ -182,10 +182,30 @@ impl Config {
         string
     }
 
+    /// Hostname and user can come from untrusted input such as a URL. They must
+    /// not add arguments or become options
+    fn proxy_command_argv(&self, proxy_command: &str) -> Result<Vec<String>, Error> {
+        let uses_host = proxy_command.contains("%h") || proxy_command.contains("%H");
+        if (uses_host && !is_safe_token_value(self.host()))
+            || (proxy_command.contains("%u") && !is_safe_token_value(&self.user()))
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "hostname or user contains characters not allowed in ProxyCommand",
+            )
+            .into());
+        }
+        // Splitting first keeps an expanded value within one argument
+        Ok(proxy_command
+            .split(' ')
+            .map(|arg| self.expand_tokens(arg))
+            .collect())
+    }
+
     pub async fn stream(&self) -> Result<Stream, Error> {
         if let Some(ref proxy_command) = self.host_config.proxy_command {
-            let proxy_command = self.expand_tokens(proxy_command);
-            let cmd: Vec<&str> = proxy_command.split(' ').collect();
+            let argv = self.proxy_command_argv(proxy_command)?;
+            let cmd: Vec<&str> = argv.iter().map(String::as_str).collect();
             Stream::proxy_command(cmd.first().unwrap_or(&""), cmd.get(1..).unwrap_or(&[]))
                 .await
                 .map_err(Into::into)
@@ -345,6 +365,15 @@ pub enum AddKeysToAgent {
     Ask,
     #[default]
     No,
+}
+
+/// Same rule as OpenSSH's `valid_hostname()`, see CVE-2023-51385. The proxy
+/// program can pass the value to a shell or parse it as an option
+fn is_safe_token_value(value: &str) -> bool {
+    !value.starts_with('-')
+        && !value
+            .chars()
+            .any(|c| c.is_whitespace() || c.is_control() || "'`\"$\\;&<>|(){}".contains(c))
 }
 
 fn check_host_against_glob_pattern(candidate: &str, glob_pattern: &str) -> bool {
@@ -529,6 +558,38 @@ Host *
             parse("Hostname foo.com\nHost foo", "malformed"),
             Err(Error::HostNotFound)
         ))
+    }
+
+    #[test]
+    fn proxy_command_rejects_unsafe_host_and_user() {
+        const CONFIG: &str = "Host *\n  ProxyCommand ssh -W %h:%p bastion\n";
+
+        let config = parse(CONFIG, "a.test_host").expect("parse");
+        let argv = config
+            .proxy_command_argv("ssh -W %h:%p bastion")
+            .expect("argv");
+        assert_eq!(argv, ["ssh", "-W", "a.test_host:22", "bastion"]);
+
+        for host in [
+            "x -oProxyCommand=y z.corp",
+            "-oProxyCommand=y",
+            "a;b",
+            "$(id)",
+            "a\tb",
+        ] {
+            let config = parse(CONFIG, host).expect("parse");
+            let proxy_command = config.host_config.proxy_command.as_deref().expect("set");
+            assert!(
+                matches!(config.proxy_command_argv(proxy_command), Err(Error::Io(_))),
+                "{host:?} accepted"
+            );
+        }
+
+        let mut config = Config::default("a.test_host");
+        config.user = Some("-oProxyCommand=y".into());
+        assert!(config.proxy_command_argv("ssh -l %u -W %h:%p b").is_err());
+        // The user is not validated when the template has no %u
+        assert!(config.proxy_command_argv("nc %h %p").is_ok());
     }
 
     #[test]

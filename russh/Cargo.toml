@@ -1,6 +1,6 @@
 [package]
 name = "russh"
-version = "0.65.2"
+version = "0.65.4"
 description = "A client and server SSH library."
 authors = ["Pierre-Étienne Meunier <pe@pijul.org>"]
 edition = "2024"
@@ -46,7 +46,6 @@ elliptic-curve = { version = "0.14", features = ["ecdh"] }
 enum_dispatch = "0.3.13"
 flate2 = { version = "1.0.15", optional = true }
 futures.workspace = true
-generic-array = "1.3.3"
 getrandom = { version = "0.4", features = ["wasm_js"] }
 ghash = "0.6.0" # only pinned due to a cargo-minimal-versions failure in 0.6.0-rc.3
 hex-literal = "1"
@@ -80,6 +79,7 @@ sec1 = { version = "0.8", features = ["der"] }
 sha1.workspace = true
 sha2.workspace = true
 sha3 = "0.12.0"
+sntrup-kem = { version = "=0.1.0-rc.0", features = ["force-scalar"], optional = true }
 signature.workspace = true
 spki = "0.8"
 ssh-encoding.workspace = true
@@ -121,6 +121,8 @@ dsa = ["ssh-key/dsa"]
 ring = ["dep:ring"]                           # Alternative crypto backend.
 rsa = ["dep:rsa", "dep:pkcs1", "ssh-key/rsa"]
 serde = ["ssh-key/serde"]
+# sntrup761x25519-sha512 key exchange. Off by default: `sntrup-kem` is a pre-release.
+sntrup = ["dep:sntrup-kem"]
 _bench = ["dep:criterion"]
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

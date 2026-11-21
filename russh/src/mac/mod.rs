@@ -19,7 +19,6 @@ use std::marker::PhantomData;
 use std::sync::LazyLock;
 
 use delegate::delegate;
-use digest::typenum::{U20, U32, U64};
 use hmac::Hmac;
 use sha1::Sha1;
 use sha2::{Sha256, Sha512};
@@ -85,18 +84,18 @@ pub const HMAC_SHA256_ETM: Name = Name("hmac-sha2-256-etm@openssh.com");
 pub const HMAC_SHA512_ETM: Name = Name("hmac-sha2-512-etm@openssh.com");
 
 pub(crate) static _NONE: NoMacAlgorithm = NoMacAlgorithm {};
-pub(crate) static _HMAC_SHA1: CryptoMacAlgorithm<Hmac<Sha1>, U20> =
-    CryptoMacAlgorithm(PhantomData, PhantomData);
-pub(crate) static _HMAC_SHA256: CryptoMacAlgorithm<Hmac<Sha256>, U32> =
-    CryptoMacAlgorithm(PhantomData, PhantomData);
-pub(crate) static _HMAC_SHA512: CryptoMacAlgorithm<Hmac<Sha512>, U64> =
-    CryptoMacAlgorithm(PhantomData, PhantomData);
-pub(crate) static _HMAC_SHA1_ETM: CryptoEtmMacAlgorithm<Hmac<Sha1>, U20> =
-    CryptoEtmMacAlgorithm(PhantomData, PhantomData);
-pub(crate) static _HMAC_SHA256_ETM: CryptoEtmMacAlgorithm<Hmac<Sha256>, U32> =
-    CryptoEtmMacAlgorithm(PhantomData, PhantomData);
-pub(crate) static _HMAC_SHA512_ETM: CryptoEtmMacAlgorithm<Hmac<Sha512>, U64> =
-    CryptoEtmMacAlgorithm(PhantomData, PhantomData);
+pub(crate) static _HMAC_SHA1: CryptoMacAlgorithm<Hmac<Sha1>, 20> =
+    CryptoMacAlgorithm(PhantomData);
+pub(crate) static _HMAC_SHA256: CryptoMacAlgorithm<Hmac<Sha256>, 32> =
+    CryptoMacAlgorithm(PhantomData);
+pub(crate) static _HMAC_SHA512: CryptoMacAlgorithm<Hmac<Sha512>, 64> =
+    CryptoMacAlgorithm(PhantomData);
+pub(crate) static _HMAC_SHA1_ETM: CryptoEtmMacAlgorithm<Hmac<Sha1>, 20> =
+    CryptoEtmMacAlgorithm(PhantomData);
+pub(crate) static _HMAC_SHA256_ETM: CryptoEtmMacAlgorithm<Hmac<Sha256>, 32> =
+    CryptoEtmMacAlgorithm(PhantomData);
+pub(crate) static _HMAC_SHA512_ETM: CryptoEtmMacAlgorithm<Hmac<Sha512>, 64> =
+    CryptoEtmMacAlgorithm(PhantomData);
 
 pub const ALL_MAC_ALGORITHMS: &[&Name] = &[
     &NONE,

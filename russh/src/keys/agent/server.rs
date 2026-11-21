@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::marker::Sync;
 use std::sync::{Arc, RwLock};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant};
 
 use byteorder::{BigEndian, ByteOrder};
 use bytes::Bytes;
@@ -11,7 +11,6 @@ use ssh_encoding::{Decode, Encode, Reader};
 use ssh_key::{HashAlg, PrivateKey};
 use subtle::ConstantTimeEq;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tokio::time::sleep;
 use {std, tokio};
 
 use super::{Constraint, msg};
@@ -24,7 +23,16 @@ const MAX_AGENT_FRAME_LEN: usize = 256 * 1024;
 
 #[derive(Clone)]
 #[allow(clippy::type_complexity)]
-struct KeyStore(Arc<RwLock<HashMap<Vec<u8>, (Arc<PrivateKey>, SystemTime, Vec<Constraint>)>>>);
+struct KeyStore(Arc<RwLock<HashMap<Vec<u8>, (Arc<PrivateKey>, Option<Instant>, Vec<Constraint>)>>>);
+
+impl KeyStore {
+    fn purge_expired(&self) {
+        if let Ok(mut keys) = self.0.write() {
+            let now = Instant::now();
+            keys.retain(|_, (_, expiry, _)| expiry.is_none_or(|expiry| expiry > now));
+        }
+    }
+}
 
 #[derive(Clone)]
 struct Lock(Arc<RwLock<CryptoVec>>);
@@ -128,6 +136,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
     }
 
     async fn respond(&mut self, writebuf: &mut Vec<u8>) -> Result<(), Error> {
+        self.keys.purge_expired();
         let is_locked = {
             if let Ok(password) = self.lock.0.read() {
                 !password.is_empty()
@@ -240,6 +249,11 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
     fn lock<R: Reader>(&self, r: &mut R) -> Result<(), Error> {
         let password = Bytes::decode(r)?;
         let mut lock = self.lock.0.write().or(Err(Error::AgentFailure))?;
+        // Two LOCK requests can both pass `confirm_request`. The second must
+        // not append to the stored password
+        if !lock.is_empty() {
+            return Err(Error::AgentFailure);
+        }
         lock.extend(&password);
         Ok(())
     }
@@ -301,28 +315,13 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
                 }
             }
         }
-        let now = SystemTime::now();
+        let expiry = lifetime
+            .and_then(|seconds| Instant::now().checked_add(Duration::from_secs(seconds as u64)));
         self.keys
             .0
             .write()
             .or(Err(Error::AgentFailure))?
-            .insert(blob.clone(), (Arc::new(key_pair), now, c));
-        if let Some(seconds) = lifetime {
-            let keys = self.keys.clone();
-            russh_util::runtime::spawn(async move {
-                sleep(Duration::from_secs(seconds as u64)).await;
-                if let Ok(mut keys) = keys.0.write() {
-                    let delete = if let Some(&(_, time, _)) = keys.get(&blob) {
-                        time == now
-                    } else {
-                        false
-                    };
-                    if delete {
-                        keys.remove(&blob);
-                    }
-                }
-            });
-        }
+            .insert(blob, (Arc::new(key_pair), expiry, c));
         writebuf.push(msg::SUCCESS);
         Ok(true)
     }
@@ -351,22 +350,24 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin + 'static, A: Agent + Send + Sync 
             if !ok {
                 return Ok((agent, false));
             }
-            // The agent may have been locked or the key removed while
-            // confirmation was pending.
-            let locked = self.lock.0.read().map(|p| !p.is_empty()).unwrap_or(true);
-            let present = self
-                .keys
-                .0
-                .read()
-                .map(|k| k.contains_key(&blob))
-                .unwrap_or(false);
-            if locked || !present {
-                return Ok((agent, false));
-            }
             agent
         } else {
             agent
         };
+        // The agent may have been locked, or the key removed or expired,
+        // while `confirm_request` or `confirm` was pending. Nothing may await
+        // between this check and the signature
+        self.keys.purge_expired();
+        let locked = self.lock.0.read().map(|p| !p.is_empty()).unwrap_or(true);
+        let present = self
+            .keys
+            .0
+            .read()
+            .map(|k| k.contains_key(&blob))
+            .unwrap_or(false);
+        if locked || !present {
+            return Ok((agent, false));
+        }
         writebuf.push(msg::SIGN_RESPONSE);
         let data = Bytes::decode(r)?;
         let flags = u32::decode(r)?;
@@ -465,6 +466,63 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn lifetime_constraint_expires_key_without_a_timer_task() {
+        use ssh_encoding::Encode;
+
+        let (server, _client) = tokio::io::duplex(64);
+        let mut connection = Connection {
+            lock: Lock(std::sync::Arc::new(std::sync::RwLock::new(
+                crate::CryptoVec::new(),
+            ))),
+            keys: KeyStore(std::sync::Arc::new(std::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            ))),
+            agent: Some(()),
+            s: server,
+            buf: Vec::new(),
+        };
+
+        let add = |lifetime: u32| {
+            let mut payload = Vec::new();
+            ssh_key::private::KeypairData::Ed25519(
+                ssh_key::private::Ed25519Keypair::from_seed(&[7u8; 32]),
+            )
+            .encode(&mut payload)
+            .unwrap();
+            String::new().encode(&mut payload).unwrap();
+            payload.push(super::msg::CONSTRAIN_LIFETIME);
+            lifetime.encode(&mut payload).unwrap();
+            payload
+        };
+
+        // A timer task would hold a second reference to the keystore
+        let payload = add(3600);
+        assert!(
+            connection
+                .add_key(&mut &payload[..], true, &mut Vec::new())
+                .await
+                .unwrap()
+        );
+        connection.keys.purge_expired();
+        assert_eq!(connection.keys.0.read().unwrap().len(), 1);
+        assert_eq!(std::sync::Arc::strong_count(&connection.keys.0), 1);
+
+        let payload = add(0);
+        assert!(
+            connection
+                .add_key(&mut &payload[..], true, &mut Vec::new())
+                .await
+                .unwrap()
+        );
+        connection.buf = vec![11];
+        let mut writebuf = Vec::new();
+        connection.respond(&mut writebuf).await.unwrap();
+        assert_eq!(writebuf[4], super::msg::IDENTITIES_ANSWER);
+        assert_eq!(BigEndian::read_u32(&writebuf[5..9]), 0);
+        assert!(connection.keys.0.read().unwrap().is_empty());
+    }
+
+    #[tokio::test]
     async fn sign_is_rejected_when_locked_during_confirm() {
         use std::future::Future;
         use std::sync::Arc;
@@ -511,7 +569,7 @@ mod tests {
         let blob = key.public_key().to_bytes().unwrap();
         connection.keys.0.write().unwrap().insert(
             blob.clone(),
-            (Arc::new(key), std::time::SystemTime::now(), vec![Constraint::Confirm]),
+            (Arc::new(key), None, vec![Constraint::Confirm]),
         );
 
         let mut payload = Vec::new();
@@ -535,5 +593,95 @@ mod tests {
         };
         let (signed, ()) = tokio::join!(signer, locker);
         assert!(!signed);
+    }
+
+    #[tokio::test]
+    async fn sign_is_rejected_when_locked_during_confirm_request() {
+        use std::future::Future;
+        use std::sync::Arc;
+
+        use ssh_encoding::Encode;
+        use tokio::sync::Notify;
+
+        use super::{Agent, MessageType, msg};
+        use crate::keys::PrivateKey;
+
+        #[derive(Clone)]
+        struct Delayed(Arc<Notify>, Arc<Notify>);
+        impl Agent for Delayed {
+            fn confirm_request(&self, _: MessageType) -> impl Future<Output = bool> + Send {
+                async move {
+                    self.0.notify_one();
+                    self.1.notified().await;
+                    true
+                }
+            }
+        }
+
+        let entered = Arc::new(Notify::new());
+        let release = Arc::new(Notify::new());
+        let lock = Lock(std::sync::Arc::new(std::sync::RwLock::new(
+            crate::CryptoVec::new(),
+        )));
+        let (server, _client) = tokio::io::duplex(64);
+        let mut connection = Connection {
+            lock: lock.clone(),
+            keys: KeyStore(std::sync::Arc::new(std::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            ))),
+            agent: Some(Delayed(entered.clone(), release.clone())),
+            s: server,
+            buf: Vec::new(),
+        };
+
+        // Without a confirm constraint `Agent::confirm` is never called
+        let key = PrivateKey::random(&mut rand::rng(), crate::keys::Algorithm::Ed25519)
+            .unwrap();
+        let blob = key.public_key().to_bytes().unwrap();
+        connection.keys.0.write().unwrap().insert(
+            blob.clone(),
+            (Arc::new(key), None, vec![]),
+        );
+
+        connection.buf.push(msg::SIGN_REQUEST);
+        blob.encode(&mut connection.buf).unwrap();
+        b"data".as_slice().encode(&mut connection.buf).unwrap();
+        0u32.encode(&mut connection.buf).unwrap();
+
+        let mut writebuf = Vec::new();
+        let signer = async {
+            connection.respond(&mut writebuf).await.unwrap();
+        };
+        let locker = async {
+            entered.notified().await;
+            lock.0.write().unwrap().extend(b"pw");
+            release.notify_one();
+        };
+        tokio::join!(signer, locker);
+        assert_eq!(writebuf, [0, 0, 0, 1, msg::FAILURE]);
+    }
+
+    #[test]
+    fn lock_does_not_append_to_an_existing_password() {
+        use ssh_encoding::Encode;
+
+        let (server, _client) = tokio::io::duplex(64);
+        let connection = Connection {
+            lock: Lock(std::sync::Arc::new(std::sync::RwLock::new(
+                crate::CryptoVec::new(),
+            ))),
+            keys: KeyStore(std::sync::Arc::new(std::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            ))),
+            agent: Some(()),
+            s: server,
+            buf: Vec::new(),
+        };
+
+        let mut payload = Vec::new();
+        b"pw".as_slice().encode(&mut payload).unwrap();
+        connection.lock(&mut &payload[..]).unwrap();
+        assert!(connection.lock(&mut &payload[..]).is_err());
+        assert_eq!(&connection.lock.0.read().unwrap()[..], b"pw");
     }
 }

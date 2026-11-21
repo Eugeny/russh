@@ -96,7 +96,6 @@ impl Session {
                 debug!("request: {request:?}");
                 if request == "ssh-userauth" {
                     let auth_request = server_accept_service(
-                        handler.authentication_banner().await?,
                         self.common.config.as_ref().methods.clone(),
                         &mut enc.write,
                     )?;
@@ -705,6 +704,78 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn open_replies_for_established_channel_are_rejected() {
+        let mut session = test_authenticated_session();
+        let channel = insert_unconfirmed_server_open(&mut session);
+        let mut handler = ChannelCallbackProbe::default();
+
+        let mut confirmation = vec![msg::CHANNEL_OPEN_CONFIRMATION];
+        for x in [channel.0, 100, 1 << 20, 32768] {
+            x.encode(&mut confirmation).unwrap();
+        }
+        session
+            .process_packet(&mut handler, &confirmation)
+            .await
+            .unwrap();
+        assert!(session.common.is_established_channel(channel));
+
+        assert!(
+            session
+                .process_packet(&mut handler, &confirmation)
+                .await
+                .is_err(),
+            "second CHANNEL_OPEN_CONFIRMATION was accepted"
+        );
+
+        let mut failure = vec![msg::CHANNEL_OPEN_FAILURE];
+        channel.encode(&mut failure).unwrap();
+        2u32.encode(&mut failure).unwrap();
+        "".encode(&mut failure).unwrap();
+        "".encode(&mut failure).unwrap();
+        session.process_packet(&mut handler, &failure).await.unwrap();
+        assert!(
+            session.common.is_established_channel(channel),
+            "CHANNEL_OPEN_FAILURE removed an established channel"
+        );
+    }
+
+    #[tokio::test]
+    async fn peer_close_with_queued_output_ends_channel() {
+        let mut session = test_authenticated_session();
+        let channel = insert_unconfirmed_server_open(&mut session);
+        let mut handler = ChannelCallbackProbe::default();
+
+        // Peer window of 0, so anything we write stays queued.
+        let mut confirmation = vec![msg::CHANNEL_OPEN_CONFIRMATION];
+        for x in [channel.0, 100, 0, 32768] {
+            x.encode(&mut confirmation).unwrap();
+        }
+        session
+            .process_packet(&mut handler, &confirmation)
+            .await
+            .unwrap();
+        session.data(channel, Bytes::from_static(b"queued")).unwrap();
+        assert!(session.common.has_any_pending_data());
+
+        let mut close = vec![msg::CHANNEL_CLOSE];
+        channel.encode(&mut close).unwrap();
+        session.process_packet(&mut handler, &close).await.unwrap();
+        assert!(
+            !session.common.is_established_channel(channel),
+            "peer-closed channel with queued output is still established"
+        );
+        assert!(!session.common.has_any_pending_data());
+
+        let mut exec = vec![msg::CHANNEL_REQUEST];
+        channel.encode(&mut exec).unwrap();
+        "exec".encode(&mut exec).unwrap();
+        exec.push(0);
+        "true".encode(&mut exec).unwrap();
+        session.process_packet(&mut handler, &exec).await.unwrap();
+        assert!(!handler.exec_called, "exec_request fired after channel_close");
+    }
+
     #[derive(Default)]
     struct ChannelCallbackProbe {
         exec_called: bool,
@@ -891,7 +962,6 @@ mod tests {
 }
 
 fn server_accept_service(
-    banner: Option<String>,
     methods: MethodSet,
     buffer: &mut Vec<u8>,
 ) -> Result<AuthRequest, crate::Error> {
@@ -899,14 +969,6 @@ fn server_accept_service(
         buffer.push(msg::SERVICE_ACCEPT);
         "ssh-userauth".encode(buffer)?;
     });
-
-    if let Some(banner) = banner {
-        push_packet!(buffer, {
-            buffer.push(msg::USERAUTH_BANNER);
-            banner.encode(buffer)?;
-            "".encode(buffer)?;
-        })
-    }
 
     Ok(AuthRequest::server(methods))
 }
@@ -927,6 +989,21 @@ impl Encrypted {
         let service_name = map_err!(String::decode(r))?;
         let method = map_err!(String::decode(r))?;
         debug!("name: {user:?} {service_name:?} {method:?}",);
+
+        // OpenSSH's sshd sends the banner on the first auth request. Some
+        // clients ignore a banner sent earlier
+        #[allow(clippy::collapsible_if)]
+        if let EncryptedState::WaitingAuthRequest(ref mut a) = self.state {
+            if !std::mem::replace(&mut a.banner_sent, true) {
+                if let Some(banner) = handler.authentication_banner().await? {
+                    push_packet!(self.write, {
+                        self.write.push(msg::USERAUTH_BANNER);
+                        map_err!(banner.encode(&mut self.write))?;
+                        map_err!("".encode(&mut self.write))?;
+                    });
+                }
+            }
+        }
 
         if service_name == "ssh-connection" {
             {
@@ -1449,7 +1526,7 @@ impl Session {
                 }
                 if let Some(ref mut enc) = self.common.encrypted {
                     // Reply with CHANNEL_CLOSE per RFC 4254 Section 5.3.
-                    enc.close(channel_num)?;
+                    enc.close_from_peer(channel_num)?;
                 }
                 // Forward the close to the channel before removing it, so that
                 // consumers waiting on `Channel::wait()` receive an explicit
@@ -1561,6 +1638,9 @@ impl Session {
                 map_err!(ensure_end(r))?;
                 let local_id = ChannelId(msg.recipient_channel);
 
+                if !self.common.is_pending_channel_open(local_id) {
+                    return Err(Error::Inconsistent.into());
+                }
                 if let Some(ref mut enc) = self.common.encrypted {
                     if let Some(parameters) = enc.channels.get_mut(&local_id) {
                         parameters.confirm(&msg);
@@ -1937,6 +2017,9 @@ impl Session {
                 trace!("Channel open failure description: {description}");
                 trace!("Channel open failure language tag: {language_tag}");
 
+                if !self.common.is_pending_channel_open(channel_num) {
+                    return Ok(());
+                }
                 if let Some(ref mut enc) = self.common.encrypted {
                     enc.channels.remove(&channel_num);
                 }
