@@ -437,7 +437,8 @@ fn compute_keys(
     let c = kex.compute_keys(
         session_id_ref,
         &hash,
-        names.cipher,
+        names.client_cipher,
+        names.server_cipher,
         names.client_mac,
         names.server_mac,
         true,
