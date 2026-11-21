@@ -1600,7 +1600,10 @@ impl Session {
     /// What a non-kex message received during a key exchange counts against
     /// `pending_limit`: its length, except that with
     /// [`Config::manual_window`] channel data counts by its payload (at least
-    /// one byte), which is what the grants in `pending_limit` measure.
+    /// one byte), which is what the grants in `pending_limit` measure. Data
+    /// for a channel that is not open, such as one we closed while the peer's
+    /// data was in flight, counts one byte: it is dropped on arrival, and that
+    /// channel's credit is no longer in `pending_limit`.
     pub(crate) fn pending_cost(&self, packet: &[u8]) -> u64 {
         let header = match packet.first() {
             Some(&msg::CHANNEL_DATA) => 9,
@@ -1609,6 +1612,16 @@ impl Session {
         };
         if !self.common.config.manual_window {
             return packet.len() as u64;
+        }
+        let open = packet
+            .get(1..5)
+            .and_then(|id| <[u8; 4]>::try_from(id).ok())
+            .is_some_and(|id| {
+                self.common
+                    .is_established_channel(ChannelId(u32::from_be_bytes(id)))
+            });
+        if !open {
+            return 1;
         }
         packet.len().saturating_sub(header).max(1) as u64
     }
@@ -1949,6 +1962,22 @@ mod tests {
         packet
     }
 
+    fn open_channel(id: u32, window: u32, confirmed: bool) -> crate::ChannelParams {
+        crate::ChannelParams {
+            recipient_channel: id,
+            sender_channel: ChannelId(id),
+            recipient_window_size: 0,
+            sender_window_size: window,
+            recipient_maximum_packet_size: 0,
+            sender_maximum_packet_size: 0,
+            confirmed,
+            wants_reply: false,
+            pending_data: VecDeque::new(),
+            pending_eof: false,
+            pending_close: false,
+        }
+    }
+
     fn with_manual_window(session: &mut Session, manual_window: bool) {
         session.common.config = Arc::new(crate::server::Config {
             manual_window,
@@ -1960,6 +1989,8 @@ mod tests {
     fn pending_cost_counts_channel_data_by_payload_with_manual_window() {
         let mut session = authenticated_session();
         with_manual_window(&mut session, true);
+        let enc = session.common.encrypted.as_mut().unwrap();
+        enc.channels.insert(ChannelId(7), open_channel(7, 0, true));
         assert_eq!(session.pending_cost(&channel_data(1000)), 1000);
         assert_eq!(session.pending_cost(&channel_extended_data(1000)), 1000);
         // An empty payload still costs a byte, so a flood of them is bounded.
@@ -1967,6 +1998,20 @@ mod tests {
         assert_eq!(session.pending_cost(&channel_extended_data(0)), 1);
         // Other messages count whole.
         assert_eq!(session.pending_cost(&[msg::IGNORE; 100]), 100);
+    }
+
+    #[test]
+    fn pending_cost_counts_data_for_a_channel_that_is_not_open_as_one_byte() {
+        let mut session = authenticated_session();
+        with_manual_window(&mut session, true);
+        // Channel 7 is closed (gone) or not confirmed: its data is dropped.
+        assert_eq!(session.pending_cost(&channel_data(1000)), 1);
+        assert_eq!(session.pending_cost(&channel_extended_data(1000)), 1);
+        let enc = session.common.encrypted.as_mut().unwrap();
+        enc.channels.insert(ChannelId(7), open_channel(7, 0, false));
+        assert_eq!(session.pending_cost(&channel_data(1000)), 1);
+        // A truncated message has no channel to look up.
+        assert_eq!(session.pending_cost(&[msg::CHANNEL_DATA, 0, 0]), 1);
     }
 
     #[test]
@@ -1984,22 +2029,8 @@ mod tests {
         let window = session.common.config.window_size;
         let enc = session.common.encrypted.as_mut().unwrap();
         for id in 0..3 {
-            enc.channels.insert(
-                ChannelId(id),
-                crate::ChannelParams {
-                    recipient_channel: id,
-                    sender_channel: ChannelId(id),
-                    recipient_window_size: 0,
-                    sender_window_size: window,
-                    recipient_maximum_packet_size: 0,
-                    sender_maximum_packet_size: 0,
-                    confirmed: true,
-                    wants_reply: false,
-                    pending_data: VecDeque::new(),
-                    pending_eof: false,
-                    pending_close: false,
-                },
-            );
+            enc.channels
+                .insert(ChannelId(id), open_channel(id, window, true));
         }
         with_manual_window(&mut session, false);
         assert_eq!(session.rekey_pending_limit(), 2 * u64::from(window));

@@ -34,6 +34,8 @@ struct Server {
     /// If set, the first `data` call waits for it, so the server reads
     /// nothing more until then.
     gate: Option<Arc<Notify>>,
+    /// If set, the gated `data` call closes its channel when it resumes.
+    close_at_gate: bool,
     received: u64,
     next_ack: u64,
 }
@@ -70,6 +72,9 @@ impl russh::server::Handler for Server {
     ) -> Result<(), Self::Error> {
         if let Some(gate) = self.gate.take() {
             gate.notified().await;
+            if self.close_at_gate {
+                return session.close(channel);
+            }
         }
         self.received += data.len() as u64;
         while self.received >= self.next_ack {
@@ -150,6 +155,7 @@ struct Options {
     grant_on_open: u32,
     limits: Option<Limits>,
     gate_first_data: bool,
+    close_at_gate: bool,
 }
 
 async fn connect(manual_window: bool) -> Pair {
@@ -191,6 +197,7 @@ async fn setup(options: Options) -> Pair {
         opened,
         grant_on_open: options.grant_on_open,
         gate: options.gate_first_data.then(|| gate.clone()),
+        close_at_gate: options.close_at_gate,
         received: 0,
         next_ack: u64::from(WINDOW),
     };
@@ -307,12 +314,13 @@ async fn with_manual_window_received_data_uses_up_the_window() {
 /// overhead, so part of the upload may still wait in the client). Then it
 /// reads again and starts a key exchange after every 256 KiB, with the rest of
 /// the upload in flight.
-async fn rekey_with_upload_in_flight(upload: u32, chunk: usize) {
+async fn upload_in_flight(upload: u32, chunk: usize, close_at_gate: bool) -> Pair {
     let mut pair = connect_with(Options {
         manual_window: true,
         grant_on_open: upload - WINDOW,
         limits: Some(Limits::new(1 << 30, 256 << 10, Duration::from_secs(3600))),
         gate_first_data: true,
+        close_at_gate,
     })
     .await;
     if upload > WINDOW {
@@ -331,6 +339,11 @@ async fn rekey_with_upload_in_flight(upload: u32, chunk: usize) {
     .await
     .expect("the client wrote the upload's size into the pipe");
     pair.gate.notify_one();
+    pair
+}
+
+async fn rekey_with_upload_in_flight(upload: u32, chunk: usize) {
+    let mut pair = upload_in_flight(upload, chunk, false).await;
     for _ in 0..upload / WINDOW {
         assert_eq!(next(&mut pair.channel).await, None, "no refill on receipt");
     }
@@ -349,4 +362,21 @@ async fn with_manual_window_a_server_rekey_accepts_granted_data_in_flight() {
 #[tokio::test]
 async fn with_manual_window_a_server_rekey_accepts_small_packets_in_flight() {
     rekey_with_upload_in_flight(WINDOW, 1).await;
+}
+
+/// The server closes the channel with most of its grant unused, while that
+/// data is in flight, and then rekeys. The data for the closed channel is
+/// dropped on arrival and must not end the session: a channel opened after it
+/// still works.
+#[tokio::test]
+async fn with_manual_window_a_server_rekey_accepts_data_in_flight_for_a_closed_channel() {
+    let pair = upload_in_flight(4 << 20, PACKET as usize, true).await;
+    let mut channel = tokio::time::timeout(LIVENESS, pair._client.channel_open_session())
+        .await
+        .expect("the channel opened in time")
+        .expect("the session survived the key exchange");
+    // It gets the same grant on open.
+    assert_eq!(next(&mut channel).await, Some(4 << 20));
+    send_window(&channel, WINDOW).await;
+    assert_eq!(next(&mut channel).await, None);
 }
