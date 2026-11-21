@@ -1949,8 +1949,12 @@ mod tests {
     // manual receive window (Config::manual_window): the rekey bound
 
     fn channel_data(payload: usize) -> Vec<u8> {
+        channel_data_on(7, payload)
+    }
+
+    fn channel_data_on(channel: u32, payload: usize) -> Vec<u8> {
         let mut packet = vec![msg::CHANNEL_DATA];
-        7u32.encode(&mut packet).unwrap();
+        channel.encode(&mut packet).unwrap();
         vec![b'x'; payload].encode(&mut packet).unwrap();
         packet
     }
@@ -1978,6 +1982,8 @@ mod tests {
             pending_close: false,
         }
     }
+
+    const PACKET: u32 = 32 * 1024;
 
     fn with_manual_window(session: &mut Session, manual_window: bool) {
         session.common.config = Arc::new(crate::server::Config {
@@ -2038,6 +2044,50 @@ mod tests {
         assert_eq!(session.rekey_pending_limit(), 2 * u64::from(window));
         with_manual_window(&mut session, true);
         assert_eq!(session.rekey_pending_limit(), 6 * u64::from(window));
+    }
+
+    /// What `reply` makes of `packet` while our KEXINIT is unanswered.
+    async fn reply_during_rekey(
+        session: &mut Session,
+        packet: Vec<u8>,
+    ) -> Result<(), crate::Error> {
+        let buffer = incoming_packet(packet);
+        let mut pkt = session.maybe_decompress(&buffer).unwrap();
+        super::super::reply(session, &mut TestHandler, &mut pkt).await
+    }
+
+    #[tokio::test]
+    async fn a_peer_that_sends_past_the_rekey_bound_is_cut_off() {
+        let mut session = authenticated_session();
+        with_manual_window(&mut session, true);
+        allow_rekey(&mut session, crate::Limits::default());
+        let window = 2 * session.common.config.window_size;
+        let enc = session.common.encrypted.as_mut().unwrap();
+        enc.channels
+            .insert(ChannelId(7), open_channel(7, window, true));
+        session.begin_rekey().unwrap();
+        let limit = session.pending_limit;
+        assert_eq!(limit, 2 * u64::from(window));
+
+        // Data for a channel that is not open is dropped and costs nothing.
+        for _ in 0..4 * limit / u64::from(PACKET) {
+            reply_during_rekey(&mut session, channel_data_on(9, PACKET as usize))
+                .await
+                .unwrap();
+        }
+        // Data for an open channel counts until the bound, then ends the
+        // session.
+        let mut sent = 0;
+        while sent + u64::from(PACKET) <= limit {
+            reply_during_rekey(&mut session, channel_data(PACKET as usize))
+                .await
+                .unwrap();
+            sent += u64::from(PACKET);
+        }
+        assert!(matches!(
+            reply_during_rekey(&mut session, channel_data(PACKET as usize)).await,
+            Err(crate::Error::Pending)
+        ));
     }
 
     #[test]
