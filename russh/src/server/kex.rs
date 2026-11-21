@@ -10,9 +10,10 @@ use ssh_key::Algorithm;
 use super::*;
 use crate::helpers::sign_with_hash_alg;
 use crate::kex::dh::biguint_to_mpint;
-use crate::kex::{KexAlgorithm, KexAlgorithmImplementor, KexCause, KEXES};
+use crate::kex::{KEXES, KexAlgorithm, KexAlgorithmImplementor, KexCause};
 use crate::keys::key::PrivateKeyWithHashAlg;
-use crate::negotiation::{is_key_compatible_with_algo, Names, Select};
+use crate::negotiation::{Names, Select, is_key_compatible_with_algo};
+use crate::parsing::ensure_end;
 use crate::{msg, negotiation};
 
 thread_local! {
@@ -82,6 +83,32 @@ impl ServerKex {
         }
     }
 
+    /// `Created` is "our KEXINIT is out, the peer's has not arrived".
+    pub fn peer_kexinit_received(&self) -> bool {
+        !matches!(self.state, ServerKexState::Created)
+    }
+
+    pub fn strict_kex(&self) -> bool {
+        match self.state {
+            ServerKexState::Created => false,
+            ServerKexState::WaitingForGexRequest { ref names, .. }
+            | ServerKexState::WaitingForDhInit { ref names, .. } => names.strict_kex(),
+            ServerKexState::WaitingForNewKeys { ref newkeys } => newkeys.names.strict_kex(),
+        }
+    }
+
+    /// A wrong `first_kex_packet_follows` guess was ignored in this exchange, so the peer's packets
+    /// after KEXINIT sit one sequence number later than the strict-kex order expects (RFC 4253 §7.1
+    /// requires the guess to be ignored and the correct packet to follow).
+    pub fn guess_ignored(&self) -> bool {
+        match self.state {
+            ServerKexState::Created => false,
+            ServerKexState::WaitingForGexRequest { ref names, .. }
+            | ServerKexState::WaitingForDhInit { ref names, .. } => names.guessed_ignored,
+            ServerKexState::WaitingForNewKeys { ref newkeys } => newkeys.names.guessed_ignored,
+        }
+    }
+
     pub fn kexinit(&mut self, output: &mut PacketWriter) -> Result<(), Error> {
         self.exchange.server_kex_init =
             negotiation::write_kex(&self.config.preferred, output, Some(self.config.as_ref()))?;
@@ -109,11 +136,12 @@ impl ServerKex {
                 }
 
                 let names = {
-                    self.exchange.client_kex_init.extend_from_slice(&input.buffer);
+                    self.exchange.client_kex_init = input.buffer.clone().into();
                     negotiation::Server::read_kex(
                         &input.buffer,
                         &self.config.preferred,
                         Some(&self.config.keys),
+                        Some(&self.config.certificates),
                         &self.cause,
                     )?
                 };
@@ -138,12 +166,14 @@ impl ServerKex {
                         self.cause.session_id(),
                     )?;
 
-                    output.packet(|w| {
+                    output.write_packet(|w| {
                         msg::NEWKEYS.encode(w)?;
                         Ok(())
                     })?;
 
                     return Ok(KexProgress::Done {
+                        server_host_certificate: None,
+                        agent_session_binding: None,
                         newkeys,
                         server_host_key: None,
                     });
@@ -173,11 +203,15 @@ impl ServerKex {
                 }
 
                 #[allow(clippy::indexing_slicing)] // length checked
-                let gex_params = GexParams::decode(&mut &input.buffer[1..])?;
+                let mut r = &input.buffer[1..];
+                let gex_params = GexParams::decode(&mut r)?;
+                ensure_end(&r)?;
                 debug!("client requests a gex group: {gex_params:?}");
 
                 let Some(dh_group) = handler.lookup_dh_gex_group(&gex_params).await? else {
-                    debug!("server::Handler impl did not find a matching DH group (is lookup_dh_gex_group implemented?)");
+                    debug!(
+                        "server::Handler impl did not find a matching DH group (is lookup_dh_gex_group implemented?)"
+                    );
                     return Err(Error::Kex)?;
                 };
 
@@ -187,7 +221,7 @@ impl ServerKex {
                 self.exchange.gex = Some((gex_params, dh_group.clone()));
                 kex.dh_gex_set_group(dh_group)?;
 
-                output.packet(|w| {
+                output.write_packet(|w| {
                     msg::KEX_DH_GEX_GROUP.encode(w)?;
                     prime.encode(w)?;
                     generator.encode(w)?;
@@ -208,8 +242,11 @@ impl ServerKex {
 
                 if names.ignore_guessed {
                     // Ignore the next packet if (1) it follows and (2) it's not the correct guess.
+                    // Dropbear always guesses (its list starts with kexguess2@matt.ucc.asn.au), so with
+                    // strict kex its real KEX_ECDH_INIT then arrives at sequence number 2; see `guess_ignored`.
                     debug!("ignoring guessed kex");
                     names.ignore_guessed = false;
+                    names.guessed_ignored = true;
                     self.state = ServerKexState::WaitingForDhInit { names, kex };
                     return Ok(KexProgress::NeedsReply {
                         kex: self,
@@ -236,23 +273,60 @@ impl ServerKex {
                 self.exchange
                     .client_ephemeral
                     .extend_from_slice(&Bytes::decode(&mut r).map_err(Into::into)?);
+                ensure_end(&r)?;
 
                 let exchange = &mut self.exchange;
                 kex.server_dh(exchange, &input.buffer)?;
 
-                let Some(matching_key_index) = self
-                    .config
-                    .keys
-                    .iter()
-                    .position(|key| is_key_compatible_with_algo(key, &names.key))
-                else {
-                    debug!("we don't have a host key of type {:?}", names.key);
-                    return Err(Error::UnknownKey.into());
+                // Present a certificate only when one was negotiated;
+                // `names.key` is then the plain algorithm the certificate
+                // contains, which is what signs the exchange below.
+                let (key, certificate) = if names.host_key_is_certificate {
+                    self.config
+                        .certificates
+                        .iter()
+                        .filter(|c| {
+                            // RSA certificates are usable with any RSA cert algorithm
+                            // variant (ssh-rsa-cert, rsa-sha2-256-cert, rsa-sha2-512-cert)
+                            // since the hash variant controls the KEx signing algorithm,
+                            // not the certificate itself.
+                            match (&c.algorithm(), &names.key) {
+                                (Algorithm::Rsa { .. }, Algorithm::Rsa { .. }) => true,
+                                _ => {
+                                    c.algorithm().to_certificate_type()
+                                        == names.key.to_certificate_type()
+                                }
+                            }
+                        })
+                        // Only certificates with a matching private key were
+                        // advertised, so skip any without one here as well.
+                        .find_map(|c| {
+                            self.config
+                                .keys
+                                .iter()
+                                .find(|k| k.public_key().key_data() == c.public_key())
+                                .map(|k| (k, Some(c)))
+                        })
+                        .ok_or(Error::UnknownKey)?
+                } else {
+                    let key = self
+                        .config
+                        .keys
+                        .iter()
+                        .find(|key| is_key_compatible_with_algo(key, &names.key))
+                        .ok_or(Error::UnknownKey)?;
+                    (key, None)
                 };
 
+                let certificate_blob = certificate
+                    .map(|cert| {
+                        let mut blob = Vec::new();
+                        cert.encode(&mut blob)?;
+                        Ok::<_, Error>(blob)
+                    })
+                    .transpose()?;
+
                 // Look up the key we'll be using to sign the exchange hash
-                #[allow(clippy::indexing_slicing)] // key index checked
-                let key = &self.config.keys[matching_key_index];
                 let signature_hash_alg = match &names.key {
                     Algorithm::Rsa { hash } => *hash,
                     _ => None,
@@ -263,7 +337,11 @@ impl ServerKex {
                     buffer.clear();
 
                     let mut pubkey_vec = Vec::new();
-                    key.public_key().to_bytes()?.encode(&mut pubkey_vec)?;
+                    if let Some(blob) = &certificate_blob {
+                        blob.encode(&mut pubkey_vec)?;
+                    } else {
+                        key.public_key().to_bytes()?.encode(&mut pubkey_vec)?;
+                    }
 
                     let hash = kex.compute_exchange_hash(&pubkey_vec, exchange, &mut buffer)?;
 
@@ -278,19 +356,23 @@ impl ServerKex {
                 )
                 .map_err(Into::into)?;
 
-                output.packet(|w| {
+                output.write_packet(|w| {
                     match kex.is_dh_gex() {
                         true => &msg::KEX_DH_GEX_REPLY,
                         false => &msg::KEX_ECDH_REPLY,
                     }
                     .encode(w)?;
-                    key.public_key().to_bytes()?.encode(w)?;
+                    if let Some(blob) = &certificate_blob {
+                        blob.encode(w)?;
+                    } else {
+                        key.public_key().to_bytes()?.encode(w)?;
+                    }
                     exchange.server_ephemeral.encode(w)?;
                     signature.encode(w)?;
                     Ok(())
                 })?;
 
-                output.packet(|w| {
+                output.write_packet(|w| {
                     msg::NEWKEYS.encode(w)?;
                     Ok(())
                 })?;
@@ -324,9 +406,14 @@ impl ServerKex {
                     );
                     return Err(Error::Kex.into());
                 }
+                #[allow(clippy::indexing_slicing, reason = "checked")]
+                let r = &input.buffer[1..];
+                ensure_end(&r)?;
 
                 debug!("new keys received");
                 Ok(KexProgress::Done {
+                    server_host_certificate: None,
+                    agent_session_binding: None,
                     newkeys,
                     server_host_key: None,
                 })
@@ -371,4 +458,20 @@ fn compute_keys(
         cipher: c,
         session_id: session_id_cv,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::tests::raw_no_crypto::{assert_rejected, kexinit_payload, raw_kex_signal, timeout};
+
+    #[tokio::test]
+    async fn kexinit_with_trailing_bytes_rejected_by_server() {
+        let result = timeout(raw_kex_signal(|payload| {
+            payload.extend_from_slice(&kexinit_payload("none"));
+            payload.push(0);
+        }))
+        .await;
+
+        assert_rejected(result, "server accepted a kexinit with trailing bytes");
+    }
 }

@@ -1,0 +1,38 @@
+# Please see the documentation for all configuration options:
+# https://help.github.com/github/administering-a-repository/configuration-options-for-dependency-updates
+
+version: 2
+updates:
+  - package-ecosystem: "cargo"
+    directory: "/"
+    labels: ["type/deps"]
+    cooldown:
+      default-days: 10
+      semver-major-days: 30
+      semver-minor-days: 7
+      semver-patch-days: 3
+    schedule:
+      interval: "weekly"
+    groups:
+      rust-updates:
+        applies-to: version-updates
+        update-types:
+          - major
+
+  - package-ecosystem: github-actions
+    directory: /
+    labels: ["type/deps"]
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 10
+      semver-major-days: 30
+      semver-minor-days: 7
+      semver-patch-days: 3
+    groups:
+      actions-updates:
+        applies-to: version-updates
+        update-types:
+          - major
+          - minor
+          - patch

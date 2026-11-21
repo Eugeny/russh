@@ -8,8 +8,7 @@
 use std::borrow::Cow;
 use std::sync::{Arc, Mutex};
 
-use russh::keys::PrivateKeyWithHashAlg;
-use russh::keys::ssh_key::rand_core::OsRng;
+use russh::keys::{PrivateKeyWithHashAlg, PublicKeyOrCertificate};
 use russh::*;
 use ssh_key::PrivateKey;
 
@@ -18,7 +17,7 @@ use ssh_key::PrivateKey;
 async fn test_kex_done_callback_receives_shared_secret() {
     let _ = env_logger::try_init();
 
-    let client_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap();
+    let client_key = PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap();
 
     // Set up server
     let mut server_config = server::Config::default();
@@ -26,7 +25,7 @@ async fn test_kex_done_callback_receives_shared_secret() {
     server_config.auth_rejection_time = std::time::Duration::from_secs(3);
     server_config
         .keys
-        .push(PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap());
+        .push(PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap());
     server_config.preferred = {
         let mut p = Preferred::default();
         p.kex = Cow::Borrowed(&[kex::CURVE25519]);
@@ -108,14 +107,14 @@ async fn test_kex_done_callback_receives_shared_secret() {
 async fn test_kex_done_with_ecdh_nistp256() {
     let _ = env_logger::try_init();
 
-    let client_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap();
+    let client_key = PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap();
 
     let mut server_config = server::Config::default();
     server_config.inactivity_timeout = None;
     server_config.auth_rejection_time = std::time::Duration::from_secs(3);
     server_config
         .keys
-        .push(PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap());
+        .push(PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap());
     server_config.preferred = {
         let mut p = Preferred::default();
         p.kex = Cow::Borrowed(&[kex::ECDH_SHA2_NISTP256]);
@@ -187,19 +186,90 @@ async fn test_kex_done_with_ecdh_nistp256() {
         .unwrap();
 }
 
-/// Test that kex_done is called on rekey
 #[tokio::test]
-async fn test_kex_done_on_rekey() {
+async fn test_kex_done_with_dh_gex_sha256_and_rfc4419_minimum() {
     let _ = env_logger::try_init();
 
-    let client_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap();
+    let client_key = PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap();
 
     let mut server_config = server::Config::default();
     server_config.inactivity_timeout = None;
     server_config.auth_rejection_time = std::time::Duration::from_secs(3);
     server_config
         .keys
-        .push(PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap());
+        .push(PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap());
+    server_config.preferred = {
+        let mut p = Preferred::default();
+        p.kex = Cow::Borrowed(&[kex::DH_GEX_SHA256]);
+        p
+    };
+    let server_config = Arc::new(server_config);
+
+    let socket = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = socket.local_addr().unwrap();
+
+    tokio::spawn(async move {
+        let (socket, _) = socket.accept().await.unwrap();
+        server::run_stream(server_config, socket, TestServer {})
+            .await
+            .unwrap();
+    });
+
+    let captured_secret: Arc<Mutex<Option<Vec<u8>>>> = Arc::new(Mutex::new(None));
+    let captured_names: Arc<Mutex<Option<Names>>> = Arc::new(Mutex::new(None));
+
+    let mut client_config = client::Config::default();
+    client_config.preferred = {
+        let mut p = Preferred::default();
+        p.kex = Cow::Borrowed(&[kex::DH_GEX_SHA256]);
+        p
+    };
+    client_config.gex = client::GexParams::for_client_config(2048, 4097, 8192).unwrap();
+    let client_config = Arc::new(client_config);
+
+    let client = TestClientWithKexCapture {
+        shared_secret: captured_secret.clone(),
+        negotiated_cipher: captured_names.clone(),
+    };
+
+    let mut session = client::connect(client_config, addr, client).await.unwrap();
+
+    let authenticated = session
+        .authenticate_publickey(
+            std::env::var("USER").unwrap_or("user".to_owned()),
+            PrivateKeyWithHashAlg::new(Arc::new(client_key), None),
+        )
+        .await
+        .unwrap()
+        .success();
+    assert!(authenticated);
+
+    let secret = captured_secret.lock().unwrap();
+    assert!(secret.is_some(), "Shared secret should be captured");
+    assert!(!secret.as_ref().unwrap().is_empty());
+
+    let kex_alg = captured_names.lock().unwrap();
+    assert_eq!(kex_alg.as_ref().unwrap().kex, kex::DH_GEX_SHA256);
+
+    session
+        .disconnect(Disconnect::ByApplication, "", "")
+        .await
+        .unwrap();
+}
+
+/// Test that kex_done is called on rekey
+#[tokio::test]
+async fn test_kex_done_on_rekey() {
+    let _ = env_logger::try_init();
+
+    let client_key = PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap();
+
+    let mut server_config = server::Config::default();
+    server_config.inactivity_timeout = None;
+    server_config.auth_rejection_time = std::time::Duration::from_secs(3);
+    server_config
+        .keys
+        .push(PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap());
     server_config.preferred = {
         let mut p = Preferred::default();
         p.kex = Cow::Borrowed(&[kex::CURVE25519]);
@@ -294,7 +364,7 @@ impl server::Handler for TestServer {
     async fn auth_publickey(
         &mut self,
         _user: &str,
-        _public_key: &ssh_key::PublicKey,
+        _public_key: server::VerifiedPublicKey<'_>,
     ) -> Result<server::Auth, Self::Error> {
         Ok(server::Auth::Accept)
     }
@@ -302,9 +372,11 @@ impl server::Handler for TestServer {
     async fn channel_open_session(
         &mut self,
         _channel: Channel<server::Msg>,
+        reply: server::ChannelOpenHandle,
         _session: &mut server::Session,
-    ) -> Result<bool, Self::Error> {
-        Ok(true)
+    ) -> Result<(), Self::Error> {
+        reply.accept().await;
+        Ok(())
     }
 
     async fn data(
@@ -329,7 +401,7 @@ impl client::Handler for TestClientWithKexCapture {
 
     async fn check_server_key(
         &mut self,
-        _server_public_key: &ssh_key::PublicKey,
+        _server_public_key: &PublicKeyOrCertificate,
     ) -> Result<bool, Self::Error> {
         Ok(true)
     }
@@ -363,7 +435,7 @@ impl client::Handler for TestClientWithRekeyCapture {
 
     async fn check_server_key(
         &mut self,
-        _server_public_key: &ssh_key::PublicKey,
+        _server_public_key: &PublicKeyOrCertificate,
     ) -> Result<bool, Self::Error> {
         Ok(true)
     }

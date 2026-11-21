@@ -1,11 +1,12 @@
 #![allow(clippy::unwrap_used)]
 use criterion::*;
-use rand::TryRngCore;
+use rand_core::TryRng;
+use std::hint;
 
 pub fn bench(c: &mut Criterion) {
-    let mut rand_generator = black_box(rand::rngs::OsRng {});
+    let mut rand_generator = hint::black_box(rand::rng());
 
-    let mut packet_length = black_box(vec![0u8; 4]);
+    let mut packet_length = hint::black_box(vec![0u8; 4]);
 
     for cipher_name in [super::CHACHA20_POLY1305, super::AES_256_GCM] {
         let cipher = super::CIPHERS.get(&cipher_name).unwrap();
@@ -26,7 +27,7 @@ pub fn bench(c: &mut Criterion) {
             group.bench_function(format!("Block size: {size}"), |b| {
                 b.iter_with_setup(
                     || {
-                        let mut in_out = black_box(vec![0u8; size]);
+                        let mut in_out = hint::black_box(vec![0u8; size]);
                         rand_generator.try_fill_bytes(&mut in_out).unwrap();
                         rand_generator.try_fill_bytes(&mut packet_length).unwrap();
                         in_out

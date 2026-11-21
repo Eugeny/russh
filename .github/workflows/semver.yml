@@ -2,25 +2,35 @@ name: Semver check
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  Build:
-    runs-on: ubuntu-latest
+  Semver:
+    name: Semver
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read # to check out the repository
 
     steps:
-    - uses: actions/checkout@v2
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
 
-    - name: Build (no features enabled)
-      run: cargo build --verbose
+      - name: Build (no features enabled)
+        run: cargo --locked build --verbose
 
-    - name: Check semver compatibility (russh)
-      uses: obi1kenobi/cargo-semver-checks-action@v2
-      continue-on-error: true
-      with:
-        package: russh
+      - name: Check semver compatibility (russh)
+        uses: obi1kenobi/cargo-semver-checks-action@v2.9
+        with:
+          package: russh

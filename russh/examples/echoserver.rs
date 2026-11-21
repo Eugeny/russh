@@ -1,9 +1,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use russh::keys::ssh_key::rand_core::OsRng;
-use russh::keys::{Certificate, *};
-use russh::server::{Msg, Server as _, Session};
+use russh::keys::Certificate;
+use russh::server::{Msg, Server as _, Session, VerifiedPublicKey};
 use russh::*;
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
@@ -19,7 +18,8 @@ async fn main() {
         auth_rejection_time: std::time::Duration::from_secs(3),
         auth_rejection_time_initial: Some(std::time::Duration::from_secs(0)),
         keys: vec![
-            russh::keys::PrivateKey::random(&mut OsRng, russh::keys::Algorithm::Ed25519).unwrap(),
+            russh::keys::PrivateKey::random(&mut rand::rng(), russh::keys::Algorithm::Ed25519)
+                .unwrap(),
         ],
         preferred: Preferred {
             // kex: std::borrow::Cow::Owned(vec![russh::kex::DH_GEX_SHA256]),
@@ -80,19 +80,21 @@ impl server::Handler for Server {
     async fn channel_open_session(
         &mut self,
         channel: Channel<Msg>,
+        reply: server::ChannelOpenHandle,
         session: &mut Session,
-    ) -> Result<bool, Self::Error> {
+    ) -> Result<(), Self::Error> {
         {
             let mut clients = self.clients.lock().await;
             clients.insert(self.id, (channel.id(), session.handle()));
         }
-        Ok(true)
+        reply.accept().await;
+        Ok(())
     }
 
     async fn auth_publickey(
         &mut self,
         _: &str,
-        _key: &ssh_key::PublicKey,
+        _key: VerifiedPublicKey<'_>,
     ) -> Result<server::Auth, Self::Error> {
         Ok(server::Auth::Accept)
     }

@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::env;
 
 use data_encoding::BASE64_MIME;
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use log::debug;
 use sha1::Sha1;
 
@@ -116,10 +116,10 @@ fn match_hostname(host: &str, pattern: &str) -> bool {
             let Some(Ok(hash)) = parts.next().map(|p| BASE64_MIME.decode(p.as_bytes())) else {
                 continue;
             };
-            if let Ok(hmac) = Hmac::<Sha1>::new_from_slice(&salt) {
-                if hmac.chain_update(host).verify_slice(&hash).is_ok() {
-                    return true;
-                }
+            if let Ok(hmac) = Hmac::<Sha1>::new_from_slice(&salt)
+                && hmac.chain_update(host).verify_slice(&hash).is_ok()
+            {
+                return true;
             }
         } else if host == entry {
             return true;

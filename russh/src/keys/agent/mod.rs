@@ -1,6 +1,41 @@
 use std::borrow::Cow;
 
+use russh_cryptovec::CryptoVec;
 use ssh_key::{Certificate, PublicKey};
+
+/// Cryptographic context that binds an SSH agent to one server connection.
+///
+/// OpenSSH agents use this context to enforce destination constraints. It is
+/// produced by the client key exchange and can be sent to an agent with
+/// [`client::AgentClient::bind_session`].
+#[derive(Debug, Clone)]
+pub struct AgentSessionBinding {
+    pub(crate) host_key: Vec<u8>,
+    pub(crate) session_id: CryptoVec,
+    pub(crate) signature: Vec<u8>,
+}
+
+impl AgentSessionBinding {
+    pub(crate) fn new(host_key: Vec<u8>, session_id: CryptoVec, signature: Vec<u8>) -> Self {
+        Self {
+            host_key,
+            session_id,
+            signature,
+        }
+    }
+
+    pub fn host_key(&self) -> &[u8] {
+        &self.host_key[..]
+    }
+
+    pub fn session_id(&self) -> &CryptoVec {
+        &self.session_id
+    }
+
+    pub fn signature(&self) -> &[u8] {
+        &self.signature[..]
+    }
+}
 
 /// Write clients for SSH agents.
 pub mod client;
@@ -83,17 +118,16 @@ impl AgentIdentity {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ssh_key::rand_core::OsRng;
     use ssh_key::{PrivateKey, certificate};
 
     fn create_test_certificate() -> Certificate {
         use std::time::{SystemTime, UNIX_EPOCH};
 
         // Create a CA key
-        let ca_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap();
+        let ca_key = PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap();
 
         // Create a user key to be certified
-        let user_key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap();
+        let user_key = PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519).unwrap();
 
         // Build and sign the certificate with reasonable validity window
         let now = SystemTime::now()
@@ -104,7 +138,7 @@ mod tests {
         let valid_before = now + 86400 * 365; // 1 year from now
 
         let mut builder = certificate::Builder::new_with_random_nonce(
-            &mut OsRng,
+            &mut rand::rng(),
             user_key.public_key(),
             valid_after,
             valid_before,
@@ -120,7 +154,7 @@ mod tests {
 
     #[test]
     fn test_agent_identity_public_key_variant() {
-        let key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519)
+        let key = PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519)
             .unwrap()
             .public_key()
             .clone();
@@ -161,7 +195,7 @@ mod tests {
 
     #[test]
     fn test_agent_identity_clone() {
-        let key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519)
+        let key = PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519)
             .unwrap()
             .public_key()
             .clone();
@@ -177,7 +211,7 @@ mod tests {
 
     #[test]
     fn test_agent_identity_debug() {
-        let key = PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519)
+        let key = PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519)
             .unwrap()
             .public_key()
             .clone();

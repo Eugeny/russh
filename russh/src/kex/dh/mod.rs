@@ -121,10 +121,10 @@ impl<D: Digest> std::fmt::Debug for DhGroupKex<D> {
 pub(crate) fn biguint_to_mpint(biguint: &BigUint) -> Vec<u8> {
     let mut mpint = Vec::new();
     let bytes = biguint.to_bytes_be();
-    if let Some(b) = bytes.first() {
-        if b > &0x7f {
-            mpint.push(0);
-        }
+    if let Some(b) = bytes.first()
+        && b > &0x7f
+    {
+        mpint.push(0);
     }
     mpint.extend(&bytes);
     mpint
@@ -347,7 +347,7 @@ impl Decode for GexParams {
         let min_group_size = u32::decode(reader)? as usize;
         let preferred_group_size = u32::decode(reader)? as usize;
         let max_group_size = u32::decode(reader)? as usize;
-        GexParams::new(min_group_size, preferred_group_size, max_group_size)
+        GexParams::from_peer_request(min_group_size, preferred_group_size, max_group_size)
     }
 
     type Error = Error;

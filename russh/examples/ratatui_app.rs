@@ -6,8 +6,6 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::{Terminal, TerminalOptions, Viewport};
-use russh::keys::ssh_key::PublicKey;
-use russh::keys::ssh_key::rand_core::OsRng;
 use russh::server::*;
 use russh::{Channel, ChannelId, Pty};
 use tokio::sync::Mutex;
@@ -120,7 +118,8 @@ impl AppServer {
             auth_rejection_time: std::time::Duration::from_secs(3),
             auth_rejection_time_initial: Some(std::time::Duration::from_secs(0)),
             keys: vec![
-                russh::keys::PrivateKey::random(&mut OsRng, ssh_key::Algorithm::Ed25519).unwrap(),
+                russh::keys::PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519)
+                    .unwrap(),
             ],
             nodelay: true,
             ..Default::default()
@@ -147,8 +146,9 @@ impl Handler for AppServer {
     async fn channel_open_session(
         &mut self,
         channel: Channel<Msg>,
+        reply: ChannelOpenHandle,
         session: &mut Session,
-    ) -> Result<bool, Self::Error> {
+    ) -> Result<(), Self::Error> {
         let terminal_handle = TerminalHandle::start(session.handle(), channel.id()).await;
 
         let backend = CrosstermBackend::new(terminal_handle);
@@ -164,10 +164,15 @@ impl Handler for AppServer {
         let mut clients = self.clients.lock().await;
         clients.insert(self.id, (terminal, app));
 
-        Ok(true)
+        reply.accept().await;
+        Ok(())
     }
 
-    async fn auth_publickey(&mut self, _: &str, _: &PublicKey) -> Result<Auth, Self::Error> {
+    async fn auth_publickey(
+        &mut self,
+        _: &str,
+        _: VerifiedPublicKey<'_>,
+    ) -> Result<Auth, Self::Error> {
         Ok(Auth::Accept)
     }
 

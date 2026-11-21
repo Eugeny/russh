@@ -26,6 +26,7 @@ use aes::{Aes128, Aes192, Aes256};
 #[cfg(feature = "aws-lc-rs")]
 use aws_lc_rs::aead::{AES_128_GCM as ALGORITHM_AES_128_GCM, AES_256_GCM as ALGORITHM_AES_256_GCM};
 use byteorder::{BigEndian, ByteOrder};
+use block::CtrWrapper;
 use ctr::Ctr128BE;
 use delegate::delegate;
 use log::trace;
@@ -103,9 +104,9 @@ pub const NONE: Name = Name("none");
 pub(crate) static _CLEAR: Clear = Clear {};
 #[cfg(feature = "des")]
 static _3DES_CBC: SshBlockCipher<CbcWrapper<des::TdesEde3>> = SshBlockCipher(PhantomData);
-static _AES_128_CTR: SshBlockCipher<Ctr128BE<Aes128>> = SshBlockCipher(PhantomData);
-static _AES_192_CTR: SshBlockCipher<Ctr128BE<Aes192>> = SshBlockCipher(PhantomData);
-static _AES_256_CTR: SshBlockCipher<Ctr128BE<Aes256>> = SshBlockCipher(PhantomData);
+static _AES_128_CTR: SshBlockCipher<CtrWrapper<Ctr128BE<Aes128>>> = SshBlockCipher(PhantomData);
+static _AES_192_CTR: SshBlockCipher<CtrWrapper<Ctr128BE<Aes192>>> = SshBlockCipher(PhantomData);
+static _AES_256_CTR: SshBlockCipher<CtrWrapper<Ctr128BE<Aes256>>> = SshBlockCipher(PhantomData);
 static _AES_128_GCM: GcmCipher = GcmCipher(&ALGORITHM_AES_128_GCM);
 static _AES_256_GCM: GcmCipher = GcmCipher(&ALGORITHM_AES_256_GCM);
 static _AES_128_CBC: SshBlockCipher<CbcWrapper<Aes128>> = SshBlockCipher(PhantomData);
@@ -209,6 +210,45 @@ pub(crate) trait SealingKey {
 
     fn seal(&mut self, seqn: u32, plaintext_in_ciphertext_out: &mut [u8], tag_out: &mut [u8]);
 
+    #[allow(clippy::indexing_slicing)] // PacketWriter reserves and sizes the packet buffer first
+    fn finish_packet(&mut self, offset: usize, payload_len: usize, buffer: &mut SSHBuffer) {
+        let payload_start = offset + PACKET_LENGTH_LEN + PADDING_LENGTH_LEN;
+        let payload_end = payload_start + payload_len;
+
+        trace!("writing, seqn = {:?}", buffer.seqn.0);
+        let padding_length = self.padding_length(&buffer.buffer[payload_start..payload_end]);
+        trace!("padding length {padding_length:?}");
+        let packet_length = PADDING_LENGTH_LEN + payload_len + padding_length;
+        trace!("packet_length {packet_length:?}");
+
+        // Maximum packet length:
+        // https://tools.ietf.org/html/rfc4253#section-6.1
+        assert!(packet_length <= u32::MAX as usize);
+        BigEndian::write_u32(
+            &mut buffer.buffer[offset..offset + PACKET_LENGTH_LEN],
+            packet_length as u32,
+        );
+
+        assert!(padding_length <= u8::MAX as usize);
+        buffer.buffer[offset + PACKET_LENGTH_LEN] = padding_length as u8;
+        buffer.buffer.resize(payload_end + padding_length, 0);
+        #[allow(clippy::indexing_slicing)] // length checked
+        self.fill_padding(&mut buffer.buffer[payload_end..]);
+        let tag_offset = buffer.buffer.len();
+        buffer.buffer.resize(tag_offset + self.tag_len(), 0);
+
+        #[allow(clippy::indexing_slicing)] // length checked
+        let (plaintext, tag) =
+            buffer.buffer[offset..].split_at_mut(PACKET_LENGTH_LEN + packet_length);
+
+        self.seal(buffer.seqn.0, plaintext, tag);
+
+        buffer.bytes += payload_len;
+        // Sequence numbers are on 32 bits and wrap.
+        // https://tools.ietf.org/html/rfc4253#section-6.4
+        buffer.seqn += Wrapping(1);
+    }
+
     fn write(&mut self, payload: &[u8], buffer: &mut SSHBuffer) {
         // https://tools.ietf.org/html/rfc4253#section-6
         //
@@ -225,8 +265,9 @@ pub(crate) trait SealingKey {
         // Maximum packet length:
         // https://tools.ietf.org/html/rfc4253#section-6.1
         assert!(packet_length <= u32::MAX as usize);
-        #[allow(clippy::unwrap_used)] // length checked
-        (packet_length as u32).encode(&mut buffer.buffer).unwrap();
+        buffer
+            .buffer
+            .extend_from_slice(&(packet_length as u32).to_be_bytes());
 
         assert!(padding_length <= u8::MAX as usize);
         buffer.buffer.push(padding_length as u8);
@@ -273,6 +314,18 @@ pub(crate) async fn read<R: AsyncRead + Unpin>(
                 return Err(Error::PacketSize(len));
             }
 
+            // A valid packet (with its MAC tag) can never be shorter than the
+            // block we already read to probe it; a smaller value would shrink
+            // the buffer below `l` below and panic on the `buffer.buffer[l..]`
+            // slice. Reject it as a protocol error instead. The tag counts:
+            // with an EtM MAC and 8-byte blocks (3des-cbc), packet_length can
+            // be 8, and the probe also reads the start of the tag.
+            if len + PACKET_LENGTH_LEN + cipher.tag_len()
+                < cipher.packet_length_to_read_for_block_length()
+            {
+                return Err(Error::PacketSize(len));
+            }
+
             buffer.len = len + cipher.tag_len();
             trace!("reading, clear len = {:?}", buffer.len);
         }
@@ -296,10 +349,12 @@ pub(crate) async fn read<R: AsyncRead + Unpin>(
         .len()
         .checked_sub(padding_length)
         .ok_or(Error::IndexOutOfBounds)?;
+    let payload_len = plaintext_end.saturating_sub(PADDING_LENGTH_LEN);
 
     // Sequence numbers are on 32 bits and wrap.
     // https://tools.ietf.org/html/rfc4253#section-6.4
     buffer.seqn += Wrapping(1);
+    buffer.bytes = buffer.bytes.saturating_add(payload_len);
     buffer.len = 0;
 
     // Remove the padding
@@ -322,6 +377,41 @@ const MAXIMUM_PADDING_LEN: usize = 19;
 const MAXIMUM_PACKET_LEN_HEADROOM: usize =
     PADDING_LENGTH_LEN + CHANNEL_EXTENDED_DATA_PACKET_OVERHEAD + MAXIMUM_PADDING_LEN;
 const MAXIMUM_PACKET_LEN: usize = MAXIMUM_PACKET_LEN_BASELINE + MAXIMUM_PACKET_LEN_HEADROOM;
+// Keep post-decompression growth within the same packet-acceptance model as
+// the transport read path.
+pub(crate) const MAXIMUM_DECOMPRESSED_PACKET_LEN: usize = MAXIMUM_PACKET_LEN;
 
 #[cfg(feature = "_bench")]
 pub mod benchmark;
+
+#[cfg(all(test, feature = "des"))]
+mod tests {
+    use super::*;
+    use crate::mac::_HMAC_SHA512_ETM;
+
+    #[tokio::test]
+    async fn read_accepts_shortest_3des_etm_packet() {
+        let key = [1; 24];
+        let iv = [2; 8];
+        let mac_key = [3; 64];
+        let mut sealing_key = _3DES_CBC.make_sealing_key(&key, &iv, &mac_key, &_HMAC_SHA512_ETM);
+        let mut opening_key = _3DES_CBC.make_opening_key(&key, &iv, &mac_key, &_HMAC_SHA512_ETM);
+
+        // With EtM the packet_length is not encrypted, so with 8-byte blocks
+        // OpenSSH sends packet_length 8 for a one-byte payload: the padding
+        // length, the payload and six bytes of padding.
+        let mut packet = vec![0, 0, 0, 8, 6, 52, 0, 0, 0, 0, 0, 0];
+        let mut tag = vec![0; sealing_key.tag_len()];
+        sealing_key.seal(0, &mut packet, &mut tag);
+        packet.extend_from_slice(&tag);
+
+        let mut buffer = SSHBuffer::new();
+        let n = read(&mut &packet[..], &mut buffer, opening_key.as_mut())
+            .await
+            .unwrap();
+
+        #[allow(clippy::indexing_slicing)]
+        let payload = &buffer.buffer[5..n];
+        assert_eq!(payload, [52]);
+    }
+}
