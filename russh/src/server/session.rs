@@ -174,7 +174,8 @@ impl Handle {
     /// Grants are ignored for a channel that is not open yet (grant after
     /// accepting a channel, or after the client confirmed one the server
     /// opened), that is closing or closed, and when empty or when they would
-    /// take the window past `u32::MAX`. Fails only if the session has ended.
+    /// take the window past `u32::MAX`. Without `manual_window`, a grant adds
+    /// to russh's own refills. Fails only if the session has ended.
     pub fn grant_window(&self, id: ChannelId, bytes: u32) -> Result<(), crate::SendError> {
         self.priority_sender
             .send(Msg::WindowGrant { id, bytes })
