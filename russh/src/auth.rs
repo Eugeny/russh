@@ -358,6 +358,7 @@ pub struct AuthRequest {
     pub(crate) principal: Option<AuthPrincipal>,
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub rejection_count: usize,
+    pub(crate) banner_sent: bool,
 }
 
 #[doc(hidden)]
@@ -394,6 +395,7 @@ impl AuthRequest {
             current: None,
             principal: None,
             rejection_count: 0,
+            banner_sent: false,
         }
     }
 
@@ -414,6 +416,7 @@ impl AuthRequest {
             current,
             principal: None,
             rejection_count: 0,
+            banner_sent: false,
         }
     }
 

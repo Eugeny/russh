@@ -6,7 +6,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use log::{debug, error, warn};
 use ssh_encoding::{Decode, Encode};
-use ssh_key::{Certificate, Mpint, PublicKey, Signature};
+use ssh_key::{Algorithm, Certificate, Mpint, PublicKey, Signature};
 
 use super::IncomingSshPacket;
 use crate::client::{Config, NewKeys};
@@ -22,6 +22,22 @@ use crate::{CryptoVec, Error, SshId, msg, negotiation, strict_kex_violation};
 
 thread_local! {
     static HASH_BUFFER: RefCell<CryptoVec> = RefCell::new(CryptoVec::new());
+}
+
+// RFC 4253 §7.1, §8. The verifier takes the algorithm from the signature
+// blob, so it accepts an RSA key when ed25519 was negotiated, and an ssh-rsa
+// (SHA-1) signature when rsa-sha2-512 was
+fn matches_negotiated_host_key_algorithm(
+    negotiated: &Algorithm,
+    host_key: &PublicKey,
+    signature: &Signature,
+) -> bool {
+    let key_type_matches = match (negotiated, host_key.algorithm()) {
+        // An RSA key's algorithm has no hash. Only the signature's does
+        (Algorithm::Rsa { .. }, Algorithm::Rsa { .. }) => true,
+        (negotiated, presented) => *negotiated == presented,
+    };
+    key_type_matches && signature.algorithm() == *negotiated
 }
 
 // Some servers (Huawei VRP among them) pad ECDSA signature scalars with leading
@@ -374,6 +390,17 @@ impl ClientKex {
                 };
                 ensure_end(r)?;
 
+                if !matches_negotiated_host_key_algorithm(&names.key, &server_host_key, &signature)
+                {
+                    debug!(
+                        "server host key ({}) or signature ({}) is not of the negotiated algorithm ({})",
+                        server_host_key.algorithm(),
+                        signature.algorithm(),
+                        names.key
+                    );
+                    return Err(Error::WrongServerSig);
+                }
+
                 if let Err(e) =
                     signature::Verifier::verify(&server_host_key, hash.as_ref(), &signature)
                 {
@@ -546,5 +573,78 @@ mod ecdsa_signature_canonicalization_tests {
         "ecdsa-sha2-nistp521".encode(&mut three_scalars).unwrap();
         scalars.encode(&mut three_scalars).unwrap();
         assert!(canonicalize_ecdsa_signature(&three_scalars).is_none());
+    }
+}
+
+#[cfg(test)]
+mod negotiated_host_key_algorithm_tests {
+    use ssh_key::{Algorithm, HashAlg, PrivateKey, Signature};
+
+    use super::matches_negotiated_host_key_algorithm;
+
+    fn ed25519() -> (PrivateKey, Signature) {
+        let key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
+        let signature = signature::Signer::try_sign(&key, b"hash").unwrap();
+        (key, signature)
+    }
+
+    #[test]
+    fn accepts_the_negotiated_algorithm() {
+        let (key, signature) = ed25519();
+        assert!(matches_negotiated_host_key_algorithm(
+            &Algorithm::Ed25519,
+            key.public_key(),
+            &signature
+        ));
+    }
+
+    #[test]
+    fn rejects_a_key_of_another_type() {
+        let (key, signature) = ed25519();
+        for negotiated in [
+            Algorithm::Rsa {
+                hash: Some(HashAlg::Sha512),
+            },
+            Algorithm::SkEd25519,
+        ] {
+            assert!(!matches_negotiated_host_key_algorithm(
+                &negotiated,
+                key.public_key(),
+                &signature
+            ));
+        }
+    }
+
+    #[cfg(feature = "rsa")]
+    #[test]
+    fn rejects_an_rsa_signature_with_another_hash() {
+        let key = PrivateKey::random(&mut rand::rng(), Algorithm::Rsa { hash: None }).unwrap();
+        let ssh_key::private::KeypairData::Rsa(keypair) = key.key_data() else {
+            unreachable!()
+        };
+        let sign = |hash| -> Signature {
+            signature::Signer::try_sign(&(keypair, hash), b"hash".as_slice()).unwrap()
+        };
+        let sha512 = Algorithm::Rsa {
+            hash: Some(HashAlg::Sha512),
+        };
+
+        assert!(matches_negotiated_host_key_algorithm(
+            &sha512,
+            key.public_key(),
+            &sign(Some(HashAlg::Sha512))
+        ));
+        for hash in [None, Some(HashAlg::Sha256)] {
+            assert!(!matches_negotiated_host_key_algorithm(
+                &sha512,
+                key.public_key(),
+                &sign(hash)
+            ));
+        }
+        assert!(!matches_negotiated_host_key_algorithm(
+            &Algorithm::Rsa { hash: None },
+            key.public_key(),
+            &sign(Some(HashAlg::Sha512))
+        ));
     }
 }

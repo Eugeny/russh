@@ -149,6 +149,16 @@ impl<C> CommonSession<C> {
             .is_some_and(|channel| channel.confirmed)
     }
 
+    /// `CHANNEL_OPEN_CONFIRMATION` and `CHANNEL_OPEN_FAILURE` are only valid
+    /// as the reply to a local open that is still waiting for one. Channels
+    /// opened by the peer are inserted already confirmed, so they never match.
+    pub(crate) fn is_pending_channel_open(&self, channel: ChannelId) -> bool {
+        self.encrypted
+            .as_ref()
+            .and_then(|enc| enc.channels.get(&channel))
+            .is_some_and(|channel| !channel.confirmed)
+    }
+
     pub fn newkeys(&mut self, newkeys: NewKeys) {
         if let Some(ref mut enc) = self.encrypted {
             enc.exchange = Some(newkeys.exchange);
@@ -291,6 +301,12 @@ impl Encrypted {
             self.byte(channel, msg::CHANNEL_CLOSE)?;
             self.channels.remove(&channel);
         }
+        Ok(())
+    }
+
+    pub(crate) fn close_from_peer(&mut self, channel: ChannelId) -> Result<(), crate::Error> {
+        self.byte(channel, msg::CHANNEL_CLOSE)?;
+        self.channels.remove(&channel);
         Ok(())
     }
 
