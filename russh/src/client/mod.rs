@@ -103,6 +103,8 @@ pub struct Session {
     server_sig_algs: Option<Vec<Algorithm>>,
     /// Number of EXT_INFO messages received (RFC 8308 allows at most two).
     ext_info_count: u8,
+    /// USERAUTH_REQUESTs sent and not yet answered with success or failure
+    pending_auth_requests: usize,
 }
 
 impl Drop for Session {
@@ -119,7 +121,6 @@ enum Reply {
         proceed_with_methods: MethodSet,
         partial_success: bool,
     },
-    ChannelOpenFailure,
     SignRequest {
         key: ssh_key::PublicKey,
         data: Vec<u8>,
@@ -1335,6 +1336,7 @@ impl Session {
             open_global_requests: VecDeque::new(),
             server_sig_algs: None,
             ext_info_count: 0,
+            pending_auth_requests: 0,
         }
     }
 
@@ -2150,7 +2152,7 @@ mod tests {
         let auth_request = AuthRequest::new(&Method::KeyboardInteractive {
             submethods: String::new(),
         });
-        let session = Session::new(
+        let mut session = Session::new(
             config.window_size,
             CommonSession {
                 auth_user: "user".to_owned(),
@@ -2192,6 +2194,7 @@ mod tests {
             receiver,
             reply_sender,
         );
+        session.pending_auth_requests = 1;
         (session, sender, reply_receiver)
     }
 
@@ -2278,6 +2281,25 @@ mod tests {
         assert!(matches!(reply.try_recv(), Ok(Ok(()))));
         assert!(session.common.encrypted.as_ref().unwrap().write.is_empty());
         assert!(session.open_global_requests.is_empty());
+    }
+
+    #[tokio::test]
+    async fn unsolicited_userauth_failure_is_rejected() {
+        let (mut session, _sender, mut replies) = keyboard_interactive_session();
+        let mut packet = vec![msg::USERAUTH_FAILURE];
+        "password".encode(&mut packet).unwrap();
+        0u8.encode(&mut packet).unwrap();
+
+        session
+            .process_packet(&mut TestHandler, &packet)
+            .await
+            .unwrap();
+        assert!(matches!(
+            session.process_packet(&mut TestHandler, &packet).await,
+            Err(crate::Error::Inconsistent)
+        ));
+        assert!(matches!(replies.try_recv(), Ok(Reply::AuthFailure { .. })));
+        assert!(replies.try_recv().is_err());
     }
 
     #[tokio::test]

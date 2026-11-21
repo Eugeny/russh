@@ -101,6 +101,7 @@ impl Session {
                                     let auth_request = AuthRequest::new(meth);
                                     if enc.write_auth_request(&self.common.auth_user, meth)? {
                                         debug!("enc: auth request written");
+                                        self.pending_auth_requests += 1;
                                         enc.state = EncryptedState::WaitingAuthRequest(auth_request)
                                     }
                                 } else {
@@ -151,6 +152,15 @@ impl Session {
                             debug!(
                                 "remaining methods {remaining_methods:?}, partial success {partial_success:?}"
                             );
+                            // Nothing reads the reply to a failure that answers no
+                            // request, and the reply queue is unbounded
+                            self.pending_auth_requests = self
+                                .pending_auth_requests
+                                .checked_sub(1)
+                                .ok_or(crate::Error::Inconsistent)?;
+                            if self.pending_auth_requests == 0 {
+                                auth_request.current = None;
+                            }
                             auth_request.methods = remaining_methods.clone();
 
                             let no_more_methods = auth_request.methods.is_empty();
@@ -580,8 +590,6 @@ impl Session {
                         .send(ChannelMsg::OpenFailure(reason_code.clone()))
                         .await;
                 }
-
-                let _ = self.sender.send(Reply::ChannelOpenFailure);
 
                 client
                     .channel_open_failure(channel_num, reason_code, &descr, &language, self)
@@ -1113,6 +1121,7 @@ impl Session {
             debug!("write_auth_request_if_needed: is_waiting = {is_waiting:?}");
             if is_waiting {
                 enc.write_auth_request(user, &meth)?;
+                self.pending_auth_requests += 1;
                 let auth_request = AuthRequest::new(&meth);
                 enc.state = EncryptedState::WaitingAuthRequest(auth_request);
             }
