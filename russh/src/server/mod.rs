@@ -1247,7 +1247,8 @@ async fn reply<H: Handler + Send>(
                 if kex.peer_kexinit_received() {
                     return Err(crate::Error::Inconsistent.into());
                 }
-                session.pending_len = session.pending_len.saturating_add(pkt.buffer.len() as u64);
+                let cost = session.pending_cost(&pkt.buffer);
+                session.pending_len = session.pending_len.saturating_add(cost);
                 if session.pending_len > session.pending_limit {
                     return Err(crate::Error::Pending.into());
                 }

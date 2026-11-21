@@ -1597,6 +1597,22 @@ impl Session {
         2 * window.max(granted)
     }
 
+    /// What a non-kex message received during a key exchange counts against
+    /// `pending_limit`: its length, except that with
+    /// [`Config::manual_window`] channel data counts by its payload (at least
+    /// one byte), which is what the grants in `pending_limit` measure.
+    pub(crate) fn pending_cost(&self, packet: &[u8]) -> u64 {
+        let header = match packet.first() {
+            Some(&msg::CHANNEL_DATA) => 9,
+            Some(&msg::CHANNEL_EXTENDED_DATA) => 13,
+            _ => return packet.len() as u64,
+        };
+        if !self.common.config.manual_window {
+            return packet.len() as u64;
+        }
+        packet.len().saturating_sub(header).max(1) as u64
+    }
+
     pub(crate) fn begin_rekey(&mut self) -> Result<(), Error> {
         debug!("beginning re-key");
         self.pending_len = 0;

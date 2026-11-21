@@ -299,36 +299,51 @@ async fn with_manual_window_received_data_uses_up_the_window() {
 }
 
 /// A server-initiated key exchange starts while the client still has data in
-/// flight inside a grant much larger than `window_size`. That data is
-/// legitimate and must not end the session.
+/// flight inside its grant, which is legitimate and must not end the session.
 ///
 /// The server stops reading at the first data packet until the client has
 /// written the whole upload into the pipe. Then it reads again and starts a
-/// key exchange after 256 KiB, with the rest of the upload already in flight.
-#[tokio::test]
-async fn with_manual_window_a_server_rekey_accepts_granted_data_in_flight() {
-    // At most one `ack` per window, fewer than the client's channel buffer
-    // holds, since nothing reads them until the upload is done.
-    const UPLOAD: u32 = 4 << 20;
+/// key exchange after every 256 KiB, with the rest of the upload in flight.
+async fn rekey_with_upload_in_flight(upload: u32, chunk: usize) {
     let mut pair = connect_with(Options {
         manual_window: true,
-        grant_on_open: UPLOAD - WINDOW,
+        grant_on_open: upload - WINDOW,
         limits: Some(Limits::new(1 << 30, 256 << 10, Duration::from_secs(3600))),
         gate_first_data: true,
     })
     .await;
-    assert_eq!(next(&mut pair.channel).await, Some(UPLOAD));
+    if upload > WINDOW {
+        assert_eq!(next(&mut pair.channel).await, Some(upload));
+    }
     let before = pair.written.load(Ordering::SeqCst);
-    send_window(&pair.channel, UPLOAD).await;
+    let data = vec![b'x'; upload as usize];
     tokio::time::timeout(LIVENESS, async {
-        while pair.written.load(Ordering::SeqCst) < before + UPLOAD as usize {
+        for piece in data.chunks(chunk) {
+            pair.channel.data(piece).await.unwrap();
+        }
+        while pair.written.load(Ordering::SeqCst) < before + upload as usize {
             tokio::task::yield_now().await;
         }
     })
     .await
     .expect("the client wrote the upload into the pipe");
     pair.gate.notify_one();
-    for _ in 0..UPLOAD / WINDOW {
+    for _ in 0..upload / WINDOW {
         assert_eq!(next(&mut pair.channel).await, None, "no refill on receipt");
     }
+}
+
+/// The grant is much larger than `window_size`. At most one `ack` per window,
+/// fewer than the client's channel buffer holds, since nothing reads them
+/// until the upload is done.
+#[tokio::test]
+async fn with_manual_window_a_server_rekey_accepts_granted_data_in_flight() {
+    rekey_with_upload_in_flight(4 << 20, PACKET as usize).await;
+}
+
+/// One-byte packets: the bound counts channel data by payload, as grants do,
+/// not by message size.
+#[tokio::test]
+async fn with_manual_window_a_server_rekey_accepts_small_packets_in_flight() {
+    rekey_with_upload_in_flight(WINDOW, 1).await;
 }
