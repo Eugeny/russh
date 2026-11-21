@@ -1157,6 +1157,7 @@ mod tests {
 
     use super::*;
     use crate::compression::{Compression, Decompress};
+    use crate::helpers::EncodedExt;
     use crate::kex::{KEXES, NONE};
     use crate::session::Exchange;
     use crate::{CryptoVec, MethodKind};
