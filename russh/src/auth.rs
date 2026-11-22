@@ -280,6 +280,9 @@ pub enum Method {
     PublicKey {
         key: PrivateKeyWithHashAlg,
     },
+    PublicKeyDirect {
+        key: PrivateKeyWithHashAlg,
+    },
     OpenSshCertificate {
         key: PrivateKeyWithHashAlg,
         cert: Certificate,
@@ -320,6 +323,10 @@ impl std::fmt::Debug for Method {
                 .field("password", &"<redacted>")
                 .finish(),
             Method::PublicKey { key } => f.debug_struct("PublicKey").field("key", key).finish(),
+            Method::PublicKeyDirect { key } => f
+                .debug_struct("PublicKeyDirect")
+                .field("key", key)
+                .finish(),
             Method::OpenSshCertificate { key, cert } => f
                 .debug_struct("OpenSshCertificate")
                 .field("key", key)

@@ -1151,14 +1151,17 @@ impl Session {
 mod tests {
     use std::collections::HashMap;
     use std::num::Wrapping;
+    use std::sync::Arc;
 
     use byteorder::{BigEndian, ByteOrder};
     use ssh_encoding::{Decode, Encode};
+    use ssh_key::PrivateKey;
 
     use super::*;
     use crate::compression::{Compression, Decompress};
     use crate::helpers::EncodedExt;
     use crate::kex::{KEXES, NONE};
+    use crate::keys::PrivateKeyWithHashAlg;
     use crate::session::Exchange;
     use crate::{CryptoVec, MethodKind};
 
@@ -1440,6 +1443,32 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn direct_publickey_auth_sends_a_signed_request() -> Result<(), Box<dyn std::error::Error>> {
+        let private_key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519)?;
+        let method = auth::Method::PublicKeyDirect {
+            key: PrivateKeyWithHashAlg::new(Arc::new(private_key), None),
+        };
+        let mut encrypted = test_encrypted();
+
+        assert!(encrypted.write_auth_request("alice", &method)?);
+
+        let mut packet = encrypted.write.as_slice();
+        let packet_len = u32::decode(&mut packet)? as usize;
+        assert_eq!(packet_len, packet.len());
+        assert_eq!(u8::decode(&mut packet)?, msg::USERAUTH_REQUEST);
+        assert_eq!(String::decode(&mut packet)?, "alice");
+        assert_eq!(String::decode(&mut packet)?, "ssh-connection");
+        assert_eq!(String::decode(&mut packet)?, "publickey");
+        assert_eq!(u8::decode(&mut packet)?, 1);
+        assert_eq!(String::decode(&mut packet)?, "ssh-ed25519");
+        assert!(!Bytes::decode(&mut packet)?.is_empty());
+        assert!(!Bytes::decode(&mut packet)?.is_empty());
+        assert!(packet.is_empty());
+
+        Ok(())
+    }
 }
 
 impl Encrypted {
@@ -1448,6 +1477,12 @@ impl Encrypted {
         user: &str,
         auth_method: &auth::Method,
     ) -> Result<bool, crate::Error> {
+        if matches!(auth_method, auth::Method::PublicKeyDirect { .. }) {
+            let mut buffer = Vec::new();
+            self.client_send_signature(user, auth_method, &mut buffer)?;
+            return Ok(true);
+        }
+
         // The server is waiting for our USERAUTH_REQUEST.
         Ok(push_packet!(self.write, {
             self.write.push(msg::USERAUTH_REQUEST);
@@ -1477,6 +1512,10 @@ impl Encrypted {
                     key.algorithm().as_str().encode(&mut self.write)?;
                     key.public_key().to_bytes()?.encode(&mut self.write)?;
                     true
+                }
+                // Handled by the early return above
+                auth::Method::PublicKeyDirect { .. } => {
+                    return Err(crate::Error::Inconsistent);
                 }
                 auth::Method::OpenSshCertificate { ref key, ref cert } => {
                     user.as_bytes().encode(&mut self.write)?;
@@ -1632,7 +1671,7 @@ impl Encrypted {
         buffer: &mut Vec<u8>,
     ) -> Result<(), crate::Error> {
         match method {
-            auth::Method::PublicKey { key } => {
+            auth::Method::PublicKey { key } | auth::Method::PublicKeyDirect { key } => {
                 let i0 = self.client_make_to_sign(
                     user,
                     &PublicKeyOrCertificate::from(key),
