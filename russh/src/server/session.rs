@@ -1603,8 +1603,8 @@ impl Session {
     /// one byte), which is what the grants in `pending_limit` measure. Data
     /// for a channel that is not open, such as one we closed while the peer's
     /// data was in flight, counts nothing: it is dropped on arrival without
-    /// keeping anything, and that channel's credit is no longer in
-    /// `pending_limit`.
+    /// keeping anything. (If the channel closed after `begin_rekey`, its
+    /// credit is still in `pending_limit`; that only makes the bound looser.)
     pub(crate) fn pending_cost(&self, packet: &[u8]) -> u64 {
         let header = match packet.first() {
             Some(&msg::CHANNEL_DATA) => 9,
