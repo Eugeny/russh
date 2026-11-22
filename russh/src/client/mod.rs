@@ -48,7 +48,7 @@ use kex::ClientKex;
 use log::{debug, error, trace, warn};
 use russh_util::time::Instant;
 use ssh_encoding::{Decode, Encode};
-use ssh_key::{Algorithm, Certificate, HashAlg, PrivateKey, PublicKey};
+use ssh_key::{Algorithm, Certificate, HashAlg, PublicKey};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadHalf, WriteHalf};
 use tokio::pin;
 use tokio::sync::mpsc::{
@@ -508,10 +508,15 @@ impl<H: Handler> Handle<H> {
     }
 
     /// Perform public OpenSSH Certificate-based SSH authentication
+    ///
+    /// For RSA keys, the hash algorithm of `key` is used for both the
+    /// certificate type in the request and the signature.
+    /// [`Handle::best_supported_rsa_hash`] returns the best hash the server
+    /// supports
     pub async fn authenticate_openssh_cert<U: Into<String>>(
         &mut self,
         user: U,
-        key: Arc<PrivateKey>,
+        key: PrivateKeyWithHashAlg,
         cert: Certificate,
     ) -> Result<AuthResult, crate::Error> {
         let user = user.into();
@@ -2117,6 +2122,7 @@ mod tests {
     use std::sync::Arc;
 
     use ssh_encoding::Encode;
+    use ssh_key::PrivateKey;
     use tokio::sync::mpsc::{channel, unbounded_channel};
 
     use super::*;

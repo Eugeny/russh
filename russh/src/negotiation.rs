@@ -44,7 +44,8 @@ pub struct Names {
     pub kex: kex::Name,
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub key: Algorithm,
-    pub cipher: cipher::Name,
+    pub client_cipher: cipher::Name,
+    pub server_cipher: cipher::Name,
     pub client_mac: mac::Name,
     pub server_mac: mac::Name,
     pub server_compression: compression::Compression,
@@ -164,6 +165,10 @@ impl Preferred {
 
 const SAFE_KEX_ORDER: &[kex::Name] = &[
     kex::MLKEM768X25519_SHA256,
+    #[cfg(feature = "sntrup")]
+    kex::SNTRUP761X25519_SHA512,
+    #[cfg(feature = "sntrup")]
+    kex::SNTRUP761X25519_SHA512_OPENSSH,
     kex::CURVE25519,
     kex::CURVE25519_PRE_RFC_8731,
     kex::DH_GEX_SHA256,
@@ -384,32 +389,34 @@ pub(crate) trait Select {
 
         // Cipher
 
-        let cipher_list = NameList::decode(&mut r)?;
-        let (_cipher_both_first, cipher) =
-            Self::select(&pref.cipher, &cipher_list, AlgorithmKind::Cipher)?;
-        String::decode(&mut r)?; // cipher server-to-client.
+        let select_cipher = |list: &[String]| {
+            Self::select(&pref.cipher, list, AlgorithmKind::Cipher).map(|(_, c)| c)
+        };
+        let client_cipher = select_cipher(&NameList::decode(&mut r)?)?;
+        let server_cipher = select_cipher(&NameList::decode(&mut r)?)?;
 
         // MAC
-
-        let need_mac = CIPHERS.get(&cipher).map(|x| x.needs_mac()).unwrap_or(false);
 
         // Select a MAC, refusing `none` whenever the negotiated cipher needs an
         // integrity MAC — regardless of whether `none` was a common choice or
         // only the no-common-MAC fallback. Pairing e.g. aes*-ctr/cbc with
         // mac=none yields a tag_len() of 0 and a panic on the read path.
-        let select_mac = |list: &[String]| match Self::select(&pref.mac, list, AlgorithmKind::Mac) {
-            Ok((_, m)) if need_mac && m == mac::NONE => Err(Error::NoCommonAlgo {
-                kind: AlgorithmKind::Mac,
-                ours: pref.mac.iter().map(|x| x.as_ref().to_owned()).collect(),
-                theirs: list.to_vec(),
-            }),
-            Ok((_, m)) => Ok(m),
-            Err(_) if !need_mac => Ok(mac::NONE),
-            Err(e) => Err(e),
+        let select_mac = |list: &[String], cipher| {
+            let need_mac = CIPHERS.get(&cipher).map(|x| x.needs_mac()).unwrap_or(false);
+            match Self::select(&pref.mac, list, AlgorithmKind::Mac) {
+                Ok((_, m)) if need_mac && m == mac::NONE => Err(Error::NoCommonAlgo {
+                    kind: AlgorithmKind::Mac,
+                    ours: pref.mac.iter().map(|x| x.as_ref().to_owned()).collect(),
+                    theirs: list.to_vec(),
+                }),
+                Ok((_, m)) => Ok(m),
+                Err(_) if !need_mac => Ok(mac::NONE),
+                Err(e) => Err(e),
+            }
         };
 
-        let client_mac = select_mac(&NameList::decode(&mut r)?)?;
-        let server_mac = select_mac(&NameList::decode(&mut r)?)?;
+        let client_mac = select_mac(&NameList::decode(&mut r)?, client_cipher)?;
+        let server_mac = select_mac(&NameList::decode(&mut r)?, server_cipher)?;
 
         // Compression
 
@@ -441,7 +448,8 @@ pub(crate) trait Select {
         Ok(Names {
             kex: kex_algorithm,
             key: key_algorithm,
-            cipher,
+            client_cipher,
+            server_cipher,
             client_mac,
             server_mac,
             client_compression,
@@ -645,10 +653,16 @@ mod tests {
     use super::*;
     use crate::helpers::NameList;
 
-    /// Build a minimal KEXINIT payload with custom kex and host-key
-    /// name-lists and a `first_kex_packet_follows` flag. All other lists come
-    /// from the default preferences so negotiation succeeds.
-    fn build_kexinit_keys(kex_names: &[&str], key_names: &[&str], follows: bool) -> Vec<u8> {
+    /// Build a minimal KEXINIT payload with custom kex, host-key and
+    /// per-direction cipher name-lists and a `first_kex_packet_follows` flag.
+    /// All other lists come from the default preferences so negotiation
+    /// succeeds.
+    fn build_kexinit_ciphers(
+        kex_names: &[&str],
+        key_names: &[&str],
+        cipher_names: [&[&str]; 2],
+        follows: bool,
+    ) -> Vec<u8> {
         let pref = Preferred::DEFAULT;
         let mut buf = vec![msg::KEXINIT];
         buf.extend_from_slice(&[0u8; 16]); // cookie
@@ -659,8 +673,8 @@ mod tests {
         names(key_names.iter().map(|s| s.to_string()).collect())
             .encode(&mut buf)
             .unwrap();
-        for _ in 0..2 {
-            names(pref.cipher.iter().map(|x| x.as_ref().to_string()).collect())
+        for cipher_names in cipher_names {
+            names(cipher_names.iter().map(|s| s.to_string()).collect())
                 .encode(&mut buf)
                 .unwrap();
         }
@@ -686,6 +700,12 @@ mod tests {
         buf
     }
 
+    fn build_kexinit_keys(kex_names: &[&str], key_names: &[&str], follows: bool) -> Vec<u8> {
+        let pref = Preferred::DEFAULT;
+        let ciphers = pref.cipher.iter().map(AsRef::as_ref).collect::<Vec<_>>();
+        build_kexinit_ciphers(kex_names, key_names, [&ciphers, &ciphers], follows)
+    }
+
     fn build_kexinit(kex_names: &[&str], follows: bool) -> Vec<u8> {
         let keys = Preferred::DEFAULT
             .key
@@ -699,15 +719,14 @@ mod tests {
         )
     }
 
-    /// Regression test for #733: a client that optimistically guesses a kex
-    /// algorithm russh does not implement (`sntrup761x25519-sha512`) — while
-    /// listing russh's own first choice (`mlkem768x25519-sha256`) second —
-    /// must have its guessed packet ignored, not consumed as the negotiated key.
+    /// A client that optimistically guesses an unknown KEX while listing
+    /// russh's own first choice (`mlkem768x25519-sha256`) second must have its
+    /// guessed packet ignored, not consumed as the negotiated key.
     #[test]
     fn wrong_guess_for_unknown_kex_is_ignored() {
         let buf = build_kexinit(
             &[
-                "sntrup761x25519-sha512",
+                "unknown-kex",
                 "mlkem768x25519-sha256",
                 "curve25519-sha256",
             ],
@@ -726,6 +745,15 @@ mod tests {
         let names = Server::read_kex(&buf, &Preferred::DEFAULT, None,
             None, &KexCause::Initial).unwrap();
         assert!(!names.ignore_guessed, "correct guess must be honored");
+    }
+
+    #[cfg(feature = "sntrup")]
+    #[test]
+    fn sntrup_openssh_alias_is_supported() {
+        let buf = build_kexinit(&["sntrup761x25519-sha512@openssh.com"], false);
+        let names = Server::read_kex(&buf, &Preferred::DEFAULT, None,
+            None, &KexCause::Initial).unwrap();
+        assert_eq!(names.kex, kex::SNTRUP761X25519_SHA512_OPENSSH);
     }
 
     const KEX_FIRST: &[&str] = &["mlkem768x25519-sha256"];
@@ -906,6 +934,25 @@ mod tests {
             Server::read_kex(&buf, &with_none_mac, None, None, &KexCause::Initial).is_err(),
             "aes-ctr + mac=none must be refused"
         );
+    }
+
+    /// RFC 4253 §7.1: the cipher is chosen independently for each direction.
+    #[test]
+    fn cipher_is_negotiated_per_direction() {
+        let buf = build_kexinit_ciphers(
+            KEX_FIRST,
+            &["ssh-ed25519"],
+            [&["chacha20-poly1305@openssh.com"], &["aes256-gcm@openssh.com"]],
+            false,
+        );
+        let pref = Preferred::DEFAULT;
+        for names in [
+            Client::read_kex(&buf, &pref, None, None, &KexCause::Initial).unwrap(),
+            Server::read_kex(&buf, &pref, None, None, &KexCause::Initial).unwrap(),
+        ] {
+            assert_eq!(names.client_cipher, cipher::CHACHA20_POLY1305);
+            assert_eq!(names.server_cipher, cipher::AES_256_GCM);
+        }
     }
 
     fn host_cert(subject: &PrivateKey, ca: &PrivateKey) -> Certificate {

@@ -10,10 +10,10 @@ use sntrup_kem::sntrup761::{
 use ssh_encoding::{Encode, Writer};
 use zeroize::Zeroizing;
 
-use super::{compute_keys, KexAlgorithm, KexAlgorithmImplementor, KexType, SharedSecret};
+use super::{KexAlgorithm, KexAlgorithmImplementor, KexType, SharedSecret, compute_keys};
 use crate::mac;
 use crate::session::Exchange;
-use crate::{cipher, msg, CryptoVec, Error};
+use crate::{CryptoVec, Error, cipher, msg};
 
 const SNTRUP761_PUBLIC_KEY_SIZE: usize = sntrup_kem::sntrup761::PUBLIC_KEY_SIZE;
 const SNTRUP761_CIPHERTEXT_SIZE: usize = sntrup_kem::sntrup761::CIPHERTEXT_SIZE;
@@ -70,7 +70,10 @@ impl Sntrup761X25519Kex {
     }
 
     fn combined_secret(&self) -> Result<&[u8], Error> {
-        self.combined.as_ref().map(|k| k.as_ref()).ok_or(Error::KexInit)
+        self.combined
+            .as_ref()
+            .map(|k| k.as_ref())
+            .ok_or(Error::KexInit)
     }
 }
 
@@ -113,9 +116,7 @@ impl KexAlgorithmImplementor for Sntrup761X25519Kex {
         }
 
         exchange.server_ephemeral.clear();
-        exchange
-            .server_ephemeral
-            .extend_from_slice(s_ct2.as_ref());
+        exchange.server_ephemeral.extend_from_slice(s_ct2.as_ref());
         exchange.server_ephemeral.extend_from_slice(&s_pk1.0);
 
         self.k_pq = Some(k_pq);
@@ -141,8 +142,7 @@ impl KexAlgorithmImplementor for Sntrup761X25519Kex {
         client_ephemeral.extend_from_slice(&x25519_pk.0);
 
         msg::KEX_HYBRID_INIT.encode(writer)?;
-        let mut c_init =
-            Vec::with_capacity(SNTRUP761_PUBLIC_KEY_SIZE + X25519_PUBLIC_KEY_SIZE);
+        let mut c_init = Vec::with_capacity(SNTRUP761_PUBLIC_KEY_SIZE + X25519_PUBLIC_KEY_SIZE);
         c_init.extend_from_slice(sntrup_pk.as_ref());
         c_init.extend_from_slice(&x25519_pk.0);
         c_init.as_slice().encode(writer)?;
@@ -295,7 +295,10 @@ mod tests {
 
         assert_eq!(client_hash, server_hash);
         assert_eq!(client_hash.len(), 64);
-        assert_eq!(client_kex.combined_secret().unwrap(), server_kex.combined_secret().unwrap());
+        assert_eq!(
+            client_kex.combined_secret().unwrap(),
+            server_kex.combined_secret().unwrap()
+        );
         assert_eq!(client_kex.shared_secret_bytes().unwrap().len(), 64);
         assert_eq!(
             client_kex.shared_secret_bytes(),
@@ -315,9 +318,11 @@ mod tests {
         let mut server_kex = test_kex();
         let mut exchange = Exchange::default();
         client_init_msg.truncate(4);
-        assert!(server_kex
-            .server_dh(&mut exchange, &client_init_msg)
-            .is_err());
+        assert!(
+            server_kex
+                .server_dh(&mut exchange, &client_init_msg)
+                .is_err()
+        );
 
         assert!(client_kex.compute_shared_secret(&[0u8; 100]).is_err());
     }

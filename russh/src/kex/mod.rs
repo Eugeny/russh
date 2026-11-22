@@ -19,6 +19,8 @@ mod curve25519;
 pub mod dh;
 mod ecdh_nistp;
 mod hybrid_mlkem;
+#[cfg(feature = "sntrup")]
+mod hybrid_sntrup;
 mod none;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -38,6 +40,8 @@ use digest::Digest;
 use ecdh_nistp::{EcdhNistP256KexType, EcdhNistP384KexType, EcdhNistP521KexType};
 use enum_dispatch::enum_dispatch;
 use hybrid_mlkem::MlKem768X25519KexType;
+#[cfg(feature = "sntrup")]
+use hybrid_sntrup::Sntrup761X25519KexType;
 use p256::NistP256;
 use p384::NistP384;
 use p521::NistP521;
@@ -146,6 +150,8 @@ pub(crate) enum KexAlgorithm {
     EcdhNistP384Kex(ecdh_nistp::EcdhNistPKex<NistP384, Sha384>),
     EcdhNistP521Kex(ecdh_nistp::EcdhNistPKex<NistP521, Sha512>),
     MlKem768X25519Kex(hybrid_mlkem::MlKem768X25519Kex),
+    #[cfg(feature = "sntrup")]
+    Sntrup761X25519Kex(hybrid_sntrup::Sntrup761X25519Kex),
     None(none::NoneKexAlgorithm),
 }
 
@@ -206,11 +212,13 @@ pub(crate) trait KexAlgorithmImplementor {
         buffer: &mut CryptoVec,
     ) -> Result<Vec<u8>, Error>;
 
+    #[allow(clippy::too_many_arguments)]
     fn compute_keys(
         &self,
         session_id: &[u8],
         exchange_hash: &[u8],
-        cipher: cipher::Name,
+        remote_to_local_cipher: cipher::Name,
+        local_to_remote_cipher: cipher::Name,
         remote_to_local_mac: mac::Name,
         local_to_remote_mac: mac::Name,
         is_server: bool,
@@ -245,6 +253,12 @@ pub const CURVE25519: Name = Name("curve25519-sha256");
 pub const CURVE25519_PRE_RFC_8731: Name = Name("curve25519-sha256@libssh.org");
 /// `mlkem768x25519-sha256`
 pub const MLKEM768X25519_SHA256: Name = Name("mlkem768x25519-sha256");
+#[cfg(feature = "sntrup")]
+/// `sntrup761x25519-sha512`.
+pub const SNTRUP761X25519_SHA512: Name = Name("sntrup761x25519-sha512");
+#[cfg(feature = "sntrup")]
+/// `sntrup761x25519-sha512@openssh.com`.
+pub const SNTRUP761X25519_SHA512_OPENSSH: Name = Name("sntrup761x25519-sha512@openssh.com");
 /// `diffie-hellman-group-exchange-sha1`.
 pub const DH_GEX_SHA1: Name = Name("diffie-hellman-group-exchange-sha1");
 /// `diffie-hellman-group-exchange-sha256`.
@@ -294,10 +308,16 @@ const _ECDH_SHA2_NISTP256: EcdhNistP256KexType = EcdhNistP256KexType {};
 const _ECDH_SHA2_NISTP384: EcdhNistP384KexType = EcdhNistP384KexType {};
 const _ECDH_SHA2_NISTP521: EcdhNistP521KexType = EcdhNistP521KexType {};
 const _MLKEM768X25519_SHA256: MlKem768X25519KexType = MlKem768X25519KexType {};
+#[cfg(feature = "sntrup")]
+const _SNTRUP761X25519_SHA512: Sntrup761X25519KexType = Sntrup761X25519KexType {};
 const _NONE: none::NoneKexType = none::NoneKexType {};
 
 pub const ALL_KEX_ALGORITHMS: &[&Name] = &[
     &MLKEM768X25519_SHA256,
+    #[cfg(feature = "sntrup")]
+    &SNTRUP761X25519_SHA512,
+    #[cfg(feature = "sntrup")]
+    &SNTRUP761X25519_SHA512_OPENSSH,
     &CURVE25519,
     &CURVE25519_PRE_RFC_8731,
     &DH_GEX_SHA1,
@@ -319,6 +339,10 @@ pub(crate) static KEXES: LazyLock<HashMap<&'static Name, &(dyn KexType + Send + 
     LazyLock::new(|| {
         let mut h: HashMap<&'static Name, &(dyn KexType + Send + Sync)> = HashMap::new();
         h.insert(&MLKEM768X25519_SHA256, &_MLKEM768X25519_SHA256);
+        #[cfg(feature = "sntrup")]
+        h.insert(&SNTRUP761X25519_SHA512, &_SNTRUP761X25519_SHA512);
+        #[cfg(feature = "sntrup")]
+        h.insert(&SNTRUP761X25519_SHA512_OPENSSH, &_SNTRUP761X25519_SHA512);
         h.insert(&CURVE25519, &_CURVE25519);
         h.insert(&CURVE25519_PRE_RFC_8731, &_CURVE25519);
         h.insert(&DH_GEX_SHA1, &_DH_GEX_SHA1);
@@ -370,16 +394,23 @@ impl SharedSecret {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn compute_keys<D: Digest>(
     shared_secret: Option<&SharedSecret>,
     session_id: &[u8],
     exchange_hash: &[u8],
-    cipher: cipher::Name,
+    remote_to_local_cipher: cipher::Name,
+    local_to_remote_cipher: cipher::Name,
     remote_to_local_mac: mac::Name,
     local_to_remote_mac: mac::Name,
     is_server: bool,
 ) -> Result<super::cipher::CipherPair, Error> {
-    let cipher = CIPHERS.get(&cipher).ok_or(Error::UnknownAlgo)?;
+    let remote_to_local_cipher = CIPHERS
+        .get(&remote_to_local_cipher)
+        .ok_or(Error::UnknownAlgo)?;
+    let local_to_remote_cipher = CIPHERS
+        .get(&local_to_remote_cipher)
+        .ok_or(Error::UnknownAlgo)?;
     let remote_to_local_mac = MACS.get(&remote_to_local_mac).ok_or(Error::UnknownAlgo)?;
     let local_to_remote_mac = MACS.get(&local_to_remote_mac).ok_or(Error::UnknownAlgo)?;
 
@@ -449,26 +480,42 @@ pub(crate) fn compute_keys<D: Digest>(
                     let mut nonce = nonce.borrow_mut();
                     let mut mac = mac.borrow_mut();
 
-                    compute_key(local_to_remote, &mut key, cipher.key_len())?;
-                    compute_key(local_to_remote_nonce, &mut nonce, cipher.nonce_len())?;
+                    compute_key(local_to_remote, &mut key, local_to_remote_cipher.key_len())?;
+                    compute_key(
+                        local_to_remote_nonce,
+                        &mut nonce,
+                        local_to_remote_cipher.nonce_len(),
+                    )?;
                     compute_key(
                         local_to_remote_mac_key,
                         &mut mac,
                         local_to_remote_mac.key_len(),
                     )?;
 
-                    let local_to_remote =
-                        cipher.make_sealing_key(&key, &nonce, &mac, *local_to_remote_mac);
+                    let local_to_remote = local_to_remote_cipher.make_sealing_key(
+                        &key,
+                        &nonce,
+                        &mac,
+                        *local_to_remote_mac,
+                    );
 
-                    compute_key(remote_to_local, &mut key, cipher.key_len())?;
-                    compute_key(remote_to_local_nonce, &mut nonce, cipher.nonce_len())?;
+                    compute_key(remote_to_local, &mut key, remote_to_local_cipher.key_len())?;
+                    compute_key(
+                        remote_to_local_nonce,
+                        &mut nonce,
+                        remote_to_local_cipher.nonce_len(),
+                    )?;
                     compute_key(
                         remote_to_local_mac_key,
                         &mut mac,
                         remote_to_local_mac.key_len(),
                     )?;
-                    let remote_to_local =
-                        cipher.make_opening_key(&key, &nonce, &mac, *remote_to_local_mac);
+                    let remote_to_local = remote_to_local_cipher.make_opening_key(
+                        &key,
+                        &nonce,
+                        &mac,
+                        *remote_to_local_mac,
+                    );
 
                     Ok(super::cipher::CipherPair {
                         local_to_remote,
