@@ -929,6 +929,7 @@ mod tests {
             sender: handle,
             pending_reads: Vec::new(),
             pending_len: 0,
+            pending_limit: 0,
             channels: std::collections::HashMap::new(),
             open_global_requests: std::collections::VecDeque::new(),
             kex: SessionKexState::Idle,
@@ -1568,7 +1569,9 @@ impl Session {
 
                 #[allow(clippy::collapsible_if)]
                 if let Some(ref mut enc) = self.common.encrypted {
-                    if enc.adjust_window_size(channel_num, &data, target)? {
+                    if self.common.config.manual_window {
+                        enc.consume_window(channel_num, data.len());
+                    } else if enc.adjust_window_size(channel_num, &data, target)? {
                         let window = handler.adjust_window(channel_num, self.target_window_size);
                         if window > 0 {
                             self.target_window_size = window

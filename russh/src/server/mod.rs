@@ -99,6 +99,21 @@ pub struct Config {
     pub keepalive_max: usize,
     /// If active, invoke `set_nodelay(true)` on client sockets; disabled by default (i.e. Nagle's algorithm is active).
     pub nodelay: bool,
+    /// Per-channel receive flow control (RFC 4254 §5.2). Disabled by default:
+    /// russh refills a channel's receive window as data arrives.
+    ///
+    /// If active, data and extended data received on a channel only use up
+    /// that channel's receive window, and the window grows only through
+    /// [`Handle::grant_window`]. Each channel starts with `window_size`; the
+    /// application grants more as it consumes the data, so a slow consumer
+    /// stops only its own channel. [`Handler::adjust_window`] is not called
+    /// in this mode.
+    ///
+    /// Data is still delivered to [`Handler::data`] and to the [`Channel`] as
+    /// it arrives, also data a misbehaving client sends past the window. A
+    /// `Channel` buffers at most `channel_buffer_size` messages whatever their
+    /// size, so a `Channel` user still has to keep reading it.
+    pub manual_window: bool,
 }
 
 impl Default for Config {
@@ -126,6 +141,7 @@ impl Default for Config {
             keepalive_interval: None,
             keepalive_max: 3,
             nodelay: false,
+            manual_window: false,
         }
     }
 }
@@ -153,6 +169,7 @@ impl Debug for Config {
             .field("inactivity_timeout", &self.inactivity_timeout)
             .field("keepalive_interval", &self.keepalive_interval)
             .field("keepalive_max", &self.keepalive_max)
+            .field("manual_window", &self.manual_window)
             .finish()
     }
 }
@@ -1123,6 +1140,7 @@ where
         sender: handle.clone(),
         pending_reads: Vec::new(),
         pending_len: 0,
+        pending_limit: 0,
         channels: HashMap::new(),
         open_global_requests: VecDeque::new(),
         kex: SessionKexState::Idle,
@@ -1216,8 +1234,9 @@ async fn reply<H: Handler + Send>(
     //   * Before it arrives (we initiated the rekey; the peer may not have seen
     //     our KEXINIT yet) their in-flight messages are legal. Handle them as
     //     usual, but bound the total so a peer that stalls the rekey and floods
-    //     cannot grow memory without limit. `pending_len` is reset when the
-    //     rekey completes (see `begin_rekey` and the kex-done path).
+    //     cannot grow memory without limit (`pending_limit`, set by
+    //     `begin_rekey`). `pending_len` is reset when the rekey completes
+    //     (see `begin_rekey` and the kex-done path).
     #[allow(clippy::collapsible_if)]
     if !is_kex_msg && session.common.encrypted.is_some() {
         if let (Some(&msg_type), SessionKexState::InProgress(kex)) =
@@ -1227,9 +1246,9 @@ async fn reply<H: Handler + Send>(
                 if kex.peer_kexinit_received() {
                     return Err(crate::Error::Inconsistent.into());
                 }
-                session.pending_len = session.pending_len.saturating_add(pkt.buffer.len() as u32);
-                if u64::from(session.pending_len) > 2 * u64::from(session.common.config.window_size)
-                {
+                let cost = session.pending_cost(&pkt.buffer);
+                session.pending_len = session.pending_len.saturating_add(cost);
+                if session.pending_len > session.pending_limit {
                     return Err(crate::Error::Pending.into());
                 }
             }
