@@ -17,7 +17,7 @@ use std::borrow::Cow;
 use bytes::Bytes;
 use log::debug;
 use rand_core::Rng;
-use ssh_encoding::{Decode, Encode};
+use ssh_encoding::Encode;
 use ssh_key::{Algorithm, Certificate, EcdsaCurve, HashAlg, PrivateKey};
 
 use crate::cipher::CIPHERS;
@@ -25,8 +25,10 @@ use crate::helpers::{AlgorithmExt, NameList};
 use crate::kex::{
     KexCause, EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT, EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER,
 };
+use crate::kex_offer::KexOffer;
+#[cfg(test)]
+use crate::kex_offer::PeerRole;
 use crate::keys::key::safe_rng;
-use crate::parsing::ensure_end;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::server::Config;
 use crate::sshbuffer::PacketWriter;
@@ -267,22 +269,37 @@ pub(crate) trait Select {
         kind: AlgorithmKind,
     ) -> Result<(bool, A), Error>;
 
+    fn is_strict_kex(offer: &KexOffer, pref: &Preferred, cause: &KexCause) -> bool {
+        let strict_kex_requested = pref.kex.contains(if Self::is_server() {
+            &EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER
+        } else {
+            &EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT
+        });
+        let strict_kex_provided = Self::select(
+            &[if Self::is_server() {
+                EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT
+            } else {
+                EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER
+            }],
+            &offer.kex,
+            AlgorithmKind::Kex,
+        )
+        .is_ok();
+
+        (strict_kex_requested && strict_kex_provided) || cause.is_strict_rekey()
+    }
+
     /// `available_host_keys`, if present, is used to limit the host key algorithms to the ones we have keys for.
     /// `available_certificates` (server only) are the host certificates the server can present.
-    fn read_kex(
-        buffer: &[u8],
+    fn select_kex(
+        offer: &KexOffer,
         pref: &Preferred,
         available_host_keys: Option<&[PrivateKey]>,
         available_certificates: Option<&[Certificate]>,
         cause: &KexCause,
     ) -> Result<Names, Error> {
-        let &Some(mut r) = &buffer.get(17..) else {
-            return Err(Error::Inconsistent);
-        };
-
         // Key exchange
 
-        let kex_list = NameList::decode(&mut r)?;
         // Filter out extension kex names from both lists before selecting
         let _local_kexes_no_ext = pref
             .kex
@@ -290,7 +307,8 @@ pub(crate) trait Select {
             .filter(|k| !KEX_EXTENSION_NAMES.contains(k))
             .cloned()
             .collect::<Vec<_>>();
-        let _remote_kexes_no_ext = kex_list
+        let _remote_kexes_no_ext = offer
+            .kex
             .iter()
             .filter(|k| {
                 // Keep unknown algorithm names: they can't be selected, but they must
@@ -311,29 +329,13 @@ pub(crate) trait Select {
 
         // Strict kex detection
 
-        let strict_kex_requested = pref.kex.contains(if Self::is_server() {
-            &EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER
-        } else {
-            &EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT
-        });
-        let strict_kex_provided = Self::select(
-            &[if Self::is_server() {
-                EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT
-            } else {
-                EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER
-            }],
-            &kex_list,
-            AlgorithmKind::Kex,
-        )
-        .is_ok();
-
-        if strict_kex_requested && strict_kex_provided {
+        let strict_kex = Self::is_strict_kex(offer, pref, cause);
+        if strict_kex && !cause.is_strict_rekey() {
             debug!("strict kex enabled")
         }
 
         // Host key
 
-        let key_list = NameList::decode(&mut r)?;
         let possible_host_key_algos = match available_host_keys {
             Some(available_host_keys) => pref.possible_host_key_algos_for_keys(available_host_keys),
             None => pref.key.iter().map(ToOwned::to_owned).collect::<Vec<_>>(),
@@ -365,7 +367,7 @@ pub(crate) trait Select {
             .is_empty()
         {
             let (both_first, algorithm) =
-                Self::select(&possible_host_key_algos[..], &key_list, AlgorithmKind::Key)?;
+                Self::select(&possible_host_key_algos[..], &offer.key, AlgorithmKind::Key)?;
             (both_first, algorithm, false)
         } else {
             let advertised = certificate_names
@@ -373,7 +375,8 @@ pub(crate) trait Select {
                 .cloned()
                 .chain(possible_host_key_algos.iter().map(ToString::to_string))
                 .collect::<Vec<_>>();
-            let (both_first, name) = Self::select(&advertised[..], &key_list, AlgorithmKind::Key)?;
+            let (both_first, name) =
+                Self::select(&advertised[..], &offer.key, AlgorithmKind::Key)?;
             let is_certificate = certificate_names.contains(&name);
             let algorithm = if is_certificate {
                 Algorithm::new_certificate_ext(&name).map_err(|_| Error::KexInit)?
@@ -392,8 +395,8 @@ pub(crate) trait Select {
         let select_cipher = |list: &[String]| {
             Self::select(&pref.cipher, list, AlgorithmKind::Cipher).map(|(_, c)| c)
         };
-        let client_cipher = select_cipher(&NameList::decode(&mut r)?)?;
-        let server_cipher = select_cipher(&NameList::decode(&mut r)?)?;
+        let client_cipher = select_cipher(&offer.client_cipher)?;
+        let server_cipher = select_cipher(&offer.server_cipher)?;
 
         // MAC
 
@@ -415,8 +418,8 @@ pub(crate) trait Select {
             }
         };
 
-        let client_mac = select_mac(&NameList::decode(&mut r)?, client_cipher)?;
-        let server_mac = select_mac(&NameList::decode(&mut r)?, server_cipher)?;
+        let client_mac = select_mac(&offer.client_mac, client_cipher)?;
+        let server_mac = select_mac(&offer.server_mac, server_cipher)?;
 
         // Compression
 
@@ -424,7 +427,7 @@ pub(crate) trait Select {
         let client_compression = compression::Compression::new(
             &Self::select(
                 &pref.compression,
-                &NameList::decode(&mut r)?,
+                &offer.client_compression,
                 AlgorithmKind::Compression,
             )?
             .1,
@@ -434,17 +437,13 @@ pub(crate) trait Select {
         let server_compression = compression::Compression::new(
             &Self::select(
                 &pref.compression,
-                &NameList::decode(&mut r)?,
+                &offer.server_compression,
                 AlgorithmKind::Compression,
             )?
             .1,
         );
-        String::decode(&mut r)?; // languages client-to-server
-        String::decode(&mut r)?; // languages server-to-client
 
-        let follows = u8::decode(&mut r)? != 0;
-        u32::decode(&mut r)?;
-        ensure_end(&r)?;
+        let follows = offer.first_kex_packet_follows;
         Ok(Names {
             kex: kex_algorithm,
             key: key_algorithm,
@@ -458,8 +457,35 @@ pub(crate) trait Select {
             // Ignore the next packet if (1) it follows and (2) it's not the correct guess.
             ignore_guessed: follows && !(kex_both_first && key_both_first),
             guessed_ignored: false,
-            strict_kex: (strict_kex_requested && strict_kex_provided) || cause.is_strict_rekey(),
+            strict_kex,
         })
+    }
+
+    /// `available_host_keys`, if present, is used to limit the host key
+    /// algorithms to the ones we have keys for.
+    /// `available_certificates` (server only) are the host certificates the
+    /// server can present.
+    #[cfg(test)]
+    fn read_kex(
+        buffer: &[u8],
+        pref: &Preferred,
+        available_host_keys: Option<&[PrivateKey]>,
+        available_certificates: Option<&[Certificate]>,
+        cause: &KexCause,
+    ) -> Result<Names, Error> {
+        let peer_role = if Self::is_server() {
+            PeerRole::Client
+        } else {
+            PeerRole::Server
+        };
+        let offer = KexOffer::decode_kexinit(peer_role, buffer)?;
+        Self::select_kex(
+            &offer,
+            pref,
+            available_host_keys,
+            available_certificates,
+            cause,
+        )
     }
 }
 

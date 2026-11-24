@@ -51,6 +51,7 @@ use tokio::sync::{broadcast, mpsc};
 use crate::cipher::{OpeningKey, clear};
 use crate::kex::dh::groups::{BUILTIN_SAFE_DH_GROUPS, DH_GROUP14, DhGroup};
 use crate::kex::{KexProgress, SessionKexState};
+use crate::kex_offer::KexOffer;
 use crate::session::*;
 use crate::ssh_read::*;
 use crate::sshbuffer::*;
@@ -247,6 +248,24 @@ pub struct VerifiedPublicKey<'a> {
 /// and you can simply define them as `async fn` instead.
 pub trait Handler: Sized {
     type Error: From<crate::Error> + Send;
+
+    /// Called during key exchange after receiving and validating the client's
+    /// `SSH_MSG_KEXINIT` packet (including any strict-kex checks), before
+    /// algorithm negotiation.
+    ///
+    /// Receives the client's SSH identification string (`sshid`, as returned
+    /// by [`Session::remote_sshid`]), algorithm and option lists offered by
+    /// the client ([`KexOffer`]). Called on initial key exchange and on
+    /// subsequent key re-exchanges, even when algorithm negotiation fails with
+    /// [`Error::NoCommonAlgo`]. Returning an `Err` aborts the connection.
+    #[allow(unused_variables)]
+    fn kex_offer(
+        &mut self,
+        sshid: &[u8],
+        offer: &KexOffer,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
+    }
 
     /// Check authentication using the "none" method.
     ///

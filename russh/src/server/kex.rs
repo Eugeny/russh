@@ -11,6 +11,7 @@ use super::*;
 use crate::helpers::sign_with_hash_alg;
 use crate::kex::dh::biguint_to_mpint;
 use crate::kex::{KEXES, KexAlgorithm, KexAlgorithmImplementor, KexCause};
+use crate::kex_offer::{KexOffer, PeerRole};
 use crate::keys::key::PrivateKeyWithHashAlg;
 use crate::negotiation::{Names, Select, is_key_compatible_with_algo};
 use crate::parsing::ensure_end;
@@ -135,25 +136,32 @@ impl ServerKex {
                     return Err(Error::KexInit)?;
                 }
 
-                let names = {
-                    self.exchange.client_kex_init = input.buffer.clone().into();
-                    negotiation::Server::read_kex(
-                        &input.buffer,
-                        &self.config.preferred,
-                        Some(&self.config.keys),
-                        Some(&self.config.certificates),
-                        &self.cause,
-                    )?
-                };
-                debug!("negotiated: {names:?}");
+                self.exchange.client_kex_init = input.buffer.clone().into();
+                let offer = KexOffer::decode_kexinit(PeerRole::Client, &input.buffer)?;
 
                 // seqno has already been incremented after read()
-                if names.strict_kex() && !self.cause.is_rekey() && input.seqn.0 != 1 {
+                if negotiation::Server::is_strict_kex(&offer, &self.config.preferred, &self.cause)
+                    && !self.cause.is_rekey()
+                    && input.seqn.0 != 1
+                {
                     return Err(strict_kex_violation(
                         msg::KEXINIT,
                         input.seqn.0 as usize - 1,
                     ))?;
                 }
+
+                handler
+                    .kex_offer(&self.exchange.client_id, &offer)
+                    .await?;
+
+                let names = negotiation::Server::select_kex(
+                    &offer,
+                    &self.config.preferred,
+                    Some(&self.config.keys),
+                    Some(&self.config.certificates),
+                    &self.cause,
+                )?;
+                debug!("negotiated: {names:?}");
 
                 let kex = KEXES.get(&names.kex).ok_or(Error::UnknownAlgo)?.make();
 
@@ -463,7 +471,51 @@ fn compute_keys(
 
 #[cfg(test)]
 mod tests {
+    use std::num::Wrapping;
+    use std::sync::Arc;
+
+    use ssh_encoding::Encode;
+
+    use super::*;
+    use crate::helpers::NameList;
     use crate::tests::raw_no_crypto::{assert_rejected, kexinit_payload, raw_kex_signal, timeout};
+
+    #[derive(Default)]
+    struct RecordingHandler {
+        offers: Vec<(Vec<u8>, KexOffer)>,
+    }
+
+    impl Handler for RecordingHandler {
+        type Error = Error;
+
+        async fn kex_offer(&mut self, sshid: &[u8], offer: &KexOffer) -> Result<(), Self::Error> {
+            self.offers.push((sshid.to_vec(), offer.clone()));
+            Ok(())
+        }
+    }
+
+    fn build_kexinit_packet(kex_algos: &[&str]) -> Vec<u8> {
+        let mut buf = vec![msg::KEXINIT];
+        buf.extend_from_slice(&[0u8; 16]);
+        let encode_list = |buf: &mut Vec<u8>, items: &[&str]| {
+            NameList(items.iter().map(|s| s.to_string()).collect())
+                .encode(buf)
+                .unwrap();
+        };
+        encode_list(&mut buf, kex_algos);
+        encode_list(&mut buf, &["ssh-ed25519"]);
+        encode_list(&mut buf, &["chacha20-poly1305@openssh.com"]);
+        encode_list(&mut buf, &["chacha20-poly1305@openssh.com"]);
+        encode_list(&mut buf, &["hmac-sha2-256-etm@openssh.com"]);
+        encode_list(&mut buf, &["hmac-sha2-256-etm@openssh.com"]);
+        encode_list(&mut buf, &["none"]);
+        encode_list(&mut buf, &["none"]);
+        encode_list(&mut buf, &["en-US"]);
+        encode_list(&mut buf, &[]);
+        0u8.encode(&mut buf).unwrap();
+        0u32.encode(&mut buf).unwrap();
+        buf
+    }
 
     #[tokio::test]
     async fn kexinit_with_trailing_bytes_rejected_by_server() {
@@ -474,5 +526,68 @@ mod tests {
         .await;
 
         assert_rejected(result, "server accepted a kexinit with trailing bytes");
+    }
+
+    #[tokio::test]
+    async fn strict_kex_violation_rejected_before_kex_offer() {
+        let config = Arc::new(Config::default());
+        let client_id = b"SSH-2.0-test-client";
+        let kex = ServerKex::new(
+            config.clone(),
+            client_id,
+            &config.server_id,
+            KexCause::Initial,
+        );
+
+        let mut pkt = IncomingSshPacket {
+            buffer: build_kexinit_packet(&[
+                "curve25519-sha256",
+                "kex-strict-c-v00@openssh.com",
+            ])
+            .into(),
+            seqn: Wrapping(2),
+        };
+        let mut output = PacketWriter::clear();
+        let mut handler = RecordingHandler::default();
+
+        let err = kex
+            .step(Some(&mut pkt), &mut output, &mut handler)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, Error::StrictKeyExchangeViolation { .. }));
+        assert!(
+            handler.offers.is_empty(),
+            "kex_offer must not run on strict-kex violation"
+        );
+    }
+
+    #[tokio::test]
+    async fn kex_offer_called_even_when_no_common_algo() {
+        let config = Arc::new(Config::default());
+        let client_id = b"SSH-2.0-scanner";
+        let kex = ServerKex::new(
+            config.clone(),
+            client_id,
+            &config.server_id,
+            KexCause::Initial,
+        );
+
+        let mut pkt = IncomingSshPacket {
+            buffer: build_kexinit_packet(&["unsupported-kex-algo"]).into(),
+            seqn: Wrapping(1),
+        };
+        let mut output = PacketWriter::clear();
+        let mut handler = RecordingHandler::default();
+
+        let err = kex
+            .step(Some(&mut pkt), &mut output, &mut handler)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, Error::NoCommonAlgo { .. }));
+        assert_eq!(handler.offers.len(), 1);
+        assert_eq!(handler.offers[0].0, client_id);
+        assert_eq!(handler.offers[0].1.kex, vec!["unsupported-kex-algo"]);
+        assert_eq!(handler.offers[0].1.client_languages, vec!["en-US"]);
+        assert!(!handler.offers[0].1.first_kex_packet_follows);
     }
 }
