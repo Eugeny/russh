@@ -65,6 +65,7 @@ use crate::cipher::{self, OpeningKey, clear};
 use crate::kex::{KexAlgorithmImplementor, KexCause, KexProgress, SessionKexState};
 use crate::keys::PrivateKeyWithHashAlg;
 use crate::msg::{is_kex_msg, validate_server_msg_strict_kex};
+use crate::kex_offer::KexOffer;
 use crate::session::{CommonSession, EncryptedState, GlobalRequestResponse, NewKeys};
 use crate::ssh_read::SshRead;
 use crate::sshbuffer::{IncomingSshPacket, PacketWriter, SSHBuffer, SshId};
@@ -2039,7 +2040,9 @@ async fn reply<H: Handler>(
     #[allow(clippy::collapsible_if)]
     if is_kex_msg {
         if let SessionKexState::InProgress(kex) = session.kex.take() {
-            let progress = kex.step(Some(pkt), &mut session.common.packet_writer)?;
+            let progress = kex
+                .step(Some(pkt), &mut session.common.packet_writer, handler)
+                .await?;
 
             match progress {
                 KexProgress::NeedsReply { kex, reset_seqn } => {
@@ -2874,6 +2877,24 @@ pub trait Handler: Sized + Send {
         server_public_key: &PublicKeyOrCertificate,
     ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
         async { Ok(false) }
+    }
+
+    /// Called during key exchange after receiving and validating the server's
+    /// `SSH_MSG_KEXINIT` packet (including any strict-kex checks), before
+    /// algorithm negotiation.
+    ///
+    /// Receives the server's SSH identification string (`sshid`, as returned
+    /// by [`Session::remote_sshid`]) algorithm and option lists offered by
+    /// the server ([`KexOffer`]). Called on initial key exchange and on
+    /// subsequent key re-exchanges, even when algorithm negotiation fails
+    /// with [`Error::NoCommonAlgo`]. Returning an `Err` aborts the connection.
+    #[allow(unused_variables)]
+    fn kex_offer(
+        &mut self,
+        sshid: &[u8],
+        offer: &KexOffer,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 
     /// Called when key exchange has completed.

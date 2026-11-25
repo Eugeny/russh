@@ -28,11 +28,13 @@ pub mod mac;
 
 pub mod keys;
 
+mod kex_offer;
 mod msg;
 mod negotiation;
 mod ssh_read;
 mod sshbuffer;
 
+pub use kex_offer::{KexOffer, PeerRole};
 pub use negotiation::{Names, Preferred};
 
 mod pty;

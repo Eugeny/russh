@@ -9,9 +9,10 @@ use ssh_encoding::{Decode, Encode};
 use ssh_key::{Algorithm, Certificate, Mpint, PublicKey, Signature};
 
 use super::IncomingSshPacket;
-use crate::client::{Config, NewKeys};
+use crate::client::{Config, Handler, NewKeys};
 use crate::kex::dh::groups::DhGroup;
 use crate::kex::{KEXES, KexAlgorithm, KexAlgorithmImplementor, KexCause, KexProgress};
+use crate::kex_offer::{KexOffer, PeerRole};
 use crate::keys::agent::AgentSessionBinding;
 use crate::keys::key::parse_public_key;
 use crate::negotiation::{Names, Select};
@@ -156,93 +157,114 @@ impl ClientKex {
         Ok(())
     }
 
-    pub fn step(
+    pub async fn step<H: Handler + Send>(
+        mut self,
+        input: Option<&mut IncomingSshPacket>,
+        output: &mut PacketWriter,
+        handler: &mut H,
+    ) -> Result<KexProgress<Self>, H::Error> {
+        if matches!(self.state, ClientKexState::Created) {
+            // At this point we expect to read the KEXINIT from the other side
+            let Some(input) = input else {
+                return Err(Error::KexInit.into());
+            };
+            if input.buffer.first() != Some(&msg::KEXINIT) {
+                error!(
+                    "Unexpected kex message at this stage: {:?}",
+                    input.buffer.first()
+                );
+                return Err(Error::KexInit.into());
+            }
+
+            self.exchange.server_kex_init = input.buffer.clone().into();
+            let offer = KexOffer::decode_kexinit(PeerRole::Server, &input.buffer)?;
+
+            // seqno has already been incremented after read()
+            if negotiation::Client::is_strict_kex(&offer, &self.config.preferred, &self.cause)
+                && !self.cause.is_rekey()
+                && input.seqn.0 != 1
+            {
+                return Err(
+                    strict_kex_violation(msg::KEXINIT, input.seqn.0 as usize - 1).into(),
+                );
+            }
+
+            handler.kex_offer(&self.exchange.server_id, &offer).await?;
+
+            return self.step_after_kexinit(&offer, output).map_err(Into::into);
+        }
+
+        self.step_sync(input, output).map_err(Into::into)
+    }
+
+    fn step_after_kexinit(
+        mut self,
+        offer: &KexOffer,
+        output: &mut PacketWriter,
+    ) -> Result<KexProgress<Self>, Error> {
+        let names = negotiation::Client::select_kex(
+            offer,
+            &self.config.preferred,
+            None,
+            None,
+            &self.cause,
+        )?;
+        debug!("negotiated algorithms: {names:?}");
+
+        let mut kex = KEXES.get(&names.kex).ok_or(Error::UnknownAlgo)?.make();
+
+        if kex.skip_exchange() {
+            // Non-standard no-kex exchange
+            let newkeys = compute_keys(
+                Vec::new(),
+                kex,
+                names.clone(),
+                self.exchange.clone(),
+                self.cause.session_id(),
+            )?;
+
+            output.write_packet(|w| {
+                msg::NEWKEYS.encode(w)?;
+                Ok(())
+            })?;
+
+            return Ok(KexProgress::Done {
+                server_host_certificate: None,
+                agent_session_binding: None,
+                newkeys,
+                server_host_key: None,
+            });
+        }
+
+        if kex.is_dh_gex() {
+            output.write_packet(|w| {
+                kex.client_dh_gex_init(&self.config.gex, w)?;
+                Ok(())
+            })?;
+
+            self.state = ClientKexState::WaitingForGexReply { names, kex };
+        } else {
+            output.write_packet(|w| {
+                kex.client_dh(&mut self.exchange.client_ephemeral, w)?;
+                Ok(())
+            })?;
+
+            self.state = ClientKexState::WaitingForDhReply { names, kex };
+        }
+
+        Ok(KexProgress::NeedsReply {
+            kex: self,
+            reset_seqn: false,
+        })
+    }
+
+    fn step_sync(
         mut self,
         input: Option<&mut IncomingSshPacket>,
         output: &mut PacketWriter,
     ) -> Result<KexProgress<Self>, Error> {
         match self.state {
-            ClientKexState::Created => {
-                // At this point we expect to read the KEXINIT from the other side
-
-                let Some(input) = input else {
-                    return Err(Error::KexInit);
-                };
-                if input.buffer.first() != Some(&msg::KEXINIT) {
-                    error!(
-                        "Unexpected kex message at this stage: {:?}",
-                        input.buffer.first()
-                    );
-                    return Err(Error::KexInit);
-                }
-
-                let names = {
-                    // read algorithms from packet.
-                    self.exchange.server_kex_init = input.buffer.clone().into();
-                    negotiation::Client::read_kex(
-                        &input.buffer,
-                        &self.config.preferred,
-                        None,
-                        None,
-                        &self.cause,
-                    )?
-                };
-                debug!("negotiated algorithms: {names:?}");
-
-                // seqno has already been incremented after read()
-                if names.strict_kex() && !self.cause.is_rekey() && input.seqn.0 != 1 {
-                    return Err(strict_kex_violation(
-                        msg::KEXINIT,
-                        input.seqn.0 as usize - 1,
-                    ));
-                }
-
-                let mut kex = KEXES.get(&names.kex).ok_or(Error::UnknownAlgo)?.make();
-
-                if kex.skip_exchange() {
-                    // Non-standard no-kex exchange
-                    let newkeys = compute_keys(
-                        Vec::new(),
-                        kex,
-                        names.clone(),
-                        self.exchange.clone(),
-                        self.cause.session_id(),
-                    )?;
-
-                    output.write_packet(|w| {
-                        msg::NEWKEYS.encode(w)?;
-                        Ok(())
-                    })?;
-
-                    return Ok(KexProgress::Done {
-                        server_host_certificate: None,
-                        agent_session_binding: None,
-                        newkeys,
-                        server_host_key: None,
-                    });
-                }
-
-                if kex.is_dh_gex() {
-                    output.write_packet(|w| {
-                        kex.client_dh_gex_init(&self.config.gex, w)?;
-                        Ok(())
-                    })?;
-
-                    self.state = ClientKexState::WaitingForGexReply { names, kex };
-                } else {
-                    output.write_packet(|w| {
-                        kex.client_dh(&mut self.exchange.client_ephemeral, w)?;
-                        Ok(())
-                    })?;
-
-                    self.state = ClientKexState::WaitingForDhReply { names, kex };
-                }
-
-                Ok(KexProgress::NeedsReply {
-                    kex: self,
-                    reset_seqn: false,
-                })
-            }
+            ClientKexState::Created => Err(Error::Inconsistent),
             ClientKexState::WaitingForGexReply { names, mut kex } => {
                 let Some(input) = input else {
                     return Err(Error::KexInit);
@@ -647,5 +669,116 @@ mod negotiated_host_key_algorithm_tests {
             key.public_key(),
             &sign(Some(HashAlg::Sha512))
         ));
+    }
+}
+
+#[cfg(test)]
+mod kex_offer_tests {
+    use std::num::Wrapping;
+    use std::sync::Arc;
+
+    use ssh_encoding::Encode;
+
+    use super::*;
+    use crate::helpers::NameList;
+
+    #[derive(Default)]
+    struct RecordingHandler {
+        offers: Vec<(Vec<u8>, KexOffer)>,
+    }
+
+    impl Handler for RecordingHandler {
+        type Error = Error;
+
+        async fn kex_offer(&mut self, sshid: &[u8], offer: &KexOffer) -> Result<(), Self::Error> {
+            self.offers.push((sshid.to_vec(), offer.clone()));
+            Ok(())
+        }
+    }
+
+    fn build_kexinit_packet(kex_algos: &[&str]) -> Vec<u8> {
+        let mut buf = vec![msg::KEXINIT];
+        buf.extend_from_slice(&[0u8; 16]);
+        let encode_list = |buf: &mut Vec<u8>, items: &[&str]| {
+            NameList(items.iter().map(|s| s.to_string()).collect())
+                .encode(buf)
+                .unwrap();
+        };
+        encode_list(&mut buf, kex_algos);
+        encode_list(&mut buf, &["ssh-ed25519"]);
+        encode_list(&mut buf, &["chacha20-poly1305@openssh.com"]);
+        encode_list(&mut buf, &["chacha20-poly1305@openssh.com"]);
+        encode_list(&mut buf, &["hmac-sha2-256-etm@openssh.com"]);
+        encode_list(&mut buf, &["hmac-sha2-256-etm@openssh.com"]);
+        encode_list(&mut buf, &["none"]);
+        encode_list(&mut buf, &["none"]);
+        encode_list(&mut buf, &[]);
+        encode_list(&mut buf, &["en-US"]);
+        0u8.encode(&mut buf).unwrap();
+        0u32.encode(&mut buf).unwrap();
+        buf
+    }
+
+    #[tokio::test]
+    async fn strict_kex_violation_rejected_before_kex_offer() {
+        let config = Arc::new(Config::default());
+        let server_id = b"SSH-2.0-test-server";
+        let kex = ClientKex::new(
+            config.clone(),
+            &config.client_id,
+            server_id,
+            KexCause::Initial,
+        );
+
+        let mut pkt = IncomingSshPacket {
+            buffer: build_kexinit_packet(&[
+                "curve25519-sha256",
+                "kex-strict-s-v00@openssh.com",
+            ])
+            .into(),
+            seqn: Wrapping(2),
+        };
+        let mut output = PacketWriter::clear();
+        let mut handler = RecordingHandler::default();
+
+        let err = kex
+            .step(Some(&mut pkt), &mut output, &mut handler)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, Error::StrictKeyExchangeViolation { .. }));
+        assert!(
+            handler.offers.is_empty(),
+            "kex_offer must not run on strict-kex violation"
+        );
+    }
+
+    #[tokio::test]
+    async fn kex_offer_called_even_when_no_common_algo() {
+        let config = Arc::new(Config::default());
+        let server_id = b"SSH-2.0-legacy-server";
+        let kex = ClientKex::new(
+            config.clone(),
+            &config.client_id,
+            server_id,
+            KexCause::Initial,
+        );
+
+        let mut pkt = IncomingSshPacket {
+            buffer: build_kexinit_packet(&["unsupported-kex-algo"]).into(),
+            seqn: Wrapping(1),
+        };
+        let mut output = PacketWriter::clear();
+        let mut handler = RecordingHandler::default();
+
+        let err = kex
+            .step(Some(&mut pkt), &mut output, &mut handler)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, Error::NoCommonAlgo { .. }));
+        assert_eq!(handler.offers.len(), 1);
+        assert_eq!(handler.offers[0].0, server_id);
+        assert_eq!(handler.offers[0].1.kex, vec!["unsupported-kex-algo"]);
+        assert_eq!(handler.offers[0].1.server_languages, vec!["en-US"]);
+        assert!(!handler.offers[0].1.first_kex_packet_follows);
     }
 }
