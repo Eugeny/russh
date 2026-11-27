@@ -821,10 +821,23 @@ impl Session {
                         map_err!(ensure_end(&r))?;
                         return client.openssh_ext_host_keys_announced(keys, self).await;
                     } else {
-                        warn!("Unhandled global request: {req:?} {wants_reply:?}",);
-                        if wants_reply == 1 {
+                        let mut data = vec![0; r.remaining_len()];
+                        map_err!(r.read(&mut data))?;
+                        debug!("client.global_request {req:?} {wants_reply:?}");
+                        let reply = client.global_request(&req, &data, self).await?;
+                        if wants_reply == 1
+                            && let Some(ref mut enc) = self.common.encrypted
+                        {
                             self.common.wants_reply = false;
-                            push_packet!(enc.write, enc.write.push(msg::REQUEST_FAILURE))
+                            push_packet!(enc.write, {
+                                match reply {
+                                    Some(reply) => {
+                                        enc.write.push(msg::REQUEST_SUCCESS);
+                                        enc.write.extend(&reply);
+                                    }
+                                    None => enc.write.push(msg::REQUEST_FAILURE),
+                                }
+                            })
                         }
                     }
                 }

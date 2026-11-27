@@ -77,6 +77,15 @@ mod tests {
         ) -> Result<bool, Self::Error> {
             Ok(true)
         }
+
+        async fn global_request(
+            &mut self,
+            name: &str,
+            data: &[u8],
+            _: &mut Session,
+        ) -> Result<Option<Vec<u8>>, Self::Error> {
+            Ok((name == "echo@example.com").then(|| data.to_vec()))
+        }
     }
 
     struct Client {}
@@ -219,8 +228,16 @@ mod tests {
             .unwrap();
         assert!(auth_result.success());
 
-        // The default server has no handler for this request name, so it replies
-        // with a failure, which surfaces as RequestDenied.
+        // The test server's global_request accepts this name and answers with
+        // the request data.
+        let echoed = session
+            .send_global_request("echo@example.com", b"payload", true)
+            .await
+            .unwrap();
+        assert_eq!(echoed.as_deref(), Some(&b"payload"[..]));
+
+        // The test server refuses any other name with a failure, which surfaces
+        // as RequestDenied.
         let denied = session
             .send_global_request("custom-request@example.com", b"payload", true)
             .await;
@@ -236,5 +253,17 @@ mod tests {
             .unwrap();
         assert!(no_reply.is_none());
         session.tcpip_forward("127.0.0.1", 12345).await.unwrap();
+
+        // The same for a request the server accepts: no unsolicited success.
+        let no_reply = session
+            .send_global_request("echo@example.com", b"payload", false)
+            .await
+            .unwrap();
+        assert!(no_reply.is_none());
+        let echoed = session
+            .send_global_request("echo@example.com", b"second", true)
+            .await
+            .unwrap();
+        assert_eq!(echoed.as_deref(), Some(&b"second"[..]));
     }
 }
