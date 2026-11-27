@@ -2422,6 +2422,66 @@ mod tests {
         );
     }
 
+    struct EchoGlobalRequests;
+
+    impl Handler for EchoGlobalRequests {
+        type Error = crate::Error;
+
+        async fn check_server_key(
+            &mut self,
+            _: &PublicKeyOrCertificate,
+        ) -> Result<bool, Self::Error> {
+            Ok(true)
+        }
+
+        async fn global_request(
+            &mut self,
+            name: &str,
+            data: &[u8],
+            _: &mut Session,
+        ) -> Result<Option<Vec<u8>>, Self::Error> {
+            Ok((name == "echo@example.com").then(|| data.to_vec()))
+        }
+    }
+
+    #[tokio::test]
+    async fn custom_global_request_is_passed_to_the_handler() {
+        let (mut session, _sender, _replies) = keyboard_interactive_session();
+        session.common.encrypted.as_mut().unwrap().state = EncryptedState::Authenticated;
+        for (name, want_reply) in [
+            ("echo@example.com", 1u8),
+            ("echo@example.com", 0),
+            ("other@example.com", 1),
+            ("other@example.com", 0),
+        ] {
+            let mut packet = vec![msg::GLOBAL_REQUEST];
+            name.encode(&mut packet).unwrap();
+            packet.push(want_reply);
+            packet.extend_from_slice(b"hi");
+            session
+                .process_packet(&mut EchoGlobalRequests, &packet)
+                .await
+                .unwrap();
+        }
+        assert_eq!(
+            session.common.encrypted.as_ref().unwrap().write,
+            [
+                0,
+                0,
+                0,
+                3,
+                msg::REQUEST_SUCCESS,
+                b'h',
+                b'i',
+                0,
+                0,
+                0,
+                1,
+                msg::REQUEST_FAILURE
+            ]
+        );
+    }
+
     /// `keyboard_interactive_session` negotiates the `none` kex, which cannot
     /// be repeated; swap in one that can and install `limits`.
     fn allow_rekey(session: &mut Session, limits: crate::Limits) {
@@ -3252,6 +3312,26 @@ pub trait Handler: Sized + Send {
             debug!("openssh_ext_hostkeys_announced: {keys:?}");
             Ok(())
         }
+    }
+
+    /// Called for a global request that russh does not handle itself, such
+    /// as a non-standard request from the server.
+    ///
+    /// `data` is the request-specific data that follows the want-reply flag
+    /// (see [RFC4254](https://tools.ietf.org/html/rfc4254#section-4)). Return
+    /// `Some(response)` to accept the request: if the server wants a reply, it
+    /// gets `SSH_MSG_REQUEST_SUCCESS` followed by `response`, which may be
+    /// empty. Return `None` to refuse it with `SSH_MSG_REQUEST_FAILURE`.
+    ///
+    /// The default implementation refuses every request.
+    #[allow(unused_variables)]
+    fn global_request(
+        &mut self,
+        name: &str,
+        data: &[u8],
+        session: &mut Session,
+    ) -> impl Future<Output = Result<Option<Vec<u8>>, Self::Error>> + Send {
+        async { Ok(None) }
     }
 
     /// Called when the server sent a disconnect message

@@ -847,6 +847,27 @@ pub trait Handler: Sized {
         async { Ok(false) }
     }
 
+    /// Called for a global request that russh does not handle itself, such
+    /// as a non-standard request sent with the client's
+    /// [`send_global_request`](crate::client::Handle::send_global_request).
+    ///
+    /// `data` is the request-specific data that follows the want-reply flag
+    /// (see [RFC4254](https://tools.ietf.org/html/rfc4254#section-4)). Return
+    /// `Some(response)` to accept the request: if the client wants a reply, it
+    /// gets `SSH_MSG_REQUEST_SUCCESS` followed by `response`, which may be
+    /// empty. Return `None` to refuse it with `SSH_MSG_REQUEST_FAILURE`.
+    ///
+    /// The default implementation refuses every request.
+    #[allow(unused_variables)]
+    fn global_request(
+        &mut self,
+        name: &str,
+        data: &[u8],
+        session: &mut Session,
+    ) -> impl Future<Output = Result<Option<Vec<u8>>, Self::Error>> + Send {
+        async { Ok(None) }
+    }
+
     /// Override when enabling the `diffie-hellman-group-exchange-*` key exchange methods.
     ///
     /// Should return a Diffie-Hellman group with a safe prime whose length is

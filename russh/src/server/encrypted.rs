@@ -2000,7 +2000,23 @@ impl Session {
                         Ok(())
                     }
                     _ => {
-                        self.request_failure();
+                        let mut data = vec![0; r.remaining_len()];
+                        map_err!(r.read(&mut data))?;
+                        debug!("handler.global_request {req_type:?}");
+                        match handler.global_request(&req_type, &data, self).await? {
+                            Some(reply) => {
+                                if self.common.wants_reply
+                                    && let Some(ref mut enc) = self.common.encrypted
+                                {
+                                    self.common.wants_reply = false;
+                                    push_packet!(enc.write, {
+                                        enc.write.push(msg::REQUEST_SUCCESS);
+                                        enc.write.extend(&reply);
+                                    })
+                                }
+                            }
+                            None => self.request_failure(),
+                        }
                         Ok(())
                     }
                 }
